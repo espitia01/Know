@@ -6,12 +6,13 @@ import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { PaperRenderer } from "@/components/paper/PaperRenderer";
 import { BottomPanel } from "@/components/panel/BottomPanel";
+import { AuthGuard } from "@/components/AuthGuard";
 
 const MIN_PANEL = 180;
 const MAX_PANEL = 600;
 const DEFAULT_PANEL = 320;
 
-export default function PaperPage() {
+function PaperContent() {
   const params = useParams();
   const router = useRouter();
   const paperId = params.id as string;
@@ -217,4 +218,8 @@ export default function PaperPage() {
       )}
     </div>
   );
+}
+
+export default function PaperPage() {
+  return <AuthGuard><PaperContent /></AuthGuard>;
 }

@@ -1,12 +1,30 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("know_token");
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
+      ...authHeaders(),
       ...options?.headers,
     },
   });
+  if (res.status === 401) {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("know_token");
+      window.location.href = "/login";
+    }
+    throw new Error("Unauthorized");
+  }
   if (!res.ok) {
     const detail = await res.text();
     throw new Error(`API error ${res.status}: ${detail}`);
@@ -143,13 +161,39 @@ export interface SettingsResponse {
 }
 
 export const api = {
+  login: async (password: string): Promise<string> => {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    if (!res.ok) throw new Error("Wrong password");
+    const data = await res.json();
+    localStorage.setItem("know_token", data.token);
+    return data.token;
+  },
+
+  logout: async () => {
+    try { await request("/api/auth/logout", { method: "POST" }); } catch {}
+    localStorage.removeItem("know_token");
+  },
+
+  checkAuth: async (): Promise<boolean> => {
+    try {
+      await request<{ authenticated: boolean }>("/api/auth/check");
+      return true;
+    } catch { return false; }
+  },
+
   uploadPaper: async (file: File): Promise<ParsedPaper> => {
     const formData = new FormData();
     formData.append("file", file);
     const res = await fetch(`${API_BASE}/api/papers/upload`, {
       method: "POST",
+      headers: authHeaders(),
       body: formData,
     });
+    if (res.status === 401) { localStorage.removeItem("know_token"); window.location.href = "/login"; throw new Error("Unauthorized"); }
     if (!res.ok) throw new Error(`Upload failed: ${res.statusText}`);
     return res.json();
   },
@@ -227,8 +271,10 @@ export const api = {
     formData.append("file", file);
     const res = await fetch(`${API_BASE}/api/papers/${paperId}/si/upload`, {
       method: "POST",
+      headers: authHeaders(),
       body: formData,
     });
+    if (res.status === 401) { localStorage.removeItem("know_token"); window.location.href = "/login"; throw new Error("Unauthorized"); }
     if (!res.ok) throw new Error(`SI upload failed: ${res.statusText}`);
     return res.json();
   },

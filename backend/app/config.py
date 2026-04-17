@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     local_model_url: str = ""
     local_model_name: str = ""
     active_provider: str = "anthropic"  # "anthropic" or "local"
+    password: str = "Ebong1996"
 
     model_config = {"env_prefix": "KNOW_", "env_file": ".env"}
 

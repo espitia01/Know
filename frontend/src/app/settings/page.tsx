@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { api, SettingsResponse } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AuthGuard } from "@/components/AuthGuard";
 
-export default function SettingsPage() {
+function SettingsContent() {
   const router = useRouter();
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [apiKey, setApiKey] = useState("");
@@ -140,4 +141,8 @@ KNOW_ACTIVE_PROVIDER=anthropic`}
       </div>
     </main>
   );
+}
+
+export default function SettingsPage() {
+  return <AuthGuard><SettingsContent /></AuthGuard>;
 }

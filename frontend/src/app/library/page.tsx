@@ -4,8 +4,9 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { api, PaperListEntry } from "@/lib/api";
 import { Input } from "@/components/ui/input";
+import { AuthGuard } from "@/components/AuthGuard";
 
-export default function LibraryPage() {
+function LibraryContent() {
   const router = useRouter();
   const [papers, setPapers] = useState<PaperListEntry[]>([]);
   const [search, setSearch] = useState("");
@@ -309,4 +310,8 @@ export default function LibraryPage() {
       </div>
     </main>
   );
+}
+
+export default function LibraryPage() {
+  return <AuthGuard><LibraryContent /></AuthGuard>;
 }

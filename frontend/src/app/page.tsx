@@ -5,8 +5,9 @@ import { useDropzone } from "react-dropzone";
 import { useRouter } from "next/navigation";
 import { api, PaperListEntry } from "@/lib/api";
 import { useStore } from "@/lib/store";
+import { AuthGuard } from "@/components/AuthGuard";
 
-export default function Home() {
+function HomeContent() {
   const router = useRouter();
   const { setPaper, loading, setLoading } = useStore();
   const [papers, setPapers] = useState<PaperListEntry[]>([]);
@@ -142,4 +143,8 @@ export default function Home() {
       </div>
     </main>
   );
+}
+
+export default function Home() {
+  return <AuthGuard><HomeContent /></AuthGuard>;
 }
