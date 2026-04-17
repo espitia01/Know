@@ -1,0 +1,14 @@
+node_modules/
+.next/
+__pycache__/
+*.pyc
+.env
+papers/
+.venv/
+*.egg-info/
+dist/
+build/
+.DS_Store
+.vercel/
+.turbo/
+package-lock.json
