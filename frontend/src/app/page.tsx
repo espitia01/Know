@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { Show, UserButton, useAuth } from "@clerk/nextjs";
+import { UserButton, useAuth } from "@clerk/nextjs";
 import { FEATURE_TOOLTIPS } from "@/lib/tooltips";
 import { api } from "@/lib/api";
 import { FeedbackModal } from "@/components/FeedbackModal";
@@ -192,7 +192,8 @@ export default function LandingPage() {
               <a href="#pricing" className="hover:text-gray-900 transition-colors">Pricing</a>
               <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors">Discord</a>
             </div>
-            <Show when="signed-out">
+            {isLoaded && !isSignedIn && (
+              <>
               <Link
                 href="/sign-in"
                 className="text-[13px] font-medium text-gray-500 hover:text-gray-900 transition-colors"
@@ -205,8 +206,10 @@ export default function LandingPage() {
               >
                 Get Started
               </Link>
-            </Show>
-            <Show when="signed-in">
+              </>
+            )}
+            {isLoaded && isSignedIn && (
+              <>
               <Link
                 href="/dashboard"
                 className="text-[13px] font-medium text-gray-500 hover:text-gray-900 transition-colors px-3 py-1.5"
@@ -214,7 +217,8 @@ export default function LandingPage() {
                 Dashboard
               </Link>
               <UserButton />
-            </Show>
+              </>
+            )}
           </div>
         </div>
       </nav>
