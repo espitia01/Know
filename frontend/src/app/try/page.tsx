@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -8,10 +8,25 @@ import Link from "next/link";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const check = () => {
+      const ua = navigator.userAgent;
+      setIsMobile(/iPhone|iPad|iPod|Android|webOS|BlackBerry|Opera Mini|IEMobile/i.test(ua) || window.innerWidth < 768);
+    };
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+  return isMobile;
+}
+
 export default function TrialPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const isMobile = useIsMobile();
 
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
@@ -98,6 +113,26 @@ export default function TrialPage() {
             </div>
           </div>
 
+          {isMobile ? (
+            <div className="text-center py-16 px-6 rounded-2xl border border-gray-200 bg-gray-50/50">
+              <div className="w-11 h-11 rounded-xl bg-gray-100 border border-gray-200 flex items-center justify-center mx-auto mb-4">
+                <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />
+                </svg>
+              </div>
+              <h2 className="text-[17px] font-semibold text-gray-900 mb-1.5">Coming soon to mobile</h2>
+              <p className="text-[14px] text-gray-500 max-w-[280px] mx-auto">
+                Know works best on a desktop browser. Please visit us on your PC for the full experience.
+              </p>
+              <Link
+                href="/sign-up"
+                className="inline-block mt-6 text-[13px] font-medium bg-gray-900 text-white px-5 py-2.5 rounded-lg hover:bg-gray-800 transition-colors"
+              >
+                Create an account for later
+              </Link>
+            </div>
+          ) : (
+          <>
           <div
             {...getRootProps()}
             className={`cursor-pointer rounded-2xl border-2 border-dashed transition-all duration-300 ${
@@ -138,6 +173,8 @@ export default function TrialPage() {
 
           {error && (
             <p className="text-[13px] text-red-500 text-center animate-fade-in">{error}</p>
+          )}
+          </>
           )}
         </div>
       </main>
