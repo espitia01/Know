@@ -18,12 +18,9 @@ class Reference(BaseModel):
 class ParsedPaper(BaseModel):
     id: str
     title: str
-    authors: list[str]
-    affiliations: list[str] = []
-    abstract: str
-    content_markdown: str
+    authors: list[str] = []
+    raw_text: str = ""
     figures: list[FigureInfo] = []
-    references: list[Reference] = []
     has_si: bool = False
     folder: str = ""
     tags: list[str] = []
@@ -131,14 +128,11 @@ class SearchResponse(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    anthropic_api_key: str | None = None
-    local_model_url: str | None = None
-    local_model_name: str | None = None
-    active_provider: str | None = None
+    analysis_model: str | None = None
+    fast_model: str | None = None
 
 
 class SettingsResponse(BaseModel):
     has_anthropic_key: bool
-    local_model_url: str
-    local_model_name: str
-    active_provider: str
+    analysis_model: str
+    fast_model: str

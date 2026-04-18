@@ -1,7 +1,9 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
+import { Md } from "@/components/ui/Md";
 import { Button } from "@/components/ui/button";
 import {
   Accordion,
@@ -9,22 +11,26 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
+
+function ProgressBar() {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const interval = setInterval(() => {
+      const elapsed = (Date.now() - start) / 1000;
+      setWidth(Math.min(90, 90 * (1 - Math.exp(-elapsed / 10))));
+    }, 150);
+    return () => clearInterval(interval);
+  }, []);
+  return (
+    <div className="w-full max-w-xs h-1 bg-accent rounded-full overflow-hidden">
+      <div className="h-full bg-foreground/60 rounded-full transition-all duration-200 ease-out" style={{ width: `${width}%` }} />
+    </div>
+  );
+}
 
 interface PreReadingPanelProps {
   paperId: string;
-}
-
-function Md({ children }: { children: string }) {
-  return (
-    <div className="analysis-content">
-      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-        {children}
-      </ReactMarkdown>
-    </div>
-  );
 }
 
 export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
@@ -44,8 +50,8 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
 
   if (preReadingLoading) {
     return (
-      <div className="flex items-center gap-3 py-8 justify-center animate-fade-in">
-        <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin" />
+      <div className="flex flex-col items-center gap-3 py-8 justify-center animate-fade-in">
+        <ProgressBar />
         <p className="text-[13px] text-muted-foreground">Analyzing paper...</p>
       </div>
     );
@@ -68,7 +74,7 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
 
   return (
     <div className="space-y-1 animate-fade-in">
-      <Accordion multiple defaultValue={["definitions", "questions", "concepts", "prior"]}>
+      <Accordion multiple defaultValue={[]}>
         {definitions.length > 0 && (
           <AccordionItem value="definitions" className="border-b-0">
             <AccordionTrigger className="text-[13px] font-semibold py-2.5 hover:no-underline">
@@ -98,7 +104,7 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
                 {research_questions.map((q, i) => (
                   <div key={i} className="rounded-lg bg-accent/50 px-3.5 py-2.5">
                     <div className="text-[13px]"><Md>{q.question}</Md></div>
-                    {q.context && <p className="text-[11px] text-muted-foreground/70 mt-1">{q.context}</p>}
+                    {q.context && <div className="text-[11px] text-muted-foreground/70 mt-1"><Md>{q.context}</Md></div>}
                   </div>
                 ))}
               </div>
@@ -117,7 +123,7 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
                   <div key={i} className="rounded-lg bg-accent/50 px-3.5 py-2.5">
                     <p className="font-medium text-[13px] mb-0.5">{c.name}</p>
                     <div className="text-[12px] text-muted-foreground"><Md>{c.description}</Md></div>
-                    {c.importance && <p className="text-[11px] text-muted-foreground/50 mt-1 italic">{c.importance}</p>}
+                    {c.importance && <div className="text-[11px] text-muted-foreground/50 mt-1 italic"><Md>{c.importance}</Md></div>}
                   </div>
                 ))}
               </div>
@@ -135,7 +141,7 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
                 {prior_work.map((p, i) => (
                   <div key={i} className="rounded-lg bg-accent/50 px-3.5 py-2.5">
                     <p className="font-medium text-[13px] mb-0.5">{p.title}</p>
-                    <p className="text-[12px] text-muted-foreground">{p.relevance}</p>
+                    <div className="text-[12px] text-muted-foreground"><Md>{p.relevance}</Md></div>
                   </div>
                 ))}
               </div>

@@ -1,54 +1,330 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { api } from "@/lib/api";
+import dynamic from "next/dynamic";
+import Image from "next/image";
+import { UserButton } from "@clerk/nextjs";
+import { api, type SelectionAnalysisResult, type PaperListEntry } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import { PaperRenderer } from "@/components/paper/PaperRenderer";
-import { BottomPanel } from "@/components/panel/BottomPanel";
-import { AuthGuard } from "@/components/AuthGuard";
+import { SelectionToolbar, type SelectionAction } from "@/components/pdf/SelectionToolbar";
+import { AnalysisPanel, type PanelPosition } from "@/components/panel/BottomPanel";
+import { BibtexModal } from "@/components/BibtexModal";
 
-const MIN_PANEL = 180;
-const MAX_PANEL = 600;
-const DEFAULT_PANEL = 320;
+const PdfViewer = dynamic(
+  () => import("@/components/pdf/PdfViewer").then((m) => m.PdfViewer),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-full">
+        <div className="w-5 h-5 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin" />
+      </div>
+    ),
+  }
+);
+
+const MIN_SIDE = 280;
+const MAX_SIDE = 700;
+const DEFAULT_SIDE = 400;
+const MIN_BOTTOM = 180;
+const MAX_BOTTOM = 500;
+const DEFAULT_BOTTOM = 300;
+
+const POSITIONS: PanelPosition[] = ["right", "bottom", "left"];
+
+function AddPaperPopover({
+  sessionIds,
+  onAdd,
+  onClose,
+}: {
+  sessionIds: Set<string>;
+  onAdd: (id: string, title: string) => void;
+  onClose: () => void;
+}) {
+  const [papers, setPapers] = useState<PaperListEntry[]>([]);
+  const [loadingPapers, setLoadingPapers] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    api.listPapers().then((p) => { setPapers(p); setLoadingPapers(false); }).catch(() => setLoadingPapers(false));
+  }, []);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [onClose]);
+
+  const handleUpload = useCallback(async (file: File) => {
+    setUploading(true);
+    try {
+      const paper = await api.uploadPaper(file);
+      onAdd(paper.id, paper.title);
+    } catch (e) {
+      console.error("Upload failed:", e);
+    } finally {
+      setUploading(false);
+    }
+  }, [onAdd]);
+
+  const folders = useMemo(() => {
+    const set = new Set<string>();
+    papers.forEach((p) => { if (p.folder) set.add(p.folder); });
+    return ["Unfiled", ...Array.from(set).sort()];
+  }, [papers]);
+
+  const folderPapers = useMemo(() => {
+    if (selectedFolder === null) return [];
+    if (selectedFolder === "Unfiled") return papers.filter((p) => !p.folder);
+    return papers.filter((p) => p.folder === selectedFolder);
+  }, [papers, selectedFolder]);
+
+  return (
+    <div
+      ref={ref}
+      className="absolute top-full right-0 mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-xl w-80 max-h-[420px] flex flex-col animate-fade-in overflow-hidden"
+    >
+      {/* Upload section */}
+      <div className="p-2.5 border-b border-gray-100 space-y-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleUpload(file);
+          }}
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading}
+          className="w-full flex items-center justify-center gap-2 text-[12px] font-semibold px-3 py-2.5 rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition-colors disabled:opacity-50"
+        >
+          {uploading ? (
+            <>
+              <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              Uploading...
+            </>
+          ) : (
+            <>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+              </svg>
+              Upload New Paper
+            </>
+          )}
+        </button>
+      </div>
+
+      <div className="overflow-y-auto flex-1">
+        {loadingPapers ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="w-4 h-4 border-2 border-gray-200 border-t-gray-500 rounded-full animate-spin" />
+          </div>
+        ) : selectedFolder === null ? (
+          /* Folder list */
+          <div className="p-1.5">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400 px-2.5 py-1.5">
+              Select a folder
+            </p>
+            {folders.map((f) => {
+              const count = f === "Unfiled"
+                ? papers.filter((p) => !p.folder).length
+                : papers.filter((p) => p.folder === f).length;
+              return (
+                <button
+                  key={f}
+                  onClick={() => setSelectedFolder(f)}
+                  className="w-full text-left flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 hover:bg-gray-50 transition-colors group"
+                >
+                  <svg className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+                  </svg>
+                  <span className="text-[12px] font-medium text-gray-700 flex-1 truncate">{f}</span>
+                  <span className="text-[10px] text-gray-400 tabular-nums">{count}</span>
+                  <svg className="w-3.5 h-3.5 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          /* Papers in selected folder */
+          <div className="p-1.5">
+            <button
+              onClick={() => setSelectedFolder(null)}
+              className="flex items-center gap-1.5 text-[11px] font-medium text-gray-400 hover:text-gray-700 transition-colors px-2 py-1.5 mb-0.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+              </svg>
+              {selectedFolder}
+            </button>
+            {folderPapers.length === 0 ? (
+              <p className="text-[12px] text-gray-400 text-center py-6">No papers in this folder</p>
+            ) : (
+              folderPapers.map((p) => {
+                const inSession = sessionIds.has(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => { if (!inSession) onAdd(p.id, p.title); }}
+                    disabled={inSession}
+                    className={`w-full text-left rounded-lg px-2.5 py-2.5 transition-colors ${
+                      inSession
+                        ? "opacity-40 cursor-default"
+                        : "hover:bg-gray-50 cursor-pointer"
+                    }`}
+                  >
+                    <p className="text-[12px] font-medium text-gray-800 truncate leading-tight">
+                      {p.title}
+                    </p>
+                    <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                      {p.authors.slice(0, 2).join(", ")}
+                      {p.authors.length > 2 ? " et al." : ""}
+                      {inSession && " · In session"}
+                    </p>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function PaperContent() {
   const params = useParams();
   const router = useRouter();
   const paperId = params.id as string;
-  const { paper, setPaper, loading, setLoading, panelVisible, togglePanel, setPreReading, setPreReadingLoading, setAssumptions, setAssumptionsLoading, setNotes } = useStore();
+  const {
+    paper, setPaper, loading, setLoading,
+    panelVisible, setPanelVisible, togglePanel,
+    setPreReading, setPreReadingLoading,
+    setAssumptions, setAssumptionsLoading,
+    setNotes,
+    selectionResult,
+    setSelectionResult, setSelectionLoading, addSelectionToHistory,
+    selectionHistory,
+    setActiveTab,
+    setSummary,
+    sessionPapers, addSessionPaper, removeSessionPaper, clearSession,
+    savePaperCache, restorePaperCache,
+    setQAResults, clearQuestions,
+    crossPaperResults, addCrossPaperResults, clearCrossPaperResults,
+  } = useStore();
   const [error, setError] = useState("");
-  const [siUploading, setSiUploading] = useState(false);
-  const siInputRef = useRef<HTMLInputElement>(null);
 
-  const [panelH, setPanelH] = useState(DEFAULT_PANEL);
+  const [activePaperId, setActivePaperId] = useState(paperId);
+  const [panelSize, setPanelSize] = useState(DEFAULT_SIDE);
+  const [panelPos, setPanelPos] = useState<PanelPosition>("right");
   const dragging = useRef(false);
-  const startY = useRef(0);
-  const startH = useRef(0);
-  const autoAnalyzed = useRef(false);
+  const startCoord = useRef(0);
+  const startSize = useRef(0);
+  const analyzedPapers = useRef<Set<string>>(new Set());
+
+  const [selection, setSelection] = useState<{ text: string; rect: DOMRect } | null>(null);
+  const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const [allFolders, setAllFolders] = useState<string[]>([]);
+  const [folderInput, setFolderInput] = useState("");
+  const [showAddPaper, setShowAddPaper] = useState(false);
+  const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
+  const [workspaceSaving, setWorkspaceSaving] = useState(false);
+  const [workspaceNameInput, setWorkspaceNameInput] = useState("");
+  const [savedWorkspaces, setSavedWorkspaces] = useState<{ id: string; name: string; paper_ids: string[]; cross_paper_results: { question: string; answer: string }[]; updated_at: string }[]>([]);
+  const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
+  const [activeWorkspaceName, setActiveWorkspaceName] = useState<string | null>(null);
+
+  const hasSelection = selectionResult !== null || selectionHistory.length > 0;
+  const sessionIds = useMemo(() => new Set(sessionPapers.map((p) => p.id)), [sessionPapers]);
 
   useEffect(() => {
-    if (paper?.id === paperId) return;
+    api.listPapers().then((papers) => {
+      const folders = [...new Set(papers.map((p) => p.folder).filter(Boolean))].sort();
+      setAllFolders(folders);
+    }).catch(() => {});
+  }, []);
+
+  // Register the URL paper as the first session paper
+  useEffect(() => {
+    if (paper && paper.id === paperId) {
+      addSessionPaper({ id: paper.id, title: paper.title });
+    }
+  }, [paper, paperId, addSessionPaper]);
+
+  const handleMoveToFolder = useCallback(async (folder: string) => {
+    if (!paper) return;
+    try {
+      await api.updateFolder(paper.id, folder);
+      setPaper({ ...paper, folder });
+    } catch (e) { console.error(e); }
+    setShowFolderPicker(false);
+    setFolderInput("");
+  }, [paper, setPaper]);
+
+  const handleCreateAndMoveToFolder = useCallback(async () => {
+    const name = folderInput.trim();
+    if (!name || !paper) return;
+    try {
+      await api.updateFolder(paper.id, name);
+      setPaper({ ...paper, folder: name });
+      if (!allFolders.includes(name)) setAllFolders((prev) => [...prev, name].sort());
+    } catch (e) { console.error(e); }
+    setShowFolderPicker(false);
+    setFolderInput("");
+  }, [folderInput, paper, setPaper, allFolders]);
+
+  // Load paper when activePaperId changes — always fetch fresh to pick up folder/tag updates
+  useEffect(() => {
     setLoading(true);
+    setError("");
     api
-      .getPaper(paperId)
+      .getPaper(activePaperId)
       .then((p) => setPaper(p))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [paperId, paper?.id, setPaper, setLoading]);
+  }, [activePaperId, setPaper, setLoading]);
 
+  // Auto-analyze when paper loads (only once per paper, skip if cache restored)
   useEffect(() => {
-    if (!paper || autoAnalyzed.current || paper.id !== paperId) return;
-    autoAnalyzed.current = true;
+    if (!paper || paper.id !== activePaperId) return;
+    if (analyzedPapers.current.has(paper.id)) return;
+    analyzedPapers.current.add(paper.id);
+
+    const store = useStore.getState();
+    if (store.preReading || store.summary) return;
+
     const cache = paper.cached_analysis || {};
 
     if (paper.notes) setNotes(paper.notes);
+
+    if (cache.selections && cache.selections.length > 0) {
+      for (const sel of cache.selections) {
+        store.addSelectionToHistory(sel as SelectionAnalysisResult);
+      }
+    }
 
     if (cache.pre_reading) {
       setPreReading(cache.pre_reading);
     } else {
       setPreReadingLoading(true);
-      api.analyze(paperId)
+      api.analyze(activePaperId)
         .then((r) => setPreReading(r))
         .catch(() => {})
         .finally(() => setPreReadingLoading(false));
@@ -58,57 +334,313 @@ function PaperContent() {
       setAssumptions(cache.assumptions.assumptions || []);
     } else {
       setAssumptionsLoading(true);
-      api.getAssumptions(paperId)
+      api.getAssumptions(activePaperId)
         .then((r) => setAssumptions(r.assumptions))
         .catch(() => {})
         .finally(() => setAssumptionsLoading(false));
     }
-  }, [paper, paperId, setPreReading, setPreReadingLoading, setAssumptions, setAssumptionsLoading, setNotes]);
 
-  const onDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragging.current = true;
-    startY.current = e.clientY;
-    startH.current = panelH;
-    document.body.style.cursor = "row-resize";
-    document.body.style.userSelect = "none";
-
-    const onMove = (ev: MouseEvent) => {
-      if (!dragging.current) return;
-      const dy = startY.current - ev.clientY;
-      setPanelH(Math.min(MAX_PANEL, Math.max(MIN_PANEL, startH.current + dy)));
-    };
-    const onUp = () => {
-      dragging.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }, [panelH]);
-
-  const handleSIUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setSiUploading(true);
-    try {
-      const updated = await api.uploadSI(paperId, file);
-      setPaper(updated);
-    } catch (err) {
-      console.error("SI upload failed:", err);
-    } finally {
-      setSiUploading(false);
+    if (cache.summary) {
+      setSummary(cache.summary);
     }
-  };
+
+    if (cache.qa_sessions && cache.qa_sessions.length > 0) {
+      const lastSession = cache.qa_sessions[cache.qa_sessions.length - 1];
+      if (lastSession?.items) {
+        useStore.getState().setQAResults(lastSession.items);
+      }
+    }
+  }, [paper, activePaperId, setPreReading, setPreReadingLoading, setAssumptions, setAssumptionsLoading, setNotes, setSummary]);
+
+  const handleSwitchPaper = useCallback((id: string) => {
+    if (id === activePaperId) return;
+    savePaperCache(activePaperId);
+    setSelection(null);
+    setSelectionResult(null);
+
+    const restored = restorePaperCache(id);
+    if (!restored) {
+      setPreReading(null);
+      setAssumptions([]);
+      setSummary(null);
+      setNotes([]);
+      setQAResults([]);
+      clearQuestions();
+    }
+    setActivePaperId(id);
+  }, [activePaperId, savePaperCache, restorePaperCache, setSelectionResult, setPreReading, setAssumptions, setSummary, setNotes, setQAResults, clearQuestions]);
+
+  const handleAddPaper = useCallback((id: string, title: string) => {
+    addSessionPaper({ id, title });
+    setShowAddPaper(false);
+  }, [addSessionPaper]);
+
+  const handleRemoveSessionPaper = useCallback((id: string) => {
+    if (sessionPapers.length <= 1) return;
+    removeSessionPaper(id);
+    if (id === activePaperId) {
+      const remaining = sessionPapers.filter((p) => p.id !== id);
+      if (remaining.length > 0) {
+        handleSwitchPaper(remaining[0].id);
+      }
+    }
+  }, [sessionPapers, activePaperId, removeSessionPaper, handleSwitchPaper]);
+
+  const handleSaveWorkspace = useCallback(async () => {
+    const name = workspaceNameInput.trim() || `Session · ${sessionPapers.length} papers`;
+    setWorkspaceSaving(true);
+    try {
+      savePaperCache(activePaperId);
+      await api.saveWorkspace({
+        name,
+        paper_ids: sessionPapers.map((p) => p.id),
+        cross_paper_results: crossPaperResults,
+      });
+      setWorkspaceNameInput("");
+      setWorkspacesLoaded(false);
+      setSavedWorkspaces([]);
+      setActiveWorkspaceName(name);
+    } catch (e) {
+      console.error("Failed to save workspace:", e);
+    } finally {
+      setWorkspaceSaving(false);
+    }
+  }, [workspaceNameInput, sessionPapers, crossPaperResults, activePaperId, savePaperCache]);
+
+  const handleLoadWorkspace = useCallback(async (ws: typeof savedWorkspaces[0]) => {
+    clearSession();
+    clearCrossPaperResults();
+
+    if (ws.cross_paper_results && ws.cross_paper_results.length > 0) {
+      addCrossPaperResults(ws.cross_paper_results);
+    }
+
+    for (const pid of ws.paper_ids) {
+      try {
+        const p = await api.getPaper(pid);
+        addSessionPaper({ id: p.id, title: p.title });
+      } catch {
+        // paper may have been deleted
+      }
+    }
+
+    if (ws.paper_ids.length > 0) {
+      const firstId = ws.paper_ids[0];
+      setActivePaperId(firstId);
+      if (firstId !== paperId) {
+        router.push(`/paper/${firstId}`);
+      }
+    }
+    setShowWorkspaceMenu(false);
+    setActiveWorkspaceName(ws.name);
+  }, [clearSession, clearCrossPaperResults, addCrossPaperResults, addSessionPaper, paperId, router]);
+
+  const handleOpenWorkspaceMenu = useCallback(async () => {
+    const opening = !showWorkspaceMenu;
+    setShowWorkspaceMenu((v) => !v);
+    if (opening) {
+      try {
+        const wsList = await api.listWorkspaces();
+        setSavedWorkspaces(wsList);
+        setWorkspacesLoaded(true);
+      } catch {
+        // ignore
+      }
+    }
+  }, [showWorkspaceMenu]);
+
+  const handleDeleteWorkspace = useCallback(async (wsId: string) => {
+    try {
+      await api.deleteWorkspace(wsId);
+      setSavedWorkspaces((prev) => prev.filter((w) => w.id !== wsId));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const [bibtexModal, setBibtexModal] = useState<{
+    open: boolean;
+    paperIds?: string[];
+    workspaceId?: string;
+    label?: string;
+  }>({ open: false });
+
+  const handleExportBibtex = useCallback((opts: { paper_ids?: string[]; workspace_id?: string }, label?: string) => {
+    setBibtexModal({
+      open: true,
+      paperIds: opts.paper_ids,
+      workspaceId: opts.workspace_id,
+      label: label || "Current paper",
+    });
+  }, []);
+
+  const [paperUsage, setPaperUsage] = useState<{
+    qa_used: number; qa_limit: number; selections_used: number; selections_limit: number;
+  } | null>(null);
+
+  const refreshUsage = useCallback(() => {
+    api.getPaperUsage(activePaperId).then(setPaperUsage).catch(() => {});
+  }, [activePaperId]);
+
+  useEffect(() => { refreshUsage(); }, [refreshUsage]);
+
+  const handleTextSelected = useCallback((text: string, rect: DOMRect) => {
+    setSelection({ text, rect });
+  }, []);
+
+  const handleSelectionClear = useCallback(() => {
+    setSelection(null);
+  }, []);
+
+  const handleSelectionAction = useCallback(async (action: SelectionAction, text: string) => {
+    setSelection(null);
+    window.getSelection()?.removeAllRanges();
+
+    if (action === "note") {
+      setPanelVisible(true);
+      setActiveTab("notes");
+      try {
+        const note = await api.addNote(activePaperId, text, "PDF Selection");
+        useStore.getState().addNote(note);
+      } catch (e) {
+        console.error("Failed to save note:", e);
+      }
+      return;
+    }
+
+    setPanelVisible(true);
+    setActiveTab("selection");
+    setSelectionLoading(true);
+    setSelectionResult(null);
+
+    try {
+      const res = await api.analyzeSelectionStream(activePaperId, text, action);
+      if (!res.ok) {
+        const detail = await res.text();
+        let msg = `HTTP ${res.status}`;
+        try { msg = JSON.parse(detail).detail || msg; } catch { /* ignore */ }
+        if (res.status === 403 || res.status === 429) {
+          setSelectionResult({ action, selected_text: text, explanation: `**Limit reached.** ${msg}\n\nUpgrade your plan to continue.` });
+          setSelectionLoading(false);
+          return;
+        }
+        throw new Error(msg);
+      }
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No stream");
+
+      const decoder = new TextDecoder();
+      let accumulated = "";
+      let buffer = "";
+
+      setSelectionResult({
+        action,
+        selected_text: text,
+        explanation: "",
+        streaming: true,
+      });
+      setSelectionLoading(false);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === "chunk") {
+              accumulated += event.text;
+              setSelectionResult({
+                action,
+                selected_text: text,
+                explanation: accumulated,
+                streaming: true,
+              });
+            } else if (event.type === "done") {
+              const finalText = event.full_text || accumulated;
+              const finalResult = {
+                action,
+                selected_text: text,
+                explanation: finalText,
+              };
+              setSelectionResult(finalResult);
+              addSelectionToHistory(finalResult);
+              refreshUsage();
+            } else if (event.type === "error") {
+              setSelectionResult({
+                action,
+                selected_text: text,
+                explanation: `Error: ${event.message}`,
+              });
+            }
+          } catch {
+            // ignore malformed SSE
+          }
+        }
+      }
+    } catch (e) {
+      setSelectionResult({
+        action,
+        selected_text: text,
+        explanation: `Analysis failed: ${e instanceof Error ? e.message : "Unknown error"}`,
+      });
+      setSelectionLoading(false);
+    }
+  }, [activePaperId, setPanelVisible, setActiveTab, setSelectionLoading, setSelectionResult, addSelectionToHistory]);
+
+  const onDragStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      dragging.current = true;
+      const isHoriz = panelPos !== "bottom";
+      startCoord.current = isHoriz ? e.clientX : e.clientY;
+      startSize.current = panelSize;
+      document.body.style.cursor = isHoriz ? "col-resize" : "row-resize";
+      document.body.style.userSelect = "none";
+
+      const min = isHoriz ? MIN_SIDE : MIN_BOTTOM;
+      const max = isHoriz ? MAX_SIDE : MAX_BOTTOM;
+
+      const onMove = (ev: MouseEvent) => {
+        if (!dragging.current) return;
+        let delta: number;
+        if (panelPos === "right") delta = startCoord.current - ev.clientX;
+        else if (panelPos === "left") delta = ev.clientX - startCoord.current;
+        else delta = startCoord.current - ev.clientY;
+        setPanelSize(Math.min(max, Math.max(min, startSize.current + delta)));
+      };
+      const onUp = () => {
+        dragging.current = false;
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [panelSize, panelPos]
+  );
+
+  const cyclePosition = useCallback(() => {
+    setPanelPos((cur) => {
+      const idx = POSITIONS.indexOf(cur);
+      const next = POSITIONS[(idx + 1) % POSITIONS.length];
+      setPanelSize(next === "bottom" ? DEFAULT_BOTTOM : DEFAULT_SIDE);
+      return next;
+    });
+  }, []);
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center h-screen bg-white">
         <div className="text-center space-y-3 animate-fade-in">
-          <div className="w-5 h-5 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin mx-auto" />
-          <p className="text-[14px] text-muted-foreground">Loading paper...</p>
+          <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-600 rounded-full animate-spin mx-auto" />
+          <p className="text-[14px] text-gray-500">Loading paper...</p>
         </div>
       </div>
     );
@@ -116,12 +648,12 @@ function PaperContent() {
 
   if (error || !paper) {
     return (
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center h-screen bg-white">
         <div className="text-center space-y-4 animate-fade-in">
-          <p className="text-destructive text-[14px]">{error || "Paper not found"}</p>
+          <p className="text-red-500 text-[14px]">{error || "Paper not found"}</p>
           <button
-            onClick={() => router.push("/")}
-            className="text-[13px] text-muted-foreground hover:text-foreground transition-colors"
+            onClick={() => router.push("/dashboard")}
+            className="text-[13px] text-gray-400 hover:text-gray-700 transition-colors"
           >
             &larr; Back to library
           </button>
@@ -130,96 +662,398 @@ function PaperContent() {
     );
   }
 
+  const isBottom = panelPos === "bottom";
+
+  const dragHandle = isBottom ? (
+    <div
+      className="shrink-0 h-1.5 flex items-center justify-center cursor-row-resize group hover:bg-accent/60 transition-colors"
+      onMouseDown={onDragStart}
+    >
+      <div className="h-[2px] w-10 rounded-full bg-foreground/8 group-hover:bg-foreground/20 transition-colors" />
+    </div>
+  ) : (
+    <div
+      className="shrink-0 w-1.5 flex items-center justify-center cursor-col-resize group hover:bg-accent/60 transition-colors"
+      onMouseDown={onDragStart}
+    >
+      <div className="w-[2px] h-8 rounded-full bg-foreground/8 group-hover:bg-foreground/20 transition-colors" />
+    </div>
+  );
+
+  const panelBlock = isBottom ? (
+    <div
+      className="shrink-0 overflow-hidden bg-background"
+      style={{ height: panelSize }}
+    >
+      <div className="mx-auto max-w-3xl h-full border-l border-r border-t rounded-t-xl">
+        <AnalysisPanel
+          paperId={activePaperId}
+          position={panelPos}
+          onCyclePosition={cyclePosition}
+          hasSelection={hasSelection}
+        />
+      </div>
+    </div>
+  ) : (
+    <div
+      className="shrink-0 overflow-hidden bg-background border-l border-r border-t"
+      style={{ width: panelSize }}
+    >
+      <AnalysisPanel
+        paperId={activePaperId}
+        position={panelPos}
+        onCyclePosition={cyclePosition}
+        hasSelection={hasSelection}
+      />
+    </div>
+  );
+
+  const pdfBlock = (
+    <div className="flex-1 overflow-hidden relative" style={{ minWidth: 0, minHeight: 0 }}>
+      <PdfViewer
+        url={api.getPdfUrl(activePaperId)}
+        onTextSelected={handleTextSelected}
+        onSelectionClear={handleSelectionClear}
+      />
+      {selection && (
+        <SelectionToolbar
+          text={selection.text}
+          rect={selection.rect}
+          onAction={handleSelectionAction}
+          onDismiss={handleSelectionClear}
+        />
+      )}
+    </div>
+  );
+
+  const showSessionBar = sessionPapers.length > 1;
+
   return (
+    <>
     <div className="flex flex-col h-screen overflow-hidden">
-      <header className="shrink-0 flex items-center gap-3 px-4 h-11 border-b bg-background/80 backdrop-blur-sm">
+      {/* Header */}
+      <header className="shrink-0 flex items-center gap-3 px-4 h-[48px] border-b border-gray-100 bg-white">
         <button
-          onClick={() => router.push("/")}
-          className="text-muted-foreground hover:text-foreground transition-colors text-[13px] font-medium shrink-0"
+          onClick={() => { clearSession(); router.push("/dashboard"); }}
+          className="text-gray-400 hover:text-gray-700 transition-colors text-[13px] font-medium shrink-0"
         >
           &larr;
         </button>
+        <div className="h-4 w-px bg-gray-200 shrink-0" />
+        <Image src="/logo.png" alt="Know" width={20} height={20} className="shrink-0 rounded-md" />
 
-        <div className="h-4 w-px bg-border shrink-0" />
-
-        <span className="text-[13px] text-foreground/70 truncate flex-1 font-medium">
-          {paper.title}
-        </span>
-
-        {paper.has_si && (
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground bg-muted px-2 py-0.5 rounded-full font-medium">
-            SI
+        {!showSessionBar && (
+          <span className="text-[13px] text-gray-600 truncate flex-1 font-medium">
+            {paper.title}
           </span>
         )}
 
-        <input ref={siInputRef} type="file" accept=".pdf" className="hidden" onChange={handleSIUpload} />
+        {showSessionBar && (
+          <span className="text-[11px] text-gray-400 truncate flex-1 font-medium uppercase tracking-wider">
+            Session · {sessionPapers.length} papers
+          </span>
+        )}
 
+        {/* Usage indicator */}
+        {paperUsage && paperUsage.qa_limit > 0 && (
+          <div className="hidden sm:flex items-center gap-2 shrink-0 text-[10px] text-gray-400">
+            <span title={`${paperUsage.qa_used} of ${paperUsage.qa_limit} Q&A used on this paper`}>
+              Q&A {paperUsage.qa_used}/{paperUsage.qa_limit}
+            </span>
+            <span className="text-gray-200">|</span>
+            <span title={`${paperUsage.selections_used} of ${paperUsage.selections_limit} selections used on this paper`}>
+              Sel {paperUsage.selections_used}/{paperUsage.selections_limit}
+            </span>
+          </div>
+        )}
+
+        {/* Add paper button */}
+        <div className="relative shrink-0">
+          <button
+            onClick={() => setShowAddPaper(!showAddPaper)}
+            className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+            title="Add paper to session"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            <span className="hidden sm:inline">Add Paper</span>
+          </button>
+          {showAddPaper && (
+            <AddPaperPopover
+              sessionIds={sessionIds}
+              onAdd={handleAddPaper}
+              onClose={() => setShowAddPaper(false)}
+            />
+          )}
+        </div>
+
+        {/* Folder assignment */}
+        <div className="relative shrink-0">
+          <button
+            onClick={() => setShowFolderPicker(!showFolderPicker)}
+            className="flex items-center gap-1.5 text-[11px] text-gray-400 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+            title="Assign to folder"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+            </svg>
+            {paper.folder || "No folder"}
+          </button>
+          {showFolderPicker && (
+            <div className="absolute right-0 top-full mt-1 z-50 bg-popover border rounded-lg shadow-lg p-2 w-48 space-y-1 animate-fade-in">
+              <button
+                onClick={() => handleMoveToFolder("")}
+                className={`w-full text-left text-[11px] px-2 py-1.5 rounded-md transition-colors ${
+                  !paper.folder ? "bg-accent font-medium" : "hover:bg-accent/50"
+                }`}
+              >
+                Unfiled
+              </button>
+              {allFolders.map((f) => (
+                <button
+                  key={f}
+                  onClick={() => handleMoveToFolder(f)}
+                  className={`w-full text-left text-[11px] px-2 py-1.5 rounded-md transition-colors truncate ${
+                    paper.folder === f ? "bg-accent font-medium" : "hover:bg-accent/50"
+                  }`}
+                >
+                  {f}
+                </button>
+              ))}
+              <div className="border-t pt-1.5 mt-1.5">
+                <div className="flex gap-1">
+                  <input
+                    value={folderInput}
+                    onChange={(e) => setFolderInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleCreateAndMoveToFolder()}
+                    placeholder="New folder..."
+                    className="flex-1 text-[11px] px-2 py-1 rounded border bg-background"
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleCreateAndMoveToFolder}
+                    className="text-[10px] font-medium text-foreground px-1.5"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Export .bib for current paper */}
         <button
-          onClick={() => siInputRef.current?.click()}
-          disabled={siUploading}
-          className="text-[12px] text-muted-foreground hover:text-foreground transition-colors font-medium shrink-0"
+          onClick={() => handleExportBibtex({ paper_ids: [activePaperId] }, "Current paper")}
+          className="shrink-0 flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+          title="Export BibTeX for current paper"
         >
-          {siUploading ? "Uploading..." : paper.has_si ? "Replace SI" : "+ SI"}
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+          </svg>
+          <span className="hidden sm:inline">.bib</span>
         </button>
 
-        <div className="h-4 w-px bg-border shrink-0" />
+        {/* Workspace save/load */}
+        <div className="relative shrink-0">
+          <button
+            onClick={handleOpenWorkspaceMenu}
+            className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+            title="Save or load workspace"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+            </svg>
+            <span className="hidden sm:inline">{activeWorkspaceName || "Workspace"}</span>
+          </button>
+          {showWorkspaceMenu && (
+            <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-xl w-80 max-h-[400px] flex flex-col animate-fade-in">
+              <div className="p-3 border-b border-gray-100 space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400">Save Current Session</p>
+                <div className="flex gap-1.5">
+                  <input
+                    value={workspaceNameInput}
+                    onChange={(e) => setWorkspaceNameInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleSaveWorkspace(); }}
+                    placeholder={`Session — ${sessionPapers.length} papers`}
+                    className="flex-1 text-[12px] px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white placeholder:text-gray-300 focus:outline-none focus:ring-1 focus:ring-gray-300"
+                  />
+                  <button
+                    onClick={handleSaveWorkspace}
+                    disabled={workspaceSaving}
+                    className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition-colors disabled:opacity-50 shrink-0"
+                  >
+                    {workspaceSaving ? "..." : "Save"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-y-auto flex-1 p-1.5">
+                {!workspacesLoaded ? (
+                  <div className="flex items-center justify-center py-6">
+                    <div className="w-4 h-4 border-2 border-gray-200 border-t-gray-500 rounded-full animate-spin" />
+                  </div>
+                ) : savedWorkspaces.length === 0 ? (
+                  <p className="text-[12px] text-gray-400 text-center py-6">No saved workspaces yet</p>
+                ) : (
+                  <>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400 px-2 py-1.5">
+                      Load Workspace
+                    </p>
+                    {savedWorkspaces.map((ws) => (
+                      <div
+                        key={ws.id}
+                        className="flex items-center gap-2 rounded-lg px-2.5 py-2 hover:bg-gray-50 transition-colors group"
+                      >
+                        <button
+                          onClick={() => handleLoadWorkspace(ws)}
+                          className="flex-1 text-left min-w-0"
+                        >
+                          <p className="text-[12px] font-medium text-gray-700 truncate">{ws.name}</p>
+                          <p className="text-[10px] text-gray-400">
+                            {ws.paper_ids.length} paper{ws.paper_ids.length !== 1 ? "s" : ""}
+                            {" · "}
+                            {new Date(ws.updated_at).toLocaleDateString()}
+                          </p>
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleExportBibtex({ workspace_id: ws.id }, `Workspace: ${ws.name}`); }}
+                          className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-gray-600 transition-all shrink-0"
+                          title="Export BibTeX"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteWorkspace(ws.id); }}
+                          className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all shrink-0"
+                          title="Delete workspace"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+
+              <div className="p-2 border-t border-gray-100">
+                <button
+                  onClick={() => setShowWorkspaceMenu(false)}
+                  className="w-full text-[11px] text-gray-400 hover:text-gray-700 py-1 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         <button
           onClick={togglePanel}
           className={`text-[12px] font-medium transition-colors shrink-0 ${
-            panelVisible ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+            panelVisible ? "text-gray-800" : "text-gray-400 hover:text-gray-700"
           }`}
         >
           {panelVisible ? "Hide Analysis" : "Show Analysis"}
         </button>
-
         <button
           onClick={() => router.push("/settings")}
-          className="text-muted-foreground/50 hover:text-muted-foreground transition-colors shrink-0"
+          className="text-gray-300 hover:text-gray-500 transition-colors shrink-0"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
         </button>
+        <UserButton />
       </header>
 
-      <div className="flex-1 overflow-y-auto" style={{ minHeight: 0 }}>
-        <div className="max-w-[680px] mx-auto px-6 py-8">
-          <PaperRenderer
-            paperId={paper.id}
-            title={paper.title}
-            authors={paper.authors}
-            affiliations={paper.affiliations || []}
-            abstract={paper.abstract}
-            contentMarkdown={paper.content_markdown}
-            figures={paper.figures}
-            references={paper.references || []}
-          />
+      {/* Session paper tabs */}
+      {showSessionBar && (
+        <div className="shrink-0 border-b border-gray-100 bg-white px-3 py-1.5">
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
+            {sessionPapers.map((sp) => (
+              <div
+                key={sp.id}
+                className={`group flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium transition-all cursor-pointer shrink-0 ${
+                  sp.id === activePaperId
+                    ? "bg-gray-900 text-white"
+                    : "bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                }`}
+                onClick={() => handleSwitchPaper(sp.id)}
+              >
+                <span className="max-w-[180px] truncate">
+                  {sp.title.length > 35 ? sp.title.slice(0, 35) + "..." : sp.title}
+                </span>
+                {sessionPapers.length > 1 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemoveSessionPaper(sp.id);
+                    }}
+                    className={`w-3.5 h-3.5 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                      sp.id === activePaperId
+                        ? "hover:bg-background/20 text-background/60 hover:text-background"
+                        : "hover:bg-foreground/10 text-muted-foreground/30 hover:text-muted-foreground opacity-0 group-hover:opacity-100"
+                    }`}
+                  >
+                    <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      {panelVisible && (
-        <>
-          <div
-            className="drag-handle shrink-0 h-2 flex items-center justify-center border-t bg-accent/50"
-            onMouseDown={onDragStart}
-          >
-            <div className="drag-bar w-10 h-[2px] rounded-full bg-foreground/10 transition-colors" />
-          </div>
-
-          <div
-            className="shrink-0 overflow-hidden bg-background border-t"
-            style={{ height: panelH }}
-          >
-            <BottomPanel paperId={paper.id} />
-          </div>
-        </>
+      {/* Main content */}
+      {isBottom ? (
+        <div className="flex-1 flex flex-col overflow-hidden" style={{ minHeight: 0 }}>
+          {pdfBlock}
+          {panelVisible && (
+            <>
+              {dragHandle}
+              {panelBlock}
+            </>
+          )}
+        </div>
+      ) : (
+        <div className="flex-1 flex overflow-hidden" style={{ minHeight: 0 }}>
+          {panelPos === "left" && panelVisible && (
+            <>
+              {panelBlock}
+              {dragHandle}
+            </>
+          )}
+          {pdfBlock}
+          {panelPos === "right" && panelVisible && (
+            <>
+              {dragHandle}
+              {panelBlock}
+            </>
+          )}
+        </div>
       )}
     </div>
+
+      <BibtexModal
+        open={bibtexModal.open}
+        onClose={() => setBibtexModal({ open: false })}
+        paperIds={bibtexModal.paperIds}
+        workspaceId={bibtexModal.workspaceId}
+        label={bibtexModal.label}
+      />
+    </>
   );
 }
 
 export default function PaperPage() {
-  return <AuthGuard><PaperContent /></AuthGuard>;
+  return <PaperContent />;
 }

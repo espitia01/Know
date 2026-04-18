@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import json
 import re
+import io
 from abc import ABC, abstractmethod
+from typing import AsyncIterator
 
 import httpx
+import ssl
+import certifi
 
 from ..config import settings
 
@@ -14,6 +18,17 @@ ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 HAIKU_MODEL = "claude-haiku-4-5"
 SONNET_MODEL = "claude-sonnet-4-6"
+OPUS_MODEL = "claude-opus-4"
+
+MAX_IMAGE_DIMENSION = 1024
+
+
+def _ssl_context():
+    """Build an SSL context, preferring certifi, falling back to system certs."""
+    try:
+        return ssl.create_default_context(cafile=certifi.where())
+    except ssl.SSLError:
+        return ssl.create_default_context()
 
 
 class LLMProvider(ABC):
@@ -21,11 +36,21 @@ class LLMProvider(ABC):
     async def complete(self, system: str, user: str, max_tokens: int = 4096) -> str: ...
 
 
+_shared_http_client: httpx.AsyncClient | None = None
+
+
+def _get_shared_client() -> httpx.AsyncClient:
+    global _shared_http_client
+    if _shared_http_client is None or _shared_http_client.is_closed:
+        _shared_http_client = httpx.AsyncClient(timeout=300.0, verify=_ssl_context())
+    return _shared_http_client
+
+
 class AnthropicProvider(LLMProvider):
     def __init__(self, api_key: str, model: str = SONNET_MODEL):
         self.api_key = api_key
         self.model = model
-        self.client = httpx.AsyncClient(timeout=300.0)
+        self.client = _get_shared_client()
 
     async def complete(self, system: str, user: str, max_tokens: int = 4096) -> str:
         response = await self.client.post(
@@ -46,6 +71,128 @@ class AnthropicProvider(LLMProvider):
         data = response.json()
         return data["content"][0]["text"]
 
+    async def stream_complete(self, system: str, user: str, max_tokens: int = 4096) -> AsyncIterator[str]:
+        """Stream a text response token-by-token."""
+        async with self.client.stream(
+            "POST",
+            ANTHROPIC_API_URL,
+            headers={
+                "x-api-key": self.api_key,
+                "anthropic-version": ANTHROPIC_VERSION,
+                "content-type": "application/json",
+            },
+            json={
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "stream": True,
+                "system": system,
+                "messages": [{"role": "user", "content": user}],
+            },
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:]
+                if payload.strip() == "[DONE]":
+                    break
+                try:
+                    event = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("type") == "content_block_delta":
+                    delta = event.get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        yield delta.get("text", "")
+
+    async def complete_with_image(
+        self, system: str, text: str, image_b64: str, media_type: str = "image/png", max_tokens: int = 4096
+    ) -> str:
+        """Send a message with both text and an image (vision)."""
+        response = await self.client.post(
+            ANTHROPIC_API_URL,
+            headers={
+                "x-api-key": self.api_key,
+                "anthropic-version": ANTHROPIC_VERSION,
+                "content-type": "application/json",
+            },
+            json={
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "system": system,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type,
+                                    "data": image_b64,
+                                },
+                            },
+                            {"type": "text", "text": text},
+                        ],
+                    }
+                ],
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data["content"][0]["text"]
+
+    async def stream_complete_with_image(
+        self, system: str, text: str, image_b64: str, media_type: str = "image/png", max_tokens: int = 4096
+    ) -> AsyncIterator[str]:
+        """Stream a vision response token-by-token."""
+        async with self.client.stream(
+            "POST",
+            ANTHROPIC_API_URL,
+            headers={
+                "x-api-key": self.api_key,
+                "anthropic-version": ANTHROPIC_VERSION,
+                "content-type": "application/json",
+            },
+            json={
+                "model": self.model,
+                "max_tokens": max_tokens,
+                "stream": True,
+                "system": system,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type,
+                                    "data": image_b64,
+                                },
+                            },
+                            {"type": "text", "text": text},
+                        ],
+                    }
+                ],
+            },
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:]
+                if payload.strip() == "[DONE]":
+                    break
+                try:
+                    event = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("type") == "content_block_delta":
+                    delta = event.get("delta", {})
+                    if delta.get("type") == "text_delta":
+                        yield delta.get("text", "")
+
 
 class LocalModelProvider(LLMProvider):
     """OpenAI-compatible provider for local models (Ollama, LM Studio, etc.)."""
@@ -53,7 +200,7 @@ class LocalModelProvider(LLMProvider):
     def __init__(self, base_url: str, model_name: str):
         self.base_url = base_url.rstrip("/")
         self.model_name = model_name
-        self.client = httpx.AsyncClient(timeout=120.0)
+        self.client = _get_shared_client()
 
     async def complete(self, system: str, user: str, max_tokens: int = 4096) -> str:
         response = await self.client.post(
@@ -72,22 +219,30 @@ class LocalModelProvider(LLMProvider):
         return data["choices"][0]["message"]["content"]
 
 
-def get_provider() -> LLMProvider:
-    """Get the user-configured LLM provider (Sonnet for analysis tasks)."""
-    if settings.active_provider == "local" and settings.local_model_url:
-        return LocalModelProvider(settings.local_model_url, settings.local_model_name)
-    if settings.anthropic_api_key:
-        return AnthropicProvider(settings.anthropic_api_key, model=SONNET_MODEL)
-    raise ValueError(
-        "No LLM provider configured. Set KNOW_ANTHROPIC_API_KEY or configure a local model."
-    )
-
-
-def get_haiku_provider() -> AnthropicProvider:
-    """Get a Haiku provider for fast formatting tasks. Always uses Anthropic API."""
+def get_provider(user_id: str | None = None) -> LLMProvider:
+    """Get the LLM provider for heavy analysis tasks, enforcing tier model limits."""
     if not settings.anthropic_api_key:
-        raise ValueError("Anthropic API key required for paper formatting.")
-    return AnthropicProvider(settings.anthropic_api_key, model=HAIKU_MODEL)
+        raise ValueError("No API key configured. Set KNOW_ANTHROPIC_API_KEY.")
+    model = settings.analysis_model
+    if user_id:
+        from ..api.settings import _get_user_model_prefs
+        model, _ = _get_user_model_prefs(user_id)
+        from ..gating import enforce_model
+        model = enforce_model(user_id, model)
+    return AnthropicProvider(settings.anthropic_api_key, model=model)
+
+
+def get_fast_provider(user_id: str | None = None) -> LLMProvider:
+    """Get a faster LLM provider for interactive tasks, enforcing tier model limits."""
+    if not settings.anthropic_api_key:
+        raise ValueError("No API key configured. Set KNOW_ANTHROPIC_API_KEY.")
+    model = settings.fast_model
+    if user_id:
+        from ..api.settings import _get_user_model_prefs
+        _, model = _get_user_model_prefs(user_id)
+        from ..gating import enforce_model
+        model = enforce_model(user_id, model)
+    return AnthropicProvider(settings.anthropic_api_key, model=model)
 
 
 def _extract_json(text: str) -> str:
@@ -110,9 +265,8 @@ def _safe_parse_json(raw: str) -> dict:
     """Extract and parse JSON from LLM output, repairing truncation if needed."""
     cleaned = _extract_json(raw)
     try:
-        return json.loads(cleaned)
+        result = json.loads(cleaned)
     except json.JSONDecodeError:
-        # Attempt repair: close unclosed strings and braces
         repaired = cleaned
         if repaired.count('"') % 2 == 1:
             repaired += '"'
@@ -121,127 +275,207 @@ def _safe_parse_json(raw: str) -> dict:
         repaired += "]" * max(0, open_brackets)
         repaired += "}" * max(0, open_braces)
         try:
-            return json.loads(repaired)
+            result = json.loads(repaired)
         except json.JSONDecodeError:
             return {}
+    return _normalize_latex_delimiters(result)
+
+
+def _normalize_latex_delimiters(obj):
+    """Convert \\( \\) to $ and \\[ \\] to $$ in all string values for remark-math compatibility."""
+    if isinstance(obj, str):
+        s = obj
+        s = re.sub(r'\\\[', '$$', s)
+        s = re.sub(r'\\\]', '$$', s)
+        s = re.sub(r'\\\(', '$', s)
+        s = re.sub(r'\\\)', '$', s)
+        return s
+    if isinstance(obj, dict):
+        return {k: _normalize_latex_delimiters(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_normalize_latex_delimiters(item) for item in obj]
+    return obj
 
 
 # ---------------------------------------------------------------------------
-# Haiku formatting (runs during upload)
+# Lightweight metadata extraction (runs during upload, no Haiku needed)
 # ---------------------------------------------------------------------------
 
-async def format_paper_with_haiku(raw_text: str) -> dict:
-    """Send raw PDF text to Haiku, get back clean markdown + metadata.
+async def extract_metadata(raw_text: str, user_id: str | None = None) -> dict:
+    """Extract just title and authors from raw PDF text using the fast provider."""
+    provider = get_fast_provider(user_id)
+    system = "Extract the paper title and author names from the given text. Return ONLY valid JSON."
+    user = f"""Extract the title and authors from this academic paper text.
 
-    Returns dict with keys: title, authors, abstract, content_markdown
-    """
-    provider = get_haiku_provider()
+Return JSON: {{"title": "...", "authors": ["Author One", "Author Two", ...]}}
 
-    system = """You are an expert academic typesetter. Convert raw PDF-extracted text into clean, readable markdown.
+Text (first 3000 chars):
+{raw_text[:3000]}"""
 
-Rules:
-- Start with a YAML-style metadata block fenced by --- lines containing:
-  title, authors, affiliations, and abstract
-- CRITICAL for authors: Write each author with their affiliation superscript numbers, e.g.: "John Smith1, Jane Doe1,2, Bob Lee3"
-- CRITICAL for affiliations: Number each affiliation, e.g.: "1 Department of Physics, MIT; 2 Department of Chemistry, Stanford; 3 Harvard University"
-- The mapping between authors and affiliations MUST be preserved from the original paper
-- The affiliations line MUST include the full institution names and departments as they appear in the paper
-- Then output the full paper body as clean markdown
-- Fix broken sentences and words split across lines/columns
-- Use ## for section headings, ### for subsections
-- Preserve ALL mathematical content using LaTeX: inline math with $...$ and display math with $$...$$
-- Reconstruct garbled equations from the PDF extraction into proper LaTeX
-- Remove page headers/footers, page numbers, journal boilerplate, "Downloaded from..." lines
-- Remove figure placeholder labels like "Figure fig_p0_0"
-- Place "## References" as the LAST section, format as a numbered markdown list (1. Author, Title...)
-- CRITICAL: include ALL references from the paper, do NOT stop early or truncate
-- Do NOT summarize or shorten -- keep ALL content from the paper
-- Output ONLY the metadata block + markdown, no other commentary"""
-
-    user = f"""Convert this raw PDF extraction into clean markdown with a metadata header:
-
-{raw_text[:60000]}"""
-
-    result = await provider.complete(system, user, max_tokens=32000)
-    return _parse_haiku_output(result)
+    raw = await provider.complete(system, user, max_tokens=512)
+    return _safe_parse_json(raw)
 
 
-def _parse_haiku_output(text: str) -> dict:
-    """Parse the metadata block + markdown body from Haiku's response."""
-    title = ""
-    authors: list[str] = []
-    affiliations: list[str] = []
-    abstract = ""
-    body = text
+# ---------------------------------------------------------------------------
+# Selection-based analysis (triggered by highlighting text in the PDF)
+# ---------------------------------------------------------------------------
 
-    if text.strip().startswith("---"):
-        parts = text.strip().split("---", 2)
-        if len(parts) >= 3:
-            meta_block = parts[1]
-            body = parts[2].strip()
+async def analyze_selection(paper_text: str, selected_text: str, action: str, user_id: str | None = None) -> dict:
+    """Analyze a user-highlighted selection from the PDF using the fast provider."""
+    provider = get_fast_provider(user_id)
 
-            for line in meta_block.strip().splitlines():
-                line = line.strip()
-                if line.lower().startswith("title:"):
-                    title = line.split(":", 1)[1].strip().strip('"').strip("'")
-                elif line.lower().startswith("authors:"):
-                    raw_authors = line.split(":", 1)[1].strip().strip('"').strip("'")
-                    authors = [a.strip().strip('"').strip("'") for a in raw_authors.split(",") if a.strip()]
-                elif line.lower().startswith("affiliations:"):
-                    raw_aff = line.split(":", 1)[1].strip().strip('"').strip("'")
-                    affiliations = [a.strip() for a in raw_aff.split(";") if a.strip()]
-                elif line.lower().startswith("abstract:"):
-                    abstract = line.split(":", 1)[1].strip().strip('"').strip("'")
+    action_prompts = {
+        "explain": f"""Explain the following passage from an academic paper clearly and thoroughly.
+Break down every piece of jargon, clarify the logic step by step, and provide broader context
+including implications, connections to other concepts, and why this matters.
+Use LaTeX for math ($...$).
 
-    if not title:
-        for line in body.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("# ") and not stripped.startswith("## "):
-                title = stripped[2:].strip()
-                break
+Selected text:
+\"\"\"{selected_text}\"\"\"
 
-    if not abstract:
-        abstract_match = re.search(
-            r"(?:^|\n)#+\s*Abstract\s*\n+([\s\S]*?)(?=\n##|\Z)",
-            body, re.IGNORECASE
-        )
-        if abstract_match:
-            abstract = abstract_match.group(1).strip()[:2000]
+Full paper context:
+{paper_text[:6000]}
 
-    references: list[dict] = []
-    content_body = body
+Return JSON:
+{{"explanation": "thorough, clear explanation that covers jargon, logic, context, implications, and connections. Use LaTeX math where relevant."}}""",
 
-    refs_match = re.search(
-        r"\n##\s*References(?:\s+and\s+Notes)?\s*\n",
-        body, re.IGNORECASE
-    )
-    if refs_match:
-        refs_text = body[refs_match.end():]
-        content_body = body[: refs_match.start()].rstrip()
-        for m in re.finditer(r"(\d+)\.\s+(.+?)(?=\n\d+\.\s|\Z)", refs_text, re.DOTALL):
-            ref_num = m.group(1)
-            ref_text = m.group(2).strip().replace("\n", " ")
-            references.append({"id": ref_num, "text": ref_text})
+        "assumptions": f"""Identify the explicit and implicit assumptions underlying this passage.
+For each assumption, explain why it matters and what would change if it didn't hold.
 
-    return {
-        "title": title,
-        "authors": authors,
-        "affiliations": affiliations,
-        "abstract": abstract,
-        "content_markdown": content_body,
-        "references": references,
+Selected text:
+\"\"\"{selected_text}\"\"\"
+
+Full paper context:
+{paper_text[:6000]}
+
+Return JSON:
+{{"assumptions": [{{"statement": "...", "type": "explicit|implicit", "significance": "..."}}]}}""",
+
+        "derive": f"""The user wants to understand the derivation in this passage step-by-step.
+Break it down into atomic steps, filling in any gaps. Each step should have a clear prompt,
+the resulting expression (LaTeX), and an explanation.
+
+Selected text:
+\"\"\"{selected_text}\"\"\"
+
+Full paper context:
+{paper_text[:6000]}
+
+Return JSON:
+{{
+  "title": "Derivation of [specific result]",
+  "starting_point": "initial expression (LaTeX)",
+  "final_result": "target expression (LaTeX)",
+  "steps": [
+    {{
+      "step_number": 1,
+      "prompt": "what to do in this step",
+      "answer": "resulting expression (LaTeX)",
+      "explanation": "why this works",
+      "hint": "a helpful nudge"
+    }}
+  ]
+}}""",
+
+        "question": f"""Answer the following question about the paper, using the selected passage as focus.
+Be thorough, educational, and use LaTeX for math.
+
+Selected text / question context:
+\"\"\"{selected_text}\"\"\"
+
+Full paper context:
+{paper_text[:6000]}
+
+Return JSON:
+{{"answer": "thorough educational answer with LaTeX math where relevant"}}""",
     }
+
+    prompt = action_prompts.get(action, action_prompts["explain"])
+    system = "You are an expert science educator. Analyze academic paper content to help students learn. Return ONLY valid JSON. CRITICAL: For ALL math expressions, use $ delimiters for inline math and $$ for display math. NEVER use \\( \\) or \\[ \\] delimiters."
+    raw = await provider.complete(system, prompt, max_tokens=8192)
+    result = _safe_parse_json(raw)
+    result["action"] = action
+    result["selected_text"] = selected_text
+    return result
+
+
+def _sanitize_user_text(text: str) -> str:
+    """Sanitize user-supplied text before embedding in LLM prompts."""
+    return text.replace('"""', '""').replace("'''", "''")[:10000]
+
+
+def _get_selection_prompt(paper_text: str, selected_text: str, action: str) -> tuple[str, str]:
+    """Return (system, user_text) for selection analysis with markdown output (for streaming)."""
+    selected_text = _sanitize_user_text(selected_text)
+    system = (
+        "You are an expert science educator. Analyze academic paper content to help students learn. "
+        "Use markdown formatting with clear structure. "
+        "CRITICAL: For ALL math, use $ for inline and $$ for display math. "
+        "NEVER use \\( \\) or \\[ \\] delimiters. Do NOT wrap output in JSON or code fences.\n\n"
+        "IMPORTANT: The selected text comes from a PDF text layer. Mathematical equations may appear garbled, "
+        "with symbols like subscripts, superscripts, Greek letters, or operators rendered as incorrect Unicode characters "
+        "or missing entirely. Use the paper context to infer the correct equations and symbols. "
+        "Always reproduce equations correctly in LaTeX even if the selected text is mangled."
+    )
+
+    prompts = {
+        "explain": f"""Explain the following passage from an academic paper clearly and thoroughly.
+Break down every piece of jargon, clarify the logic step by step, and provide broader context
+including implications, connections to other concepts, and why this matters.
+Use LaTeX for math ($...$). Use markdown formatting.
+Note: The selected text is extracted from a PDF text layer and mathematical symbols may be garbled or missing. Interpret them using context.
+
+Selected text:
+\"\"\"{selected_text}\"\"\"
+
+Paper context:
+{paper_text[:6000]}""",
+
+        "assumptions": f"""Identify the explicit and implicit assumptions underlying this passage.
+For each assumption, explain why it matters and what would change if it didn't hold.
+Use markdown formatting with bullet points.
+Note: Mathematical symbols in the selection may be garbled from PDF extraction. Interpret using context.
+
+Selected text:
+\"\"\"{selected_text}\"\"\"
+
+Paper context:
+{paper_text[:6000]}""",
+
+        "derive": f"""Break down the derivation in this passage step-by-step.
+Fill in any gaps with atomic steps. For each step provide the expression (LaTeX) and explanation.
+Use markdown formatting with numbered steps.
+Note: Mathematical symbols in the selection may be garbled from PDF extraction. Reconstruct the correct equations using paper context.
+
+Selected text:
+\"\"\"{selected_text}\"\"\"
+
+Paper context:
+{paper_text[:6000]}""",
+
+        "question": f"""Answer the following question about the paper, using the selected passage as focus.
+Be thorough, educational, and use LaTeX for math. Use markdown formatting.
+Note: If the selection contains garbled math from PDF extraction, interpret it using paper context.
+
+Selected text / question:
+\"\"\"{selected_text}\"\"\"
+
+Paper context:
+{paper_text[:6000]}""",
+    }
+
+    return system, prompts.get(action, prompts["explain"])
 
 
 # ---------------------------------------------------------------------------
 # Analysis functions (use Sonnet or user-configured provider)
 # ---------------------------------------------------------------------------
 
-async def analyze_paper(paper_text: str) -> dict:
+async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
     """Run pre-reading analysis on paper content."""
-    provider = get_provider()
+    provider = get_provider(user_id)
 
-    system = """You are an expert science educator. Analyze the given academic paper and extract structured information to help a student prepare before reading. Return ONLY valid JSON with no other text."""
+    system = """You are an expert science educator. Analyze the given academic paper and extract structured information to help a student prepare before reading. Return ONLY valid JSON with no other text. CRITICAL: For ALL math, use $ for inline and $$ for display math. NEVER use \\( \\) or \\[ \\] delimiters."""
 
     user = f"""Analyze this paper and return a JSON object with these fields:
 
@@ -257,9 +491,9 @@ Paper content:
     return _safe_parse_json(raw)
 
 
-async def explain_term(paper_text: str, term: str, context: str) -> dict:
+async def explain_term(paper_text: str, term: str, context: str, user_id: str | None = None) -> dict:
     """Explain a term in the context of the paper."""
-    provider = get_provider()
+    provider = get_provider(user_id)
 
     system = """You are an expert science educator. Explain technical terms clearly and accurately. Return ONLY valid JSON."""
 
@@ -279,9 +513,9 @@ Paper excerpt:
     return _safe_parse_json(raw)
 
 
-async def find_skipped_steps(paper_text: str, section: str) -> dict:
+async def find_skipped_steps(paper_text: str, section: str, user_id: str | None = None) -> dict:
     """Identify and fill in skipped derivation steps."""
-    provider = get_provider()
+    provider = get_provider(user_id)
 
     system = """You are an expert physicist and mathematics educator. When given a derivation from a paper, identify any steps that were skipped and provide the intermediate steps. Return ONLY valid JSON."""
 
@@ -310,16 +544,16 @@ Return JSON:
     return _safe_parse_json(raw)
 
 
-async def extract_assumptions(paper_text: str) -> dict:
+async def extract_assumptions(paper_text: str, user_id: str | None = None) -> dict:
     """Extract explicit and implicit assumptions."""
-    provider = get_provider()
+    provider = get_provider(user_id)
 
     system = """You are an expert science educator. Identify all assumptions in the paper, both those explicitly stated and those implied. Return ONLY valid JSON."""
 
     user = f"""Analyze this paper and extract all assumptions, both explicit (clearly stated) and implicit (unstated but necessary for the conclusions to hold).
 
 Paper content:
-{paper_text[:12000]}
+{paper_text[:6000]}
 
 Return JSON:
 {{
@@ -336,9 +570,9 @@ Return JSON:
     return _safe_parse_json(raw)
 
 
-async def generate_derivation_exercise(paper_text: str, section: str) -> dict:
+async def generate_derivation_exercise(paper_text: str, section: str, user_id: str | None = None) -> dict:
     """Generate an interactive derivation exercise with fill-in-the-blank steps."""
-    provider = get_provider()
+    provider = get_provider(user_id)
 
     system = """You are an expert physics/mathematics educator creating interactive derivation exercises. Your exercises must be detailed, pedagogical, and genuinely useful for a student trying to learn the material. Return ONLY valid JSON."""
 
@@ -348,16 +582,15 @@ CRITICAL INSTRUCTIONS:
 - Find the key derivation or mathematical argument in this section
 - Break it into 6-12 ATOMIC steps where each step involves exactly one algebraic manipulation, substitution, or logical move
 - Each step MUST have:
-  * "prompt": A clear instruction telling the student what to do (e.g., "Substitute the expression for X into equation Y", "Take the derivative of both sides with respect to t", "Apply the chain rule to expand the left side")
+  * "prompt": A clear instruction telling the student what to do
   * "answer": The resulting mathematical expression after performing the step (use LaTeX like $...$)
   * "explanation": WHY this step works and what principle it uses (2-3 sentences)
   * "hint": A gentle nudge without giving away the answer
-- The prompts must be specific enough that a student knows exactly what operation to perform
 - Start from a clearly stated starting equation/expression
 - End at the final result from the paper
 
 Full paper context:
-{paper_text[:12000]}
+{paper_text[:6000]}
 
 Return JSON:
 {{
@@ -374,17 +607,15 @@ Return JSON:
       "hint": "a helpful hint without giving away the answer"
     }}
   ]
-}}
-
-Make sure every step is concrete and actionable. Do NOT use vague prompts like "simplify" or "continue". Be specific: "Factor out $k_B T$ from the numerator", "Apply integration by parts with $u = x$ and $dv = e^{{-x}} dx$", etc."""
+}}"""
 
     raw = await provider.complete(system, user, max_tokens=8192)
     return _safe_parse_json(raw)
 
 
-async def answer_questions(paper_text: str, questions: list[str]) -> list[dict]:
+async def answer_questions(paper_text: str, questions: list[str], user_id: str | None = None) -> list[dict]:
     """Answer a batch of questions about the paper."""
-    provider = get_provider()
+    provider = get_provider(user_id)
 
     system = """You are an expert science educator. Answer questions about the paper thoroughly but accessibly. Use LaTeX for math expressions. Return ONLY valid JSON."""
 
@@ -396,7 +627,7 @@ Questions:
 {q_list}
 
 Paper content:
-{paper_text[:12000]}
+{paper_text[:6000]}
 
 Return JSON:
 {{
@@ -410,3 +641,190 @@ Return JSON:
 
     raw = await provider.complete(system, user, max_tokens=8192)
     return _safe_parse_json(raw)
+
+
+async def answer_questions_multi(paper_texts: list[tuple[str, str]], questions: list[str], user_id: str | None = None) -> list[dict]:
+    """Answer questions using context from multiple papers.
+    paper_texts: list of (title, raw_text) tuples.
+    """
+    provider = get_provider(user_id)
+
+    system = (
+        "You are an expert science educator. You have access to multiple papers in a reading session. "
+        "Answer questions by synthesizing information across all provided papers. "
+        "Reference specific papers by title when citing information. "
+        "Use LaTeX for math ($...$). Return ONLY valid JSON. "
+        "CRITICAL: For ALL math, use $ for inline and $$ for display. NEVER use \\( \\) or \\[ \\] delimiters."
+    )
+
+    q_list = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
+
+    papers_context = ""
+    chars_per_paper = max(2000, 12000 // len(paper_texts))
+    for i, (title, text) in enumerate(paper_texts):
+        papers_context += f"\n--- Paper {i+1}: {title} ---\n{text[:chars_per_paper]}\n"
+
+    user = f"""Answer these questions using all the papers in the session. Synthesize across papers where relevant.
+
+Questions:
+{q_list}
+
+{papers_context}
+
+Return JSON:
+{{
+  "items": [
+    {{
+      "question": "the original question",
+      "answer": "thorough answer synthesizing across papers, referencing paper titles when citing specific information"
+    }}
+  ]
+}}"""
+
+    raw = await provider.complete(system, user, max_tokens=8192)
+    return _safe_parse_json(raw)
+
+
+async def summarize_paper(paper_text: str, model_override: str | None = None, user_id: str | None = None) -> dict:
+    """Generate an extremely detailed, structured summary of the paper."""
+    if model_override:
+        if user_id:
+            from ..gating import enforce_model
+            model_override = enforce_model(user_id, model_override)
+        provider = AnthropicProvider(settings.anthropic_api_key, model=model_override)
+    else:
+        provider = get_provider(user_id)
+
+    system = """You are an expert science educator and researcher. Produce an extremely detailed, structured summary of the academic paper. Return ONLY valid JSON. CRITICAL: For ALL math expressions, use $ delimiters for inline math and $$ for display math. NEVER use \\( \\) or \\[ \\] delimiters."""
+
+    user = f"""Create an extremely detailed summary of this academic paper. The summary should be comprehensive enough that someone could understand the paper's full contribution without reading the original.
+
+Structure your summary with ALL of the following sections:
+
+1. **overview**: A 3-5 sentence high-level overview of what the paper does and why it matters.
+2. **motivation**: Why was this work done? What gap in knowledge does it fill? (3-5 sentences)
+3. **key_contributions**: Array of the paper's main contributions (each as a string, 1-2 sentences).
+4. **methodology**: Detailed explanation of the methods, models, or theoretical framework used. Include equations where relevant. (Multiple paragraphs)
+5. **main_results**: Detailed description of the key findings, including quantitative results. Use LaTeX for any numbers or equations. (Multiple paragraphs)
+6. **discussion**: What do the results mean? How do they compare to prior work? What are the implications? (Multiple paragraphs)
+7. **limitations**: Array of limitations or caveats the authors mention or that are apparent.
+8. **future_work**: What follow-up research does this enable or suggest? (2-3 sentences)
+9. **key_equations**: Array of the most important equations in the paper, each as {{"equation": "LaTeX", "meaning": "what it represents"}}.
+10. **key_figures_and_tables**: Array of descriptions of the most important figures/tables: {{"id": "Fig. 1", "description": "what it shows and why it matters"}}.
+
+Paper content:
+{paper_text[:20000]}
+
+Return JSON with all the above fields."""
+
+    raw = await provider.complete(system, user, max_tokens=12000)
+    return _safe_parse_json(raw)
+
+
+def _resize_image_b64(image_b64: str, max_dim: int = MAX_IMAGE_DIMENSION) -> str:
+    """Downscale a base64 PNG if either dimension exceeds max_dim. Uses PyMuPDF."""
+    import base64
+    import fitz
+
+    try:
+        raw = base64.b64decode(image_b64)
+        pix = fitz.Pixmap(raw)
+        w, h = pix.width, pix.height
+        if w <= max_dim and h <= max_dim:
+            return image_b64
+
+        scale = max_dim / max(w, h)
+        new_w, new_h = int(w * scale), int(h * scale)
+
+        # Create a tiny temp PDF, insert image, render at target size
+        doc = fitz.open()
+        page = doc.new_page(width=new_w, height=new_h)
+        page.insert_image(fitz.Rect(0, 0, new_w, new_h), pixmap=pix)
+        out_pix = page.get_pixmap(dpi=72)
+        doc.close()
+
+        return base64.b64encode(out_pix.tobytes("png")).decode("utf-8")
+    except Exception:
+        return image_b64
+
+
+async def analyze_figure(paper_text: str, image_b64: str, question: str = "", user_id: str | None = None) -> dict:
+    """Analyze a figure from the paper using Claude's vision capability."""
+    provider = get_fast_provider(user_id)
+    if not isinstance(provider, AnthropicProvider):
+        raise ValueError("Figure analysis requires an Anthropic provider with vision support.")
+
+    image_b64 = _resize_image_b64(image_b64)
+
+    system = (
+        "You are an expert science educator analyzing figures from academic papers. "
+        "Provide clear, thorough, educational explanations. Return ONLY valid JSON. "
+        "CRITICAL: For ALL math expressions, use $ delimiters for inline math and $$ "
+        "for display math. NEVER use \\( \\) or \\[ \\] delimiters."
+    )
+
+    if question.strip():
+        user_text = f"""The user has a question about this figure from an academic paper.
+
+User's question: {question}
+
+Paper context (for reference):
+{paper_text[:4000]}
+
+Analyze the figure and answer the question thoroughly.
+
+Return JSON:
+{{
+  "description": "brief description of what the figure shows",
+  "answer": "thorough answer to the user's question",
+  "key_observations": ["observation 1", "observation 2"],
+  "relation_to_paper": "how this figure relates to the paper"
+}}"""
+    else:
+        user_text = f"""Analyze this figure from an academic paper in detail.
+
+Paper context (for reference):
+{paper_text[:4000]}
+
+Describe what the figure shows, what the axes/labels mean, and how it relates to the paper.
+
+Return JSON:
+{{
+  "description": "detailed description of what the figure shows",
+  "key_observations": ["observation 1", "observation 2"],
+  "methodology_shown": "what method this figure illustrates (if applicable)",
+  "relation_to_paper": "how this figure supports the paper's arguments",
+  "takeaway": "the main conclusion from this figure"
+}}"""
+
+    raw = await provider.complete_with_image(system, user_text, image_b64, max_tokens=2048)
+    return _safe_parse_json(raw)
+
+
+def _get_figure_prompt(paper_text: str, question: str) -> tuple[str, str]:
+    """Return (system, user_text) for figure analysis."""
+    system = (
+        "You are an expert science educator analyzing figures from academic papers. "
+        "Provide clear, thorough, educational explanations. Use markdown formatting. "
+        "CRITICAL: For ALL math, use $ for inline and $$ for display math. "
+        "NEVER use \\( \\) or \\[ \\] delimiters. Do NOT wrap output in JSON or code fences."
+    )
+
+    if question.strip():
+        user_text = f"""The user has a question about this figure from an academic paper.
+
+User's question: {question}
+
+Paper context (for reference):
+{paper_text[:4000]}
+
+Answer the question thoroughly, referencing specific elements of the figure. Use markdown formatting."""
+    else:
+        user_text = f"""Analyze this figure from an academic paper in detail.
+
+Paper context (for reference):
+{paper_text[:4000]}
+
+Describe what the figure shows, what the axes/labels mean, the key takeaways, and how it relates to the paper. Use markdown formatting."""
+
+    return system, user_text

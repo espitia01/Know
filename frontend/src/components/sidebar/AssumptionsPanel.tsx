@@ -1,21 +1,27 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
+import { Md } from "@/components/ui/Md";
 
 interface AssumptionsPanelProps {
   paperId: string;
 }
 
-function Md({ children }: { children: string }) {
+function ProgressBar() {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const interval = setInterval(() => {
+      const elapsed = (Date.now() - start) / 1000;
+      setWidth(Math.min(90, 90 * (1 - Math.exp(-elapsed / 10))));
+    }, 150);
+    return () => clearInterval(interval);
+  }, []);
   return (
-    <div className="analysis-content">
-      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-        {children}
-      </ReactMarkdown>
+    <div className="w-full max-w-xs h-1 bg-accent rounded-full overflow-hidden">
+      <div className="h-full bg-foreground/60 rounded-full transition-all duration-200 ease-out" style={{ width: `${width}%` }} />
     </div>
   );
 }
@@ -37,8 +43,8 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
 
   if (assumptionsLoading) {
     return (
-      <div className="flex items-center gap-3 py-8 justify-center animate-fade-in">
-        <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin" />
+      <div className="flex flex-col items-center gap-3 py-8 justify-center animate-fade-in">
+        <ProgressBar />
         <p className="text-[13px] text-muted-foreground">Extracting assumptions...</p>
       </div>
     );

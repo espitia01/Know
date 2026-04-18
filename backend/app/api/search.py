@@ -2,35 +2,40 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 
 from ..models.schemas import SearchResponse, SearchResult
 from ..services.pdf_parser import get_paper
+from ..auth import require_auth
+from .papers import _validate_id, _verify_paper_owner
 
 router = APIRouter(prefix="/api/papers", tags=["search"])
 
 
 @router.get("/{paper_id}/search", response_model=SearchResponse)
-async def search_paper(paper_id: str, q: str = Query(..., min_length=1)):
-    paper = get_paper(paper_id)
+async def search_paper(paper_id: str, q: str = Query(..., min_length=1), user_id: str = Depends(require_auth)):
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    paper = get_paper(paper_id, user_id=user_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
     query_lower = q.lower()
     results: list[SearchResult] = []
 
-    content_lower = paper.content_markdown.lower()
+    content = paper.raw_text or ""
+    content_lower = content.lower()
     start_idx = 0
     while True:
         idx = content_lower.find(query_lower, start_idx)
         if idx == -1:
             break
         start = max(0, idx - 80)
-        end = min(len(paper.content_markdown), idx + len(q) + 80)
-        snippet = paper.content_markdown[start:end]
+        end = min(len(content), idx + len(q) + 80)
+        snippet = content[start:end]
         if start > 0:
             snippet = "..." + snippet
-        if end < len(paper.content_markdown):
+        if end < len(content):
             snippet = snippet + "..."
         results.append(
             SearchResult(section="Paper", snippet=snippet.strip(), match_type="content")
@@ -38,15 +43,5 @@ async def search_paper(paper_id: str, q: str = Query(..., min_length=1)):
         start_idx = idx + len(q)
         if len(results) >= 20:
             break
-
-    for ref in paper.references:
-        if query_lower in ref.text.lower():
-            results.append(
-                SearchResult(
-                    section="References",
-                    snippet=ref.text[:150],
-                    match_type="reference",
-                )
-            )
 
     return SearchResponse(query=q, results=results)

@@ -7,11 +7,37 @@ import type {
   Assumption,
   SearchResult,
   Note,
+  SelectionAnalysisResult,
+  PaperSummary,
 } from "./api";
+
+interface PaperCache {
+  preReading: PreReadingAnalysis | null;
+  assumptions: Assumption[];
+  summary: PaperSummary | null;
+  notes: Note[];
+  selectionHistory: SelectionAnalysisResult[];
+  qaResults: QAItem[];
+  questions: string[];
+}
+
+interface CrossPaperQA {
+  question: string;
+  answer: string;
+}
 
 interface AppStore {
   paper: ParsedPaper | null;
   setPaper: (p: ParsedPaper | null) => void;
+
+  sessionPapers: { id: string; title: string }[];
+  addSessionPaper: (p: { id: string; title: string }) => void;
+  removeSessionPaper: (id: string) => void;
+  clearSession: () => void;
+
+  crossPaperResults: CrossPaperQA[];
+  addCrossPaperResults: (items: CrossPaperQA[]) => void;
+  clearCrossPaperResults: () => void;
 
   loading: boolean;
   setLoading: (l: boolean) => void;
@@ -22,6 +48,13 @@ interface AppStore {
   panelVisible: boolean;
   setPanelVisible: (v: boolean) => void;
   togglePanel: () => void;
+
+  selectionResult: SelectionAnalysisResult | null;
+  setSelectionResult: (r: SelectionAnalysisResult | null) => void;
+  selectionLoading: boolean;
+  setSelectionLoading: (l: boolean) => void;
+  selectionHistory: SelectionAnalysisResult[];
+  addSelectionToHistory: (r: SelectionAnalysisResult) => void;
 
   preReading: PreReadingAnalysis | null;
   setPreReading: (p: PreReadingAnalysis | null) => void;
@@ -57,21 +90,60 @@ interface AppStore {
   addNote: (n: Note) => void;
   updateNote: (id: string, text: string) => void;
   removeNote: (id: string) => void;
+
+  summary: PaperSummary | null;
+  setSummary: (s: PaperSummary | null) => void;
+  summaryLoading: boolean;
+  setSummaryLoading: (l: boolean) => void;
+
+  paperCaches: Record<string, PaperCache>;
+  savePaperCache: (paperId: string) => void;
+  restorePaperCache: (paperId: string) => boolean;
+  clearPaperCache: (paperId: string) => void;
 }
 
-export const useStore = create<AppStore>((set) => ({
+export const useStore = create<AppStore>((set, get) => ({
   paper: null,
   setPaper: (p) => set({ paper: p }),
+
+  sessionPapers: [],
+  addSessionPaper: (p) =>
+    set((s) => {
+      if (s.sessionPapers.some((sp) => sp.id === p.id)) return s;
+      return { sessionPapers: [...s.sessionPapers, p] };
+    }),
+  removeSessionPaper: (id) =>
+    set((s) => {
+      const { [id]: _, ...rest } = s.paperCaches;
+      return {
+        sessionPapers: s.sessionPapers.filter((sp) => sp.id !== id),
+        paperCaches: rest,
+      };
+    }),
+  clearSession: () => set({ sessionPapers: [], paperCaches: {}, crossPaperResults: [] }),
+
+  crossPaperResults: [],
+  addCrossPaperResults: (items) =>
+    set((s) => ({ crossPaperResults: [...items, ...s.crossPaperResults] })),
+  clearCrossPaperResults: () => set({ crossPaperResults: [] }),
 
   loading: false,
   setLoading: (l) => set({ loading: l }),
 
-  activeTab: "preread",
+  activeTab: "summary",
   setActiveTab: (t) => set({ activeTab: t }),
 
   panelVisible: true,
   setPanelVisible: (v) => set({ panelVisible: v }),
   togglePanel: () => set((s) => ({ panelVisible: !s.panelVisible })),
+
+  selectionResult: null,
+  setSelectionResult: (r) => set({ selectionResult: r }),
+  selectionLoading: false,
+  setSelectionLoading: (l) => set({ selectionLoading: l }),
+  selectionHistory: [],
+  addSelectionToHistory: (r) =>
+    set((s) => ({ selectionHistory: [r, ...s.selectionHistory].slice(0, 50) })),
 
   preReading: null,
   setPreReading: (p) => set({ preReading: p }),
@@ -112,4 +184,47 @@ export const useStore = create<AppStore>((set) => ({
     })),
   removeNote: (id) =>
     set((s) => ({ notes: s.notes.filter((n) => n.id !== id) })),
+
+  summary: null,
+  setSummary: (s) => set({ summary: s }),
+  summaryLoading: false,
+  setSummaryLoading: (l) => set({ summaryLoading: l }),
+
+  paperCaches: {},
+  savePaperCache: (paperId: string) => {
+    const s = get();
+    set({
+      paperCaches: {
+        ...s.paperCaches,
+        [paperId]: {
+          preReading: s.preReading,
+          assumptions: s.assumptions,
+          summary: s.summary,
+          notes: s.notes,
+          selectionHistory: s.selectionHistory,
+          qaResults: s.qaResults,
+          questions: s.questions,
+        },
+      },
+    });
+  },
+  restorePaperCache: (paperId: string) => {
+    const cached = get().paperCaches[paperId];
+    if (!cached) return false;
+    set({
+      preReading: cached.preReading,
+      assumptions: cached.assumptions,
+      summary: cached.summary,
+      notes: cached.notes,
+      selectionHistory: cached.selectionHistory,
+      qaResults: cached.qaResults,
+      questions: cached.questions,
+      selectionResult: null,
+    });
+    return true;
+  },
+  clearPaperCache: (paperId: string) => {
+    const { [paperId]: _, ...rest } = get().paperCaches;
+    set({ paperCaches: rest });
+  },
 }));

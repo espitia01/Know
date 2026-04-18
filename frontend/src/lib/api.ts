@@ -1,27 +1,46 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+let _getToken: (() => Promise<string | null>) | null = null;
+let _cachedToken: string | null = null;
+let _tokenRefreshInterval: ReturnType<typeof setInterval> | null = null;
 
-function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("know_token");
+export function setClerkTokenGetter(fn: () => Promise<string | null>) {
+  _getToken = fn;
+  fn().then((t) => { _cachedToken = t; });
+  if (_tokenRefreshInterval) clearInterval(_tokenRefreshInterval);
+  _tokenRefreshInterval = setInterval(() => {
+    fn().then((t) => { _cachedToken = t; });
+  }, 45_000);
 }
 
-function authHeaders(): Record<string, string> {
-  const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
+export function getAuthHeadersSync(): Record<string, string> {
+  if (_getToken && _cachedToken) {
+    _getToken().then((t) => { _cachedToken = t; });
+  }
+  return _cachedToken ? { Authorization: `Bearer ${_cachedToken}` } : {};
+}
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+async function authHeaders(): Promise<Record<string, string>> {
+  if (_getToken) {
+    const token = await _getToken();
+    _cachedToken = token;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+  return {};
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers = await authHeaders();
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
-      ...authHeaders(),
+      ...headers,
       ...options?.headers,
     },
   });
   if (res.status === 401) {
     if (typeof window !== "undefined") {
-      localStorage.removeItem("know_token");
-      window.location.href = "/login";
+      window.location.href = "/sign-in";
     }
     throw new Error("Unauthorized");
   }
@@ -39,11 +58,6 @@ export interface FigureInfo {
   page: number;
 }
 
-export interface Reference {
-  id: string;
-  text: string;
-}
-
 export interface Note {
   id: string;
   text: string;
@@ -55,11 +69,8 @@ export interface ParsedPaper {
   id: string;
   title: string;
   authors: string[];
-  affiliations: string[];
-  abstract: string;
-  content_markdown: string;
+  raw_text: string;
   figures: FigureInfo[];
-  references: Reference[];
   has_si: boolean;
   folder: string;
   tags: string[];
@@ -70,6 +81,10 @@ export interface ParsedPaper {
     derivation_exercises?: DerivationExercise[];
     qa_sessions?: { items: QAItem[] }[];
     explains?: ExplainResponse[];
+    selections?: SelectionAnalysisResult[];
+    summary?: PaperSummary;
+    figure_analyses?: FigureAnalysis[];
+    skipped_steps?: Record<string, unknown>[];
   };
 }
 
@@ -153,48 +168,68 @@ export interface SearchResult {
   match_type: string;
 }
 
+export interface SelectionAnalysisResult {
+  action: string;
+  selected_text: string;
+  explanation?: string;
+  elaboration?: string;
+  answer?: string;
+  assumptions?: { statement: string; type: string; significance: string }[];
+  title?: string;
+  starting_point?: string;
+  final_result?: string;
+  steps?: DerivationStep[];
+  streaming?: boolean;
+}
+
 export interface SettingsResponse {
   has_anthropic_key: boolean;
-  local_model_url: string;
-  local_model_name: string;
-  active_provider: string;
+  analysis_model: string;
+  fast_model: string;
+}
+
+export interface PaperSummary {
+  overview: string;
+  motivation: string;
+  key_contributions: string[];
+  methodology: string;
+  main_results: string;
+  discussion: string;
+  limitations: string[];
+  future_work: string;
+  key_equations: { equation: string; meaning: string }[];
+  key_figures_and_tables: { id: string; description: string }[];
+}
+
+export interface FigureAnalysis {
+  figure_id: string;
+  question: string;
+  description: string;
+  answer?: string;
+  key_observations: string[];
+  methodology_shown?: string;
+  relation_to_paper: string;
+  takeaway?: string;
 }
 
 export const api = {
-  login: async (password: string): Promise<string> => {
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
-    });
-    if (!res.ok) throw new Error("Wrong password");
-    const data = await res.json();
-    localStorage.setItem("know_token", data.token);
-    return data.token;
-  },
-
-  logout: async () => {
-    try { await request("/api/auth/logout", { method: "POST" }); } catch {}
-    localStorage.removeItem("know_token");
-  },
-
-  checkAuth: async (): Promise<boolean> => {
-    try {
-      await request<{ authenticated: boolean }>("/api/auth/check");
-      return true;
-    } catch { return false; }
-  },
-
   uploadPaper: async (file: File): Promise<ParsedPaper> => {
     const formData = new FormData();
     formData.append("file", file);
+    const headers = await authHeaders();
     const res = await fetch(`${API_BASE}/api/papers/upload`, {
       method: "POST",
-      headers: authHeaders(),
+      headers,
       body: formData,
     });
-    if (res.status === 401) { localStorage.removeItem("know_token"); window.location.href = "/login"; throw new Error("Unauthorized"); }
-    if (!res.ok) throw new Error(`Upload failed: ${res.statusText}`);
+    if (res.status === 401) {
+      window.location.href = "/sign-in";
+      throw new Error("Unauthorized");
+    }
+    if (!res.ok) {
+      const detail = await res.text();
+      throw new Error(`Upload failed (${res.status}): ${detail}`);
+    }
     return res.json();
   },
 
@@ -202,21 +237,23 @@ export const api = {
 
   getPaper: (id: string) => request<ParsedPaper>(`/api/papers/${id}`),
 
+  getPdfUrl: (id: string) => `${API_BASE}/api/papers/${id}/pdf`,
+
   deletePaper: (id: string) =>
     request<{ status: string }>(`/api/papers/${id}`, { method: "DELETE" }),
-
-  movePaperToFolder: (id: string, folder: string) =>
-    request<{ status: string }>(`/api/papers/${id}/folder`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folder }),
-    }),
 
   updateTags: (id: string, tags: string[]) =>
     request<{ status: string }>(`/api/papers/${id}/tags`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tags }),
+    }),
+
+  updateFolder: (id: string, folder: string) =>
+    request<{ status: string }>(`/api/papers/${id}/folder`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder }),
     }),
 
   addNote: (id: string, text: string, section: string = "") =>
@@ -238,8 +275,24 @@ export const api = {
       method: "DELETE",
     }),
 
-  getFigureUrl: (paperId: string, figId: string) =>
-    `${API_BASE}/api/papers/${paperId}/figures/${figId}`,
+  analyzeSelection: (id: string, selectedText: string, action: string) =>
+    request<SelectionAnalysisResult>(`/api/papers/${id}/selection`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selected_text: selectedText, action }),
+    }),
+
+  analyzeSelectionStream: async (id: string, selectedText: string, action: string) => {
+    const headers = await authHeaders();
+    return fetch(`${API_BASE}/api/papers/${id}/selection-stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+      },
+      body: JSON.stringify({ selected_text: selectedText, action }),
+    });
+  },
 
   analyze: (id: string) =>
     request<PreReadingAnalysis>(`/api/papers/${id}/analyze`, { method: "POST" }),
@@ -251,33 +304,43 @@ export const api = {
       body: JSON.stringify({ term, context }),
     }),
 
-  getSkippedSteps: (id: string, section: string) =>
-    request<{ section: string; filled_steps: DerivationStep[] }>(
-      `/api/papers/${id}/skipped-steps`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ section }),
-      }
-    ),
-
   getAssumptions: (id: string) =>
     request<{ assumptions: Assumption[] }>(`/api/papers/${id}/assumptions`, {
       method: "POST",
     }),
 
-  uploadSI: async (paperId: string, file: File): Promise<ParsedPaper> => {
-    const formData = new FormData();
-    formData.append("file", file);
-    const res = await fetch(`${API_BASE}/api/papers/${paperId}/si/upload`, {
+  getSummary: (id: string) =>
+    request<PaperSummary>(`/api/papers/${id}/summary`, {
       method: "POST",
-      headers: authHeaders(),
-      body: formData,
+    }),
+
+  analyzeFigure: (id: string, figureId: string, question: string = "") =>
+    request<FigureAnalysis>(`/api/papers/${id}/figure-qa`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ figure_id: figureId, question }),
+    }),
+
+  analyzeFigureStream: async (id: string, figureId: string, question: string = "") => {
+    const headers = await authHeaders();
+    return fetch(`${API_BASE}/api/papers/${id}/figure-qa-stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+      },
+      body: JSON.stringify({ figure_id: figureId, question }),
     });
-    if (res.status === 401) { localStorage.removeItem("know_token"); window.location.href = "/login"; throw new Error("Unauthorized"); }
-    if (!res.ok) throw new Error(`SI upload failed: ${res.statusText}`);
-    return res.json();
   },
+
+  getFigureUrl: (paperId: string, figId: string) =>
+    `${API_BASE}/api/papers/${paperId}/figures/${figId}`,
+
+  reextractFigures: (id: string) =>
+    request<{ status: string; figures_count: number; figures: FigureInfo[] }>(
+      `/api/papers/${id}/reextract-figures`,
+      { method: "POST" }
+    ),
 
   getDerivationExercise: (id: string, section: string) =>
     request<DerivationExercise>(
@@ -296,6 +359,13 @@ export const api = {
       body: JSON.stringify({ questions }),
     }),
 
+  askQuestionsMulti: (paperIds: string[], questions: string[]) =>
+    request<{ items: QAItem[] }>(`/api/papers/multi-qa`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paper_ids: paperIds, questions }),
+    }),
+
   search: (id: string, query: string) =>
     request<{ query: string; results: SearchResult[] }>(
       `/api/papers/${id}/search?q=${encodeURIComponent(query)}`
@@ -305,13 +375,92 @@ export const api = {
 
   updateSettings: (data: {
     anthropic_api_key?: string;
-    local_model_url?: string;
-    local_model_name?: string;
-    active_provider?: string;
+    analysis_model?: string;
+    fast_model?: string;
   }) =>
     request<SettingsResponse>("/api/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     }),
+
+  getModels: () => request<{ models: string[] }>("/api/settings/models"),
+
+  getCurrentUser: () =>
+    request<{ user_id: string; tier: string; paper_count: number; has_billing: boolean; cancel_at_period_end: boolean; cancel_at: number | null }>("/api/user/me"),
+
+  createCheckoutSession: (tier: string, successUrl?: string, cancelUrl?: string) =>
+    request<{ url: string; session_id: string }>("/api/billing/checkout-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tier, success_url: successUrl, cancel_url: cancelUrl }),
+    }),
+
+  createPortalSession: (returnUrl?: string) =>
+    request<{ url: string }>("/api/billing/portal-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ return_url: returnUrl }),
+    }),
+
+  cancelSubscription: (reason: string, feedback: string) =>
+    request<{ status: string; cancel_at: number; message: string }>("/api/billing/cancel-subscription", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason, feedback }),
+    }),
+
+  resubscribe: () =>
+    request<{ status: string; message: string }>("/api/billing/resubscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }),
+
+  upgradeSubscription: (tier: string) =>
+    request<{ status: string; tier: string }>("/api/billing/upgrade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tier }),
+    }),
+
+  submitFeedback: (message: string) =>
+    request<{ status: string }>("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    }),
+
+  listWorkspaces: () =>
+    request<{ id: string; name: string; paper_ids: string[]; cross_paper_results: { question: string; answer: string }[]; updated_at: string }[]>("/api/workspaces"),
+
+  saveWorkspace: (data: {
+    id?: string;
+    name: string;
+    paper_ids: string[];
+    cross_paper_results: { question: string; answer: string }[];
+  }) =>
+    request<{ id: string; name: string; paper_ids: string[]; cross_paper_results: { question: string; answer: string }[]; updated_at: string }>("/api/workspaces", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+
+  deleteWorkspace: (id: string) =>
+    request<{ status: string }>(`/api/workspaces/${id}`, { method: "DELETE" }),
+
+  exportBibtex: (opts: { paper_ids?: string[]; folder?: string; workspace_id?: string }) =>
+    request<{ bibtex: string; count: number }>("/api/export/bibtex", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(opts),
+    }),
+
+  getPaperUsage: (paperId: string) =>
+    request<{
+      qa_used: number;
+      qa_limit: number;
+      selections_used: number;
+      selections_limit: number;
+      tier: string;
+    }>(`/api/usage/${paperId}`),
 };

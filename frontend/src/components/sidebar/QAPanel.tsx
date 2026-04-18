@@ -1,23 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
+import { Md } from "@/components/ui/Md";
 import { Textarea } from "@/components/ui/textarea";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
 
 interface QAPanelProps {
   paperId: string;
 }
 
-function Md({ children }: { children: string }) {
+function ProgressBar() {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const interval = setInterval(() => {
+      const elapsed = (Date.now() - start) / 1000;
+      setWidth(Math.min(90, 90 * (1 - Math.exp(-elapsed / 10))));
+    }, 150);
+    return () => clearInterval(interval);
+  }, []);
   return (
-    <div className="analysis-content">
-      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-        {children}
-      </ReactMarkdown>
+    <div className="w-full max-w-xs h-1 bg-accent rounded-full overflow-hidden mx-auto">
+      <div className="h-full bg-foreground/60 rounded-full transition-all duration-200 ease-out" style={{ width: `${width}%` }} />
     </div>
   );
 }
@@ -30,9 +35,25 @@ const GUIDED_PROMPTS = [
   "Practical implications?",
 ];
 
+const CROSS_PAPER_PROMPTS = [
+  "Compare methodologies across papers",
+  "What are the common assumptions?",
+  "How do the results complement each other?",
+  "Identify contradictions between papers",
+  "Synthesize key findings",
+];
+
 export function QAPanel({ paperId }: QAPanelProps) {
-  const { questions, addQuestion, removeQuestion, clearQuestions, qaResults, setQAResults, qaLoading, setQALoading } = useStore();
+  const {
+    questions, addQuestion, removeQuestion, clearQuestions,
+    qaResults, setQAResults, qaLoading, setQALoading,
+    sessionPapers,
+  } = useStore();
   const [input, setInput] = useState("");
+  const [crossPaper, setCrossPaper] = useState(false);
+  const [qaError, setQAError] = useState("");
+
+  const hasMultiplePapers = sessionPapers.length > 1;
 
   const handleAdd = () => {
     const q = input.trim();
@@ -46,15 +67,25 @@ export function QAPanel({ paperId }: QAPanelProps) {
   const handleAnswerAll = async () => {
     if (questions.length === 0) return;
     setQALoading(true);
+    setQAError("");
     try {
-      const result = await api.askQuestions(paperId, questions);
+      let result;
+      if (crossPaper && hasMultiplePapers) {
+        const ids = sessionPapers.map((p) => p.id);
+        result = await api.askQuestionsMulti(ids, questions);
+      } else {
+        result = await api.askQuestions(paperId, questions);
+      }
       setQAResults(result.items);
     } catch (e) {
-      console.error("Q&A failed:", e);
+      const msg = e instanceof Error ? e.message : "Q&A failed";
+      setQAError(msg.replace(/^API error \d+:\s*/, "").replace(/[{}"]/g, "").replace("detail:", "").trim());
     } finally {
       setQALoading(false);
     }
   };
+
+  const prompts = crossPaper && hasMultiplePapers ? CROSS_PAPER_PROMPTS : GUIDED_PROMPTS;
 
   return (
     <div className="space-y-3">
@@ -63,9 +94,37 @@ export function QAPanel({ paperId }: QAPanelProps) {
           Queue questions as you read, then answer them all at once.
         </p>
 
+        {/* Cross-paper toggle */}
+        {hasMultiplePapers && (
+          <button
+            onClick={() => setCrossPaper(!crossPaper)}
+            className={`flex items-center gap-2 w-full px-3 py-2 rounded-lg border transition-all text-left ${
+              crossPaper
+                ? "border-foreground/20 bg-foreground/5"
+                : "border-border/50 bg-transparent hover:border-border"
+            }`}
+          >
+            <div className={`w-7 h-4 rounded-full transition-colors relative shrink-0 ${
+              crossPaper ? "bg-foreground" : "bg-muted-foreground/20"
+            }`}>
+              <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-background shadow-sm transition-all ${
+                crossPaper ? "left-3.5" : "left-0.5"
+              }`} />
+            </div>
+            <div>
+              <p className="text-[12px] font-medium leading-tight">
+                Cross-Paper Mode
+              </p>
+              <p className="text-[10px] text-muted-foreground/50 leading-tight">
+                Ask questions across all {sessionPapers.length} papers in session
+              </p>
+            </div>
+          </button>
+        )}
+
         {questions.length === 0 && qaResults.length === 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {GUIDED_PROMPTS.map((prompt, i) => (
+            {prompts.map((prompt, i) => (
               <button
                 key={i}
                 onClick={() => addQuestion(prompt)}
@@ -78,7 +137,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
         )}
 
         <Textarea
-          placeholder="Type a question..."
+          placeholder={crossPaper && hasMultiplePapers ? "Ask across all papers..." : "Type a question..."}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -102,7 +161,23 @@ export function QAPanel({ paperId }: QAPanelProps) {
         </div>
       </div>
 
-      {questions.length > 0 && qaResults.length === 0 && (
+      {qaLoading && (
+        <div className="flex flex-col items-center gap-2 py-4">
+          <ProgressBar />
+          <p className="text-[11px] text-muted-foreground animate-pulse">
+            {crossPaper && hasMultiplePapers ? "Analyzing across papers..." : "Analyzing..."}
+          </p>
+        </div>
+      )}
+
+      {qaError && (
+        <div className="rounded-lg bg-red-50 border border-red-100 px-3.5 py-2.5 space-y-1">
+          <p className="text-[12px] text-red-600 font-medium">Limit reached</p>
+          <p className="text-[11px] text-red-500">{qaError}</p>
+        </div>
+      )}
+
+      {questions.length > 0 && qaResults.length === 0 && !qaLoading && (
         <div className="space-y-1.5">
           <p className="text-[12px] font-semibold text-muted-foreground/70 uppercase tracking-widest">
             Questions <span className="text-muted-foreground/40">{questions.length}</span>
@@ -131,6 +206,11 @@ export function QAPanel({ paperId }: QAPanelProps) {
           <div className="flex items-center justify-between">
             <p className="text-[12px] font-semibold text-muted-foreground/70 uppercase tracking-widest">
               Answers
+              {crossPaper && hasMultiplePapers && (
+                <span className="ml-1.5 text-[10px] text-muted-foreground/40 normal-case tracking-normal font-normal">
+                  (cross-paper)
+                </span>
+              )}
             </p>
             <button
               onClick={() => { setQAResults([]); clearQuestions(); }}
