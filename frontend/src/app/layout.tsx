@@ -33,9 +33,7 @@ export default function RootLayout({
           />
         </head>
         <body className="min-h-full flex flex-col antialiased">
-          <PasscodeGate>
-            <ClerkTokenProvider>{children}</ClerkTokenProvider>
-          </PasscodeGate>
+          <ClerkTokenProvider>{children}</ClerkTokenProvider>
           <Analytics />
         </body>
       </html>
