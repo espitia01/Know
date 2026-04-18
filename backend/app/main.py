@@ -69,23 +69,10 @@ if extra_origins:
 
 _main_logger.info("CORS allowed origins: %s", allowed_origins)
 
-from starlette.types import ASGIApp, Receive, Scope, Send
-
-class FlexibleCORSMiddleware(CORSMiddleware):
-    """Extends CORSMiddleware to also allow Vercel preview deployment URLs."""
-    def is_allowed_origin(self, origin: str) -> bool:
-        if super().is_allowed_origin(origin):
-            return True
-        for allowed in self.allow_origins:
-            base = allowed.replace("https://", "").replace("http://", "")
-            origin_host = origin.replace("https://", "").replace("http://", "")
-            if origin_host.endswith(".vercel.app") and base.endswith(".vercel.app"):
-                return True
-        return False
-
 app.add_middleware(
-    FlexibleCORSMiddleware,
+    CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
