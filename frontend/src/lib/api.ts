@@ -217,7 +217,6 @@ export const api = {
     const formData = new FormData();
     formData.append("file", file);
     const headers = await authHeaders();
-    console.log("[Know] Upload headers:", Object.keys(headers));
     const res = await fetch(`${API_BASE}/api/papers/upload`, {
       method: "POST",
       headers,

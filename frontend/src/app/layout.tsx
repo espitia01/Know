@@ -1,7 +1,6 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { ClerkTokenProvider } from "@/components/ClerkTokenProvider";
-import { PasscodeGate } from "@/components/PasscodeGate";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import "katex/dist/katex.min.css";

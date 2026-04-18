@@ -13,7 +13,7 @@ function useIsMobile() {
   useEffect(() => {
     const check = () => {
       const ua = navigator.userAgent;
-      setIsMobile(/iPhone|iPod|Android(?!.*Tablet)|webOS|BlackBerry|Opera Mini|IEMobile/i.test(ua) && window.innerWidth < 768);
+      setIsMobile(/iPhone|iPod|Android/i.test(ua) && window.innerWidth < 768);
     };
     check();
     window.addEventListener("resize", check);

@@ -55,15 +55,26 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Know", description="Pedagogical Paper Enhancement Platform", lifespan=lifespan)
 
-allowed_origins = ["*"]
+allowed_origins = [
+    "http://localhost:3000",
+]
+extra_origins = os.environ.get("KNOW_CORS_ORIGINS", "")
+if extra_origins:
+    for o in extra_origins.split(","):
+        origin = o.strip().rstrip("/")
+        if origin and origin != "*":
+            allowed_origins.append(origin)
+        elif origin == "*":
+            _main_logger.warning("CORS wildcard '*' rejected. Set explicit domains in KNOW_CORS_ORIGINS.")
 
-_main_logger.info("CORS: temporarily allowing all origins for debugging")
+_main_logger.info("CORS allowed origins: %s", allowed_origins)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=False,
-    allow_methods=["*"],
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
