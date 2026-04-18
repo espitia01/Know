@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import { api, getAuthHeadersSync } from "@/lib/api";
 
 interface FeedbackModalProps {
@@ -117,12 +118,12 @@ export function FeedbackModal({ open, onClose }: FeedbackModalProps) {
                 >
                   Close
                 </button>
-                <a
+                <Link
                   href="/sign-in"
                   className="flex-1 text-[13px] font-semibold py-3 rounded-xl bg-gray-900 text-white hover:bg-gray-800 transition-colors text-center"
                 >
                   Sign In
-                </a>
+                </Link>
               </div>
             )}
           </>
