@@ -1,6 +1,7 @@
 import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { ClerkTokenProvider } from "@/components/ClerkTokenProvider";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import "katex/dist/katex.min.css";
 
@@ -32,6 +33,7 @@ export default function RootLayout({
         </head>
         <body className="min-h-full flex flex-col antialiased">
           <ClerkTokenProvider>{children}</ClerkTokenProvider>
+          <Analytics />
         </body>
       </html>
     </ClerkProvider>
