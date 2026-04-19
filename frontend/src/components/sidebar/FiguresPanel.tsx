@@ -70,10 +70,14 @@ function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: ()
     <div
       className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-8 animate-fade-in"
       onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Expanded view of ${alt}`}
     >
       <button
         onClick={onClose}
         className="absolute top-4 right-4 text-white/70 hover:text-white transition-colors z-10"
+        aria-label="Close lightbox"
       >
         <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -117,7 +121,7 @@ function ProgressBar({ running }: { running: boolean }) {
 
 export function FiguresPanel({ paperId }: FiguresPanelProps) {
   const { paper, setPaper } = useStore();
-  const figures = paper?.figures ?? [];
+  const figures = (paper?.id === paperId ? paper?.figures : null) ?? [];
   const [selected, setSelected] = useState<FigureInfo | null>(null);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
@@ -126,6 +130,17 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
   const [conversations, setConversations] = useState<Record<string, ChatMessage[]>>({});
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const prevPaperIdRef = useRef(paperId);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (prevPaperIdRef.current !== paperId) {
+      abortRef.current?.abort();
+      setSelected(null);
+      setConversations({});
+      prevPaperIdRef.current = paperId;
+    }
+  }, [paperId]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -151,6 +166,10 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
       const figId = fig.id;
       const userMsg: ChatMessage = { role: "user", text: q || "Analyze this figure" };
 
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       setConversations((prev) => ({
         ...prev,
         [figId]: [...(prev[figId] || []), userMsg],
@@ -159,6 +178,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
       try {
         const res = await api.analyzeFigureStream(paperId, figId, q);
+        if (controller.signal.aborted) return;
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
@@ -176,6 +196,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         }));
 
         while (true) {
+          if (controller.signal.aborted) { reader.cancel(); break; }
           const { done, value } = await reader.read();
           if (done) break;
 
@@ -224,6 +245,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           }
         }
       } catch (e) {
+        if (controller.signal.aborted) return;
         setConversations((prev) => {
           const msgs = [...(prev[figId] || [])];
           const last = msgs[msgs.length - 1];
@@ -261,13 +283,6 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
         </svg>
         <p className="text-[13px] text-muted-foreground/60">No figures detected in this paper.</p>
-        <button
-          onClick={handleReextract}
-          disabled={reextracting}
-          className="mt-3 text-[12px] font-medium text-foreground hover:opacity-80 transition-opacity disabled:opacity-40"
-        >
-          {reextracting ? "Extracting..." : "Re-extract Figures"}
-        </button>
       </div>
     );
   }
@@ -297,7 +312,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
         <div className="flex-1 overflow-y-auto min-h-0 py-3 space-y-3">
           <div
-            className="rounded-lg border border-border overflow-hidden bg-accent/20 cursor-zoom-in hover:border-foreground/30 transition-colors"
+            className="rounded-xl glass-subtle overflow-hidden cursor-zoom-in hover:bg-white/60 transition-colors"
             onClick={() => setLightboxFig(selected)}
             title="Click to expand"
           >
@@ -317,7 +332,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           {chat.length === 0 && !loading && (
             <button
               onClick={() => handleAnalyze(selected)}
-              className="w-full text-[12px] font-medium bg-foreground text-background px-4 py-2 rounded-lg hover:opacity-90 transition-opacity"
+              className="w-full text-[12px] font-medium btn-primary-glass text-background px-4 py-2 rounded-xl transition-opacity"
             >
               Analyze This Figure
             </button>
@@ -335,7 +350,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
                   </div>
                 ) : (
                   <div key={i} className="flex justify-start w-full">
-                    <div className="bg-accent/60 border border-border/40 rounded-xl rounded-bl-sm px-3 py-2.5 max-w-[95%] w-full">
+                    <div className="glass-subtle rounded-xl rounded-bl-sm px-3 py-2.5 max-w-[95%] w-full">
                       {msg.streaming && !msg.text && (
                         <div className="space-y-2">
                           <ProgressBar running={true} />
@@ -360,7 +375,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           {/* Loading indicator for initial send before stream starts */}
           {loading && chat.length > 0 && chat[chat.length - 1].role === "user" && (
             <div className="flex justify-start w-full">
-              <div className="bg-accent/60 border border-border/40 rounded-xl rounded-bl-sm px-3 py-2.5 w-full space-y-2">
+              <div className="glass-subtle rounded-xl rounded-bl-sm px-3 py-2.5 w-full space-y-2">
                 <ProgressBar running={true} />
                 <p className="text-[11px] text-muted-foreground animate-pulse">Sending to AI...</p>
               </div>
@@ -380,12 +395,12 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               }}
               placeholder="Ask about this figure..."
               disabled={loading}
-              className="flex-1 text-[12px] px-3 py-2 rounded-lg border border-border bg-background placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+              className="flex-1 text-[12px] px-3 py-2 rounded-xl border border-white/20 glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
             />
             <button
               onClick={handleAsk}
               disabled={!question.trim() || loading}
-              className="text-[11px] font-medium px-3 py-2 rounded-lg bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-30 shrink-0"
+              className="text-[11px] font-medium px-3 py-2 rounded-xl btn-primary-glass text-background transition-opacity disabled:opacity-30 shrink-0"
             >
               Ask
             </button>
@@ -406,7 +421,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           <button
             key={fig.id}
             onClick={() => setSelected(fig)}
-            className="group rounded-lg border border-border overflow-hidden hover:border-foreground/30 transition-colors bg-accent/20"
+            className="group rounded-xl glass-subtle overflow-hidden hover:bg-white/60 transition-colors"
           >
             <div className="aspect-[4/3] overflow-hidden relative">
               <AuthImage

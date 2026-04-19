@@ -33,70 +33,84 @@ def _validate_id(value: str, name: str = "ID") -> str:
 def _verify_paper_owner(paper_id: str, user_id: str) -> None:
     """Check that the paper belongs to the requesting user via Supabase."""
     from ..services.db import get_db, get_paper_meta
-    if get_db():
-        meta = get_paper_meta(paper_id, user_id=user_id)
-        if not meta:
-            raise HTTPException(status_code=404, detail="Paper not found")
+    if not get_db():
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    meta = get_paper_meta(paper_id, user_id=user_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Paper not found")
 
 
 @router.post("/upload", response_model=ParsedPaper)
 async def upload_paper(request: Request, user_id: str = Depends(require_auth)):
     check_paper_limit(user_id)
-    content_type = request.headers.get("content-type", "")
-    if "multipart/form-data" not in content_type:
-        raise HTTPException(status_code=400, detail="Expected multipart/form-data")
-
-    form = await request.form()
-    file_field = form.get("file")
-    if file_field is None or not hasattr(file_field, "read"):
-        raise HTTPException(status_code=400, detail="No file field in form data")
-
-    file = file_field
-    filename = getattr(file, "filename", "") or ""
-    if not filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are accepted")
-
-    paper_id = uuid.uuid4().hex
-    pdf_path = settings.papers_dir / f"{paper_id}.pdf"
-
-    content = await file.read()
-    if len(content) > MAX_UPLOAD_SIZE:
-        raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
-    if not content[:5] == b"%PDF-":
-        raise HTTPException(status_code=400, detail="Invalid PDF file")
-    with open(pdf_path, "wb") as f:
-        f.write(content)
+    _paper_count_incremented = True
 
     try:
-        raw = extract_pdf(pdf_path, paper_id)
-    except Exception as e:
-        pdf_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=422, detail="Failed to parse PDF. Please try a different file.")
+        content_type = request.headers.get("content-type", "")
+        if "multipart/form-data" not in content_type:
+            raise HTTPException(status_code=400, detail="Expected multipart/form-data")
 
-    try:
-        meta = await extract_metadata(raw.raw_text, user_id=user_id)
+        form = await request.form()
+        file_field = form.get("file")
+        if file_field is None or not hasattr(file_field, "read"):
+            raise HTTPException(status_code=400, detail="No file field in form data")
+
+        file = file_field
+        filename = getattr(file, "filename", "") or ""
+        if not filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="Only PDF files are accepted")
+
+        paper_id = uuid.uuid4().hex
+        pdf_path = settings.papers_dir / f"{paper_id}.pdf"
+
+        content = await file.read()
+        if len(content) > MAX_UPLOAD_SIZE:
+            raise HTTPException(status_code=413, detail="File too large (max 50 MB)")
+        if not content[:5] == b"%PDF-":
+            raise HTTPException(status_code=400, detail="Invalid PDF file")
+
+        import asyncio
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, lambda: pdf_path.write_bytes(content))
+
+        try:
+            raw = extract_pdf(pdf_path, paper_id)
+        except Exception as e:
+            pdf_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=422, detail="Failed to parse PDF. Please try a different file.")
+
+        try:
+            meta = await extract_metadata(raw.raw_text, user_id=user_id)
+        except Exception:
+            meta = {"title": "", "authors": []}
+
+        paper = ParsedPaper(
+            id=paper_id,
+            title=meta.get("title") or filename.replace(".pdf", "") or paper_id,
+            authors=meta.get("authors", []),
+            raw_text=raw.raw_text,
+            figures=raw.figures,
+        )
+
+        save_paper(paper, user_id=user_id)
+        _paper_count_incremented = False
+        return paper
     except Exception:
-        meta = {"title": "", "authors": []}
-
-    paper = ParsedPaper(
-        id=paper_id,
-        title=meta.get("title") or filename.replace(".pdf", "") or paper_id,
-        authors=meta.get("authors", []),
-        raw_text=raw.raw_text,
-        figures=raw.figures,
-    )
-
-    save_paper(paper, user_id=user_id)
-
-    from ..services.db import increment_paper_count
-    increment_paper_count(user_id)
-
-    return paper
+        if _paper_count_incremented:
+            try:
+                from ..services.db import increment_paper_count
+                increment_paper_count(user_id, -1)
+            except Exception:
+                pass
+        raise
 
 
 @router.get("/", response_model=list[dict])
 async def get_papers(user_id: str = Depends(require_auth)):
-    return list_papers(user_id=user_id)
+    try:
+        return list_papers(user_id=user_id)
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Database unavailable")
 
 
 @router.get("/{paper_id}", response_model=ParsedPaper)
@@ -117,12 +131,8 @@ async def get_paper_pdf(paper_id: str, user_id: str = Depends(require_auth)):
     pdf_path = settings.papers_dir / f"{paper_id}.pdf"
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail="PDF not found")
-    data = pdf_path.read_bytes()
-    return Response(
-        content=data,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename={paper_id}.pdf"},
-    )
+    return FileResponse(str(pdf_path), media_type="application/pdf",
+                        headers={"Content-Disposition": f"inline; filename={paper_id}.pdf"})
 
 
 @router.get("/{paper_id}/figures/{fig_id}")
@@ -216,7 +226,7 @@ async def update_note(paper_id: str, note_id: str, body: dict, user_id: str = De
 
     for n in paper.notes:
         if n["id"] == note_id:
-            n["text"] = body.get("text", n["text"])
+            n["text"] = body.get("text", n["text"])[:10000]
             save_paper(paper, user_id=user_id)
             return n
 

@@ -18,10 +18,17 @@ export function BibtexModal({ open, onClose, paperIds, folder, workspaceId, labe
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const wasOpen = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const exportKeyRef = useRef("");
 
   useEffect(() => {
-    if (open && !wasOpen.current) {
+    const key = JSON.stringify({ paperIds, folder, workspaceId });
+    if (open && (key !== exportKeyRef.current || !bibtex)) {
+      exportKeyRef.current = key;
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       setBibtex("");
       setCount(0);
       setError("");
@@ -36,15 +43,24 @@ export function BibtexModal({ open, onClose, paperIds, folder, workspaceId, labe
       api
         .exportBibtex(opts as { paper_ids?: string[]; folder?: string; workspace_id?: string })
         .then((res) => {
-          setBibtex(res.bibtex);
-          setCount(res.count);
+          if (!controller.signal.aborted) {
+            setBibtex(res.bibtex);
+            setCount(res.count);
+          }
         })
         .catch((e) => {
-          setError(e instanceof Error ? e.message : "Export failed");
+          if (!controller.signal.aborted) {
+            setError(e instanceof Error ? e.message : "Export failed");
+          }
         })
-        .finally(() => setLoading(false));
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        });
     }
-    wasOpen.current = open;
+    if (!open) {
+      abortRef.current?.abort();
+    }
+    return () => { abortRef.current?.abort(); };
   }, [open, paperIds, folder, workspaceId]);
 
   const handleCopy = useCallback(() => {
@@ -57,11 +73,13 @@ export function BibtexModal({ open, onClose, paperIds, folder, workspaceId, labe
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-lg mx-4 flex flex-col max-h-[80vh] animate-fade-in">
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center"
+      onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
+    >      <div className="absolute inset-0 bg-black/20 backdrop-blur-md" onClick={onClose} />
+      <div className="relative glass-strong rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[80vh] animate-fade-in">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/20">
           <div>
             <h3 className="text-[14px] font-semibold text-gray-900">BibTeX Export</h3>
             {label && <p className="text-[11px] text-gray-400 mt-0.5">{label}</p>}
@@ -97,7 +115,7 @@ export function BibtexModal({ open, onClose, paperIds, folder, workspaceId, labe
               <p className="text-[11px] text-gray-400 mb-2">
                 {count} {count === 1 ? "entry" : "entries"}
               </p>
-              <pre className="text-[12px] leading-relaxed text-gray-700 bg-gray-50 border border-gray-100 rounded-xl p-4 whitespace-pre-wrap font-mono overflow-x-auto select-all">
+              <pre className="text-[12px] leading-relaxed text-gray-700 glass-subtle rounded-xl p-4 whitespace-pre-wrap font-mono overflow-x-auto select-all">
                 {bibtex}
               </pre>
             </>
@@ -106,7 +124,7 @@ export function BibtexModal({ open, onClose, paperIds, folder, workspaceId, labe
 
         {/* Footer */}
         {!loading && !error && bibtex && (
-          <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-end gap-2">
+          <div className="px-5 py-3 border-t border-white/20 flex items-center justify-end gap-2">
             <button
               onClick={onClose}
               className="text-[12px] text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg transition-colors"
@@ -115,7 +133,7 @@ export function BibtexModal({ open, onClose, paperIds, folder, workspaceId, labe
             </button>
             <button
               onClick={handleCopy}
-              className="text-[12px] font-semibold px-4 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition-colors flex items-center gap-1.5"
+              className="text-[12px] font-semibold px-4 py-1.5 rounded-xl btn-primary-glass text-white transition-all flex items-center gap-1.5"
             >
               {copied ? (
                 <>

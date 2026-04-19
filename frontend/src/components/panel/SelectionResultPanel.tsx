@@ -1,9 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
 import { Md } from "@/components/ui/Md";
 import type { SelectionAnalysisResult } from "@/lib/api";
 
@@ -31,7 +28,6 @@ interface SelectionResultPanelProps {
   result: SelectionAnalysisResult | null;
   loading: boolean;
   history: SelectionAnalysisResult[];
-  paperId: string;
   onFollowUp: (question: string, context: string) => Promise<void>;
 }
 
@@ -43,7 +39,7 @@ const actionLabels: Record<string, string> = {
   followup: "Follow-up",
 };
 
-export function SelectionResultPanel({ result, loading, history, paperId, onFollowUp }: SelectionResultPanelProps) {
+export function SelectionResultPanel({ result, loading, history, onFollowUp }: SelectionResultPanelProps) {
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
 
   if (loading) {
@@ -75,7 +71,7 @@ export function SelectionResultPanel({ result, loading, history, paperId, onFoll
             History
           </p>
           {history.slice(result ? 1 : 0).map((item, i) => (
-            <div key={i} className="rounded-lg border border-border/40 overflow-hidden">
+            <div key={i} className="rounded-xl border border-white/20 glass-subtle overflow-hidden">
               <button
                 onClick={() => setExpandedHistory(expandedHistory === i ? null : i)}
                 className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors"
@@ -84,7 +80,7 @@ export function SelectionResultPanel({ result, loading, history, paperId, onFoll
                   {actionLabels[item.action] || item.action}
                 </span>
                 <span className="text-[11px] text-muted-foreground/60 truncate flex-1">
-                  {item.selected_text.slice(0, 80)}...
+                  {item.selected_text.length > 80 ? item.selected_text.slice(0, 80) + "..." : item.selected_text}
                 </span>
                 <svg
                   className={`w-3 h-3 text-muted-foreground/30 shrink-0 transition-transform ${expandedHistory === i ? "rotate-180" : ""}`}
@@ -130,12 +126,12 @@ function FollowUpInput({ context, onSubmit }: { context: string; onSubmit: (q: s
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
         placeholder="Ask a follow-up question..."
         disabled={submitting}
-        className="flex-1 text-[12px] px-3 py-1.5 rounded-lg border border-border bg-background placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+        className="flex-1 text-[12px] px-3 py-1.5 rounded-xl border border-white/20 glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
       />
       <button
         onClick={handleSubmit}
         disabled={!input.trim() || submitting}
-        className="text-[11px] font-medium px-3 py-1.5 rounded-lg bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-30 shrink-0"
+        className="text-[11px] font-medium px-3 py-1.5 rounded-xl btn-primary-glass text-background transition-opacity disabled:opacity-30 shrink-0"
       >
         {submitting ? "..." : "Ask"}
       </button>
@@ -158,7 +154,7 @@ function ResultCard({ result }: { result: SelectionAnalysisResult }) {
         )}
       </div>
 
-      <div className="text-[11px] text-muted-foreground/50 bg-accent/40 px-3 py-2 rounded-lg border border-border/40 italic leading-relaxed">
+      <div className="text-[11px] text-muted-foreground/50 glass-subtle px-3 py-2 rounded-xl italic leading-relaxed">
         &ldquo;{result.selected_text.length > 200 ? result.selected_text.slice(0, 200) + "..." : result.selected_text}&rdquo;
       </div>
 
@@ -193,9 +189,9 @@ function ResultCard({ result }: { result: SelectionAnalysisResult }) {
       {result.assumptions && result.assumptions.length > 0 && (
         <div className="space-y-2">
           {result.assumptions.map((a, i) => (
-            <div key={i} className="bg-accent/30 rounded-lg px-3 py-2 border border-border/40">
+            <div key={i} className="glass-subtle rounded-xl px-3 py-2">
               <div className="flex items-start gap-2">
-                <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded shrink-0 ${
+                <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-lg shrink-0 ${
                   a.type === "explicit"
                     ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
                     : "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300"
@@ -225,7 +221,7 @@ function DerivationView({ result }: { result: SelectionAnalysisResult }) {
   return (
     <div className="space-y-3">
       {result.starting_point && (
-        <div className="bg-accent/30 rounded-lg px-3 py-2.5 border border-border/40">
+        <div className="glass-subtle rounded-xl px-3 py-2.5">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 mb-1">Starting Point</p>
           <div className="text-[13px]"><Md>{result.starting_point}</Md></div>
         </div>
@@ -252,10 +248,10 @@ function StepCard({ step }: { step: NonNullable<SelectionAnalysisResult["steps"]
   const [showHint, setShowHint] = useState(false);
 
   return (
-    <div className="rounded-lg border border-border/40 overflow-hidden">
-      <div className="px-3 py-2 bg-accent/20">
+    <div className="rounded-xl border border-white/20 glass-subtle overflow-hidden">
+      <div className="px-3 py-2 glass">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold text-muted-foreground/50 w-5 h-5 flex items-center justify-center rounded-full bg-accent shrink-0">
+          <span className="text-[10px] font-bold text-muted-foreground/50 w-5 h-5 flex items-center justify-center rounded-full glass shrink-0">
             {step.step_number}
           </span>
           <div className="text-[12px] flex-1"><Md>{step.prompt}</Md></div>

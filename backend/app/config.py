@@ -10,7 +10,6 @@ class Settings(BaseSettings):
     fast_model: str = "claude-haiku-4-5"
 
     # Clerk auth
-    clerk_secret_key: str = ""
     clerk_jwks_url: str = ""
     clerk_issuer: str = ""
     clerk_audience: str = ""
@@ -33,3 +32,12 @@ class Settings(BaseSettings):
 
 settings = Settings()
 settings.papers_dir.mkdir(parents=True, exist_ok=True)
+
+import logging as _cfg_logging
+_cfg_logger = _cfg_logging.getLogger("know.config")
+if not settings.anthropic_api_key:
+    _cfg_logger.warning("KNOW_ANTHROPIC_API_KEY not set — LLM features will fail")
+if not settings.supabase_url or not settings.supabase_key:
+    _cfg_logger.warning("Supabase not configured — persistence disabled, limits will fail closed")
+if not settings.clerk_jwks_url:
+    _cfg_logger.warning("KNOW_CLERK_JWKS_URL not set — authentication will reject all requests")

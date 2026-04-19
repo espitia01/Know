@@ -28,6 +28,7 @@ function SettingsContent() {
   const [fastModel, setFastModel] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [billingLoading, setBillingLoading] = useState(false);
   const [resubscribeLoading, setResubscribeLoading] = useState(false);
@@ -46,7 +47,7 @@ function SettingsContent() {
         setSettings(s);
         setAnalysisModel(s.analysis_model);
         setFastModel(s.fast_model);
-      }).catch(() => {});
+      }).catch(() => setLoadError("Failed to load settings."));
       api.getModels().then((r) => setModels(r.models)).catch(() => {});
     }
   }, [showModels]);
@@ -71,7 +72,7 @@ function SettingsContent() {
   };
 
   return (
-    <main className="flex-1 flex flex-col items-center px-6 pt-[8vh] pb-12 bg-white min-h-screen">
+    <main className="flex-1 flex flex-col items-center px-6 pt-[8vh] pb-12 bg-mesh min-h-screen">
       <div className="max-w-lg w-full space-y-8">
         {/* Header */}
         <div className="flex items-center gap-3">
@@ -81,7 +82,7 @@ function SettingsContent() {
           >
             &larr; Back
           </button>
-          <div className="h-4 w-px bg-gray-200" />
+          <div className="h-4 w-px bg-white/20" />
           <Image src="/logo.png" alt="Know" width={20} height={20} className="rounded-md" />
           <h1 className="text-[15px] font-semibold text-gray-900">Settings</h1>
           <div className="flex-1" />
@@ -91,13 +92,17 @@ function SettingsContent() {
         {/* Model Selection */}
         {showModels && (
           <div className="space-y-5">
-            <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-5">
+            <div className="glass rounded-2xl p-6 space-y-5">
               <div className="flex items-center justify-between">
                 <p className="text-[14px] font-semibold text-gray-900">Models</p>
-                <span className="text-[11px] text-gray-400 bg-gray-50 border border-gray-100 px-2.5 py-1 rounded-full font-medium capitalize">
+                <span className="text-[11px] text-gray-400 glass-subtle px-2.5 py-1 rounded-full font-medium capitalize">
                   {tier} Plan
                 </span>
               </div>
+
+              {loadError && (
+                <p className="text-[12px] text-red-500">{loadError}</p>
+              )}
 
               <div className="space-y-2">
                 <label className="text-[12px] text-gray-500 font-medium">
@@ -108,10 +113,10 @@ function SettingsContent() {
                   {models.map((m) => (
                     <label
                       key={m}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-all duration-200 ${
+                      className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all duration-200 ${
                         analysisModel === m
-                          ? "border-gray-300 bg-gray-50/80"
-                          : "border-gray-100 hover:border-gray-200 hover:bg-gray-50/40"
+                          ? "glass-strong shadow-sm"
+                          : "glass-subtle hover:bg-white/60"
                       }`}
                     >
                       <input
@@ -131,7 +136,7 @@ function SettingsContent() {
                 </div>
               </div>
 
-              <div className="space-y-2 pt-4 border-t border-gray-50">
+              <div className="space-y-2 pt-4 border-t border-white/20">
                 <label className="text-[12px] text-gray-500 font-medium">
                   Selection Model
                   <span className="text-gray-300 ml-1 font-normal">(Explain, Derive)</span>
@@ -140,10 +145,10 @@ function SettingsContent() {
                   {models.map((m) => (
                     <label
                       key={m}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-all duration-200 ${
+                      className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all duration-200 ${
                         fastModel === m
-                          ? "border-gray-300 bg-gray-50/80"
-                          : "border-gray-100 hover:border-gray-200 hover:bg-gray-50/40"
+                          ? "glass-strong shadow-sm"
+                          : "glass-subtle hover:bg-white/60"
                       }`}
                     >
                       <input
@@ -176,7 +181,7 @@ function SettingsContent() {
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="w-full text-[13px] h-10 rounded-xl"
+              className="w-full text-[13px] h-10 rounded-xl btn-primary-glass border-0"
             >
               {saving ? "Saving..." : "Save Settings"}
             </Button>
@@ -191,11 +196,11 @@ function SettingsContent() {
         )}
 
         {/* Account */}
-        <div className="bg-white rounded-2xl border border-gray-100 p-6 space-y-5">
+        <div className="glass rounded-2xl p-6 space-y-5">
           <p className="text-[14px] font-semibold text-gray-900">Account</p>
 
           {tierUser && (
-            <div className="flex items-center justify-between px-4 py-3.5 rounded-xl bg-gray-50/80 border border-gray-100">
+            <div className="flex items-center justify-between px-4 py-3.5 rounded-xl glass-subtle">
               <div>
                 <p className="text-[13px] font-medium text-gray-800 capitalize">{tierUser.tier} Plan</p>
                 <p className="text-[11px] text-gray-400 mt-0.5">
@@ -205,7 +210,7 @@ function SettingsContent() {
               {tierUser.tier === "free" && (
                 <button
                   onClick={() => router.push("/#pricing")}
-                  className="text-[12px] font-semibold bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-gray-800 transition-colors"
+                  className="text-[12px] font-semibold bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2 rounded-xl hover:opacity-90 transition-all shadow-sm"
                 >
                   Upgrade
                 </button>
@@ -227,7 +232,7 @@ function SettingsContent() {
                     }
                   }}
                   disabled={upgradeLoading}
-                  className="text-[12px] font-semibold bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50"
+                  className="text-[12px] font-semibold bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2 rounded-xl hover:opacity-90 transition-all shadow-sm disabled:opacity-50"
                 >
                   {upgradeLoading ? "Upgrading..." : "Upgrade to Researcher"}
                 </button>
@@ -252,14 +257,14 @@ function SettingsContent() {
                   }
                 }}
                 disabled={billingLoading}
-                className="w-full text-[13px] font-medium px-4 py-3 rounded-xl border border-gray-100 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+                className="w-full text-[13px] font-medium px-4 py-3 rounded-xl glass text-gray-700 hover:bg-white/60 transition-all disabled:opacity-50"
               >
                 {billingLoading ? "Opening..." : "Manage Billing"}
               </button>
 
               {tierUser.cancel_at_period_end ? (
                 <>
-                  <div className="px-4 py-3.5 rounded-xl bg-amber-50/80 border border-amber-200/60 text-center">
+                  <div className="px-4 py-3.5 rounded-xl glass-subtle border-amber-200/40 text-center">
                     <p className="text-[13px] text-amber-800 font-medium">Cancellation scheduled</p>
                     <p className="text-[11px] text-amber-600 mt-0.5">
                       Access continues until{" "}
@@ -283,7 +288,7 @@ function SettingsContent() {
                       }
                     }}
                     disabled={resubscribeLoading}
-                    className="w-full text-[13px] font-semibold px-4 py-3 rounded-xl bg-gray-900 text-white hover:bg-gray-800 transition-colors disabled:opacity-50"
+                    className="w-full text-[13px] font-semibold px-4 py-3 rounded-xl btn-primary-glass text-white transition-all disabled:opacity-50"
                   >
                     {resubscribeLoading ? "Resubscribing..." : "Resubscribe"}
                   </button>
@@ -291,7 +296,7 @@ function SettingsContent() {
               ) : (
                 <button
                   onClick={() => { setBillingError(""); setShowCancelModal(true); }}
-                  className="w-full text-[13px] font-medium px-4 py-3 rounded-xl border border-red-100 text-red-500 hover:bg-red-50/50 transition-colors"
+                  className="w-full text-[13px] font-medium px-4 py-3 rounded-xl glass border-red-200/40 text-red-500 hover:bg-red-50/30 transition-all"
                 >
                   Cancel Subscription
                 </button>
@@ -305,7 +310,7 @@ function SettingsContent() {
 
           <button
             onClick={() => signOut({ redirectUrl: "/" })}
-            className="w-full text-[13px] font-medium px-4 py-3 rounded-xl border border-gray-100 text-gray-500 hover:text-red-500 hover:border-red-100 hover:bg-red-50/50 transition-colors"
+            className="w-full text-[13px] font-medium px-4 py-3 rounded-xl glass text-gray-500 hover:text-red-500 hover:border-red-200/40 hover:bg-red-50/30 transition-all"
           >
             Sign Out
           </button>

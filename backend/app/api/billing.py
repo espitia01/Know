@@ -286,7 +286,7 @@ async def stripe_webhook(request: Request):
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
 
-    logger.info("Webhook received: sig=%s..., payload_len=%d", sig_header[:30] if sig_header else "none", len(payload))
+    logger.info("Webhook received: payload_len=%d", len(payload))
 
     try:
         if not settings.stripe_webhook_secret:
@@ -381,9 +381,22 @@ def _handle_subscription_change(subscription: dict, event_type: str):
             update_user_tier(user["user_id"], "free")
 
 
+_feedback_rate: dict[str, float] = {}
+
 @router.post("/api/feedback")
 async def submit_feedback(body: dict, user_id: str = Depends(require_auth)):
     """Store general product feedback from authenticated users."""
+    import time
+    now = time.time()
+    last = _feedback_rate.get(user_id, 0)
+    if now - last < 10:
+        raise HTTPException(status_code=429, detail="Please wait before submitting more feedback.")
+    _feedback_rate[user_id] = now
+    if len(_feedback_rate) > 10000:
+        cutoff = now - 60
+        stale = [k for k, v in _feedback_rate.items() if v < cutoff]
+        for k in stale:
+            del _feedback_rate[k]
     message = body.get("message", "").strip()[:5000]
     if not message:
         raise HTTPException(status_code=400, detail="Feedback message is required")

@@ -43,7 +43,7 @@ async def get_settings(user_id: str = Depends(require_auth)):
     enforced_analysis = enforce_model(user_id, analysis)
     enforced_fast = enforce_model(user_id, fast)
     return SettingsResponse(
-        has_anthropic_key=bool(settings.anthropic_api_key),
+        has_anthropic_key=True,
         analysis_model=enforced_analysis,
         fast_model=enforced_fast,
     )
@@ -71,7 +71,7 @@ async def update_settings(update: SettingsUpdate, user_id: str = Depends(require
 
     analysis, fast = _get_user_model_prefs(user_id)
     return SettingsResponse(
-        has_anthropic_key=bool(settings.anthropic_api_key),
+        has_anthropic_key=True,
         analysis_model=analysis,
         fast_model=fast,
     )

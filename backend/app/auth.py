@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import jwt
 from jwt import PyJWKClient
 
@@ -53,6 +54,10 @@ async def require_auth(
             decode_opts["audience"] = settings.clerk_audience
         else:
             jwt_options["verify_aud"] = False
+            if os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("KNOW_PRODUCTION"):
+                logger.error("KNOW_CLERK_AUDIENCE is not set in production — rejecting request")
+                raise HTTPException(status_code=503, detail="Authentication misconfigured")
+            logger.warning("KNOW_CLERK_AUDIENCE is not set — audience validation disabled. Set it in production.")
 
         payload = jwt.decode(
             token,

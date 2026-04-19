@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
 import { Textarea } from "@/components/ui/textarea";
+import { useUserTier, canAccess } from "@/lib/UserTierContext";
 
 interface QAPanelProps {
   paperId: string;
@@ -49,11 +50,14 @@ export function QAPanel({ paperId }: QAPanelProps) {
     qaResults, setQAResults, qaLoading, setQALoading,
     sessionPapers,
   } = useStore();
+  const { user } = useUserTier();
+  const tier = user?.tier || "free";
   const [input, setInput] = useState("");
   const [crossPaper, setCrossPaper] = useState(false);
   const [qaError, setQAError] = useState("");
 
-  const hasMultiplePapers = sessionPapers.length > 1;
+  const canMultiQA = canAccess(tier, "multi-qa");
+  const hasMultiplePapers = sessionPapers.length > 1 && canMultiQA;
 
   const handleAdd = () => {
     const q = input.trim();
@@ -122,13 +126,13 @@ export function QAPanel({ paperId }: QAPanelProps) {
           </button>
         )}
 
-        {questions.length === 0 && qaResults.length === 0 && (
+        {questions.length === 0 && (
           <div className="flex flex-wrap gap-1.5">
             {prompts.map((prompt, i) => (
               <button
                 key={i}
                 onClick={() => addQuestion(prompt)}
-                className="text-[11px] px-2.5 py-1 rounded-full bg-accent/60 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors font-medium"
+                className="text-[11px] px-2.5 py-1 rounded-full glass-subtle text-muted-foreground hover:text-foreground hover:bg-white/60 transition-colors font-medium"
               >
                 {prompt}
               </button>
@@ -154,7 +158,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
           <button
             onClick={handleAnswerAll}
             disabled={questions.length === 0 || qaLoading}
-            className="flex-1 text-[12px] font-medium py-1.5 rounded-lg bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex-1 text-[12px] font-medium py-1.5 rounded-xl btn-primary-glass text-background transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {qaLoading ? "Answering..." : `Answer All (${questions.length})`}
           </button>
@@ -183,7 +187,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
             Questions <span className="text-muted-foreground/40">{questions.length}</span>
           </p>
           {questions.map((q, i) => (
-            <div key={i} className="flex items-start gap-2.5 rounded-lg bg-accent/50 px-3.5 py-2">
+            <div key={i} className="flex items-start gap-2.5 rounded-xl glass-subtle px-3.5 py-2">
               <span className="text-[11px] text-muted-foreground/50 font-medium shrink-0 mt-0.5 tabular-nums">
                 {i + 1}.
               </span>
@@ -220,7 +224,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
             </button>
           </div>
           {qaResults.map((item, i) => (
-            <div key={i} className="rounded-lg bg-accent/50 px-3.5 py-2.5 space-y-1">
+            <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5 space-y-1">
               <p className="text-[13px] font-medium">{item.question}</p>
               <div className="text-[12px] text-muted-foreground"><Md>{item.answer}</Md></div>
             </div>

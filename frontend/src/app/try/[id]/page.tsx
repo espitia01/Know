@@ -7,7 +7,9 @@ import Image from "next/image";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
+import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
+import { preprocessLatex } from "@/lib/latex";
 import type { PaperSummary } from "@/lib/api";
 import { FEATURE_TOOLTIPS } from "@/lib/tooltips";
 
@@ -28,8 +30,8 @@ const PdfViewer = dynamic(
 function Md({ children }: { children: string }) {
   return (
     <div className="analysis-content">
-      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-        {children}
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+        {preprocessLatex(children)}
       </ReactMarkdown>
     </div>
   );

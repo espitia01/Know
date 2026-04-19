@@ -36,7 +36,7 @@ from ..services.llm import (
 )
 from ..services.pdf_parser import get_paper, get_figure_path, save_paper
 from ..auth import require_auth
-from ..gating import check_feature_access, check_usage_limit, track_usage, check_daily_api_limit
+from ..gating import check_feature_access, check_usage_limit, track_usage
 from ..api.papers import _validate_id, _verify_paper_owner
 
 router = APIRouter(prefix="/api/papers", tags=["analysis"])
@@ -62,9 +62,10 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
         )
         paper.cached_analysis["pre_reading"] = analysis.model_dump()
         save_paper(paper, user_id=user_id)
+        track_usage(user_id, paper_id, "api_call")
         return analysis
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Analysis service temporarily unavailable.")
     except Exception as e:
         logger.exception("Analysis failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Analysis failed. Please try again.")
@@ -81,8 +82,12 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    selected_text = body.get("selected_text", "").strip()
+    selected_text = body.get("selected_text", "").strip()[:10000]
     action = body.get("action", "explain")
+    if action not in ("explain", "assumptions", "derive", "question"):
+        action = "explain"
+    if action == "assumptions":
+        check_feature_access(user_id, "assumptions")
     if not selected_text:
         raise HTTPException(status_code=400, detail="No text selected")
 
@@ -94,8 +99,8 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
         save_paper(paper, user_id=user_id)
         track_usage(user_id, paper_id, "selection")
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Selection analysis service temporarily unavailable.")
     except Exception as e:
         logger.exception("Selection analysis failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Selection analysis failed. Please try again.")
@@ -115,8 +120,12 @@ async def selection_analysis_stream(paper_id: str, body: dict, user_id: str = De
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    selected_text = body.get("selected_text", "").strip()
+    selected_text = body.get("selected_text", "").strip()[:10000]
     action = body.get("action", "explain")
+    if action not in ("explain", "assumptions", "derive", "question"):
+        action = "explain"
+    if action == "assumptions":
+        check_feature_access(user_id, "assumptions")
     if not selected_text:
         raise HTTPException(status_code=400, detail="No text selected")
 
@@ -148,7 +157,8 @@ async def selection_analysis_stream(paper_id: str, body: dict, user_id: str = De
             save_paper(paper, user_id=user_id)
             track_usage(user_id, paper_id, "selection")
         except Exception as e:
-            yield f"data: {_json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            logger.exception("Selection stream error for paper %s", paper_id)
+            yield f"data: {_json.dumps({'type': 'error', 'message': 'Analysis failed. Please try again.'})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -156,6 +166,7 @@ async def selection_analysis_stream(paper_id: str, body: dict, user_id: str = De
 @router.post("/{paper_id}/explain", response_model=ExplainResponse)
 async def explain(paper_id: str, req: ExplainRequest, user_id: str = Depends(require_auth)):
     check_feature_access(user_id, "selection")
+    check_usage_limit(user_id, paper_id, "selection")
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
     paper = get_paper(paper_id, user_id=user_id)
@@ -174,9 +185,8 @@ async def explain(paper_id: str, req: ExplainRequest, user_id: str = Depends(req
         explains.append(resp.model_dump())
         paper.cached_analysis["explains"] = explains
         save_paper(paper, user_id=user_id)
+        track_usage(user_id, paper_id, "selection")
         return resp
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.exception("Explain failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Explain failed. Please try again.")
@@ -185,13 +195,14 @@ async def explain(paper_id: str, req: ExplainRequest, user_id: str = Depends(req
 @router.post("/{paper_id}/skipped-steps")
 async def skipped_steps(paper_id: str, body: dict, user_id: str = Depends(require_auth)):
     check_feature_access(user_id, "selection")
+    check_usage_limit(user_id, paper_id, "selection")
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
     paper = get_paper(paper_id, user_id=user_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    section_content = body.get("section", "")
+    section_content = body.get("section", "")[:10000]
 
     try:
         result = await find_skipped_steps(paper.raw_text, section_content, user_id=user_id)
@@ -199,9 +210,10 @@ async def skipped_steps(paper_id: str, body: dict, user_id: str = Depends(requir
         skipped.append(result)
         paper.cached_analysis["skipped_steps"] = skipped
         save_paper(paper, user_id=user_id)
+        track_usage(user_id, paper_id, "selection")
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
     except Exception as e:
         logger.exception("Skipped steps failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Skipped steps failed. Please try again.")
@@ -221,9 +233,10 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
         resp = AssumptionsResponse(assumptions=result.get("assumptions", []))
         paper.cached_analysis["assumptions"] = resp.model_dump()
         save_paper(paper, user_id=user_id)
+        track_usage(user_id, paper_id, "api_call")
         return resp
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
     except Exception as e:
         logger.exception("Assumptions extraction failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Assumptions extraction failed. Please try again.")
@@ -232,13 +245,14 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
 @router.post("/{paper_id}/derivation/exercise", response_model=DerivationExercise)
 async def derivation_exercise(paper_id: str, body: dict, user_id: str = Depends(require_auth)):
     check_feature_access(user_id, "selection")
+    check_usage_limit(user_id, paper_id, "selection")
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
     paper = get_paper(paper_id, user_id=user_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    section_content = body.get("section", "")
+    section_content = body.get("section", "")[:10000]
 
     try:
         result = await generate_derivation_exercise(paper.raw_text, section_content, user_id=user_id)
@@ -253,9 +267,10 @@ async def derivation_exercise(paper_id: str, body: dict, user_id: str = Depends(
         exercises.append(exercise.model_dump())
         paper.cached_analysis["derivation_exercises"] = exercises
         save_paper(paper, user_id=user_id)
+        track_usage(user_id, paper_id, "selection")
         return exercise
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
     except Exception as e:
         logger.exception("Exercise generation failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Exercise generation failed. Please try again.")
@@ -283,8 +298,8 @@ async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)
         save_paper(paper, user_id=user_id)
         track_usage(user_id, paper_id, "qa")
         return resp
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Q&A service temporarily unavailable.")
     except Exception as e:
         logger.exception("Q&A failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Q&A failed. Please try again.")
@@ -303,9 +318,10 @@ async def summary(paper_id: str, user_id: str = Depends(require_auth)):
         result = await summarize_paper(paper.raw_text, user_id=user_id)
         paper.cached_analysis["summary"] = result
         save_paper(paper, user_id=user_id)
+        track_usage(user_id, paper_id, "api_call")
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
     except Exception as e:
         logger.exception("Summary generation failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Summary generation failed. Please try again.")
@@ -324,7 +340,7 @@ async def figure_qa(paper_id: str, body: dict, user_id: str = Depends(require_au
         raise HTTPException(status_code=404, detail="Paper not found")
 
     fig_id = body.get("figure_id", "").strip()
-    question = body.get("question", "").strip()
+    question = body.get("question", "").strip()[:2000]
 
     if not fig_id:
         raise HTTPException(status_code=400, detail="No figure_id provided")
@@ -345,9 +361,10 @@ async def figure_qa(paper_id: str, body: dict, user_id: str = Depends(require_au
         figure_analyses.append(result)
         paper.cached_analysis["figure_analyses"] = figure_analyses
         save_paper(paper, user_id=user_id)
+        track_usage(user_id, paper_id, "api_call")
         return result
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
     except Exception as e:
         logger.exception("Figure analysis failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Figure analysis failed. Please try again.")
@@ -367,7 +384,7 @@ async def figure_qa_stream(paper_id: str, body: dict, user_id: str = Depends(req
         raise HTTPException(status_code=404, detail="Paper not found")
 
     fig_id = body.get("figure_id", "").strip()
-    question = body.get("question", "").strip()
+    question = body.get("question", "").strip()[:2000]
 
     if not fig_id:
         raise HTTPException(status_code=400, detail="No figure_id provided")
@@ -411,8 +428,10 @@ async def figure_qa_stream(paper_id: str, body: dict, user_id: str = Depends(req
             figure_analyses.append(result)
             paper.cached_analysis["figure_analyses"] = figure_analyses
             save_paper(paper, user_id=user_id)
+            track_usage(user_id, paper_id, "api_call")
         except Exception as e:
-            yield f"data: {_json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            logger.exception("Figure stream error for paper %s", paper_id)
+            yield f"data: {_json.dumps({'type': 'error', 'message': 'Figure analysis failed. Please try again.'})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -421,8 +440,9 @@ async def figure_qa_stream(paper_id: str, body: dict, user_id: str = Depends(req
 async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
     """Answer questions using context from multiple papers in a session."""
     check_feature_access(user_id, "multi-qa")
-    paper_ids = body.get("paper_ids", [])
-    questions = body.get("questions", [])
+    paper_ids = body.get("paper_ids", [])[:10]
+    questions = body.get("questions", [])[:20]
+    questions = [q[:2000] for q in questions if isinstance(q, str)]
 
     if not paper_ids or not questions:
         raise HTTPException(status_code=400, detail="paper_ids and questions required")
@@ -440,11 +460,13 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
 
     try:
         result = await answer_questions_multi(paper_texts, questions, user_id=user_id)
+        for pid in paper_ids:
+            track_usage(user_id, pid, "qa")
         if isinstance(result, dict) and "items" in result:
             return result
         return {"items": result}
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
     except Exception as e:
         logger.exception("Multi-paper Q&A failed")
         raise HTTPException(status_code=500, detail="Multi-paper Q&A failed. Please try again.")

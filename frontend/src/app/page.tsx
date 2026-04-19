@@ -178,9 +178,9 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-mesh">
       {/* Nav */}
-      <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b border-gray-100/80">
+      <nav className="sticky top-0 z-50 glass-nav">
         <div className="max-w-6xl mx-auto px-6 h-[60px] flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <Image src="/logo.png" alt="Know" width={26} height={26} className="rounded-md" />
@@ -202,7 +202,7 @@ export default function LandingPage() {
               </Link>
               <Link
                 href="/sign-up"
-                className="text-[13px] font-medium bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-gray-800 transition-colors"
+                className="text-[13px] font-medium btn-primary-glass text-white px-4 py-2 rounded-xl transition-all"
               >
                 Get Started
               </Link>
@@ -228,9 +228,9 @@ export default function LandingPage() {
         ref={hero.ref}
         className={`relative pt-28 pb-24 px-6 overflow-hidden transition-all duration-1000 ${hero.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"}`}
       >
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_50%_-20%,rgba(120,119,198,0.06),transparent)]" />
+        <div className="absolute inset-0 bg-mesh-hero" />
         <div className="relative max-w-3xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-gray-50 border border-gray-200/80 text-[12px] font-medium text-gray-500 mb-8">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full glass text-[12px] font-medium text-gray-500 mb-8">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             v0.1
           </div>
@@ -244,13 +244,13 @@ export default function LandingPage() {
           <div className="mt-10 flex items-center justify-center gap-4">
             <Link
               href="/try"
-              className="text-[14px] font-medium px-6 py-3 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-all duration-200"
+              className="text-[14px] font-medium px-6 py-3 rounded-xl glass glass-hover text-gray-700 transition-all duration-200"
             >
               Try for Free
             </Link>
             <Link
               href="/sign-up"
-              className="text-[14px] font-medium px-6 py-3 rounded-xl bg-gray-900 text-white hover:bg-gray-800 transition-all duration-200 shadow-sm shadow-gray-900/10"
+              className="text-[14px] font-medium px-6 py-3 rounded-xl btn-primary-glass text-white transition-all duration-200"
             >
               Get Started &rarr;
             </Link>
@@ -262,7 +262,7 @@ export default function LandingPage() {
       {/* How it works */}
       <section
         ref={howItWorks.ref}
-        className="py-28 px-6 border-t border-gray-100"
+        className="py-28 px-6 border-t border-white/30"
       >
         <div className="max-w-4xl mx-auto">
           <p className="text-center text-[12px] uppercase tracking-[0.2em] font-semibold text-gray-400 mb-4">
@@ -278,7 +278,7 @@ export default function LandingPage() {
                 className={`relative transition-all duration-700 ${howItWorks.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"}`}
                 style={{ transitionDelay: `${i * 150}ms` }}
               >
-                <div className="w-9 h-9 rounded-full bg-gray-900 text-white flex items-center justify-center text-[14px] font-semibold mb-5">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-b from-gray-800 to-gray-950 text-white flex items-center justify-center text-[14px] font-semibold mb-5 shadow-lg shadow-gray-900/15">
                   {s.num}
                 </div>
                 <h3 className="text-[16px] font-semibold text-gray-900 mb-2 tracking-[-0.01em]">{s.title}</h3>
@@ -292,7 +292,7 @@ export default function LandingPage() {
       {/* Features */}
       <section
         ref={featuresSection.ref}
-        className="py-28 px-6 bg-gray-50/70 border-t border-gray-100"
+        className="py-28 px-6 bg-mesh-section border-t border-white/30"
         id="features"
       >
         <div className="max-w-5xl mx-auto">
@@ -306,10 +306,10 @@ export default function LandingPage() {
             {features.map((f, i) => (
               <div
                 key={f.title}
-                className={`group bg-white p-6 rounded-2xl border border-gray-100 hover:border-gray-200 hover:shadow-[0_2px_20px_rgba(0,0,0,0.04)] transition-all duration-300 ${featuresSection.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
+                className={`group glass glass-hover p-6 rounded-2xl transition-all duration-300 ${featuresSection.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
                 style={{ transitionDelay: `${i * 80}ms` }}
               >
-                <div className="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-400 group-hover:text-gray-600 group-hover:border-gray-200 transition-all duration-300 mb-4">
+                <div className="w-9 h-9 rounded-xl glass-subtle flex items-center justify-center text-gray-400 group-hover:text-gray-600 transition-all duration-300 mb-4">
                   {f.icon}
                 </div>
                 <h3 className="text-[15px] font-semibold text-gray-900 mb-1.5 tracking-[-0.01em]">{f.title}</h3>
@@ -323,7 +323,7 @@ export default function LandingPage() {
       {/* Pricing */}
       <section
         ref={pricing.ref}
-        className="py-28 px-6 border-t border-gray-100"
+        className="py-28 px-6 border-t border-white/30"
         id="pricing"
       >
         <div className="max-w-5xl mx-auto">
@@ -340,15 +340,15 @@ export default function LandingPage() {
             {tiers.map((t, i) => (
               <div
                 key={t.name}
-                className={`relative bg-white rounded-2xl border p-7 transition-all duration-700 ${
+                className={`relative rounded-2xl p-7 transition-all duration-700 ${
                   t.highlight
-                    ? "border-gray-900 shadow-[0_4px_40px_rgba(0,0,0,0.08)] scale-[1.02] z-10"
-                    : "border-gray-200/80 hover:border-gray-300 hover:shadow-[0_2px_20px_rgba(0,0,0,0.04)]"
+                    ? "glass-strong glass-border-glow shadow-[0_8px_40px_rgba(0,0,0,0.06)] scale-[1.02] z-10"
+                    : "glass glass-hover"
                 } ${pricing.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"}`}
                 style={{ transitionDelay: `${i * 120}ms` }}
               >
                 {t.highlight && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 bg-gray-900 text-white text-[11px] font-semibold rounded-full tracking-wide">
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 bg-gradient-to-r from-violet-500 to-purple-600 text-white text-[11px] font-semibold rounded-full tracking-wide shadow-lg shadow-violet-500/25">
                     Most Popular
                   </div>
                 )}
@@ -365,8 +365,8 @@ export default function LandingPage() {
                   disabled={checkoutLoading !== null}
                   className={`block w-full text-center text-[13px] font-semibold py-3 rounded-xl transition-all duration-200 disabled:opacity-50 ${
                     t.highlight
-                      ? "bg-gray-900 text-white hover:bg-gray-800 shadow-sm shadow-gray-900/10"
-                      : "bg-gray-50 text-gray-900 hover:bg-gray-100 border border-gray-200"
+                      ? "btn-primary-glass text-white"
+                      : "glass glass-hover text-gray-900"
                   }`}
                 >
                   {checkoutLoading === t.tier ? "Redirecting..." : t.cta}
@@ -394,7 +394,7 @@ export default function LandingPage() {
       </section>
 
       {/* CTA */}
-      <section className="py-28 px-6 bg-gray-50/70 border-t border-gray-100">
+      <section className="py-28 px-6 bg-mesh-section border-t border-white/30">
         <div className="max-w-2xl mx-auto text-center">
           <h2 className="text-[28px] sm:text-3xl font-bold tracking-[-0.03em] text-gray-900 mb-4">
             Ready to know your papers?
@@ -405,13 +405,13 @@ export default function LandingPage() {
           <div className="flex items-center justify-center gap-4">
             <Link
               href="/try"
-              className="text-[14px] font-medium px-6 py-3 rounded-xl border border-gray-200 text-gray-700 hover:bg-white hover:border-gray-300 transition-all duration-200"
+              className="text-[14px] font-medium px-6 py-3 rounded-xl glass glass-hover text-gray-700 transition-all duration-200"
             >
               Try for Free
             </Link>
             <Link
               href="/sign-up"
-              className="text-[14px] font-medium px-6 py-3 rounded-xl bg-gray-900 text-white hover:bg-gray-800 transition-all duration-200 shadow-sm shadow-gray-900/10"
+              className="text-[14px] font-medium px-6 py-3 rounded-xl btn-primary-glass text-white transition-all duration-200"
             >
               Get Started &rarr;
             </Link>
@@ -420,7 +420,7 @@ export default function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-gray-100 py-10 px-6 bg-white">
+      <footer className="border-t border-white/30 py-10 px-6 glass-subtle">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <Image src="/logo.png" alt="Know" width={18} height={18} className="rounded-sm" />

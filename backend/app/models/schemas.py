@@ -89,6 +89,9 @@ class QAItem(BaseModel):
 class QARequest(BaseModel):
     questions: list[str]
 
+    def model_post_init(self, __context: object) -> None:
+        self.questions = [q[:2000] for q in self.questions[:20] if isinstance(q, str) and q.strip()]
+
 
 class QAResponse(BaseModel):
     items: list[QAItem]
@@ -97,6 +100,10 @@ class QAResponse(BaseModel):
 class ExplainRequest(BaseModel):
     term: str
     context: str = ""
+
+    def model_post_init(self, __context: object) -> None:
+        self.term = self.term[:500]
+        self.context = self.context[:5000]
 
 
 class ExplainResponse(BaseModel):

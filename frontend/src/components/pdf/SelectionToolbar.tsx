@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useUserTier, canAccess } from "@/lib/UserTierContext";
 
 export type SelectionAction = "explain" | "derive" | "assumptions" | "question" | "note";
 
@@ -63,6 +64,16 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const mountedAt = useRef(Date.now());
+  const { user } = useUserTier();
+  const tier = user?.tier || "free";
+
+  const visibleActions = actions.filter((a) => {
+    if (a.id === "note") return canAccess(tier, "notes");
+    if (a.id === "explain" || a.id === "derive") return canAccess(tier, "selection");
+    if (a.id === "assumptions") return canAccess(tier, "assumptions");
+    if (a.id === "question") return canAccess(tier, "qa");
+    return true;
+  });
 
   const updatePosition = useCallback(() => {
     const toolbar = toolbarRef.current;
@@ -107,8 +118,8 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
       className="fixed z-50 animate-fade-in"
       style={{ top: pos.top, left: pos.left }}
     >
-      <div className="bg-white border border-gray-200 shadow-2xl rounded-xl px-1.5 py-1.5 flex items-center gap-0.5">
-        {actions.map((a) => (
+      <div className="glass-strong shadow-2xl rounded-2xl px-1.5 py-1.5 flex items-center gap-0.5">
+        {visibleActions.map((a) => (
           <button
             key={a.id}
             onClick={(e) => {
@@ -116,7 +127,7 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
               e.stopPropagation();
               onAction(a.id, cleanText);
             }}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-50 transition-colors whitespace-nowrap"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-medium text-gray-500 hover:text-gray-900 hover:bg-white/60 transition-colors whitespace-nowrap"
           >
             <a.Icon />
             {a.label}
@@ -124,7 +135,7 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
         ))}
       </div>
       {cleanText.length > 40 && (
-        <div className="mt-1.5 mx-1 px-2.5 py-1.5 text-[10px] text-gray-400 bg-white border border-gray-100 rounded-lg max-w-sm leading-relaxed line-clamp-2">
+        <div className="mt-1.5 mx-1 px-2.5 py-1.5 text-[10px] text-gray-400 glass-subtle rounded-xl max-w-sm leading-relaxed line-clamp-2">
           {cleanText.slice(0, 120)}{cleanText.length > 120 ? "..." : ""}
         </div>
       )}

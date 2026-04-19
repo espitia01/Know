@@ -5,10 +5,17 @@ let _tokenRefreshInterval: ReturnType<typeof setInterval> | null = null;
 export function setClerkTokenGetter(fn: () => Promise<string | null>) {
   _getToken = fn;
   fn().then((t) => { _cachedToken = t; });
-  if (_tokenRefreshInterval) clearInterval(_tokenRefreshInterval);
+  clearTokenRefreshInterval();
   _tokenRefreshInterval = setInterval(() => {
     fn().then((t) => { _cachedToken = t; });
   }, 45_000);
+}
+
+export function clearTokenRefreshInterval() {
+  if (_tokenRefreshInterval) {
+    clearInterval(_tokenRefreshInterval);
+    _tokenRefreshInterval = null;
+  }
 }
 
 export function getAuthHeadersSync(): Record<string, string> {
@@ -31,24 +38,44 @@ async function authHeaders(): Promise<Record<string, string>> {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = await authHeaders();
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      ...headers,
-      ...options?.headers,
-    },
-  });
-  if (res.status === 401) {
-    if (typeof window !== "undefined") {
-      window.location.href = "/sign-in";
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120_000);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        ...headers,
+        ...options?.headers,
+      },
+    });
+    if (res.status === 401) {
+      if (typeof window !== "undefined") {
+        window.location.href = "/sign-in";
+      }
+      throw new Error("Unauthorized");
     }
-    throw new Error("Unauthorized");
+    if (!res.ok) {
+      const status = res.status;
+      let detail: string;
+      try {
+        const body = await res.json();
+        detail = body?.detail || `Request failed (${status})`;
+      } catch {
+        detail = `Request failed (${status})`;
+      }
+      throw new Error(detail);
+    }
+    const text = await res.text();
+    if (!text) return {} as T;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return {} as T;
+    }
+  } finally {
+    clearTimeout(timeout);
   }
-  if (!res.ok) {
-    const detail = await res.text();
-    throw new Error(`API error ${res.status}: ${detail}`);
-  }
-  return res.json();
 }
 
 export interface FigureInfo {
@@ -282,7 +309,7 @@ export const api = {
       body: JSON.stringify({ selected_text: selectedText, action }),
     }),
 
-  analyzeSelectionStream: async (id: string, selectedText: string, action: string) => {
+  analyzeSelectionStream: async (id: string, selectedText: string, action: string, signal?: AbortSignal) => {
     const headers = await authHeaders();
     return fetch(`${API_BASE}/api/papers/${id}/selection-stream`, {
       method: "POST",
@@ -291,6 +318,7 @@ export const api = {
         ...headers,
       },
       body: JSON.stringify({ selected_text: selectedText, action }),
+      signal,
     });
   },
 
@@ -321,7 +349,7 @@ export const api = {
       body: JSON.stringify({ figure_id: figureId, question }),
     }),
 
-  analyzeFigureStream: async (id: string, figureId: string, question: string = "") => {
+  analyzeFigureStream: async (id: string, figureId: string, question: string = "", signal?: AbortSignal) => {
     const headers = await authHeaders();
     return fetch(`${API_BASE}/api/papers/${id}/figure-qa-stream`, {
       method: "POST",
@@ -330,6 +358,7 @@ export const api = {
         ...headers,
       },
       body: JSON.stringify({ figure_id: figureId, question }),
+      signal,
     });
   },
 

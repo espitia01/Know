@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
@@ -21,11 +21,10 @@ interface AnalysisPanelProps {
   paperId: string;
   position: PanelPosition;
   onCyclePosition: () => void;
-  hasSelection: boolean;
 }
 
 const TAB_STYLE =
-  "text-[11px] h-7 px-3 rounded-md font-medium transition-all data-active:bg-foreground data-active:text-background data-active:shadow-sm";
+  "text-[11px] h-7 px-3 rounded-lg font-medium transition-all data-active:bg-foreground data-active:text-background data-active:shadow-sm";
 
 const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
   right: {
@@ -42,7 +41,7 @@ const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
   },
 };
 
-export function AnalysisPanel({ paperId, position, onCyclePosition, hasSelection }: AnalysisPanelProps) {
+export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPanelProps) {
   const { activeTab, setActiveTab, selectionResult, selectionLoading, selectionHistory, setSelectionResult, setSelectionLoading, addSelectionToHistory, sessionPapers } = useStore();
   const { user } = useUserTier();
   const tier = user?.tier || "free";
@@ -78,7 +77,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, hasSelection
       onValueChange={setActiveTab}
       className="flex flex-col h-full"
     >
-      <div className="shrink-0 flex items-center gap-1 px-2 pt-2 pb-1.5 border-b bg-accent/30 min-w-0">
+      <div className="shrink-0 flex items-center gap-1 px-2 pt-2 pb-1.5 border-b border-white/20 glass-subtle min-w-0">
         <div className="overflow-x-auto scrollbar-hide min-w-0 flex-1">
           <TabsList className="h-8 gap-0.5 bg-transparent p-0 flex-nowrap inline-flex w-max">
             {showSelectionTab && (
@@ -115,7 +114,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, hasSelection
                 </TabsTrigger>
               );
             })}
-            {hasMultiplePapers && (
+            {hasMultiplePapers && canAccess(tier, "multi-qa") && (
               <TabsTrigger
                 value="compare"
                 className={TAB_STYLE}
@@ -149,7 +148,6 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, hasSelection
                 result={selectionResult}
                 loading={selectionLoading}
                 history={selectionHistory}
-                paperId={paperId}
                 onFollowUp={handleFollowUp}
               />
             </TabsContent>
@@ -160,7 +158,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, hasSelection
           <TabsContent value="qa" className="mt-0"><QAPanel paperId={paperId} /></TabsContent>
           <TabsContent value="figures" className="mt-0"><FiguresPanel paperId={paperId} /></TabsContent>
           <TabsContent value="notes" className="mt-0"><NotesPanel paperId={paperId} /></TabsContent>
-          {hasMultiplePapers && (
+          {hasMultiplePapers && canAccess(tier, "multi-qa") && (
             <TabsContent value="compare" className="mt-0"><CrossPaperPanel /></TabsContent>
           )}
         </div>

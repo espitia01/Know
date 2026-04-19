@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Textarea } from "@/components/ui/textarea";
@@ -15,15 +15,20 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [saving, setSaving] = useState(false);
+  const currentPaperRef = useRef(paperId);
+  currentPaperRef.current = paperId;
 
   const handleAdd = async () => {
     const text = input.trim();
     if (!text || saving) return;
+    const targetId = paperId;
     setSaving(true);
     try {
-      const note = await api.addNote(paperId, text);
-      addNote(note);
-      setInput("");
+      const note = await api.addNote(targetId, text);
+      if (currentPaperRef.current === targetId) {
+        addNote(note);
+        setInput("");
+      }
     } catch (e) {
       console.error("Failed to save note:", e);
     } finally {
@@ -37,10 +42,10 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
     try {
       await api.updateNote(paperId, noteId, text);
       updateNote(noteId, text);
+      setEditing(null);
     } catch (e) {
       console.error("Failed to update note:", e);
     }
-    setEditing(null);
   };
 
   const handleDelete = async (noteId: string) => {
@@ -76,7 +81,7 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
           <button
             onClick={handleAdd}
             disabled={!input.trim() || saving}
-            className="text-[12px] font-medium bg-foreground text-background px-4 py-1 rounded-lg hover:opacity-90 transition-opacity disabled:opacity-40"
+            className="text-[12px] font-medium btn-primary-glass text-background px-4 py-1 rounded-xl transition-opacity disabled:opacity-40"
           >
             {saving ? "Saving..." : "Save Note"}
           </button>
@@ -89,7 +94,7 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
             Notes <span className="text-muted-foreground/40">{notes.length}</span>
           </p>
           {[...notes].reverse().map((note) => (
-            <div key={note.id} className="group rounded-lg bg-accent/50 px-3.5 py-2.5">
+            <div key={note.id} className="group rounded-xl glass-subtle px-3.5 py-2.5">
               {editing === note.id ? (
                 <div className="space-y-1.5">
                   <Textarea

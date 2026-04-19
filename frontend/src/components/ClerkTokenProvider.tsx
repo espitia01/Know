@@ -2,7 +2,7 @@
 
 import { useAuth } from "@clerk/nextjs";
 import { useEffect } from "react";
-import { setClerkTokenGetter } from "@/lib/api";
+import { setClerkTokenGetter, clearTokenRefreshInterval } from "@/lib/api";
 import { UserTierProvider } from "@/lib/UserTierContext";
 
 export function ClerkTokenProvider({ children }: { children: React.ReactNode }) {
@@ -10,6 +10,7 @@ export function ClerkTokenProvider({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     setClerkTokenGetter(getToken);
+    return () => clearTokenRefreshInterval();
   }, [getToken]);
 
   return <UserTierProvider>{children}</UserTierProvider>;

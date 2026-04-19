@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
@@ -28,16 +28,23 @@ function ProgressBar() {
 
 export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
   const { assumptions, setAssumptions, assumptionsLoading, setAssumptionsLoading } = useStore();
+  const currentPaperRef = useRef(paperId);
+  currentPaperRef.current = paperId;
 
   const handleExtract = async () => {
+    const targetId = paperId;
     setAssumptionsLoading(true);
     try {
-      const result = await api.getAssumptions(paperId);
-      setAssumptions(result.assumptions);
+      const result = await api.getAssumptions(targetId);
+      if (currentPaperRef.current === targetId) {
+        setAssumptions(result.assumptions);
+      }
     } catch (e) {
       console.error("Assumptions extraction failed:", e);
     } finally {
-      setAssumptionsLoading(false);
+      if (currentPaperRef.current === targetId) {
+        setAssumptionsLoading(false);
+      }
     }
   };
 
@@ -77,7 +84,7 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
             Explicit <span className="text-muted-foreground/40">{explicit.length}</span>
           </p>
           {explicit.map((a, i) => (
-            <div key={i} className="rounded-lg bg-accent/50 px-3.5 py-2.5">
+            <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
               <div className="text-[13px]"><Md>{a.statement}</Md></div>
               {a.section && (
                 <span className="inline-block mt-1.5 text-[10px] text-muted-foreground/60 bg-muted px-2 py-0.5 rounded-full font-medium">
@@ -95,7 +102,7 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
             Implicit <span className="text-muted-foreground/40">{implicit.length}</span>
           </p>
           {implicit.map((a, i) => (
-            <div key={i} className="rounded-lg bg-accent/30 border border-dashed border-border/60 px-3.5 py-2.5">
+            <div key={i} className="rounded-xl glass-subtle border border-dashed border-white/20 px-3.5 py-2.5">
               <div className="text-[13px]"><Md>{a.statement}</Md></div>
               {a.section && (
                 <span className="inline-block mt-1.5 text-[10px] text-muted-foreground/60 bg-muted px-2 py-0.5 rounded-full font-medium">

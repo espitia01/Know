@@ -8,6 +8,7 @@ import { api, PaperListEntry } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { useStore } from "@/lib/store";
 import { BibtexModal } from "@/components/BibtexModal";
+import { useUserTier, canAccess } from "@/lib/UserTierContext";
 
 function FolderIcon({ className = "w-4 h-4", filled = false }: { className?: string; filled?: boolean }) {
   return filled ? (
@@ -23,6 +24,8 @@ function FolderIcon({ className = "w-4 h-4", filled = false }: { className?: str
 
 function LibraryContent() {
   const router = useRouter();
+  const { user: tierUser, loading: tierLoading } = useUserTier();
+  const isFree = tierLoading ? true : (!tierUser || tierUser.tier === "free");
   const [papers, setPapers] = useState<PaperListEntry[]>([]);
   const [search, setSearch] = useState("");
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
@@ -35,13 +38,17 @@ function LibraryContent() {
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
   const dragPaper = useRef<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState<"folders" | "workspaces">("folders");
+  const [fetchError, setFetchError] = useState("");
   const [workspaces, setWorkspaces] = useState<{ id: string; name: string; paper_ids: string[]; cross_paper_results: { question: string; answer: string }[]; updated_at: string }[]>([]);
   const [workspacesLoading, setWorkspacesLoading] = useState(false);
+  const [workspacesFetched, setWorkspacesFetched] = useState(false);
   const [deleteWsConfirm, setDeleteWsConfirm] = useState<string | null>(null);
   const { addSessionPaper, clearSession, addCrossPaperResults, clearCrossPaperResults } = useStore();
 
   useEffect(() => {
-    api.listPapers().then(setPapers).catch(() => {});
+    api.listPapers()
+      .then(setPapers)
+      .catch(() => setFetchError("Failed to load papers. Please refresh."));
   }, []);
 
   const loadWorkspaces = useCallback(async () => {
@@ -51,13 +58,14 @@ function LibraryContent() {
       setWorkspaces(wsList);
     } catch { /* ignore */ }
     setWorkspacesLoading(false);
+    setWorkspacesFetched(true);
   }, []);
 
   useEffect(() => {
-    if (sidebarTab === "workspaces" && workspaces.length === 0 && !workspacesLoading) {
+    if (sidebarTab === "workspaces" && !workspacesFetched && !workspacesLoading) {
       loadWorkspaces();
     }
-  }, [sidebarTab, workspaces.length, workspacesLoading, loadWorkspaces]);
+  }, [sidebarTab, workspacesFetched, workspacesLoading, loadWorkspaces]);
 
   const handleOpenWorkspace = useCallback(async (ws: typeof workspaces[0]) => {
     clearSession();
@@ -109,6 +117,13 @@ function LibraryContent() {
     }
     return list;
   }, [papers, activeFolder, search]);
+
+  const PAGE_SIZE = 50;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const visiblePapers = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
+  const hasMore = visibleCount < filtered.length;
+
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [filtered]);
 
   const handleDelete = useCallback(async (id: string) => {
     try {
@@ -213,9 +228,9 @@ function LibraryContent() {
 
   return (
     <>
-    <main className="flex-1 flex flex-col h-screen overflow-hidden bg-white">
+    <main className="flex-1 flex flex-col h-screen overflow-hidden bg-mesh">
       {/* Header */}
-      <header className="shrink-0 flex items-center gap-3 px-5 h-[52px] border-b border-gray-100 bg-white">
+      <header className="shrink-0 flex items-center gap-3 px-5 h-[52px] border-b border-white/20 glass-nav">
         <button
           onClick={() => router.push("/dashboard")}
           className="text-gray-400 hover:text-gray-700 transition-colors text-[13px] font-medium"
@@ -242,49 +257,52 @@ function LibraryContent() {
             }
             handleExportBibtex(opts, lbl);
           }}
-          disabled={filtered.length === 0}
+          disabled={filtered.length === 0 || isFree}
           className="text-[11px] text-gray-400 hover:text-gray-700 transition-colors font-medium px-2 py-1 rounded-md hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
-          title="Export BibTeX"
+          title={isFree ? "Upgrade to export citations" : "Export Citations"}
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
           </svg>
-          .bib
+          Citations
         </button>
         <UserButton />
       </header>
 
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <aside className="w-56 shrink-0 border-r border-gray-100 bg-gray-50/40 overflow-y-auto p-4 space-y-4">
+        <aside className="w-56 shrink-0 border-r border-white/20 glass-subtle overflow-y-auto p-4 space-y-4">
           <Input
             placeholder="Search papers..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="text-[13px] h-9 rounded-lg bg-white border-gray-100 focus:border-gray-300"
+            className="text-[13px] h-9 rounded-xl bg-white/50 border-white/20 focus:border-white/40 backdrop-blur-sm"
           />
 
           {/* Sidebar tabs */}
-          <div className="flex gap-1 bg-gray-100/60 rounded-lg p-0.5">
+          <div className="flex gap-1 glass-subtle rounded-xl p-0.5">
             <button
               onClick={() => setSidebarTab("folders")}
-              className={`flex-1 text-[11px] font-semibold py-1.5 rounded-md transition-all ${
+              className={`flex-1 text-[11px] font-semibold py-1.5 rounded-lg transition-all ${
                 sidebarTab === "folders"
-                  ? "bg-white text-gray-900 shadow-sm"
+                  ? "glass-strong text-gray-900 shadow-sm"
                   : "text-gray-400 hover:text-gray-600"
               }`}
             >
               Folders
             </button>
             <button
-              onClick={() => setSidebarTab("workspaces")}
-              className={`flex-1 text-[11px] font-semibold py-1.5 rounded-md transition-all ${
-                sidebarTab === "workspaces"
-                  ? "bg-white text-gray-900 shadow-sm"
+              onClick={() => !isFree && setSidebarTab("workspaces")}
+              disabled={isFree}
+              className={`flex-1 text-[11px] font-semibold py-1.5 rounded-lg transition-all ${
+                isFree
+                  ? "text-gray-300 cursor-not-allowed"
+                  : sidebarTab === "workspaces"
+                  ? "glass-strong text-gray-900 shadow-sm"
                   : "text-gray-400 hover:text-gray-600"
               }`}
             >
-              Workspaces
+              Workspaces{isFree ? " ⬆" : ""}
             </button>
           </div>
 
@@ -326,10 +344,10 @@ function LibraryContent() {
 
             <button
               onClick={() => setActiveFolder(null)}
-              className={`w-full text-left text-[12px] px-3 py-2.5 rounded-lg transition-all duration-200 ${
+              className={`w-full text-left text-[12px] px-3 py-2.5 rounded-xl transition-all duration-200 ${
                 activeFolder === null
-                  ? "bg-gray-900 text-white font-medium"
-                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-100/80"
+                  ? "bg-gradient-to-r from-gray-800 to-gray-900 text-white font-medium shadow-md shadow-gray-900/10"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-white/50"
               }`}
             >
               <span className="flex items-center gap-2.5">
@@ -344,12 +362,12 @@ function LibraryContent() {
               onDragOver={(e) => onFolderDragOver(e, "")}
               onDragLeave={onFolderDragLeave}
               onDrop={(e) => onFolderDrop(e, "")}
-              className={`w-full text-left text-[12px] px-3 py-2.5 rounded-lg transition-all duration-200 ${
+              className={`w-full text-left text-[12px] px-3 py-2.5 rounded-xl transition-all duration-200 ${
                 dragOverFolder === ""
-                  ? "bg-gray-200/60 ring-2 ring-gray-300 ring-inset"
+                  ? "bg-violet-50/50 ring-2 ring-violet-300/40 ring-inset"
                   : activeFolder === ""
-                    ? "bg-gray-900 text-white font-medium"
-                    : "text-gray-600 hover:text-gray-900 hover:bg-gray-100/80"
+                    ? "bg-gradient-to-r from-gray-800 to-gray-900 text-white font-medium shadow-md shadow-gray-900/10"
+                    : "text-gray-600 hover:text-gray-900 hover:bg-white/50"
               }`}
             >
               <span className="flex items-center gap-2.5">
@@ -387,12 +405,12 @@ function LibraryContent() {
                     onDragOver={(e) => onFolderDragOver(e, f)}
                     onDragLeave={onFolderDragLeave}
                     onDrop={(e) => onFolderDrop(e, f)}
-                    className={`w-full text-left text-[12px] px-3 py-2.5 rounded-lg transition-all duration-200 truncate ${
+                    className={`w-full text-left text-[12px] px-3 py-2.5 rounded-xl transition-all duration-200 truncate ${
                       dragOverFolder === f
-                        ? "bg-gray-200/60 ring-2 ring-gray-300 ring-inset"
+                        ? "bg-violet-50/50 ring-2 ring-violet-300/40 ring-inset"
                         : activeFolder === f
-                          ? "bg-gray-900 text-white font-medium"
-                          : "text-gray-600 hover:text-gray-900 hover:bg-gray-100/80"
+                          ? "bg-gradient-to-r from-gray-800 to-gray-900 text-white font-medium shadow-md shadow-gray-900/10"
+                          : "text-gray-600 hover:text-gray-900 hover:bg-white/50"
                     }`}
                   >
                     <span className="flex items-center gap-2.5">
@@ -439,7 +457,7 @@ function LibraryContent() {
                 </div>
               ) : (
                 workspaces.map((ws) => (
-                  <div key={ws.id} className="group/ws rounded-lg hover:bg-gray-100/80 transition-all">
+                  <div key={ws.id} className="group/ws rounded-xl hover:bg-white/50 transition-all">
                     {deleteWsConfirm === ws.id ? (
                       <div className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-red-50 border border-red-100 animate-fade-in">
                         <span className="text-[11px] text-red-600 flex-1 truncate">Delete?</span>
@@ -506,7 +524,14 @@ function LibraryContent() {
 
         {/* Paper list */}
         <div className="flex-1 overflow-y-auto p-6">
-          {filtered.length === 0 ? (
+          {fetchError ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center space-y-3">
+                <p className="text-[14px] text-red-500">{fetchError}</p>
+                <button onClick={() => { setFetchError(""); api.listPapers().then(setPapers).catch(() => setFetchError("Failed to load papers.")); }} className="text-[13px] font-medium text-gray-600 hover:text-gray-900 transition-colors">Retry</button>
+              </div>
+            </div>
+          ) : filtered.length === 0 ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center space-y-3">
                 <FolderIcon className="w-10 h-10 mx-auto text-gray-200" />
@@ -523,13 +548,13 @@ function LibraryContent() {
             </div>
           ) : (
             <div className="space-y-1">
-              {filtered.map((p) => (
+              {visiblePapers.map((p) => (
                 <div
                   key={p.id}
                   draggable
                   onDragStart={(e) => onPaperDragStart(e, p.id)}
                   onDragEnd={onPaperDragEnd}
-                  className="group flex items-start gap-3 px-4 py-4 rounded-xl hover:bg-gray-50/80 transition-all duration-200 cursor-grab active:cursor-grabbing"
+                  className="group flex items-start gap-3 px-4 py-4 rounded-2xl hover:bg-white/50 transition-all duration-200 cursor-grab active:cursor-grabbing"
                 >
                   <div className="shrink-0 mt-2 text-gray-200 group-hover:text-gray-400 transition-colors">
                     <svg className="w-3 h-3" viewBox="0 0 6 10" fill="currentColor">
@@ -642,6 +667,14 @@ function LibraryContent() {
                   </div>
                 </div>
               ))}
+              {hasMore && (
+                <button
+                  onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                  className="w-full text-center text-[13px] text-gray-500 hover:text-gray-800 py-3 font-medium transition-colors"
+                >
+                  Show more ({filtered.length - visibleCount} remaining)
+                </button>
+              )}
             </div>
           )}
         </div>

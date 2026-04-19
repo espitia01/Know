@@ -32,7 +32,10 @@ export function SearchPanel({ paperId }: SearchPanelProps) {
       <Input
         placeholder="Search paper content..."
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          if (!e.target.value.trim()) setSearchResults([]);
+        }}
         onKeyDown={(e) => e.key === "Enter" && handleSearch()}
         className="text-[13px]"
       />

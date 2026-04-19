@@ -10,6 +10,7 @@ import { useStore } from "@/lib/store";
 import { SelectionToolbar, type SelectionAction } from "@/components/pdf/SelectionToolbar";
 import { AnalysisPanel, type PanelPosition } from "@/components/panel/BottomPanel";
 import { BibtexModal } from "@/components/BibtexModal";
+import { useUserTier, canAccess } from "@/lib/UserTierContext";
 
 const PdfViewer = dynamic(
   () => import("@/components/pdf/PdfViewer").then((m) => m.PdfViewer),
@@ -94,10 +95,10 @@ function AddPaperPopover({
   return (
     <div
       ref={ref}
-      className="absolute top-full right-0 mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-xl w-80 max-h-[420px] flex flex-col animate-fade-in overflow-hidden"
+      className="absolute top-full right-0 mt-1 z-50 glass-strong rounded-2xl shadow-xl w-80 max-h-[420px] flex flex-col animate-fade-in overflow-hidden"
     >
       {/* Upload section */}
-      <div className="p-2.5 border-b border-gray-100 space-y-2">
+      <div className="p-2.5 border-b border-white/20 space-y-2">
         <input
           ref={fileInputRef}
           type="file"
@@ -111,7 +112,7 @@ function AddPaperPopover({
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          className="w-full flex items-center justify-center gap-2 text-[12px] font-semibold px-3 py-2.5 rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition-colors disabled:opacity-50"
+          className="w-full flex items-center justify-center gap-2 text-[12px] font-semibold px-3 py-2.5 rounded-xl btn-primary-glass text-white transition-all disabled:opacity-50"
         >
           {uploading ? (
             <>
@@ -194,8 +195,8 @@ function AddPaperPopover({
                       {p.title}
                     </p>
                     <p className="text-[10px] text-gray-400 truncate mt-0.5">
-                      {p.authors.slice(0, 2).join(", ")}
-                      {p.authors.length > 2 ? " et al." : ""}
+                      {(p.authors || []).slice(0, 2).join(", ")}
+                      {(p.authors || []).length > 2 ? " et al." : ""}
                       {inSession && " · In session"}
                     </p>
                   </button>
@@ -212,6 +213,8 @@ function AddPaperPopover({
 function PaperContent() {
   const params = useParams();
   const router = useRouter();
+  const { user: tierUser, loading: tierLoading } = useUserTier();
+  const isFree = tierLoading ? true : (!tierUser || tierUser.tier === "free");
   const paperId = params.id as string;
   const {
     paper, setPaper, loading, setLoading,
@@ -221,23 +224,33 @@ function PaperContent() {
     setNotes,
     selectionResult,
     setSelectionResult, setSelectionLoading, addSelectionToHistory,
-    selectionHistory,
     setActiveTab,
     setSummary,
     sessionPapers, addSessionPaper, removeSessionPaper, clearSession,
-    savePaperCache, restorePaperCache,
+    savePaperCache, restorePaperCache, updatePaperCache,
     setQAResults, clearQuestions,
     crossPaperResults, addCrossPaperResults, clearCrossPaperResults,
+    resetAnalysisState,
   } = useStore();
   const [error, setError] = useState("");
 
   const [activePaperId, setActivePaperId] = useState(paperId);
+  const sseAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (paperId !== activePaperId) {
+      sseAbortRef.current?.abort();
+      savePaperCache(activePaperId);
+      const restored = restorePaperCache(paperId);
+      if (!restored) resetAnalysisState();
+      setActivePaperId(paperId);
+    }
+  }, [paperId]);
   const [panelSize, setPanelSize] = useState(DEFAULT_SIDE);
   const [panelPos, setPanelPos] = useState<PanelPosition>("right");
   const dragging = useRef(false);
   const startCoord = useRef(0);
   const startSize = useRef(0);
-  const analyzedPapers = useRef<Set<string>>(new Set());
 
   const [selection, setSelection] = useState<{ text: string; rect: DOMRect } | null>(null);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
@@ -246,12 +259,12 @@ function PaperContent() {
   const [showAddPaper, setShowAddPaper] = useState(false);
   const [showWorkspaceMenu, setShowWorkspaceMenu] = useState(false);
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
+  const [workspaceSaved, setWorkspaceSaved] = useState(false);
   const [workspaceNameInput, setWorkspaceNameInput] = useState("");
   const [savedWorkspaces, setSavedWorkspaces] = useState<{ id: string; name: string; paper_ids: string[]; cross_paper_results: { question: string; answer: string }[]; updated_at: string }[]>([]);
   const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
   const [activeWorkspaceName, setActiveWorkspaceName] = useState<string | null>(null);
 
-  const hasSelection = selectionResult !== null || selectionHistory.length > 0;
   const sessionIds = useMemo(() => new Set(sessionPapers.map((p) => p.id)), [sessionPapers]);
 
   useEffect(() => {
@@ -290,54 +303,96 @@ function PaperContent() {
     setFolderInput("");
   }, [folderInput, paper, setPaper, allFolders]);
 
-  // Load paper when activePaperId changes — always fetch fresh to pick up folder/tag updates
+  // Save cache on unmount (navigating away from paper page entirely)
   useEffect(() => {
+    const saveOnUnload = () => {
+      const s = useStore.getState();
+      s.savePaperCache(activePaperId);
+    };
+    window.addEventListener("beforeunload", saveOnUnload);
+    return () => {
+      window.removeEventListener("beforeunload", saveOnUnload);
+      saveOnUnload();
+    };
+  }, [activePaperId]);
+
+  // Load paper when activePaperId changes — always fetch fresh to pick up folder/tag updates
+  // First try to restore from local cache for instant display
+  const cacheRestoredRef = useRef(false);
+  useEffect(() => {
+    const store = useStore.getState();
+    if (!store.preReading && !store.summary) {
+      cacheRestoredRef.current = store.restorePaperCache(activePaperId);
+    } else {
+      cacheRestoredRef.current = true;
+    }
+  }, [activePaperId]);
+
+  useEffect(() => {
+    let stale = false;
     setLoading(true);
     setError("");
     api
       .getPaper(activePaperId)
-      .then((p) => setPaper(p))
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .then((p) => {
+        if (!stale) setPaper(p);
+      })
+      .catch((e) => {
+        if (!stale) setError(e.message);
+      })
+      .finally(() => {
+        if (!stale) setLoading(false);
+      });
+    return () => { stale = true; };
   }, [activePaperId, setPaper, setLoading]);
 
-  // Auto-analyze when paper loads (only once per paper, skip if cache restored)
+  // Auto-analyze when paper loads (skip if cache was already restored)
   useEffect(() => {
     if (!paper || paper.id !== activePaperId) return;
-    if (analyzedPapers.current.has(paper.id)) return;
-    analyzedPapers.current.add(paper.id);
+    if (tierLoading) return;
 
     const store = useStore.getState();
-    if (store.preReading || store.summary) return;
+    if (cacheRestoredRef.current || store.preReading || store.summary) return;
 
+    const pid = activePaperId;
+    let stale = false;
     const cache = paper.cached_analysis || {};
 
     if (paper.notes) setNotes(paper.notes);
 
     if (cache.selections && cache.selections.length > 0) {
-      for (const sel of cache.selections) {
-        store.addSelectionToHistory(sel as SelectionAnalysisResult);
+      const currentHistory = store.selectionHistory;
+      if (currentHistory.length === 0) {
+        for (const sel of cache.selections) {
+          store.addSelectionToHistory(sel as SelectionAnalysisResult);
+        }
       }
     }
 
     if (cache.pre_reading) {
       setPreReading(cache.pre_reading);
-    } else {
+    } else if (canAccess(tierUser?.tier || "free", "prepare")) {
       setPreReadingLoading(true);
-      api.analyze(activePaperId)
-        .then((r) => setPreReading(r))
+      api.analyze(pid)
+        .then((r) => {
+          if (stale) { updatePaperCache(pid, { preReading: r }); return; }
+          setPreReading(r);
+        })
         .catch(() => {})
-        .finally(() => setPreReadingLoading(false));
+        .finally(() => { if (!stale) setPreReadingLoading(false); });
     }
 
     if (cache.assumptions) {
       setAssumptions(cache.assumptions.assumptions || []);
-    } else {
+    } else if (canAccess(tierUser?.tier || "free", "assumptions")) {
       setAssumptionsLoading(true);
-      api.getAssumptions(activePaperId)
-        .then((r) => setAssumptions(r.assumptions))
+      api.getAssumptions(pid)
+        .then((r) => {
+          if (stale) { updatePaperCache(pid, { assumptions: r.assumptions }); return; }
+          setAssumptions(r.assumptions);
+        })
         .catch(() => {})
-        .finally(() => setAssumptionsLoading(false));
+        .finally(() => { if (!stale) setAssumptionsLoading(false); });
     }
 
     if (cache.summary) {
@@ -345,30 +400,30 @@ function PaperContent() {
     }
 
     if (cache.qa_sessions && cache.qa_sessions.length > 0) {
-      const lastSession = cache.qa_sessions[cache.qa_sessions.length - 1];
-      if (lastSession?.items) {
-        useStore.getState().setQAResults(lastSession.items);
+      const allItems = cache.qa_sessions.flatMap(
+        (session: { items?: { question: string; answer: string }[] }) => session.items || []
+      );
+      if (allItems.length > 0) {
+        useStore.getState().setQAResults(allItems);
       }
     }
-  }, [paper, activePaperId, setPreReading, setPreReadingLoading, setAssumptions, setAssumptionsLoading, setNotes, setSummary]);
+
+    return () => { stale = true; };
+  }, [paper, activePaperId, tierUser?.tier, tierLoading, setPreReading, setPreReadingLoading, setAssumptions, setAssumptionsLoading, setNotes, setSummary, updatePaperCache]);
 
   const handleSwitchPaper = useCallback((id: string) => {
     if (id === activePaperId) return;
+    sseAbortRef.current?.abort();
     savePaperCache(activePaperId);
     setSelection(null);
     setSelectionResult(null);
 
     const restored = restorePaperCache(id);
     if (!restored) {
-      setPreReading(null);
-      setAssumptions([]);
-      setSummary(null);
-      setNotes([]);
-      setQAResults([]);
-      clearQuestions();
+      resetAnalysisState();
     }
     setActivePaperId(id);
-  }, [activePaperId, savePaperCache, restorePaperCache, setSelectionResult, setPreReading, setAssumptions, setSummary, setNotes, setQAResults, clearQuestions]);
+  }, [activePaperId, savePaperCache, restorePaperCache, resetAnalysisState]);
 
   const handleAddPaper = useCallback((id: string, title: string) => {
     addSessionPaper({ id, title });
@@ -389,6 +444,7 @@ function PaperContent() {
   const handleSaveWorkspace = useCallback(async () => {
     const name = workspaceNameInput.trim() || `Session · ${sessionPapers.length} papers`;
     setWorkspaceSaving(true);
+    setWorkspaceSaved(false);
     try {
       savePaperCache(activePaperId);
       await api.saveWorkspace({
@@ -400,6 +456,8 @@ function PaperContent() {
       setWorkspacesLoaded(false);
       setSavedWorkspaces([]);
       setActiveWorkspaceName(name);
+      setWorkspaceSaved(true);
+      setTimeout(() => setWorkspaceSaved(false), 2000);
     } catch (e) {
       console.error("Failed to save workspace:", e);
     } finally {
@@ -508,6 +566,10 @@ function PaperContent() {
       return;
     }
 
+    sseAbortRef.current?.abort();
+    const controller = new AbortController();
+    sseAbortRef.current = controller;
+
     setPanelVisible(true);
     setActiveTab("selection");
     setSelectionLoading(true);
@@ -515,6 +577,7 @@ function PaperContent() {
 
     try {
       const res = await api.analyzeSelectionStream(activePaperId, text, action);
+      if (controller.signal.aborted) return;
       if (!res.ok) {
         const detail = await res.text();
         let msg = `HTTP ${res.status}`;
@@ -542,6 +605,7 @@ function PaperContent() {
       setSelectionLoading(false);
 
       while (true) {
+        if (controller.signal.aborted) { reader.cancel(); break; }
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -583,6 +647,7 @@ function PaperContent() {
         }
       }
     } catch (e) {
+      if (controller.signal.aborted) return;
       setSelectionResult({
         action,
         selected_text: text,
@@ -590,7 +655,7 @@ function PaperContent() {
       });
       setSelectionLoading(false);
     }
-  }, [activePaperId, setPanelVisible, setActiveTab, setSelectionLoading, setSelectionResult, addSelectionToHistory]);
+  }, [activePaperId, setPanelVisible, setActiveTab, setSelectionLoading, setSelectionResult, addSelectionToHistory, refreshUsage]);
 
   const onDragStart = useCallback(
     (e: React.MouseEvent) => {
@@ -690,7 +755,6 @@ function PaperContent() {
           paperId={activePaperId}
           position={panelPos}
           onCyclePosition={cyclePosition}
-          hasSelection={hasSelection}
         />
       </div>
     </div>
@@ -703,7 +767,6 @@ function PaperContent() {
         paperId={activePaperId}
         position={panelPos}
         onCyclePosition={cyclePosition}
-        hasSelection={hasSelection}
       />
     </div>
   );
@@ -726,20 +789,20 @@ function PaperContent() {
     </div>
   );
 
-  const showSessionBar = sessionPapers.length > 1;
+  const showSessionBar = !isFree && sessionPapers.length > 1;
 
   return (
     <>
     <div className="flex flex-col h-screen overflow-hidden">
       {/* Header */}
-      <header className="shrink-0 flex items-center gap-3 px-4 h-[48px] border-b border-gray-100 bg-white">
+      <header className="shrink-0 flex items-center gap-3 px-4 h-[48px] border-b border-white/20 glass-nav">
         <button
           onClick={() => { clearSession(); router.push("/dashboard"); }}
           className="text-gray-400 hover:text-gray-700 transition-colors text-[13px] font-medium shrink-0"
         >
           &larr;
         </button>
-        <div className="h-4 w-px bg-gray-200 shrink-0" />
+        <div className="h-4 w-px bg-white/20 shrink-0" />
         <Image src="/logo.png" alt="Know" width={20} height={20} className="shrink-0 rounded-md" />
 
         {!showSessionBar && (
@@ -768,6 +831,7 @@ function PaperContent() {
         )}
 
         {/* Add paper button */}
+        {!isFree && (
         <div className="relative shrink-0">
           <button
             onClick={() => setShowAddPaper(!showAddPaper)}
@@ -787,6 +851,7 @@ function PaperContent() {
             />
           )}
         </div>
+        )}
 
         {/* Folder assignment */}
         <div className="relative shrink-0">
@@ -801,7 +866,7 @@ function PaperContent() {
             {paper.folder || "No folder"}
           </button>
           {showFolderPicker && (
-            <div className="absolute right-0 top-full mt-1 z-50 bg-popover border rounded-lg shadow-lg p-2 w-48 space-y-1 animate-fade-in">
+            <div className="absolute right-0 top-full mt-1 z-50 glass-strong rounded-2xl shadow-lg p-2 w-48 space-y-1 animate-fade-in">
               <button
                 onClick={() => handleMoveToFolder("")}
                 className={`w-full text-left text-[11px] px-2 py-1.5 rounded-md transition-colors ${
@@ -843,19 +908,22 @@ function PaperContent() {
           )}
         </div>
 
-        {/* Export .bib for current paper */}
+        {/* Export citations for current paper */}
+        {!isFree && (
         <button
           onClick={() => handleExportBibtex({ paper_ids: [activePaperId] }, "Current paper")}
           className="shrink-0 flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
-          title="Export BibTeX for current paper"
+          title="Export citations for current paper"
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
           </svg>
-          <span className="hidden sm:inline">.bib</span>
+          <span className="hidden sm:inline">Citations</span>
         </button>
+        )}
 
         {/* Workspace save/load */}
+        {!isFree && (
         <div className="relative shrink-0">
           <button
             onClick={handleOpenWorkspaceMenu}
@@ -868,8 +936,8 @@ function PaperContent() {
             <span className="hidden sm:inline">{activeWorkspaceName || "Workspace"}</span>
           </button>
           {showWorkspaceMenu && (
-            <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-xl w-80 max-h-[400px] flex flex-col animate-fade-in">
-              <div className="p-3 border-b border-gray-100 space-y-2">
+            <div className="absolute right-0 top-full mt-1 z-50 glass-strong rounded-2xl shadow-xl w-80 max-h-[400px] flex flex-col animate-fade-in">
+              <div className="p-3 border-b border-white/20 space-y-2">
                 <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400">Save Current Session</p>
                 <div className="flex gap-1.5">
                   <input
@@ -877,14 +945,14 @@ function PaperContent() {
                     onChange={(e) => setWorkspaceNameInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") handleSaveWorkspace(); }}
                     placeholder={`Session — ${sessionPapers.length} papers`}
-                    className="flex-1 text-[12px] px-2.5 py-1.5 rounded-lg border border-gray-200 bg-white placeholder:text-gray-300 focus:outline-none focus:ring-1 focus:ring-gray-300"
+                    className="flex-1 text-[12px] px-2.5 py-1.5 rounded-xl border border-white/20 bg-white/50 placeholder:text-gray-300 focus:outline-none focus:ring-1 focus:ring-white/40"
                   />
                   <button
                     onClick={handleSaveWorkspace}
                     disabled={workspaceSaving}
-                    className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition-colors disabled:opacity-50 shrink-0"
+                    className="text-[11px] font-semibold px-3 py-1.5 rounded-xl btn-primary-glass text-white transition-all disabled:opacity-50 shrink-0"
                   >
-                    {workspaceSaving ? "..." : "Save"}
+                    {workspaceSaving ? "..." : workspaceSaved ? "Saved!" : "Save"}
                   </button>
                 </div>
               </div>
@@ -904,7 +972,7 @@ function PaperContent() {
                     {savedWorkspaces.map((ws) => (
                       <div
                         key={ws.id}
-                        className="flex items-center gap-2 rounded-lg px-2.5 py-2 hover:bg-gray-50 transition-colors group"
+                        className="flex items-center gap-2 rounded-xl px-2.5 py-2 hover:bg-white/40 transition-colors group"
                       >
                         <button
                           onClick={() => handleLoadWorkspace(ws)}
@@ -941,7 +1009,7 @@ function PaperContent() {
                 )}
               </div>
 
-              <div className="p-2 border-t border-gray-100">
+              <div className="p-2 border-t border-white/20">
                 <button
                   onClick={() => setShowWorkspaceMenu(false)}
                   className="w-full text-[11px] text-gray-400 hover:text-gray-700 py-1 transition-colors"
@@ -952,6 +1020,7 @@ function PaperContent() {
             </div>
           )}
         </div>
+        )}
 
         <button
           onClick={togglePanel}
@@ -970,20 +1039,25 @@ function PaperContent() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
         </button>
-        <UserButton />
+        <UserButton>
+          <UserButton.MenuItems>
+            <UserButton.Link label="Settings" labelIcon={<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>} href="/settings" />
+          </UserButton.MenuItems>
+        </UserButton>
       </header>
 
       {/* Session paper tabs */}
       {showSessionBar && (
-        <div className="shrink-0 border-b border-gray-100 bg-white px-3 py-1.5">
+        <div className="shrink-0 border-b border-white/20 glass-subtle px-3 py-1.5">
           <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
             {sessionPapers.map((sp) => (
-              <div
+              <button
                 key={sp.id}
+                type="button"
                 className={`group flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium transition-all cursor-pointer shrink-0 ${
                   sp.id === activePaperId
-                    ? "bg-gray-900 text-white"
-                    : "bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                    ? "bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-md shadow-gray-900/10"
+                    : "glass-subtle text-gray-500 hover:bg-white/60 hover:text-gray-800"
                 }`}
                 onClick={() => handleSwitchPaper(sp.id)}
               >
@@ -991,11 +1065,14 @@ function PaperContent() {
                   {sp.title.length > 35 ? sp.title.slice(0, 35) + "..." : sp.title}
                 </span>
                 {sessionPapers.length > 1 && (
-                  <button
+                  <span
+                    role="button"
+                    tabIndex={0}
                     onClick={(e) => {
                       e.stopPropagation();
                       handleRemoveSessionPaper(sp.id);
                     }}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); handleRemoveSessionPaper(sp.id); } }}
                     className={`w-3.5 h-3.5 rounded-full flex items-center justify-center shrink-0 transition-colors ${
                       sp.id === activePaperId
                         ? "hover:bg-background/20 text-background/60 hover:text-background"
@@ -1005,9 +1082,9 @@ function PaperContent() {
                     <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
-                  </button>
+                  </span>
                 )}
-              </div>
+              </button>
             ))}
           </div>
         </div>

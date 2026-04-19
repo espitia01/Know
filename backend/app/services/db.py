@@ -69,7 +69,7 @@ def get_or_create_user(user_id: str, email: str = "") -> dict:
 def get_user(user_id: str) -> dict | None:
     client = get_db()
     if not client:
-        return {"user_id": user_id, "tier": "free", "paper_count": 0}
+        return None
     return _safe_single(client.table("users").select("*").eq("user_id", user_id))
 
 
@@ -100,11 +100,41 @@ def increment_paper_count(user_id: str, delta: int = 1) -> None:
         return
     try:
         client.rpc("increment_paper_count", {"uid": user_id, "delta": delta}).execute()
-    except Exception:
-        user = get_user(user_id)
-        if user:
-            new_count = max(0, (user.get("paper_count") or 0) + delta)
-            client.table("users").update({"paper_count": new_count}).eq("user_id", user_id).execute()
+    except Exception as e:
+        logger.warning("increment_paper_count RPC failed, retrying once: %s", e)
+        try:
+            client.rpc("increment_paper_count", {"uid": user_id, "delta": delta}).execute()
+        except Exception:
+            logger.error("increment_paper_count retry also failed for user %s", user_id)
+
+
+def check_and_increment_paper_count(user_id: str, max_papers: int) -> bool:
+    """Atomically check the paper limit and increment if under. Returns True on success.
+    
+    Uses the DB-level RPC when available; falls back to read-then-write with a recheck
+    to minimize the race window.
+    """
+    client = get_db()
+    if not client:
+        return False
+
+    try:
+        res = client.rpc("check_and_increment_paper_count", {
+            "uid": user_id, "max_count": max_papers
+        }).execute()
+        if res and res.data is not None:
+            return bool(res.data)
+    except Exception as e:
+        logger.debug("check_and_increment_paper_count RPC unavailable: %s", e)
+
+    user = get_user(user_id)
+    if not user:
+        return False
+    current = user.get("paper_count", 0)
+    if current >= max_papers:
+        return False
+    increment_paper_count(user_id, 1)
+    return True
 
 
 # ----------------------------------------------------------------
@@ -237,19 +267,22 @@ def record_usage(user_id: str, paper_id: str, action: str) -> int:
 
     if existing:
         new_count = (existing.get("count") or 0) + 1
-        client.table("usage").update({"count": new_count}).eq("id", existing["id"]).execute()
+        try:
+            client.table("usage").update({"count": new_count}).eq("id", existing["id"]).execute()
+        except Exception as e:
+            logger.warning("Usage update failed: %s", e)
         return new_count
     else:
         try:
-            client.table("usage").insert({
+            client.table("usage").upsert({
                 "user_id": user_id,
                 "paper_id": paper_id,
                 "action": action,
                 "count": 1,
                 "date": today,
-            }).execute()
+            }, on_conflict="user_id,paper_id,action,date").execute()
         except Exception as e:
-            logger.warning("Usage insert failed: %s", e)
+            logger.warning("Usage upsert failed: %s", e)
         return 1
 
 

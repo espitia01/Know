@@ -17,7 +17,7 @@ TIER_LIMITS: dict[str, dict] = {
         "max_papers": 3,
         "qa_per_paper": 5,
         "selections_per_paper": 3,
-        "features": {"summary"},
+        "features": {"summary", "qa", "selection"},
         "models": {"claude-haiku-4-5"},
         "best_model": "claude-haiku-4-5",
         "daily_api_calls": 20,
@@ -45,11 +45,16 @@ TIER_LIMITS: dict[str, dict] = {
 
 def get_user_tier(user_id: str) -> str:
     user = get_user(user_id)
-    return (user or {}).get("tier", "free")
+    if not user:
+        return "free"
+    tier = user.get("tier", "free")
+    if tier not in TIER_LIMITS:
+        return "free"
+    return tier
 
 
 def check_feature_access(user_id: str, feature: str) -> str:
-    """Check if user can access a feature. Returns the tier. Raises 403/429 on deny."""
+    """Check if user can access a feature. Returns the tier. Raises 403 on deny."""
     tier = get_user_tier(user_id)
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
 
@@ -59,31 +64,27 @@ def check_feature_access(user_id: str, feature: str) -> str:
             detail=f"The '{feature}' feature requires a higher plan. Current plan: {tier}.",
         )
 
-    max_daily = limits.get("daily_api_calls", 20)
-    if max_daily != -1:
-        from .services.db import get_daily_api_count
-        current = get_daily_api_count(user_id)
-        if current >= max_daily:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Daily API limit reached ({max_daily} calls/day on {tier} plan). Try again tomorrow or upgrade.",
-            )
-
     return tier
 
 
 def check_paper_limit(user_id: str) -> str:
-    """Check if user can upload another paper. Returns the tier. Raises 403 on deny."""
-    tier = get_user_tier(user_id)
+    """Check if user can upload another paper and atomically reserve the slot.
+    Returns the tier. Raises 403/503 on deny.
+    """
+    user = get_user(user_id)
+    if not user:
+        raise HTTPException(status_code=503, detail="Database unavailable — cannot verify paper limit.")
+    tier = user.get("tier", "free")
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
     max_papers = limits["max_papers"]
 
     if max_papers == -1:
+        from .services.db import increment_paper_count
+        increment_paper_count(user_id, 1)
         return tier
 
-    user = get_user(user_id)
-    current_count = (user or {}).get("paper_count", 0)
-    if current_count >= max_papers:
+    from .services.db import check_and_increment_paper_count
+    if not check_and_increment_paper_count(user_id, max_papers):
         raise HTTPException(
             status_code=403,
             detail=f"Paper limit reached ({max_papers} papers on {tier} plan). Upgrade to add more.",
@@ -118,8 +119,37 @@ def check_usage_limit(user_id: str, paper_id: str, action: str) -> str:
 
 
 def track_usage(user_id: str, paper_id: str, action: str) -> int:
-    """Record a usage event. Returns updated count."""
-    return record_usage(user_id, paper_id, action)
+    """Record a usage event and enforce daily + per-paper limits. Returns updated count.
+
+    This is the single enforcement point for rate limits to avoid TOCTOU races:
+    daily and per-paper checks happen right before the atomic increment.
+    """
+    tier = get_user_tier(user_id)
+    limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+
+    max_daily = limits.get("daily_api_calls", 20)
+    if max_daily != -1:
+        from .services.db import get_daily_api_count
+        current = get_daily_api_count(user_id)
+        if current >= max_daily:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Daily API limit reached ({max_daily} calls/day on {tier} plan). Try again tomorrow or upgrade.",
+            )
+
+    limit_key = {"qa": "qa_per_paper", "selection": "selections_per_paper"}.get(action)
+    if limit_key:
+        max_count = limits.get(limit_key, -1)
+        if max_count != -1:
+            current_paper = get_usage_count(user_id, paper_id, action)
+            if current_paper >= max_count:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Usage limit reached ({max_count} {action}s per paper on {tier} plan). Upgrade to continue.",
+                )
+
+    count = record_usage(user_id, paper_id, action)
+    return count
 
 
 def check_daily_api_limit(user_id: str) -> str:

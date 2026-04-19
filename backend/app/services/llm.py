@@ -197,7 +197,13 @@ class AnthropicProvider(LLMProvider):
 class LocalModelProvider(LLMProvider):
     """OpenAI-compatible provider for local models (Ollama, LM Studio, etc.)."""
 
+    _ALLOWED_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
     def __init__(self, base_url: str, model_name: str):
+        from urllib.parse import urlparse
+        parsed = urlparse(base_url)
+        if parsed.hostname not in self._ALLOWED_HOSTS:
+            raise ValueError(f"LocalModelProvider only allows local hosts, got: {parsed.hostname}")
         self.base_url = base_url.rstrip("/")
         self.model_name = model_name
         self.client = _get_shared_client()
@@ -323,6 +329,7 @@ Text (first 3000 chars):
 async def analyze_selection(paper_text: str, selected_text: str, action: str, user_id: str | None = None) -> dict:
     """Analyze a user-highlighted selection from the PDF using the fast provider."""
     provider = get_fast_provider(user_id)
+    selected_text = _sanitize_user_text(selected_text)
 
     action_prompts = {
         "explain": f"""Explain the following passage from an academic paper clearly and thoroughly.
@@ -736,12 +743,13 @@ def _resize_image_b64(image_b64: str, max_dim: int = MAX_IMAGE_DIMENSION) -> str
         scale = max_dim / max(w, h)
         new_w, new_h = int(w * scale), int(h * scale)
 
-        # Create a tiny temp PDF, insert image, render at target size
         doc = fitz.open()
-        page = doc.new_page(width=new_w, height=new_h)
-        page.insert_image(fitz.Rect(0, 0, new_w, new_h), pixmap=pix)
-        out_pix = page.get_pixmap(dpi=72)
-        doc.close()
+        try:
+            page = doc.new_page(width=new_w, height=new_h)
+            page.insert_image(fitz.Rect(0, 0, new_w, new_h), pixmap=pix)
+            out_pix = page.get_pixmap(dpi=72)
+        finally:
+            doc.close()
 
         return base64.b64encode(out_pix.tobytes("png")).decode("utf-8")
     except Exception:

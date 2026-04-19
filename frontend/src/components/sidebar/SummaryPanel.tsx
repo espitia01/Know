@@ -35,7 +35,8 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   const [fetchError, setFetchError] = useState(false);
 
   useEffect(() => {
-    if (summary) return;
+    if (summary && paper?.id === paperId) return;
+    if (paper?.id !== paperId) return;
     if (paper?.cached_analysis?.summary) {
       setSummary(paper.cached_analysis.summary);
       return;
@@ -44,11 +45,13 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     fetchAttempted.current = paperId;
     setFetchError(false);
     setSummaryLoading(true);
+    let stale = false;
     api
       .getSummary(paperId)
-      .then((r) => setSummary(r))
-      .catch(() => setFetchError(true))
-      .finally(() => setSummaryLoading(false));
+      .then((r) => { if (!stale) setSummary(r); })
+      .catch(() => { if (!stale) setFetchError(true); })
+      .finally(() => { if (!stale) setSummaryLoading(false); });
+    return () => { stale = true; };
   }, [paperId, summary, paper, setSummary, setSummaryLoading]);
 
   if (summaryLoading) {
@@ -72,11 +75,12 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
             fetchAttempted.current = null;
             setFetchError(false);
             setSummaryLoading(true);
+            const targetId = paperId;
             api
-              .getSummary(paperId)
-              .then((r) => setSummary(r))
-              .catch(() => setFetchError(true))
-              .finally(() => setSummaryLoading(false));
+              .getSummary(targetId)
+              .then((r) => { if (paper?.id === targetId) setSummary(r); })
+              .catch(() => { if (paper?.id === targetId) setFetchError(true); })
+              .finally(() => { if (paper?.id === targetId) setSummaryLoading(false); });
           }}
           className="mt-2 text-[12px] font-medium text-foreground hover:opacity-80 transition-opacity"
         >
@@ -163,7 +167,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
           </h3>
           <div className="space-y-2">
             {summary.key_equations.map((eq, i) => (
-              <div key={i} className="rounded-lg bg-accent/50 px-3.5 py-2.5">
+              <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
                 <Md>{eq.equation}</Md>
                 <div className="text-[12px] text-muted-foreground mt-1"><Md>{eq.meaning}</Md></div>
               </div>
@@ -180,7 +184,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
           </h3>
           <div className="space-y-1.5">
             {summary.key_figures_and_tables.map((fig, i) => (
-              <div key={i} className="rounded-lg bg-accent/50 px-3.5 py-2.5">
+              <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
                 <span className="text-[12px] font-semibold">{fig.id}</span>
                 <div className="text-[12px] text-muted-foreground mt-0.5"><Md>{fig.description}</Md></div>
               </div>

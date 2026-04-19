@@ -56,7 +56,9 @@ function DashboardContent() {
   })();
 
   useEffect(() => {
-    api.listPapers().then(setPapers).catch(() => {});
+    api.listPapers()
+      .then(setPapers)
+      .catch(() => setError("Failed to load papers. Please refresh."));
   }, []);
 
   useEffect(() => {
@@ -93,9 +95,21 @@ function DashboardContent() {
 
   if (isMobile) {
     return (
-      <main className="flex-1 flex flex-col items-center px-6 pt-[15vh] pb-12 bg-white min-h-screen">
-        <div className="absolute top-5 right-5">
-          <UserButton />
+      <main className="flex-1 flex flex-col items-center px-6 pt-[15vh] pb-12 bg-mesh min-h-screen">
+        <div className="absolute top-5 right-5 flex items-center gap-3">
+          {tierUser?.tier === "free" && (
+            <a
+              href="/#pricing"
+              className="text-[12px] font-medium bg-gradient-to-r from-violet-500 to-purple-600 text-white px-3.5 py-1.5 rounded-xl shadow-lg shadow-violet-500/20"
+            >
+              Upgrade
+            </a>
+          )}
+          <UserButton>
+            <UserButton.MenuItems>
+              <UserButton.Link label="Settings" labelIcon={<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>} href="/settings" />
+            </UserButton.MenuItems>
+          </UserButton>
         </div>
 
         <div className="max-w-[400px] w-full space-y-10 text-center">
@@ -111,8 +125,8 @@ function DashboardContent() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-gray-200 bg-gray-50/50 py-12 px-6 space-y-4">
-            <div className="w-12 h-12 rounded-xl bg-white border border-gray-100 flex items-center justify-center mx-auto">
+          <div className="glass rounded-2xl py-12 px-6 space-y-4">
+            <div className="w-12 h-12 rounded-xl glass-subtle flex items-center justify-center mx-auto">
               <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" />
               </svg>
@@ -156,9 +170,21 @@ function DashboardContent() {
   }
 
   return (
-    <main className="flex-1 flex flex-col items-center px-6 pt-[10vh] pb-12 bg-white min-h-screen">
-      <div className="absolute top-5 right-5">
-        <UserButton />
+    <main className="flex-1 flex flex-col items-center px-6 pt-[10vh] pb-12 bg-mesh min-h-screen">
+      <div className="absolute top-5 right-5 flex items-center gap-3">
+        {tierUser?.tier === "free" && (
+          <Link
+            href="/#pricing"
+            className="text-[12px] font-medium bg-gradient-to-r from-violet-500 to-purple-600 text-white px-3.5 py-1.5 rounded-xl hover:shadow-lg hover:shadow-violet-500/20 transition-all"
+          >
+            Upgrade
+          </Link>
+        )}
+        <UserButton>
+          <UserButton.MenuItems>
+            <UserButton.Link label="Settings" labelIcon={<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>} href="/settings" />
+          </UserButton.MenuItems>
+        </UserButton>
       </div>
 
       <div className="max-w-[480px] w-full space-y-10">
@@ -180,8 +206,8 @@ function DashboardContent() {
           {...getRootProps()}
           className={`cursor-pointer rounded-2xl border-2 border-dashed transition-all duration-300 ${
             isDragActive
-              ? "border-gray-400 bg-gray-50 scale-[1.01]"
-              : "border-gray-200 hover:border-gray-300 hover:bg-gray-50/50"
+              ? "border-violet-300 bg-violet-50/30 scale-[1.01] shadow-lg shadow-violet-500/5"
+              : "border-white/30 glass-subtle hover:bg-white/60 hover:border-white/40"
           } ${loading ? "opacity-50 pointer-events-none" : ""}`}
         >
           <div className="flex flex-col items-center justify-center py-16 px-6">
@@ -200,7 +226,7 @@ function DashboardContent() {
               <p className="text-[15px] font-medium text-gray-500">Drop here</p>
             ) : (
               <div className="text-center space-y-3">
-                <div className="w-11 h-11 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center mx-auto">
+                <div className="w-11 h-11 rounded-xl glass flex items-center justify-center mx-auto">
                   <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
                   </svg>
@@ -233,12 +259,12 @@ function DashboardContent() {
               </button>
             </div>
 
-            <div className="bg-white rounded-xl border border-gray-100 divide-y divide-gray-50 overflow-hidden">
+            <div className="glass rounded-2xl divide-y divide-white/20 overflow-hidden">
               {papers.slice(0, 3).map((p) => (
                 <button
                   key={p.id}
                   onClick={() => router.push(`/paper/${p.id}`)}
-                  className="w-full text-left px-4 py-3.5 hover:bg-gray-50/70 transition-colors group"
+                  className="w-full text-left px-4 py-3.5 hover:bg-white/40 transition-colors group"
                 >
                   <p className="text-[14px] truncate font-medium text-gray-800 leading-snug group-hover:text-gray-900">{p.title || `paper-${p.id}`}</p>
                   <div className="flex items-center gap-2 mt-1">

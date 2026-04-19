@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -11,6 +12,16 @@ import fitz  # pymupdf
 
 from ..config import settings
 from ..models.schemas import FigureInfo, ParsedPaper
+
+_paper_locks: dict[str, threading.Lock] = {}
+_locks_lock = threading.Lock()
+
+
+def _get_paper_lock(paper_id: str) -> threading.Lock:
+    with _locks_lock:
+        if paper_id not in _paper_locks:
+            _paper_locks[paper_id] = threading.Lock()
+        return _paper_locks[paper_id]
 
 
 @dataclass
@@ -190,7 +201,8 @@ def save_paper(paper: ParsedPaper, user_id: str | None = None) -> None:
     paper_dir = settings.papers_dir / paper.id
     paper_dir.mkdir(parents=True, exist_ok=True)
     meta_path = paper_dir / "paper.json"
-    meta_path.write_text(paper.model_dump_json(indent=2))
+    with _get_paper_lock(paper.id):
+        meta_path.write_text(paper.model_dump_json(indent=2))
 
     if user_id:
         from .db import save_paper_meta
@@ -202,7 +214,8 @@ def get_paper(paper_id: str, user_id: str | None = None) -> ParsedPaper | None:
     meta_path = settings.papers_dir / paper_id / "paper.json"
     if not meta_path.exists():
         return None
-    data = json.loads(meta_path.read_text())
+    with _get_paper_lock(paper_id):
+        data = json.loads(meta_path.read_text())
     paper = ParsedPaper(**data)
 
     if user_id and not paper.cached_analysis:
@@ -229,6 +242,7 @@ def list_papers(user_id: str | None = None) -> list[dict]:
         from .db import list_papers_meta, get_db
         if get_db():
             return list_papers_meta(user_id)
+        raise ValueError("Database unavailable")
 
     results = []
     for paper_dir in settings.papers_dir.iterdir():

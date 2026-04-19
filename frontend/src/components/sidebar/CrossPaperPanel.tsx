@@ -61,7 +61,7 @@ export function CrossPaperPanel() {
         </p>
         <div className="flex flex-wrap gap-1.5 mb-3 px-1">
           {sessionPapers.map((p) => (
-            <span key={p.id} className="text-[10px] px-2 py-1 rounded-full bg-gray-50 border border-gray-100 text-gray-500 truncate max-w-[200px]">
+            <span key={p.id} className="text-[10px] px-2 py-1 rounded-full glass-subtle text-gray-500 truncate max-w-[200px]">
               {p.title.length > 30 ? p.title.slice(0, 30) + "..." : p.title}
             </span>
           ))}
@@ -74,7 +74,7 @@ export function CrossPaperPanel() {
             <button
               key={prompt}
               onClick={() => handleAsk(prompt)}
-              className="text-[11px] px-2.5 py-1.5 rounded-lg bg-gray-50 border border-gray-100 text-gray-500 hover:text-gray-800 hover:bg-gray-100 hover:border-gray-200 transition-all font-medium"
+              className="text-[11px] px-2.5 py-1.5 rounded-xl glass-subtle text-gray-500 hover:text-gray-800 hover:bg-white/60 transition-all font-medium"
             >
               {prompt}
             </button>
@@ -94,7 +94,7 @@ export function CrossPaperPanel() {
         <button
           onClick={() => handleAsk()}
           disabled={!input.trim() || loading}
-          className="w-full text-[12px] font-semibold py-2.5 rounded-lg bg-gray-900 text-white hover:bg-gray-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="w-full text-[12px] font-semibold py-2.5 rounded-xl btn-primary-glass text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {loading ? "Analyzing across papers..." : "Ask"}
         </button>
@@ -128,7 +128,7 @@ export function CrossPaperPanel() {
             </button>
           </div>
           {crossPaperResults.map((r, i) => (
-            <div key={i} className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 space-y-2">
+            <div key={i} className="rounded-2xl glass px-4 py-3 space-y-2">
               <p className="text-[13px] font-medium text-gray-800">{r.question}</p>
               <div className="text-[12px] text-gray-600">
                 <Md>{r.answer}</Md>

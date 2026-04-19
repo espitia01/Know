@@ -11,7 +11,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p /data/papers
+RUN mkdir -p /data/papers && \
+    groupadd -r appuser && useradd -r -g appuser appuser && \
+    chown -R appuser:appuser /data/papers /app
+
+USER appuser
 
 ENV KNOW_PAPERS_DIR=/data/papers
 

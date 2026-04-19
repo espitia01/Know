@@ -128,7 +128,13 @@ export function preprocessLatex(text: string): string {
   let s = text;
 
   s = s.replace(/\\\(/g, "$").replace(/\\\)/g, "$");
-  s = s.replace(/\\\[/g, "$$").replace(/\\\]/g, "$$");
+  s = s.replace(/\\\[/g, "\n$$\n").replace(/\\\]/g, "\n$$\n");
+
+  s = s.replace(/(?<!\n)\$\$(?!\$)/g, (match, offset) => {
+    const before = s[offset - 1];
+    if (before && before !== '\n') return '\n$$';
+    return match;
+  });
 
   const parts: string[] = [];
   let lastIndex = 0;
@@ -146,5 +152,8 @@ export function preprocessLatex(text: string): string {
     parts.push(wrapBareLatex(s.slice(lastIndex)));
   }
 
-  return parts.join("");
+  let result = parts.join("");
+  result = result.replace(/\n{3,}/g, "\n\n");
+
+  return result;
 }

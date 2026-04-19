@@ -40,8 +40,8 @@ async def _trial_cleanup_loop():
                                 shutil.rmtree(p)
                             else:
                                 p.unlink()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        _main_logger.debug("Trial cleanup skip %s: %s", p.name, e)
         except Exception as e:
             _main_logger.warning("Trial cleanup failed: %s", e)
 
@@ -54,6 +54,27 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Know", description="Pedagogical Paper Enhancement Platform", lifespan=lifespan)
+
+MAX_JSON_BODY = 2 * 1024 * 1024  # 2 MB
+
+
+@app.middleware("http")
+async def limit_json_body(request: Request, call_next):
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        body = await request.body()
+        if len(body) > MAX_JSON_BODY:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+    return await call_next(request)
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    _main_logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
 
 allowed_origins = [
     "http://localhost:3000",
@@ -69,10 +90,19 @@ if extra_origins:
 
 _main_logger.info("CORS allowed origins: %s", allowed_origins)
 
+cors_regex = os.environ.get("KNOW_CORS_REGEX", "")
+if cors_regex:
+    import re as _re
+    try:
+        _re.compile(cors_regex)
+    except _re.error as _err:
+        _main_logger.error("Invalid KNOW_CORS_REGEX '%s': %s — ignoring", cors_regex, _err)
+        cors_regex = ""
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_origin_regex=cors_regex or None,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
@@ -113,8 +143,8 @@ async def get_current_user(user_id: str = Depends(require_auth)):
                         cancel_at = sub.current_period_end
                     except Exception:
                         pass
-        except Exception:
-            pass
+        except Exception as e:
+            _main_logger.warning("Stripe sync for user %s failed: %s", user_id, e)
     elif customer_id and tier != "free":
         try:
             import stripe as _stripe
@@ -127,8 +157,12 @@ async def get_current_user(user_id: str = Depends(require_auth)):
                         cancel_at = sub.current_period_end
                     except Exception:
                         pass
-        except Exception:
-            pass
+            else:
+                update_user_tier(user_id, "free")
+                tier = "free"
+                _main_logger.info("User %s demoted to free: no active Stripe subscription", user_id)
+        except Exception as e:
+            _main_logger.warning("Stripe fetch for user %s failed: %s", user_id, e)
 
     return {
         "user_id": user.get("user_id", user_id),
@@ -168,8 +202,13 @@ TRIAL_WINDOW = 3600
 
 
 def _check_trial_rate(request: Request):
-    forwarded = request.headers.get("x-forwarded-for", "")
-    ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+    ip = request.client.host if request.client else "unknown"
+    if ip in ("127.0.0.1", "::1", "unknown"):
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            ip = forwarded.split(",")[0].strip()
+    if not ip or ip == "unknown":
+        raise HTTPException(status_code=429, detail="Cannot determine client IP for rate limiting.")
     from .services.db import get_db
     client = get_db()
     if client:
@@ -190,6 +229,10 @@ def _check_trial_rate(request: Request):
     # Fallback: in-memory (only used when Supabase is not configured)
     now = time.time()
     if ip not in _trial_fallback:
+        if len(_trial_fallback) > 10000:
+            oldest = sorted(_trial_fallback, key=lambda k: _trial_fallback[k][-1] if _trial_fallback[k] else 0)[:5000]
+            for k in oldest:
+                del _trial_fallback[k]
         _trial_fallback[ip] = collections.deque()
     dq = _trial_fallback[ip]
     while dq and dq[0] < now - TRIAL_WINDOW:
@@ -262,7 +305,7 @@ async def trial_upload(request: Request):
         cached_analysis={},
     )
     save_paper(paper)
-    return paper
+    return {"id": paper.id, "title": paper.title, "authors": paper.authors, "figures": [f.model_dump() for f in paper.figures]}
 
 
 @app.post("/api/trial/summary")
@@ -274,7 +317,7 @@ async def trial_summary(request: Request, body: dict):
 
     paper_id = body.get("paper_id", "")
     if not paper_id or not paper_id.startswith("trial_"):
-        raise HTTPException(status_code=403, detail="Trial summary only for trial papers")
+        raise HTTPException(status_code=400, detail="Trial summary only for trial papers")
     from .api.papers import _validate_id
     _validate_id(paper_id, "paper_id")
 
@@ -292,7 +335,7 @@ async def trial_summary(request: Request, body: dict):
         return result
     except ValueError as e:
         _main_logger.error("Trial summary failed: %s", e)
-        raise HTTPException(status_code=500, detail="Summary generation failed. Please try again.")
+        raise HTTPException(status_code=503, detail="Summary generation failed. Please try again.")
 
 
 @app.get("/api/trial/paper/{paper_id}")
@@ -301,7 +344,7 @@ async def trial_get_paper(paper_id: str, request: Request):
     from .api.papers import _validate_id
     _validate_id(paper_id, "paper_id")
     if not paper_id.startswith("trial_"):
-        raise HTTPException(status_code=403, detail="Trial access only for trial papers")
+        raise HTTPException(status_code=400, detail="Trial access only for trial papers")
 
     from .services.pdf_parser import get_paper
     paper = get_paper(paper_id)
@@ -316,7 +359,7 @@ async def trial_get_pdf(paper_id: str, request: Request):
     from .api.papers import _validate_id
     _validate_id(paper_id, "paper_id")
     if not paper_id.startswith("trial_"):
-        raise HTTPException(status_code=403, detail="Trial access only for trial papers")
+        raise HTTPException(status_code=400, detail="Trial access only for trial papers")
 
     pdf_path = settings.papers_dir / f"{paper_id}.pdf"
     if not pdf_path.exists():
@@ -343,21 +386,39 @@ app.include_router(billing_router)
 # Workspace endpoints
 # ----------------------------------------------------------------
 
+def _require_paid_tier(user_id: str) -> str:
+    """Reject free-tier users from workspace and export features."""
+    from .gating import get_user_tier
+    tier = get_user_tier(user_id)
+    if tier == "free":
+        raise HTTPException(status_code=403, detail="Workspaces require a paid plan. Upgrade to save sessions.")
+    return tier
+
+
 @app.get("/api/workspaces")
 async def list_user_workspaces(user_id: str = Depends(require_auth)):
+    _require_paid_tier(user_id)
     from .services.db import list_workspaces
     return list_workspaces(user_id)
 
 
 @app.post("/api/workspaces")
 async def save_user_workspace(body: dict, user_id: str = Depends(require_auth)):
-    from .services.db import save_workspace
+    _require_paid_tier(user_id)
+    from .services.db import save_workspace, get_paper_meta
+    from .api.papers import _validate_id
     ws_name = body.get("name", "Untitled Session")[:100]
+    paper_ids = body.get("paper_ids", [])[:50]
+    validated_ids = []
+    for pid in paper_ids:
+        _validate_id(pid, "paper_id")
+        if get_paper_meta(pid, user_id=user_id):
+            validated_ids.append(pid)
     result = save_workspace(
         user_id=user_id,
         workspace_id=body.get("id"),
         name=ws_name,
-        paper_ids=body.get("paper_ids", [])[:50],
+        paper_ids=validated_ids,
         cross_paper_results=body.get("cross_paper_results", [])[:200],
     )
     if not result:
@@ -367,6 +428,7 @@ async def save_user_workspace(body: dict, user_id: str = Depends(require_auth)):
 
 @app.delete("/api/workspaces/{workspace_id}")
 async def delete_user_workspace(workspace_id: str, user_id: str = Depends(require_auth)):
+    _require_paid_tier(user_id)
     from .services.db import delete_workspace
     delete_workspace(workspace_id, user_id)
     return {"status": "deleted"}
@@ -378,8 +440,10 @@ async def delete_user_workspace(workspace_id: str, user_id: str = Depends(requir
 
 def _escape_bibtex(text: str) -> str:
     """Escape BibTeX special characters."""
-    for ch in ('&', '%', '#', '_', '~', '^'):
+    text = text.replace('\\', '\\textbackslash{}')
+    for ch in ('&', '%', '#', '_', '~', '^', '$'):
         text = text.replace(ch, f'\\{ch}')
+    text = text.replace('{', '\\{').replace('}', '\\}')
     return text
 
 

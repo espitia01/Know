@@ -6,7 +6,7 @@ import { getAuthHeadersSync } from "@/lib/api";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs`;
 
 interface PdfViewerProps {
   url: string;
@@ -29,6 +29,8 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
   const pageHeightRef = useRef(800);
   const retryCount = useRef(0);
 
+  const [retryKey, setRetryKey] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
     setLoadError("");
@@ -50,7 +52,7 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
           if (cancelled) return;
           if (retryCount.current < 3) {
             retryCount.current++;
-            setTimeout(attemptFetch, 1000 * retryCount.current);
+            setTimeout(() => { if (!cancelled) attemptFetch(); }, 1000 * retryCount.current);
           } else {
             setLoadError(e.message || "Failed to load PDF");
           }
@@ -59,7 +61,7 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
 
     attemptFetch();
     return () => { cancelled = true; };
-  }, [url]);
+  }, [url, retryKey]);
 
   const fileData = useMemo(() => {
     if (!pdfData) return null;
@@ -112,10 +114,11 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
   }, [updateVisibleRange]);
 
   const handlePageRender = useCallback((pageNum: number) => {
-    if (pageNum === 1) {
-      const el = containerRef.current?.querySelector(`[data-page-number="1"]`);
-      if (el) {
-        pageHeightRef.current = el.getBoundingClientRect().height;
+    const el = containerRef.current?.querySelector(`[data-page-number="${pageNum}"]`);
+    if (el) {
+      const h = el.getBoundingClientRect().height;
+      if (Math.abs(h - pageHeightRef.current) > 2) {
+        pageHeightRef.current = h;
         updateVisibleRange();
       }
     }
@@ -123,7 +126,7 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
 
   const handleMouseUp = useCallback(() => {
     const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !sel.toString().trim()) {
       onSelectionClear?.();
       return;
     }
@@ -176,36 +179,37 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
     }
   };
 
-  const estimatedPageHeight = pageHeightRef.current + PAGE_GAP;
-
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b bg-accent/30">
+      <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-white/20 glass-subtle">
         <div className="flex items-center gap-1">
           <button
             onClick={zoomOut}
-            className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors text-[15px]"
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/50 transition-all text-[15px]"
             title="Zoom out"
+            aria-label="Zoom out"
           >
             −
           </button>
           <button
             onClick={zoomReset}
-            className="h-7 px-2 flex items-center justify-center rounded-md text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent transition-colors font-mono"
+            className="h-7 px-2 flex items-center justify-center rounded-lg text-[11px] text-muted-foreground hover:text-foreground hover:bg-white/50 transition-all font-mono"
+            aria-label={`Reset zoom (currently ${Math.round(scale * 100)}%)`}
           >
             {Math.round(scale * 100)}%
           </button>
           <button
             onClick={zoomIn}
-            className="w-7 h-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors text-[15px]"
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/50 transition-all text-[15px]"
             title="Zoom in"
+            aria-label="Zoom in"
           >
             +
           </button>
         </div>
 
-        <div className="h-4 w-px bg-border" />
+        <div className="h-4 w-px bg-white/20" />
 
         {numPages > 0 && (
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -214,7 +218,7 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
               onChange={(e) => setPageInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handlePageInputSubmit()}
               onBlur={handlePageInputSubmit}
-              className="w-10 h-6 text-center rounded border bg-background text-[11px]"
+              className="w-10 h-6 text-center rounded-lg border border-white/20 bg-white/40 text-[11px] backdrop-blur-sm"
             />
             <span>/ {numPages}</span>
           </div>
@@ -238,8 +242,8 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
             <div className="text-center space-y-3">
               <p className="text-[13px] text-destructive">Failed to load PDF: {loadError}</p>
               <button
-                onClick={() => { setLoadError(""); retryCount.current = 0; setPdfData(null); }}
-                className="text-[12px] font-medium text-gray-500 hover:text-gray-900 transition-colors px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50"
+                onClick={() => { setLoadError(""); retryCount.current = 0; setRetryKey((k) => k + 1); }}
+                className="text-[12px] font-medium text-gray-500 hover:text-gray-900 transition-all px-3 py-1.5 rounded-xl glass hover:bg-white/60"
               >
                 Retry
               </button>

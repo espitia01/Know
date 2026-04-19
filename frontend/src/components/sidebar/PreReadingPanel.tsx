@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
@@ -35,16 +35,23 @@ interface PreReadingPanelProps {
 
 export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
   const { preReading, setPreReading, preReadingLoading, setPreReadingLoading } = useStore();
+  const currentPaperRef = useRef(paperId);
+  currentPaperRef.current = paperId;
 
   const handleAnalyze = async () => {
+    const targetId = paperId;
     setPreReadingLoading(true);
     try {
-      const result = await api.analyze(paperId);
-      setPreReading(result);
+      const result = await api.analyze(targetId);
+      if (currentPaperRef.current === targetId) {
+        setPreReading(result);
+      }
     } catch (e) {
       console.error("Analysis failed:", e);
     } finally {
-      setPreReadingLoading(false);
+      if (currentPaperRef.current === targetId) {
+        setPreReadingLoading(false);
+      }
     }
   };
 
@@ -83,7 +90,7 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
             <AccordionContent>
               <div className="space-y-1.5 pb-2">
                 {definitions.map((d, i) => (
-                  <div key={i} className="rounded-lg bg-accent/50 px-3.5 py-2.5">
+                  <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
                     <p className="font-medium text-[13px] mb-0.5">{d.term}</p>
                     <div className="text-[12px] text-muted-foreground"><Md>{d.definition}</Md></div>
                     {d.source && <p className="text-[11px] text-muted-foreground/50 mt-1">Source: {d.source}</p>}
@@ -102,7 +109,7 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
             <AccordionContent>
               <div className="space-y-1.5 pb-2">
                 {research_questions.map((q, i) => (
-                  <div key={i} className="rounded-lg bg-accent/50 px-3.5 py-2.5">
+                  <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
                     <div className="text-[13px]"><Md>{q.question}</Md></div>
                     {q.context && <div className="text-[11px] text-muted-foreground/70 mt-1"><Md>{q.context}</Md></div>}
                   </div>
@@ -120,7 +127,7 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
             <AccordionContent>
               <div className="space-y-1.5 pb-2">
                 {concepts.map((c, i) => (
-                  <div key={i} className="rounded-lg bg-accent/50 px-3.5 py-2.5">
+                  <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
                     <p className="font-medium text-[13px] mb-0.5">{c.name}</p>
                     <div className="text-[12px] text-muted-foreground"><Md>{c.description}</Md></div>
                     {c.importance && <div className="text-[11px] text-muted-foreground/50 mt-1 italic"><Md>{c.importance}</Md></div>}
@@ -139,7 +146,7 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
             <AccordionContent>
               <div className="space-y-1.5 pb-2">
                 {prior_work.map((p, i) => (
-                  <div key={i} className="rounded-lg bg-accent/50 px-3.5 py-2.5">
+                  <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
                     <p className="font-medium text-[13px] mb-0.5">{p.title}</p>
                     <div className="text-[12px] text-muted-foreground"><Md>{p.relevance}</Md></div>
                   </div>
