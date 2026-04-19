@@ -510,6 +510,8 @@ function PaperContent() {
 
   const handleOpenWorkspaceMenu = useCallback(async () => {
     const opening = !showWorkspaceMenu;
+    setShowAddPaper(false);
+    setShowFolderPicker(false);
     setShowWorkspaceMenu((v) => !v);
     if (opening) {
       try {
@@ -849,7 +851,7 @@ function PaperContent() {
         {!isFree && (
         <div className="relative shrink-0" data-dropdown>
           <button
-            onClick={() => setShowAddPaper(!showAddPaper)}
+            onClick={() => { setShowFolderPicker(false); setShowWorkspaceMenu(false); setShowAddPaper(!showAddPaper); }}
             className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
             title="Add paper to session"
           >
@@ -871,7 +873,7 @@ function PaperContent() {
         {/* Folder assignment */}
         <div className="relative shrink-0" data-dropdown>
           <button
-            onClick={() => setShowFolderPicker(!showFolderPicker)}
+            onClick={() => { setShowAddPaper(false); setShowWorkspaceMenu(false); setShowFolderPicker(!showFolderPicker); }}
             className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
             title="Assign to folder"
           >

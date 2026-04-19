@@ -39,7 +39,7 @@ async function authHeaders(): Promise<Record<string, string>> {
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = await authHeaders();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120_000);
+  const timeout = setTimeout(() => controller.abort(), 180_000);
   try {
     const res = await fetch(`${API_BASE}${path}`, {
       ...options,

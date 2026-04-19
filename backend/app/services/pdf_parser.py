@@ -210,22 +210,45 @@ def save_paper(paper: ParsedPaper, user_id: str | None = None) -> None:
 
 
 def get_paper(paper_id: str, user_id: str | None = None) -> ParsedPaper | None:
-    """Load a previously parsed paper by ID (from disk, with Supabase cache fallback)."""
+    """Load a previously parsed paper by ID (from disk, with Supabase fallback)."""
     meta_path = settings.papers_dir / paper_id / "paper.json"
-    if not meta_path.exists():
-        return None
-    with _get_paper_lock(paper_id):
-        data = json.loads(meta_path.read_text())
-    paper = ParsedPaper(**data)
 
-    if user_id and not paper.cached_analysis:
-        from .db import get_cached_analysis
-        supabase_cache = get_cached_analysis(paper_id, user_id)
-        if supabase_cache:
-            paper.cached_analysis = supabase_cache
-            meta_path.write_text(paper.model_dump_json(indent=2))
+    if meta_path.exists():
+        with _get_paper_lock(paper_id):
+            data = json.loads(meta_path.read_text())
+        paper = ParsedPaper(**data)
 
-    return paper
+        if user_id and not paper.cached_analysis:
+            from .db import get_cached_analysis
+            supabase_cache = get_cached_analysis(paper_id, user_id)
+            if supabase_cache:
+                paper.cached_analysis = supabase_cache
+                meta_path.write_text(paper.model_dump_json(indent=2))
+
+        return paper
+
+    if user_id:
+        from .db import get_paper_meta
+        row = get_paper_meta(paper_id, user_id)
+        if row:
+            paper = ParsedPaper(
+                id=row["id"],
+                title=row.get("title", ""),
+                authors=row.get("authors", []),
+                raw_text=row.get("raw_text", ""),
+                figures=[],
+                folder=row.get("folder", ""),
+                tags=row.get("tags", []),
+                notes=row.get("notes", []),
+                cached_analysis=row.get("cached_analysis", {}),
+            )
+            paper_dir = settings.papers_dir / paper_id
+            paper_dir.mkdir(parents=True, exist_ok=True)
+            with _get_paper_lock(paper_id):
+                meta_path.write_text(paper.model_dump_json(indent=2))
+            return paper
+
+    return None
 
 
 def get_figure_path(paper_id: str, fig_id: str) -> Path | None:

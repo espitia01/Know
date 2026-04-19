@@ -316,6 +316,8 @@ async def summary(paper_id: str, user_id: str = Depends(require_auth)):
 
     try:
         result = await summarize_paper(paper.raw_text, user_id=user_id)
+        if not result or not result.get("overview"):
+            raise HTTPException(status_code=502, detail="Summary generation returned empty results. Please retry.")
         paper.cached_analysis["summary"] = result
         save_paper(paper, user_id=user_id)
         track_usage(user_id, paper_id, "api_call")

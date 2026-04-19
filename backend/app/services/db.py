@@ -156,8 +156,16 @@ def save_paper_meta(paper_dict: dict, user_id: str) -> None:
         "tags": paper_dict.get("tags", []),
         "notes": paper_dict.get("notes", []),
         "cached_analysis": paper_dict.get("cached_analysis", {}),
+        "raw_text": paper_dict.get("raw_text", ""),
     }
-    client.table("papers").upsert(row, on_conflict="id").execute()
+    try:
+        client.table("papers").upsert(row, on_conflict="id").execute()
+    except Exception:
+        row.pop("raw_text", None)
+        try:
+            client.table("papers").upsert(row, on_conflict="id").execute()
+        except Exception as e:
+            logger.error("save_paper_meta failed: %s", e)
 
 
 def get_paper_meta(paper_id: str, user_id: str | None = None) -> dict | None:

@@ -13,6 +13,7 @@ from ..config import settings
 from ..models.schemas import ParsedPaper
 from ..services.pdf_parser import extract_pdf, extract_figures, get_figure_path, get_paper, list_papers, save_paper
 from ..services.llm import extract_metadata
+from ..services import storage as cloud_storage
 from ..auth import require_auth
 from ..gating import check_paper_limit, check_feature_access
 
@@ -93,6 +94,20 @@ async def upload_paper(request: Request, user_id: str = Depends(require_auth)):
         )
 
         save_paper(paper, user_id=user_id)
+
+        # Persist PDF and figures to Supabase Storage
+        cloud_storage.upload_file(user_id, f"{paper_id}.pdf", content, "application/pdf")
+        figures_dir = settings.papers_dir / paper_id / "figures"
+        if figures_dir.exists():
+            for fig_file in figures_dir.iterdir():
+                if fig_file.suffix == ".png":
+                    cloud_storage.upload_file(
+                        user_id,
+                        f"{paper_id}/figures/{fig_file.name}",
+                        fig_file.read_bytes(),
+                        "image/png",
+                    )
+
         _paper_count_incremented = False
         return paper
     except Exception:
@@ -129,10 +144,19 @@ async def get_paper_pdf(paper_id: str, user_id: str = Depends(require_auth)):
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
     pdf_path = settings.papers_dir / f"{paper_id}.pdf"
-    if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail="PDF not found")
-    return FileResponse(str(pdf_path), media_type="application/pdf",
+
+    if pdf_path.exists():
+        return FileResponse(str(pdf_path), media_type="application/pdf",
+                            headers={"Content-Disposition": f"inline; filename={paper_id}.pdf"})
+
+    pdf_bytes = cloud_storage.download_file(user_id, f"{paper_id}.pdf")
+    if pdf_bytes:
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.write_bytes(pdf_bytes)
+        return Response(content=pdf_bytes, media_type="application/pdf",
                         headers={"Content-Disposition": f"inline; filename={paper_id}.pdf"})
+
+    raise HTTPException(status_code=404, detail="PDF not found")
 
 
 @router.get("/{paper_id}/figures/{fig_id}")
@@ -140,10 +164,19 @@ async def get_figure(paper_id: str, fig_id: str, user_id: str = Depends(require_
     _validate_id(paper_id, "paper_id")
     _validate_id(fig_id, "fig_id")
     _verify_paper_owner(paper_id, user_id)
+
     fig_path = get_figure_path(paper_id, fig_id)
-    if not fig_path:
-        raise HTTPException(status_code=404, detail="Figure not found")
-    return FileResponse(str(fig_path), media_type="image/png")
+    if fig_path:
+        return FileResponse(str(fig_path), media_type="image/png")
+
+    fig_bytes = cloud_storage.download_file(user_id, f"{paper_id}/figures/{fig_id}.png")
+    if fig_bytes:
+        local_dir = settings.papers_dir / paper_id / "figures"
+        local_dir.mkdir(parents=True, exist_ok=True)
+        (local_dir / f"{fig_id}.png").write_bytes(fig_bytes)
+        return Response(content=fig_bytes, media_type="image/png")
+
+    raise HTTPException(status_code=404, detail="Figure not found")
 
 
 @router.delete("/{paper_id}")
@@ -156,6 +189,8 @@ async def delete_paper(paper_id: str, user_id: str = Depends(require_auth)):
     if paper_dir.exists():
         shutil.rmtree(paper_dir)
     pdf_path.unlink(missing_ok=True)
+
+    cloud_storage.delete_paper_files(user_id, paper_id)
 
     from ..services.db import delete_paper_meta, increment_paper_count
     delete_paper_meta(paper_id, user_id)
@@ -259,7 +294,11 @@ async def reextract_figures(paper_id: str, user_id: str = Depends(require_auth))
 
     pdf_path = settings.papers_dir / f"{paper_id}.pdf"
     if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail="PDF not found")
+        pdf_bytes = cloud_storage.download_file(user_id, f"{paper_id}.pdf")
+        if not pdf_bytes:
+            raise HTTPException(status_code=404, detail="PDF not found")
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.write_bytes(pdf_bytes)
 
     paper_dir = settings.papers_dir / paper_id
     old_figs = paper_dir / "figures"
@@ -269,6 +308,16 @@ async def reextract_figures(paper_id: str, user_id: str = Depends(require_auth))
     doc = fitz_mod.open(str(pdf_path))
     figures = extract_figures(doc, paper_dir)
     doc.close()
+
+    for fig in figures:
+        fig_file = paper_dir / "figures" / f"{fig.id}.png"
+        if fig_file.exists():
+            cloud_storage.upload_file(
+                user_id,
+                f"{paper_id}/figures/{fig_file.name}",
+                fig_file.read_bytes(),
+                "image/png",
+            )
 
     paper.figures = figures
     save_paper(paper, user_id=user_id)

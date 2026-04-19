@@ -45,13 +45,16 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     fetchAttempted.current = paperId;
     setFetchError(false);
     setSummaryLoading(true);
-    let stale = false;
+    const targetId = paperId;
     api
-      .getSummary(paperId)
-      .then((r) => { if (!stale) setSummary(r); })
-      .catch(() => { if (!stale) setFetchError(true); })
-      .finally(() => { if (!stale) setSummaryLoading(false); });
-    return () => { stale = true; };
+      .getSummary(targetId)
+      .then((r) => {
+        if (useStore.getState().paper?.id === targetId) setSummary(r);
+      })
+      .catch(() => {
+        if (useStore.getState().paper?.id === targetId) setFetchError(true);
+      })
+      .finally(() => setSummaryLoading(false));
   }, [paperId, summary, paper, setSummary, setSummaryLoading]);
 
   if (summaryLoading) {
@@ -78,9 +81,9 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
             const targetId = paperId;
             api
               .getSummary(targetId)
-              .then((r) => { if (paper?.id === targetId) setSummary(r); })
-              .catch(() => { if (paper?.id === targetId) setFetchError(true); })
-              .finally(() => { if (paper?.id === targetId) setSummaryLoading(false); });
+              .then((r) => { if (useStore.getState().paper?.id === targetId) setSummary(r); })
+              .catch(() => { if (useStore.getState().paper?.id === targetId) setFetchError(true); })
+              .finally(() => setSummaryLoading(false));
           }}
           className="mt-2 text-[12px] font-medium text-foreground hover:opacity-80 transition-opacity"
         >

@@ -291,10 +291,11 @@ def _normalize_latex_delimiters(obj):
     """Convert \\( \\) to $ and \\[ \\] to $$ in all string values for remark-math compatibility."""
     if isinstance(obj, str):
         s = obj
-        s = re.sub(r'\\\[', '$$', s)
-        s = re.sub(r'\\\]', '$$', s)
+        s = re.sub(r'\\\[', '\n$$\n', s)
+        s = re.sub(r'\\\]', '\n$$\n', s)
         s = re.sub(r'\\\(', '$', s)
         s = re.sub(r'\\\)', '$', s)
+        s = re.sub(r'\n{3,}', '\n\n', s)
         return s
     if isinstance(obj, dict):
         return {k: _normalize_latex_delimiters(v) for k, v in obj.items()}
@@ -720,11 +721,11 @@ Structure your summary with ALL of the following sections:
 10. **key_figures_and_tables**: Array of descriptions of the most important figures/tables: {{"id": "Fig. 1", "description": "what it shows and why it matters"}}.
 
 Paper content:
-{paper_text[:20000]}
+{paper_text[:12000]}
 
 Return JSON with all the above fields."""
 
-    raw = await provider.complete(system, user, max_tokens=12000)
+    raw = await provider.complete(system, user, max_tokens=6000)
     return _safe_parse_json(raw)
 
 

@@ -6,7 +6,7 @@ import { getAuthHeadersSync } from "@/lib/api";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 
-pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs`;
 
 interface PdfViewerProps {
   url: string;
@@ -82,8 +82,15 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
   }, []);
 
   const onDocumentLoadError = useCallback((error: Error) => {
-    console.error("PDF render error:", error.message);
-    setLoadError(error.message || "Failed to render PDF");
+    const msg = error?.message || "Unknown error";
+    console.error("PDF render error:", msg, error);
+    if (msg.includes("worker") || msg.includes("Worker")) {
+      setLoadError("PDF worker failed to load. Please refresh the page.");
+    } else if (msg.includes("Invalid PDF") || msg.includes("password")) {
+      setLoadError("This PDF file appears to be corrupted or password-protected.");
+    } else {
+      setLoadError(msg || "Failed to render PDF");
+    }
     setPdfData(null);
   }, []);
 

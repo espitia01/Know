@@ -130,11 +130,8 @@ export function preprocessLatex(text: string): string {
   s = s.replace(/\\\(/g, "$").replace(/\\\)/g, "$");
   s = s.replace(/\\\[/g, "\n$$\n").replace(/\\\]/g, "\n$$\n");
 
-  s = s.replace(/(?<!\n)\$\$(?!\$)/g, (match, offset) => {
-    const before = s[offset - 1];
-    if (before && before !== '\n') return '\n$$';
-    return match;
-  });
+  s = s.replace(/(?<!\n)\$\$(?!\$)/g, '\n$$');
+  s = s.replace(/\$\$(?!\n)/g, '$$\n');
 
   const parts: string[] = [];
   let lastIndex = 0;
