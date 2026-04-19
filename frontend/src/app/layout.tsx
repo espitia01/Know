@@ -46,11 +46,6 @@ export default function RootLayout({
       <html lang="en" className={`h-full scroll-smooth ${inter.variable} ${sourceSerif.variable}`}>
         <head>
           <meta name="theme-color" content="#f8f7ff" />
-          <link rel="icon" href="/favicon.ico" sizes="any" />
-          <link rel="icon" href="/favicon-16x16.png" type="image/png" sizes="16x16" />
-          <link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32" />
-          <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180" />
-          <link rel="manifest" href="/site.webmanifest" />
         </head>
         <body className="min-h-full flex flex-col antialiased">
           <ClerkTokenProvider>{children}</ClerkTokenProvider>

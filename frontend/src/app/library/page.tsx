@@ -44,6 +44,9 @@ function LibraryContent() {
   const [workspacesFetched, setWorkspacesFetched] = useState(false);
   const [deleteWsConfirm, setDeleteWsConfirm] = useState<string | null>(null);
   const { addSessionPaper, clearSession, addCrossPaperResults, clearCrossPaperResults } = useStore();
+  const [selectedPapers, setSelectedPapers] = useState<Set<string>>(new Set());
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
     api.listPapers()
@@ -123,7 +126,7 @@ function LibraryContent() {
   const visiblePapers = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
   const hasMore = visibleCount < filtered.length;
 
-  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [filtered]);
+  useEffect(() => { setVisibleCount(PAGE_SIZE); setSelectedPapers(new Set()); }, [filtered]);
 
   const handleDelete = useCallback(async (id: string) => {
     try {
@@ -171,6 +174,34 @@ function LibraryContent() {
 
   const folderCount = (folder: string) =>
     papers.filter((p) => p.folder === folder).length;
+
+  const toggleSelectPaper = useCallback((id: string) => {
+    setSelectedPapers((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    if (selectedPapers.size === filtered.length) {
+      setSelectedPapers(new Set());
+    } else {
+      setSelectedPapers(new Set(filtered.map((p) => p.id)));
+    }
+  }, [selectedPapers.size, filtered]);
+
+  const handleBulkDelete = useCallback(async () => {
+    setBulkDeleting(true);
+    const ids = [...selectedPapers];
+    for (const id of ids) {
+      try { await api.deletePaper(id); } catch { /* continue */ }
+    }
+    setPapers((prev) => prev.filter((p) => !selectedPapers.has(p.id)));
+    setSelectedPapers(new Set());
+    setBulkDeleteConfirm(false);
+    setBulkDeleting(false);
+  }, [selectedPapers]);
 
   const [bibtexModal, setBibtexModal] = useState<{
     open: boolean;
@@ -524,6 +555,59 @@ function LibraryContent() {
 
         {/* Paper list */}
         <div className="flex-1 overflow-y-auto p-6">
+          {/* Selection toolbar */}
+          {selectedPapers.size > 0 && (
+            <div className="flex items-center gap-3 mb-4 px-4 py-2.5 rounded-xl glass-strong animate-fade-in">
+              <span className="text-[12px] font-semibold text-gray-700">
+                {selectedPapers.size} selected
+              </span>
+              <div className="h-4 w-px bg-gray-200" />
+              {!bulkDeleteConfirm ? (
+                <>
+                  <button
+                    onClick={() => setBulkDeleteConfirm(true)}
+                    className="text-[11px] font-medium text-red-500 hover:text-red-700 transition-colors px-2 py-1 rounded-md hover:bg-red-50"
+                  >
+                    Delete
+                  </button>
+                  {!isFree && (
+                    <button
+                      onClick={() => handleExportBibtex({ paper_ids: [...selectedPapers] }, `${selectedPapers.size} selected papers`)}
+                      className="text-[11px] font-medium text-gray-600 hover:text-gray-900 transition-colors px-2 py-1 rounded-md hover:bg-gray-50"
+                    >
+                      Export Citations
+                    </button>
+                  )}
+                  <div className="flex-1" />
+                  <button
+                    onClick={() => setSelectedPapers(new Set())}
+                    className="text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    Clear
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-[11px] text-red-600">
+                    Delete {selectedPapers.size} paper{selectedPapers.size > 1 ? "s" : ""}?
+                  </span>
+                  <button
+                    onClick={handleBulkDelete}
+                    disabled={bulkDeleting}
+                    className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
+                  >
+                    {bulkDeleting ? "Deleting..." : "Confirm"}
+                  </button>
+                  <button
+                    onClick={() => setBulkDeleteConfirm(false)}
+                    className="text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </>
+              )}
+            </div>
+          )}
           {fetchError ? (
             <div className="flex items-center justify-center h-full">
               <div className="text-center space-y-3">
@@ -536,26 +620,76 @@ function LibraryContent() {
               <div className="text-center space-y-3">
                 <FolderIcon className="w-10 h-10 mx-auto text-gray-200" />
                 <p className="text-[14px] text-gray-500">
-                  {activeFolder !== null ? "No papers in this folder." : "No papers found."}
+                  {papers.length === 0
+                    ? "Your library is empty."
+                    : activeFolder !== null
+                      ? "No papers in this folder."
+                      : "No papers match your search."
+                  }
                 </p>
                 <button
                   onClick={() => router.push("/dashboard")}
                   className="text-[13px] text-gray-500 hover:text-gray-900 transition-colors font-medium"
                 >
-                  Upload a paper &rarr;
+                  {papers.length === 0 ? "Upload your first paper \u2192" : "Upload a paper \u2192"}
                 </button>
               </div>
             </div>
           ) : (
             <div className="space-y-1">
+              {/* Select all header */}
+              <div className="flex items-center gap-3 px-4 py-2 border-b border-black/[0.04] mb-1">
+                <button
+                  onClick={toggleSelectAll}
+                  className={`w-4 h-4 rounded border-[1.5px] flex items-center justify-center transition-all shrink-0 ${
+                    selectedPapers.size === filtered.length && filtered.length > 0
+                      ? "bg-gray-800 border-gray-800"
+                      : selectedPapers.size > 0
+                        ? "bg-gray-400 border-gray-400"
+                        : "border-gray-300 hover:border-gray-400"
+                  }`}
+                >
+                  {selectedPapers.size > 0 && (
+                    <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      {selectedPapers.size === filtered.length
+                        ? <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                        : <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" />
+                      }
+                    </svg>
+                  )}
+                </button>
+                <span className="text-[11px] text-gray-400 font-medium">
+                  {selectedPapers.size === filtered.length && filtered.length > 0
+                    ? "Deselect all"
+                    : `Select all (${filtered.length})`
+                  }
+                </span>
+              </div>
               {visiblePapers.map((p) => (
                 <div
                   key={p.id}
                   draggable
                   onDragStart={(e) => onPaperDragStart(e, p.id)}
                   onDragEnd={onPaperDragEnd}
-                  className="group flex items-start gap-3 px-4 py-4 rounded-2xl hover:bg-white/50 transition-all duration-200 cursor-grab active:cursor-grabbing"
+                  className={`group flex items-start gap-3 px-4 py-4 rounded-2xl hover:bg-white/50 transition-all duration-200 cursor-grab active:cursor-grabbing ${
+                    selectedPapers.has(p.id) ? "bg-white/60 ring-1 ring-gray-200" : ""
+                  }`}
                 >
+                  <button
+                    onClick={(e) => { e.stopPropagation(); toggleSelectPaper(p.id); }}
+                    className={`shrink-0 mt-1.5 w-4 h-4 rounded border-[1.5px] flex items-center justify-center transition-all ${
+                      selectedPapers.has(p.id)
+                        ? "bg-gray-800 border-gray-800"
+                        : "border-gray-300 hover:border-gray-400"
+                    }`}
+                  >
+                    {selectedPapers.has(p.id) && (
+                      <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    )}
+                  </button>
+
                   <div className="shrink-0 mt-2 text-gray-200 group-hover:text-gray-400 transition-colors">
                     <svg className="w-3 h-3" viewBox="0 0 6 10" fill="currentColor">
                       <circle cx="1" cy="1" r="1" />
