@@ -762,7 +762,7 @@ function PaperContent() {
             </span>
             <span className="text-gray-200">|</span>
             <span title={`${paperUsage.selections_used} of ${paperUsage.selections_limit} selections used on this paper`}>
-              Sel {paperUsage.selections_used}/{paperUsage.selections_limit}
+              Selections {paperUsage.selections_used}/{paperUsage.selections_limit}
             </span>
           </div>
         )}
