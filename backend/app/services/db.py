@@ -235,7 +235,7 @@ def delete_paper_meta(paper_id: str, user_id: str) -> None:
 # ----------------------------------------------------------------
 
 def record_usage(user_id: str, paper_id: str, action: str) -> int:
-    """Atomically record a usage event and return today's total for this action+paper."""
+    """Record a usage event and return today's total for this action+paper."""
     client = get_db()
     if not client:
         return 0
@@ -243,18 +243,6 @@ def record_usage(user_id: str, paper_id: str, action: str) -> int:
     from datetime import timezone, datetime
 
     today_str = datetime.now(timezone.utc).date().isoformat()
-
-    try:
-        res = client.rpc("increment_usage", {
-            "p_user_id": user_id,
-            "p_paper_id": paper_id,
-            "p_action": action,
-            "p_date": today_str,
-        }).execute()
-        if res and res.data is not None:
-            return int(res.data)
-    except Exception as e:
-        logger.warning("increment_usage RPC failed, using fallback: %s", e)
 
     existing = _safe_single(
         client.table("usage")
@@ -275,15 +263,15 @@ def record_usage(user_id: str, paper_id: str, action: str) -> int:
         return new_count
     else:
         try:
-            client.table("usage").upsert({
+            client.table("usage").insert({
                 "user_id": user_id,
                 "paper_id": paper_id,
                 "action": action,
                 "count": 1,
                 "date": today_str,
-            }, on_conflict="user_id,paper_id,action,date").execute()
+            }).execute()
         except Exception as e:
-            logger.warning("Usage upsert failed: %s", e)
+            logger.warning("Usage insert failed: %s", e)
         return 1
 
 

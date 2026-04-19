@@ -11,3 +11,4 @@ build/
 .DS_Store
 .vercel/
 .turbo/
+frontend/package-lock 2.json

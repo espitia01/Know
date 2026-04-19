@@ -304,6 +304,21 @@ function PaperContent() {
     setFolderInput("");
   }, [folderInput, paper, setPaper, allFolders]);
 
+  // Close dropdowns on outside click
+  useEffect(() => {
+    if (!showAddPaper && !showFolderPicker && !showWorkspaceMenu) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-dropdown]")) {
+        setShowAddPaper(false);
+        setShowFolderPicker(false);
+        setShowWorkspaceMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showAddPaper, showFolderPicker, showWorkspaceMenu]);
+
   // Save cache on unmount (navigating away from paper page entirely)
   useEffect(() => {
     const saveOnUnload = () => {
@@ -832,7 +847,7 @@ function PaperContent() {
 
         {/* Add paper button */}
         {!isFree && (
-        <div className="relative shrink-0">
+        <div className="relative shrink-0" data-dropdown>
           <button
             onClick={() => setShowAddPaper(!showAddPaper)}
             className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
@@ -854,7 +869,7 @@ function PaperContent() {
         )}
 
         {/* Folder assignment */}
-        <div className="relative shrink-0">
+        <div className="relative shrink-0" data-dropdown>
           <button
             onClick={() => setShowFolderPicker(!showFolderPicker)}
             className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
@@ -924,7 +939,7 @@ function PaperContent() {
 
         {/* Workspace save/load */}
         {!isFree && (
-        <div className="relative shrink-0">
+        <div className="relative shrink-0" data-dropdown>
           <button
             onClick={handleOpenWorkspaceMenu}
             className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"

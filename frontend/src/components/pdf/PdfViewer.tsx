@@ -6,7 +6,7 @@ import { getAuthHeadersSync } from "@/lib/api";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 
-pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 interface PdfViewerProps {
   url: string;
@@ -49,7 +49,12 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
           return r.arrayBuffer();
         })
         .then((buf) => {
-          if (!cancelled) setPdfData(buf);
+          if (!cancelled) {
+            if (buf.byteLength < 100) {
+              throw new Error("PDF_NOT_FOUND");
+            }
+            setPdfData(buf);
+          }
         })
         .catch((e) => {
           if (cancelled) return;
@@ -74,6 +79,12 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
   const onDocumentLoadSuccess = useCallback(({ numPages: n }: { numPages: number }) => {
     setNumPages(n);
     setVisibleRange({ start: 1, end: Math.min(n, 1 + BUFFER_PAGES * 2) });
+  }, []);
+
+  const onDocumentLoadError = useCallback((error: Error) => {
+    console.error("PDF render error:", error.message);
+    setLoadError(error.message || "Failed to render PDF");
+    setPdfData(null);
   }, []);
 
   const updateVisibleRange = useCallback(() => {
@@ -272,6 +283,7 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
           <Document
             file={fileData}
             onLoadSuccess={onDocumentLoadSuccess}
+            onLoadError={onDocumentLoadError}
             loading={
               <div className="flex items-center justify-center h-64">
                 <div className="text-center space-y-3">
