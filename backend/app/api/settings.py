@@ -33,8 +33,10 @@ def _save_user_model_prefs(user_id: str, analysis_model: str | None = None, fast
     if updates:
         try:
             client.table("users").update(updates).eq("user_id", user_id).execute()
-        except Exception:
-            pass
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error("Failed to save model prefs for %s: %s", user_id, exc)
+            raise
 
 
 @router.get("", response_model=SettingsResponse)
@@ -53,21 +55,29 @@ async def get_settings(user_id: str = Depends(require_auth)):
 async def update_settings(update: SettingsUpdate, user_id: str = Depends(require_auth)):
     allowed = get_allowed_models(user_id)
 
-    if update.analysis_model is not None:
-        if update.analysis_model not in allowed:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Model '{update.analysis_model}' is not available on your plan. Allowed: {', '.join(allowed)}",
-            )
-        _save_user_model_prefs(user_id, analysis_model=update.analysis_model)
+    try:
+        if update.analysis_model is not None:
+            if update.analysis_model not in allowed:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Model '{update.analysis_model}' is not available on your plan. Allowed: {', '.join(allowed)}",
+                )
+            _save_user_model_prefs(user_id, analysis_model=update.analysis_model)
 
-    if update.fast_model is not None:
-        if update.fast_model not in allowed:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Model '{update.fast_model}' is not available on your plan. Allowed: {', '.join(allowed)}",
-            )
-        _save_user_model_prefs(user_id, fast_model=update.fast_model)
+        if update.fast_model is not None:
+            if update.fast_model not in allowed:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Model '{update.fast_model}' is not available on your plan. Allowed: {', '.join(allowed)}",
+                )
+            _save_user_model_prefs(user_id, fast_model=update.fast_model)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save model preferences. The 'analysis_model' and 'fast_model' columns may need to be added to the users table. Error: {exc}",
+        )
 
     analysis, fast = _get_user_model_prefs(user_id)
     return SettingsResponse(
