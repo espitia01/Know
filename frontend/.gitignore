@@ -42,3 +42,6 @@ next-env.d.ts
 
 # clerk configuration (can include secrets)
 /.clerk/
+
+# generated at postinstall from node_modules
+/public/pdf.worker.min.mjs
