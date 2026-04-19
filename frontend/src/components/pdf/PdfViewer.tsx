@@ -46,10 +46,6 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
             if (r.status === 404) throw new Error("PDF_NOT_FOUND");
             throw new Error(`HTTP ${r.status}`);
           }
-          const ct = r.headers.get("content-type") || "";
-          if (!ct.includes("pdf") && !ct.includes("octet-stream")) {
-            throw new Error("PDF_NOT_FOUND");
-          }
           return r.arrayBuffer();
         })
         .then((buf) => {

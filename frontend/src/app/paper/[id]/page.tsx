@@ -795,7 +795,7 @@ function PaperContent() {
     <>
     <div className="flex flex-col h-screen overflow-hidden">
       {/* Header */}
-      <header className="shrink-0 flex items-center gap-3 px-4 h-[48px] border-b border-black/[0.06] glass-nav">
+      <header className="shrink-0 flex items-center gap-3 px-4 h-[48px] border-b border-black/[0.06] glass-nav z-30 relative">
         <button
           onClick={() => { clearSession(); router.push("/dashboard"); }}
           className="text-gray-500 hover:text-gray-700 transition-colors text-[13px] font-medium shrink-0"

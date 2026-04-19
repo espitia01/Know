@@ -242,14 +242,14 @@ def record_usage(user_id: str, paper_id: str, action: str) -> int:
 
     from datetime import timezone, datetime
 
-    today = datetime.now(timezone.utc).date().isoformat()
+    today_str = datetime.now(timezone.utc).date().isoformat()
 
     try:
         res = client.rpc("increment_usage", {
             "p_user_id": user_id,
             "p_paper_id": paper_id,
             "p_action": action,
-            "p_date": today,
+            "p_date": today_str,
         }).execute()
         if res and res.data is not None:
             return int(res.data)
@@ -262,7 +262,8 @@ def record_usage(user_id: str, paper_id: str, action: str) -> int:
         .eq("user_id", user_id)
         .eq("paper_id", paper_id)
         .eq("action", action)
-        .eq("date", today)
+        .gte("date", today_str)
+        .lte("date", today_str)
     )
 
     if existing:
@@ -279,7 +280,7 @@ def record_usage(user_id: str, paper_id: str, action: str) -> int:
                 "paper_id": paper_id,
                 "action": action,
                 "count": 1,
-                "date": today,
+                "date": today_str,
             }, on_conflict="user_id,paper_id,action,date").execute()
         except Exception as e:
             logger.warning("Usage upsert failed: %s", e)
@@ -326,14 +327,15 @@ def get_usage_count(user_id: str, paper_id: str, action: str) -> int:
 
     from datetime import datetime, timezone
 
-    today = datetime.now(timezone.utc).date().isoformat()
+    today_str = datetime.now(timezone.utc).date().isoformat()
     existing = _safe_single(
         client.table("usage")
         .select("count")
         .eq("user_id", user_id)
         .eq("paper_id", paper_id)
         .eq("action", action)
-        .eq("date", today)
+        .gte("date", today_str)
+        .lte("date", today_str)
     )
     return (existing or {}).get("count", 0)
 
@@ -346,13 +348,14 @@ def get_daily_api_count(user_id: str) -> int:
 
     from datetime import datetime, timezone
 
-    today = datetime.now(timezone.utc).date().isoformat()
+    today_str = datetime.now(timezone.utc).date().isoformat()
     try:
         res = (
             client.table("usage")
             .select("count")
             .eq("user_id", user_id)
-            .eq("date", today)
+            .gte("date", today_str)
+            .lte("date", today_str)
             .execute()
         )
         rows = res.data or [] if res else []

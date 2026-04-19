@@ -230,7 +230,7 @@ function LibraryContent() {
     <>
     <main className="flex-1 flex flex-col h-screen overflow-hidden bg-mesh">
       {/* Header */}
-      <header className="shrink-0 flex items-center gap-3 px-5 h-[52px] border-b border-black/[0.06] glass-nav">
+      <header className="shrink-0 flex items-center gap-3 px-5 h-[52px] border-b border-black/[0.06] glass-nav z-30 relative">
         <button
           onClick={() => router.push("/dashboard")}
           className="text-gray-500 hover:text-gray-700 transition-colors text-[13px] font-medium"
