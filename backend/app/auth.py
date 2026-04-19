@@ -66,7 +66,12 @@ async def require_auth(
         from .services.db import get_or_create_user
         get_or_create_user(user_id, email=payload.get("email", ""))
         return user_id
+    except HTTPException:
+        raise
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+    except Exception as e:
+        logger.exception("Unexpected auth error: %s", e)
+        raise HTTPException(status_code=500, detail="Authentication failed")
