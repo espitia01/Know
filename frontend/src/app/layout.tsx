@@ -22,6 +22,13 @@ const sourceSerif = Source_Serif_4({
 export const metadata: Metadata = {
   title: "Know",
   description: "Transform academic papers into interactive learning experiences",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon.png", type: "image/png", sizes: "180x180" },
+    ],
+    apple: "/apple-icon.png",
+  },
   metadataBase: new URL("https://knowpaper.com"),
   openGraph: {
     title: "Know",

@@ -55,9 +55,9 @@ async def require_auth(
         else:
             jwt_options["verify_aud"] = False
             if os.environ.get("RAILWAY_ENVIRONMENT") or os.environ.get("KNOW_PRODUCTION"):
-                logger.error("KNOW_CLERK_AUDIENCE is not set in production — rejecting request")
-                raise HTTPException(status_code=503, detail="Authentication misconfigured")
-            logger.warning("KNOW_CLERK_AUDIENCE is not set — audience validation disabled. Set it in production.")
+                logger.warning("KNOW_CLERK_AUDIENCE is not set in production — audience validation disabled")
+            else:
+                logger.warning("KNOW_CLERK_AUDIENCE is not set — audience validation disabled")
 
         payload = jwt.decode(
             token,
