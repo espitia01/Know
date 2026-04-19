@@ -117,12 +117,12 @@ export function CrossPaperPanel() {
       {crossPaperResults.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-gray-400">
+            <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-gray-500">
               Results
             </p>
             <button
               onClick={clearCrossPaperResults}
-              className="text-[11px] text-gray-400 hover:text-gray-700 transition-colors font-medium"
+              className="text-[11px] text-gray-500 hover:text-gray-700 transition-colors font-medium"
             >
               Clear
             </button>

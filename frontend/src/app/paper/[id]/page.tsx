@@ -98,7 +98,7 @@ function AddPaperPopover({
       className="absolute top-full right-0 mt-1 z-50 glass-strong rounded-2xl shadow-xl w-80 max-h-[420px] flex flex-col animate-fade-in overflow-hidden"
     >
       {/* Upload section */}
-      <div className="p-2.5 border-b border-white/20 space-y-2">
+      <div className="p-2.5 border-b border-black/[0.06] space-y-2">
         <input
           ref={fileInputRef}
           type="file"
@@ -243,6 +243,7 @@ function PaperContent() {
       savePaperCache(activePaperId);
       const restored = restorePaperCache(paperId);
       if (!restored) resetAnalysisState();
+      cacheRestoredRef.current = restored;
       setActivePaperId(paperId);
     }
   }, [paperId]);
@@ -321,9 +322,7 @@ function PaperContent() {
   const cacheRestoredRef = useRef(false);
   useEffect(() => {
     const store = useStore.getState();
-    if (!store.preReading && !store.summary) {
-      cacheRestoredRef.current = store.restorePaperCache(activePaperId);
-    } else {
+    if (store.preReading || store.summary) {
       cacheRestoredRef.current = true;
     }
   }, [activePaperId]);
@@ -422,6 +421,7 @@ function PaperContent() {
     if (!restored) {
       resetAnalysisState();
     }
+    cacheRestoredRef.current = restored;
     setActivePaperId(id);
   }, [activePaperId, savePaperCache, restorePaperCache, resetAnalysisState]);
 
@@ -718,7 +718,7 @@ function PaperContent() {
           <p className="text-red-500 text-[14px]">{error || "Paper not found"}</p>
           <button
             onClick={() => router.push("/dashboard")}
-            className="text-[13px] text-gray-400 hover:text-gray-700 transition-colors"
+            className="text-[13px] text-gray-500 hover:text-gray-700 transition-colors"
           >
             &larr; Back to library
           </button>
@@ -795,14 +795,14 @@ function PaperContent() {
     <>
     <div className="flex flex-col h-screen overflow-hidden">
       {/* Header */}
-      <header className="shrink-0 flex items-center gap-3 px-4 h-[48px] border-b border-white/20 glass-nav">
+      <header className="shrink-0 flex items-center gap-3 px-4 h-[48px] border-b border-black/[0.06] glass-nav">
         <button
           onClick={() => { clearSession(); router.push("/dashboard"); }}
-          className="text-gray-400 hover:text-gray-700 transition-colors text-[13px] font-medium shrink-0"
+          className="text-gray-500 hover:text-gray-700 transition-colors text-[13px] font-medium shrink-0"
         >
           &larr;
         </button>
-        <div className="h-4 w-px bg-white/20 shrink-0" />
+        <div className="h-4 w-px bg-black/[0.06] shrink-0" />
         <Image src="/logo.png" alt="Know" width={20} height={20} className="shrink-0 rounded-md" />
 
         {!showSessionBar && (
@@ -812,14 +812,14 @@ function PaperContent() {
         )}
 
         {showSessionBar && (
-          <span className="text-[11px] text-gray-400 truncate flex-1 font-medium uppercase tracking-wider">
+          <span className="text-[11px] text-gray-500 truncate flex-1 font-medium uppercase tracking-wider">
             Session · {sessionPapers.length} papers
           </span>
         )}
 
         {/* Usage indicator */}
         {paperUsage && paperUsage.qa_limit > 0 && (
-          <div className="hidden sm:flex items-center gap-2 shrink-0 text-[10px] text-gray-400">
+          <div className="hidden sm:flex items-center gap-2 shrink-0 text-[10px] text-gray-500">
             <span title={`${paperUsage.qa_used} of ${paperUsage.qa_limit} Q&A used on this paper`}>
               Q&A {paperUsage.qa_used}/{paperUsage.qa_limit}
             </span>
@@ -835,7 +835,7 @@ function PaperContent() {
         <div className="relative shrink-0">
           <button
             onClick={() => setShowAddPaper(!showAddPaper)}
-            className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
             title="Add paper to session"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -857,7 +857,7 @@ function PaperContent() {
         <div className="relative shrink-0">
           <button
             onClick={() => setShowFolderPicker(!showFolderPicker)}
-            className="flex items-center gap-1.5 text-[11px] text-gray-400 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
             title="Assign to folder"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -912,7 +912,7 @@ function PaperContent() {
         {!isFree && (
         <button
           onClick={() => handleExportBibtex({ paper_ids: [activePaperId] }, "Current paper")}
-          className="shrink-0 flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+          className="shrink-0 flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
           title="Export citations for current paper"
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -927,7 +927,7 @@ function PaperContent() {
         <div className="relative shrink-0">
           <button
             onClick={handleOpenWorkspaceMenu}
-            className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
             title="Save or load workspace"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -937,7 +937,7 @@ function PaperContent() {
           </button>
           {showWorkspaceMenu && (
             <div className="absolute right-0 top-full mt-1 z-50 glass-strong rounded-2xl shadow-xl w-80 max-h-[400px] flex flex-col animate-fade-in">
-              <div className="p-3 border-b border-white/20 space-y-2">
+              <div className="p-3 border-b border-black/[0.06] space-y-2">
                 <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400">Save Current Session</p>
                 <div className="flex gap-1.5">
                   <input
@@ -945,7 +945,7 @@ function PaperContent() {
                     onChange={(e) => setWorkspaceNameInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") handleSaveWorkspace(); }}
                     placeholder={`Session — ${sessionPapers.length} papers`}
-                    className="flex-1 text-[12px] px-2.5 py-1.5 rounded-xl border border-white/20 bg-white/50 placeholder:text-gray-300 focus:outline-none focus:ring-1 focus:ring-white/40"
+                    className="flex-1 text-[12px] px-2.5 py-1.5 rounded-xl border border-black/[0.06] bg-white/50 placeholder:text-gray-300 focus:outline-none focus:ring-1 focus:ring-white/40"
                   />
                   <button
                     onClick={handleSaveWorkspace}
@@ -1009,7 +1009,7 @@ function PaperContent() {
                 )}
               </div>
 
-              <div className="p-2 border-t border-white/20">
+              <div className="p-2 border-t border-black/[0.06]">
                 <button
                   onClick={() => setShowWorkspaceMenu(false)}
                   className="w-full text-[11px] text-gray-400 hover:text-gray-700 py-1 transition-colors"
@@ -1025,7 +1025,7 @@ function PaperContent() {
         <button
           onClick={togglePanel}
           className={`text-[12px] font-medium transition-colors shrink-0 ${
-            panelVisible ? "text-gray-800" : "text-gray-400 hover:text-gray-700"
+            panelVisible ? "text-gray-800" : "text-gray-500 hover:text-gray-700"
           }`}
         >
           {panelVisible ? "Hide Analysis" : "Show Analysis"}
@@ -1039,7 +1039,9 @@ function PaperContent() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
         </button>
-        <UserButton>
+        <UserButton
+          appearance={{ elements: { userButtonPopoverActionButton__manageAccount: { display: "none" } } }}
+        >
           <UserButton.MenuItems>
             <UserButton.Link label="Settings" labelIcon={<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>} href="/settings" />
           </UserButton.MenuItems>
@@ -1048,7 +1050,7 @@ function PaperContent() {
 
       {/* Session paper tabs */}
       {showSessionBar && (
-        <div className="shrink-0 border-b border-white/20 glass-subtle px-3 py-1.5">
+        <div className="shrink-0 border-b border-black/[0.06] glass-subtle px-3 py-1.5">
           <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
             {sessionPapers.map((sp) => (
               <button

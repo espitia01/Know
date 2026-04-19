@@ -153,10 +153,8 @@ async def delete_paper(paper_id: str, user_id: str = Depends(require_auth)):
     paper_dir = settings.papers_dir / paper_id
     pdf_path = settings.papers_dir / f"{paper_id}.pdf"
 
-    if not paper_dir.exists():
-        raise HTTPException(status_code=404, detail="Paper not found")
-
-    shutil.rmtree(paper_dir)
+    if paper_dir.exists():
+        shutil.rmtree(paper_dir)
     pdf_path.unlink(missing_ok=True)
 
     from ..services.db import delete_paper_meta, increment_paper_count

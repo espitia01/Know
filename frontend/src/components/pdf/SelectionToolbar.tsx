@@ -127,7 +127,7 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
               e.stopPropagation();
               onAction(a.id, cleanText);
             }}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-medium text-gray-500 hover:text-gray-900 hover:bg-white/60 transition-colors whitespace-nowrap"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-medium text-gray-600 hover:text-gray-900 hover:bg-white/60 transition-colors whitespace-nowrap"
           >
             <a.Icon />
             {a.label}

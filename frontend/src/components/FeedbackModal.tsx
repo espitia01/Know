@@ -90,7 +90,7 @@ export function FeedbackModal({ open, onClose }: FeedbackModalProps) {
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                     placeholder="What's on your mind?"
-                    className="w-full text-[13px] border border-white/20 rounded-xl px-4 py-3 resize-none h-32 focus:outline-none focus:ring-1 focus:ring-white/40 focus:border-white/40 placeholder:text-gray-400 bg-white/40"
+                    className="w-full text-[13px] border border-black/[0.06] rounded-xl px-4 py-3 resize-none h-32 focus:outline-none focus:ring-1 focus:ring-white/40 focus:border-white/40 placeholder:text-gray-400 bg-white/40"
                   />
                 </div>
 

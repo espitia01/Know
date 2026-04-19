@@ -187,7 +187,7 @@ export default function LandingPage() {
             <span className="text-[15px] font-semibold tracking-[-0.03em] text-gray-900">Know</span>
           </Link>
           <div className="flex items-center gap-6">
-            <div className="hidden sm:flex items-center gap-6 text-[13px] text-gray-500">
+            <div className="hidden sm:flex items-center gap-6 text-[13px] text-gray-600">
               <a href="#features" className="hover:text-gray-900 transition-colors">Features</a>
               <a href="#pricing" className="hover:text-gray-900 transition-colors">Pricing</a>
               <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors">Discord</a>
@@ -196,7 +196,7 @@ export default function LandingPage() {
               <>
               <Link
                 href="/sign-in"
-                className="text-[13px] font-medium text-gray-500 hover:text-gray-900 transition-colors"
+                className="text-[13px] font-medium text-gray-600 hover:text-gray-900 transition-colors"
               >
                 Sign in
               </Link>
@@ -212,11 +212,11 @@ export default function LandingPage() {
               <>
               <Link
                 href="/dashboard"
-                className="text-[13px] font-medium text-gray-500 hover:text-gray-900 transition-colors px-3 py-1.5"
+                className="text-[13px] font-medium text-gray-600 hover:text-gray-900 transition-colors px-3 py-1.5"
               >
                 Dashboard
               </Link>
-              <UserButton />
+              <UserButton appearance={{ elements: { userButtonPopoverActionButton__manageAccount: { display: "none" } } }} />
               </>
             )}
           </div>
@@ -230,14 +230,14 @@ export default function LandingPage() {
       >
         <div className="absolute inset-0 bg-mesh-hero" />
         <div className="relative max-w-3xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full glass text-[12px] font-medium text-gray-500 mb-8">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full glass text-[12px] font-medium text-gray-600 mb-8">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
             v0.1
           </div>
           <h1 className="text-[clamp(2.5rem,6vw,4.5rem)] font-extrabold tracking-[-0.04em] text-gray-950 leading-[1.05]">
             Know papers<br className="hidden sm:block" /> like never before
           </h1>
-          <p className="mt-6 text-[17px] sm:text-lg text-gray-500 max-w-xl mx-auto leading-relaxed">
+          <p className="mt-6 text-[17px] sm:text-lg text-gray-600 max-w-xl mx-auto leading-relaxed">
             Upload any academic paper and let AI transform it into an interactive
             learning experience with summaries, Q&A, derivations, and smart notes.
           </p>
@@ -262,7 +262,7 @@ export default function LandingPage() {
       {/* How it works */}
       <section
         ref={howItWorks.ref}
-        className="py-28 px-6 border-t border-white/30"
+        className="py-28 px-6 border-t border-black/[0.06]"
       >
         <div className="max-w-4xl mx-auto">
           <p className="text-center text-[12px] uppercase tracking-[0.2em] font-semibold text-gray-400 mb-4">
@@ -282,7 +282,7 @@ export default function LandingPage() {
                   {s.num}
                 </div>
                 <h3 className="text-[16px] font-semibold text-gray-900 mb-2 tracking-[-0.01em]">{s.title}</h3>
-                <p className="text-[14px] text-gray-500 leading-relaxed">{s.desc}</p>
+                <p className="text-[14px] text-gray-600 leading-relaxed">{s.desc}</p>
               </div>
             ))}
           </div>
@@ -292,7 +292,7 @@ export default function LandingPage() {
       {/* Features */}
       <section
         ref={featuresSection.ref}
-        className="py-28 px-6 bg-mesh-section border-t border-white/30"
+        className="py-28 px-6 bg-mesh-section border-t border-black/[0.06]"
         id="features"
       >
         <div className="max-w-5xl mx-auto">
@@ -313,7 +313,7 @@ export default function LandingPage() {
                   {f.icon}
                 </div>
                 <h3 className="text-[15px] font-semibold text-gray-900 mb-1.5 tracking-[-0.01em]">{f.title}</h3>
-                <p className="text-[13px] text-gray-500 leading-relaxed">{f.desc}</p>
+                <p className="text-[13px] text-gray-600 leading-relaxed">{f.desc}</p>
               </div>
             ))}
           </div>
@@ -323,7 +323,7 @@ export default function LandingPage() {
       {/* Pricing */}
       <section
         ref={pricing.ref}
-        className="py-28 px-6 border-t border-white/30"
+        className="py-28 px-6 border-t border-black/[0.06]"
         id="pricing"
       >
         <div className="max-w-5xl mx-auto">
@@ -333,7 +333,7 @@ export default function LandingPage() {
           <p className="text-center text-[28px] sm:text-3xl font-bold tracking-[-0.03em] text-gray-900 mb-4">
             Simple, transparent pricing
           </p>
-          <p className="text-center text-[15px] text-gray-500 mb-16 max-w-md mx-auto">
+          <p className="text-center text-[15px] text-gray-600 mb-16 max-w-md mx-auto">
             Start free, upgrade when you need more. No hidden fees.
           </p>
           <div className="grid md:grid-cols-3 gap-5 items-start">
@@ -354,7 +354,7 @@ export default function LandingPage() {
                 )}
                 <div className="mb-5">
                   <h3 className="text-[15px] font-semibold text-gray-900">{t.name}</h3>
-                  <p className="text-[13px] text-gray-500 mt-0.5">{t.desc}</p>
+                  <p className="text-[13px] text-gray-600 mt-0.5">{t.desc}</p>
                 </div>
                 <div className="flex items-baseline gap-1 mb-7">
                   <span className="text-[36px] font-extrabold tracking-[-0.03em] text-gray-900">{t.price}</span>
@@ -394,12 +394,12 @@ export default function LandingPage() {
       </section>
 
       {/* CTA */}
-      <section className="py-28 px-6 bg-mesh-section border-t border-white/30">
+      <section className="py-28 px-6 bg-mesh-section border-t border-black/[0.06]">
         <div className="max-w-2xl mx-auto text-center">
           <h2 className="text-[28px] sm:text-3xl font-bold tracking-[-0.03em] text-gray-900 mb-4">
             Ready to know your papers?
           </h2>
-          <p className="text-[15px] text-gray-500 mb-10 leading-relaxed">
+          <p className="text-[15px] text-gray-600 mb-10 leading-relaxed">
             Join researchers and students who use Know to deeply understand academic literature.
           </p>
           <div className="flex items-center justify-center gap-4">
@@ -420,26 +420,26 @@ export default function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-white/30 py-10 px-6 glass-subtle">
+      <footer className="border-t border-black/[0.06] py-10 px-6 glass-subtle">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <Image src="/logo.png" alt="Know" width={18} height={18} className="rounded-sm" />
             <span className="text-[13px] text-gray-400">&copy; {new Date().getFullYear()} Know</span>
           </div>
           <div className="flex items-center gap-8">
-            <a href="#pricing" className="text-[12px] text-gray-400 hover:text-gray-600 transition-colors">
+            <a href="#pricing" className="text-[12px] text-gray-500 hover:text-gray-700 transition-colors">
               Pricing
             </a>
-            <Link href="/terms" className="text-[12px] text-gray-400 hover:text-gray-600 transition-colors">
+            <Link href="/terms" className="text-[12px] text-gray-500 hover:text-gray-700 transition-colors">
               Terms
             </Link>
             <button
               onClick={() => setShowFeedback(true)}
-              className="text-[12px] text-gray-400 hover:text-gray-600 transition-colors"
+              className="text-[12px] text-gray-500 hover:text-gray-700 transition-colors"
             >
               Feedback
             </button>
-            <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="text-[12px] text-gray-400 hover:text-gray-600 transition-colors flex items-center gap-1.5">
+            <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="text-[12px] text-gray-500 hover:text-gray-700 transition-colors flex items-center gap-1.5">
               <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
               </svg>

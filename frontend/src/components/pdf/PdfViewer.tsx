@@ -42,7 +42,14 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
     function attemptFetch() {
       fetch(url, { headers })
         .then((r) => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          if (!r.ok) {
+            if (r.status === 404) throw new Error("PDF_NOT_FOUND");
+            throw new Error(`HTTP ${r.status}`);
+          }
+          const ct = r.headers.get("content-type") || "";
+          if (!ct.includes("pdf") && !ct.includes("octet-stream")) {
+            throw new Error("PDF_NOT_FOUND");
+          }
           return r.arrayBuffer();
         })
         .then((buf) => {
@@ -50,11 +57,11 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
         })
         .catch((e) => {
           if (cancelled) return;
-          if (retryCount.current < 3) {
+          if (e.message === "PDF_NOT_FOUND" || retryCount.current >= 3) {
+            setLoadError(e.message || "Failed to load PDF");
+          } else {
             retryCount.current++;
             setTimeout(() => { if (!cancelled) attemptFetch(); }, 1000 * retryCount.current);
-          } else {
-            setLoadError(e.message || "Failed to load PDF");
           }
         });
     }
@@ -182,7 +189,7 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-white/20 glass-subtle">
+      <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-black/[0.06] glass-subtle">
         <div className="flex items-center gap-1">
           <button
             onClick={zoomOut}
@@ -209,7 +216,7 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
           </button>
         </div>
 
-        <div className="h-4 w-px bg-white/20" />
+        <div className="h-4 w-px bg-black/[0.06]" />
 
         {numPages > 0 && (
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -218,7 +225,7 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
               onChange={(e) => setPageInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handlePageInputSubmit()}
               onBlur={handlePageInputSubmit}
-              className="w-10 h-6 text-center rounded-lg border border-white/20 bg-white/40 text-[11px] backdrop-blur-sm"
+              className="w-10 h-6 text-center rounded-lg border border-black/[0.06] bg-white/40 text-[11px] backdrop-blur-sm"
             />
             <span>/ {numPages}</span>
           </div>
@@ -239,14 +246,23 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
       >
         {loadError ? (
           <div className="flex items-center justify-center h-64">
-            <div className="text-center space-y-3">
-              <p className="text-[13px] text-destructive">Failed to load PDF: {loadError}</p>
-              <button
-                onClick={() => { setLoadError(""); retryCount.current = 0; setRetryKey((k) => k + 1); }}
-                className="text-[12px] font-medium text-gray-500 hover:text-gray-900 transition-all px-3 py-1.5 rounded-xl glass hover:bg-white/60"
-              >
-                Retry
-              </button>
+            <div className="text-center space-y-3 max-w-sm px-6">
+              {loadError === "PDF_NOT_FOUND" ? (
+                <>
+                  <p className="text-[13px] font-medium text-gray-700">PDF no longer available</p>
+                  <p className="text-[12px] text-gray-500">This paper&apos;s file was lost during a server update. Please re-upload the PDF from your library.</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-[13px] text-destructive">Failed to load PDF</p>
+                  <button
+                    onClick={() => { setLoadError(""); retryCount.current = 0; setRetryKey((k) => k + 1); }}
+                    className="text-[12px] font-medium text-gray-600 hover:text-gray-900 transition-all px-3 py-1.5 rounded-xl glass hover:bg-white/60"
+                  >
+                    Retry
+                  </button>
+                </>
+              )}
             </div>
           </div>
         ) : !fileData ? (

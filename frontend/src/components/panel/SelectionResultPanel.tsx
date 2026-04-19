@@ -71,7 +71,7 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
             History
           </p>
           {history.slice(result ? 1 : 0).map((item, i) => (
-            <div key={i} className="rounded-xl border border-white/20 glass-subtle overflow-hidden">
+            <div key={i} className="rounded-xl border border-black/[0.06] glass-subtle overflow-hidden">
               <button
                 onClick={() => setExpandedHistory(expandedHistory === i ? null : i)}
                 className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors"
@@ -126,7 +126,7 @@ function FollowUpInput({ context, onSubmit }: { context: string; onSubmit: (q: s
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
         placeholder="Ask a follow-up question..."
         disabled={submitting}
-        className="flex-1 text-[12px] px-3 py-1.5 rounded-xl border border-white/20 glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+        className="flex-1 text-[12px] px-3 py-1.5 rounded-xl border border-black/[0.06] glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
       />
       <button
         onClick={handleSubmit}
@@ -248,7 +248,7 @@ function StepCard({ step }: { step: NonNullable<SelectionAnalysisResult["steps"]
   const [showHint, setShowHint] = useState(false);
 
   return (
-    <div className="rounded-xl border border-white/20 glass-subtle overflow-hidden">
+    <div className="rounded-xl border border-black/[0.06] glass-subtle overflow-hidden">
       <div className="px-3 py-2 glass">
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-bold text-muted-foreground/50 w-5 h-5 flex items-center justify-center rounded-full glass shrink-0">

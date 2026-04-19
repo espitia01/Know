@@ -230,10 +230,10 @@ function LibraryContent() {
     <>
     <main className="flex-1 flex flex-col h-screen overflow-hidden bg-mesh">
       {/* Header */}
-      <header className="shrink-0 flex items-center gap-3 px-5 h-[52px] border-b border-white/20 glass-nav">
+      <header className="shrink-0 flex items-center gap-3 px-5 h-[52px] border-b border-black/[0.06] glass-nav">
         <button
           onClick={() => router.push("/dashboard")}
-          className="text-gray-400 hover:text-gray-700 transition-colors text-[13px] font-medium"
+          className="text-gray-500 hover:text-gray-700 transition-colors text-[13px] font-medium"
         >
           &larr;
         </button>
@@ -241,7 +241,7 @@ function LibraryContent() {
         <Image src="/logo.png" alt="Know" width={20} height={20} className="rounded-md" />
         <h1 className="text-[15px] font-semibold text-gray-900">Library</h1>
         <div className="flex-1" />
-        <span className="text-[12px] text-gray-400 font-medium tabular-nums">
+        <span className="text-[12px] text-gray-500 font-medium tabular-nums">
           {papers.length} paper{papers.length !== 1 ? "s" : ""}
         </span>
         <button
@@ -258,7 +258,7 @@ function LibraryContent() {
             handleExportBibtex(opts, lbl);
           }}
           disabled={filtered.length === 0 || isFree}
-          className="text-[11px] text-gray-400 hover:text-gray-700 transition-colors font-medium px-2 py-1 rounded-md hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+          className="text-[11px] text-gray-500 hover:text-gray-700 transition-colors font-medium px-2 py-1 rounded-md hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
           title={isFree ? "Upgrade to export citations" : "Export Citations"}
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -266,17 +266,17 @@ function LibraryContent() {
           </svg>
           Citations
         </button>
-        <UserButton />
+        <UserButton appearance={{ elements: { userButtonPopoverActionButton__manageAccount: { display: "none" } } }} />
       </header>
 
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <aside className="w-56 shrink-0 border-r border-white/20 glass-subtle overflow-y-auto p-4 space-y-4">
+        <aside className="w-56 shrink-0 border-r border-black/[0.06] glass-subtle overflow-y-auto p-4 space-y-4">
           <Input
             placeholder="Search papers..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="text-[13px] h-9 rounded-xl bg-white/50 border-white/20 focus:border-white/40 backdrop-blur-sm"
+            className="text-[13px] h-9 rounded-xl bg-white/50 border-black/[0.06] focus:border-white/40 backdrop-blur-sm"
           />
 
           {/* Sidebar tabs */}
@@ -286,7 +286,7 @@ function LibraryContent() {
               className={`flex-1 text-[11px] font-semibold py-1.5 rounded-lg transition-all ${
                 sidebarTab === "folders"
                   ? "glass-strong text-gray-900 shadow-sm"
-                  : "text-gray-400 hover:text-gray-600"
+                  : "text-gray-500 hover:text-gray-700"
               }`}
             >
               Folders
@@ -299,7 +299,7 @@ function LibraryContent() {
                   ? "text-gray-300 cursor-not-allowed"
                   : sidebarTab === "workspaces"
                   ? "glass-strong text-gray-900 shadow-sm"
-                  : "text-gray-400 hover:text-gray-600"
+                  : "text-gray-500 hover:text-gray-700"
               }`}
             >
               Workspaces{isFree ? " ⬆" : ""}
@@ -535,7 +535,7 @@ function LibraryContent() {
             <div className="flex items-center justify-center h-full">
               <div className="text-center space-y-3">
                 <FolderIcon className="w-10 h-10 mx-auto text-gray-200" />
-                <p className="text-[14px] text-gray-400">
+                <p className="text-[14px] text-gray-500">
                   {activeFolder !== null ? "No papers in this folder." : "No papers found."}
                 </p>
                 <button

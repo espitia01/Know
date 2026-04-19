@@ -22,13 +22,6 @@ const sourceSerif = Source_Serif_4({
 export const metadata: Metadata = {
   title: "Know",
   description: "Transform academic papers into interactive learning experiences",
-  icons: {
-    icon: [
-      { url: "/favicon.ico", sizes: "any" },
-      { url: "/icon.png", type: "image/png", sizes: "180x180" },
-    ],
-    apple: "/apple-icon.png",
-  },
   metadataBase: new URL("https://knowpaper.com"),
   openGraph: {
     title: "Know",
@@ -53,6 +46,9 @@ export default function RootLayout({
       <html lang="en" className={`h-full scroll-smooth ${inter.variable} ${sourceSerif.variable}`}>
         <head>
           <meta name="theme-color" content="#f8f7ff" />
+          <link rel="icon" href="/favicon.ico" sizes="any" />
+          <link rel="icon" href="/icon.png" type="image/png" sizes="180x180" />
+          <link rel="apple-touch-icon" href="/apple-icon.png" />
         </head>
         <body className="min-h-full flex flex-col antialiased">
           <ClerkTokenProvider>{children}</ClerkTokenProvider>

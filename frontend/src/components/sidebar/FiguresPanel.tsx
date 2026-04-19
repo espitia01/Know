@@ -395,7 +395,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               }}
               placeholder="Ask about this figure..."
               disabled={loading}
-              className="flex-1 text-[12px] px-3 py-2 rounded-xl border border-white/20 glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+              className="flex-1 text-[12px] px-3 py-2 rounded-xl border border-black/[0.06] glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
             />
             <button
               onClick={handleAsk}

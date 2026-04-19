@@ -79,7 +79,7 @@ export function BibtexModal({ open, onClose, paperIds, folder, workspaceId, labe
     >      <div className="absolute inset-0 bg-black/20 backdrop-blur-md" onClick={onClose} />
       <div className="relative glass-strong rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[80vh] animate-fade-in">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/20">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-black/[0.06]">
           <div>
             <h3 className="text-[14px] font-semibold text-gray-900">BibTeX Export</h3>
             {label && <p className="text-[11px] text-gray-400 mt-0.5">{label}</p>}
@@ -124,7 +124,7 @@ export function BibtexModal({ open, onClose, paperIds, folder, workspaceId, labe
 
         {/* Footer */}
         {!loading && !error && bibtex && (
-          <div className="px-5 py-3 border-t border-white/20 flex items-center justify-end gap-2">
+          <div className="px-5 py-3 border-t border-black/[0.06] flex items-center justify-end gap-2">
             <button
               onClick={onClose}
               className="text-[12px] text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg transition-colors"

@@ -102,7 +102,7 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
             Implicit <span className="text-muted-foreground/40">{implicit.length}</span>
           </p>
           {implicit.map((a, i) => (
-            <div key={i} className="rounded-xl glass-subtle border border-dashed border-white/20 px-3.5 py-2.5">
+            <div key={i} className="rounded-xl glass-subtle border border-dashed border-black/[0.06] px-3.5 py-2.5">
               <div className="text-[13px]"><Md>{a.statement}</Md></div>
               {a.section && (
                 <span className="inline-block mt-1.5 text-[10px] text-muted-foreground/60 bg-muted px-2 py-0.5 rounded-full font-medium">
