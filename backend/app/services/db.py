@@ -127,7 +127,7 @@ def save_paper_meta(paper_dict: dict, user_id: str) -> None:
         "notes": paper_dict.get("notes", []),
         "cached_analysis": paper_dict.get("cached_analysis", {}),
     }
-    client.table("papers").upsert(row, on_conflict="id,user_id").execute()
+    client.table("papers").upsert(row, on_conflict="id").execute()
 
 
 def get_paper_meta(paper_id: str, user_id: str | None = None) -> dict | None:
