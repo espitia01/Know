@@ -18,9 +18,12 @@ the two are now a single atomic call.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 from .services.db import (
     get_user,
@@ -274,6 +277,12 @@ def reserve_usage(
         # Any unexpected error path (DB connectivity etc.): roll back what we
         # reserved and surface as 503 so the client doesn't get charged for
         # a broken reservation.
+        logger.exception(
+            "reserve_usage 503 (user=%s paper=%s action=%s model=%s tier=%s "
+            "reserved=%s) — check that migrations 005/006/008 have been applied "
+            "and that Supabase is reachable",
+            user_id, paper_id, action, model, tier, reserved,
+        )
         if reserved["model"] and model:
             release_daily_model_usage(user_id, today, model, count)
         if reserved["daily"]:
