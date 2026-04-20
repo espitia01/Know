@@ -33,6 +33,9 @@ const DEFAULT_BOTTOM = 300;
 
 const POSITIONS: PanelPosition[] = ["right", "bottom", "left"];
 
+const autoAnalyzedPapers = new Set<string>();
+const activeRequests = new Map<string, Set<string>>();
+
 function AddPaperPopover({
   sessionIds,
   onAdd,
@@ -336,7 +339,6 @@ function PaperContent() {
   // Load paper when activePaperId changes — always fetch fresh to pick up folder/tag updates
   // First try to restore from local cache for instant display
   const cacheRestoredRef = useRef(false);
-  const autoAnalyzedRef = useRef<string | null>(null);
   useEffect(() => {
     const store = useStore.getState();
     if (store.preReading || store.summary) {
@@ -366,15 +368,15 @@ function PaperContent() {
   useEffect(() => {
     if (!paper || paper.id !== activePaperId) return;
     if (tierLoading) return;
-    if (autoAnalyzedRef.current === activePaperId) return;
+    if (autoAnalyzedPapers.has(activePaperId)) return;
 
     const store = useStore.getState();
     if (cacheRestoredRef.current || store.preReading || store.summary) {
-      autoAnalyzedRef.current = activePaperId;
+      autoAnalyzedPapers.add(activePaperId);
       return;
     }
 
-    autoAnalyzedRef.current = activePaperId;
+    autoAnalyzedPapers.add(activePaperId);
 
     const pid = activePaperId;
     const cache = paper.cached_analysis || {};
@@ -390,9 +392,13 @@ function PaperContent() {
       }
     }
 
+    const pending = activeRequests.get(pid) ?? new Set<string>();
+    activeRequests.set(pid, pending);
+
     if (cache.pre_reading) {
       setPreReading(cache.pre_reading);
-    } else if (canAccess(tierUser?.tier || "free", "prepare")) {
+    } else if (canAccess(tierUser?.tier || "free", "prepare") && !pending.has("preReading")) {
+      pending.add("preReading");
       setPreReadingLoading(true);
       api.analyze(pid)
         .then((r) => {
@@ -402,13 +408,20 @@ function PaperContent() {
         })
         .catch(() => {})
         .finally(() => {
-          if (useStore.getState().paper?.id === pid) setPreReadingLoading(false);
+          pending.delete("preReading");
+          const s = useStore.getState();
+          if (s.paper?.id === pid) {
+            setPreReadingLoading(false);
+          } else if (s.preReadingLoading) {
+            setPreReadingLoading(false);
+          }
         });
     }
 
     if (cache.assumptions) {
       setAssumptions(cache.assumptions.assumptions || []);
-    } else if (canAccess(tierUser?.tier || "free", "assumptions")) {
+    } else if (canAccess(tierUser?.tier || "free", "assumptions") && !pending.has("assumptions")) {
+      pending.add("assumptions");
       setAssumptionsLoading(true);
       api.getAssumptions(pid)
         .then((r) => {
@@ -418,7 +431,13 @@ function PaperContent() {
         })
         .catch(() => {})
         .finally(() => {
-          if (useStore.getState().paper?.id === pid) setAssumptionsLoading(false);
+          pending.delete("assumptions");
+          const s = useStore.getState();
+          if (s.paper?.id === pid) {
+            setAssumptionsLoading(false);
+          } else if (s.assumptionsLoading) {
+            setAssumptionsLoading(false);
+          }
         });
     }
 

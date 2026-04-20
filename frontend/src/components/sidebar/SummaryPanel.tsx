@@ -107,10 +107,15 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     }
     if (paper?.id !== paperId) return;
     if (fetchAttempted.current === paperId) return;
-    if (activeStreams.has(paperId)) return;
+
+    if (activeStreams.has(paperId)) {
+      setSummaryLoading(true);
+      return;
+    }
+
     fetchAttempted.current = paperId;
     startFetch(paperId);
-  }, [paperId, effectiveSummary, summary, paper, setSummary, startFetch]);
+  }, [paperId, effectiveSummary, summary, paper, setSummary, setSummaryLoading, startFetch]);
 
   if (summaryLoading && !effectiveSummary) {
     return (

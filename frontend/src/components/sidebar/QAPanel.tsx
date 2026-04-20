@@ -78,17 +78,19 @@ export function QAPanel({ paperId }: QAPanelProps) {
 
   const handleAnswerAll = async () => {
     if (questions.length === 0) return;
+    const toAnswer = [...questions];
     setQALoading(true);
     setQAError("");
     try {
       let result;
       if (crossPaper && hasMultiplePapers) {
         const ids = sessionPapers.map((p) => p.id);
-        result = await api.askQuestionsMulti(ids, questions);
+        result = await api.askQuestionsMulti(ids, toAnswer);
       } else {
-        result = await api.askQuestions(paperId, questions);
+        result = await api.askQuestions(paperId, toAnswer);
       }
-      setQAResults(result.items);
+      setQAResults([...qaResults, ...result.items]);
+      clearQuestions();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Q&A failed";
       setQAError(msg.replace(/^API error \d+:\s*/, "").replace(/[{}"]/g, "").replace("detail:", "").trim());
@@ -134,7 +136,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
           </button>
         )}
 
-        {qaResults.length === 0 && !qaLoading && (
+        {!qaLoading && (
           <div className="flex flex-wrap gap-1.5">
             {prompts.filter((p) => !usedPrompts.has(p)).map((prompt, i) => (
               <button
@@ -196,10 +198,10 @@ export function QAPanel({ paperId }: QAPanelProps) {
         </div>
       )}
 
-      {questions.length > 0 && qaResults.length === 0 && !qaLoading && (
+      {questions.length > 0 && !qaLoading && (
         <div className="space-y-1.5">
           <p className="text-[12px] font-semibold text-muted-foreground/70 uppercase tracking-widest">
-            Questions <span className="text-muted-foreground/40">{questions.length}</span>
+            Queued <span className="text-muted-foreground/40">{questions.length}</span>
           </p>
           {questions.map((q, i) => (
             <div key={i} className="flex items-start gap-2.5 rounded-xl glass-subtle px-3.5 py-2">
@@ -232,7 +234,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
               )}
             </p>
             <button
-              onClick={() => { setQAResults([]); clearQuestions(); setUsedPrompts(new Set()); }}
+              onClick={() => { setQAResults([]); clearQuestions(); setUsedPrompts(new Set()); setQAError(""); }}
               className="text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors font-medium"
             >
               Clear

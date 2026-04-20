@@ -19,6 +19,22 @@ function containsLatex(s: string): boolean {
  * Iterative parser that finds bare LaTeX expressions and wraps them in $.
  * Avoids nested quantifiers to prevent ReDoS.
  */
+const TEXT_COMMANDS = new Set([
+  'textbf', 'textit', 'textrm', 'textsf', 'texttt', 'textsc',
+  'emph', 'underline', 'text', 'mathrm', 'cite', 'ref', 'label',
+  'section', 'subsection', 'paragraph', 'item', 'caption', 'footnote',
+  'href', 'url', 'title', 'author', 'date', 'documentclass',
+  'usepackage', 'newcommand', 'renewcommand', 'input', 'include',
+  'begin', 'end',
+]);
+
+function tryConsumeEnvironment(segment: string, pos: number): { end: number; match: string } | null {
+  const rest = segment.slice(pos);
+  const m = rest.match(/^\\begin\{(\w+)\}([\s\S]*?)\\end\{\1\}/);
+  if (!m) return null;
+  return { end: pos + m[0].length, match: m[0] };
+}
+
 function wrapBareLatex(segment: string): string {
   if (segment.length > MAX_WRAP_LENGTH || !containsLatex(segment)) return segment;
 
@@ -27,6 +43,20 @@ function wrapBareLatex(segment: string): string {
 
   while (i < segment.length) {
     if (segment[i] === '\\' && i + 1 < segment.length && /[A-Za-z]/.test(segment[i + 1])) {
+      const env = tryConsumeEnvironment(segment, i);
+      if (env) {
+        result.push('\n$$\n' + env.match + '\n$$\n');
+        i = env.end;
+        continue;
+      }
+
+      const cmdMatch = segment.slice(i).match(/^\\([A-Za-z]+)/);
+      if (cmdMatch && TEXT_COMMANDS.has(cmdMatch[1])) {
+        result.push(cmdMatch[0]);
+        i += cmdMatch[0].length;
+        continue;
+      }
+
       const start = i;
       i = consumeLatexExpr(segment, i);
       const expr = segment.slice(start, i);
@@ -37,7 +67,7 @@ function wrapBareLatex(segment: string): string {
       }
     } else if (/[A-Za-z0-9]/.test(segment[i]) && i + 1 < segment.length && /[_^]/.test(segment[i + 1])) {
       const start = i;
-      i++; // consume the letter
+      i++;
       i = consumeLatexExpr(segment, i);
       const expr = segment.slice(start, i);
       if (containsLatex(expr)) {
@@ -129,13 +159,6 @@ export function preprocessLatex(text: string): string {
 
   s = s.replace(/\\\(/g, "$").replace(/\\\)/g, "$");
   s = s.replace(/\\\[/g, "\n$$\n").replace(/\\\]/g, "\n$$\n");
-
-  s = s.replace(
-    /(?<!\$)\\begin\{(\w+)\}([\s\S]*?)\\end\{\1\}(?!\$)/g,
-    (match) => {
-      return '\n$$\n' + match + '\n$$\n';
-    }
-  );
 
   s = s.replace(/(?<!\n)\$\$(?!\$)/g, '\n$$');
   s = s.replace(/\$\$(?!\n)/g, '$$\n');
