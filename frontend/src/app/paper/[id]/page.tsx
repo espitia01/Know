@@ -236,6 +236,7 @@ function PaperContent() {
 
   const [activePaperId, setActivePaperId] = useState(paperId);
   const sseAbortRef = useRef<AbortController | null>(null);
+  const initialLoadDone = useRef(false);
 
   useEffect(() => {
     if (paperId !== activePaperId) {
@@ -335,6 +336,7 @@ function PaperContent() {
   // Load paper when activePaperId changes — always fetch fresh to pick up folder/tag updates
   // First try to restore from local cache for instant display
   const cacheRestoredRef = useRef(false);
+  const autoAnalyzedRef = useRef<string | null>(null);
   useEffect(() => {
     const store = useStore.getState();
     if (store.preReading || store.summary) {
@@ -344,12 +346,12 @@ function PaperContent() {
 
   useEffect(() => {
     let stale = false;
-    setLoading(true);
+    if (!initialLoadDone.current) setLoading(true);
     setError("");
     api
       .getPaper(activePaperId)
       .then((p) => {
-        if (!stale) setPaper(p);
+        if (!stale) { setPaper(p); initialLoadDone.current = true; }
       })
       .catch((e) => {
         if (!stale) setError(e.message);
@@ -360,13 +362,19 @@ function PaperContent() {
     return () => { stale = true; };
   }, [activePaperId, setPaper, setLoading]);
 
-  // Auto-analyze when paper loads (skip if cache was already restored)
+  // Auto-analyze when paper loads (skip if cache was already restored or already analyzed this paper)
   useEffect(() => {
     if (!paper || paper.id !== activePaperId) return;
     if (tierLoading) return;
+    if (autoAnalyzedRef.current === activePaperId) return;
 
     const store = useStore.getState();
-    if (cacheRestoredRef.current || store.preReading || store.summary) return;
+    if (cacheRestoredRef.current || store.preReading || store.summary) {
+      autoAnalyzedRef.current = activePaperId;
+      return;
+    }
+
+    autoAnalyzedRef.current = activePaperId;
 
     const pid = activePaperId;
     let stale = false;
@@ -468,11 +476,14 @@ function PaperContent() {
         cross_paper_results: crossPaperResults,
       });
       setWorkspaceNameInput("");
-      setWorkspacesLoaded(false);
-      setSavedWorkspaces([]);
       setActiveWorkspaceName(name);
       setWorkspaceSaved(true);
       setTimeout(() => setWorkspaceSaved(false), 2000);
+      try {
+        const wsList = await api.listWorkspaces();
+        setSavedWorkspaces(wsList);
+        setWorkspacesLoaded(true);
+      } catch { /* ignore */ }
     } catch (e) {
       console.error("Failed to save workspace:", e);
     } finally {

@@ -342,6 +342,18 @@ export const api = {
       method: "POST",
     }),
 
+  getSummaryStream: async (id: string, signal?: AbortSignal) => {
+    const headers = await authHeaders();
+    return fetch(`${API_BASE}/api/papers/${id}/summary-stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+      },
+      signal,
+    });
+  },
+
   analyzeFigure: (id: string, figureId: string, question: string = "") =>
     request<FigureAnalysis>(`/api/papers/${id}/figure-qa`, {
       method: "POST",

@@ -59,9 +59,16 @@ export function QAPanel({ paperId }: QAPanelProps) {
   const canMultiQA = canAccess(tier, "multi-qa");
   const hasMultiplePapers = sessionPapers.length > 1 && canMultiQA;
 
+  const [justAdded, setJustAdded] = useState(false);
+
   const handleAdd = () => {
     const q = input.trim();
-    if (q) { addQuestion(q); setInput(""); }
+    if (q) {
+      addQuestion(q);
+      setInput("");
+      setJustAdded(true);
+      setTimeout(() => setJustAdded(false), 1200);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -126,7 +133,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
           </button>
         )}
 
-        {questions.length === 0 && (
+        {qaResults.length === 0 && (
           <div className="flex flex-wrap gap-1.5">
             {prompts.map((prompt, i) => (
               <button
@@ -151,9 +158,13 @@ export function QAPanel({ paperId }: QAPanelProps) {
         <div className="flex gap-2">
           <button
             onClick={handleAdd}
-            className="flex-1 text-[12px] font-medium py-1.5 rounded-lg border border-border hover:bg-accent transition-colors"
+            className={`flex-1 text-[12px] font-medium py-1.5 rounded-lg border transition-all ${
+              justAdded
+                ? "border-green-300 bg-green-50 text-green-700"
+                : "border-border hover:bg-accent"
+            }`}
           >
-            Add Question
+            {justAdded ? "✓ Added" : "Add Question"}
           </button>
           <button
             onClick={handleAnswerAll}
@@ -206,7 +217,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
       )}
 
       {qaResults.length > 0 && (
-        <div className="space-y-2">
+        <div className="space-y-4">
           <div className="flex items-center justify-between">
             <p className="text-[12px] font-semibold text-muted-foreground/70 uppercase tracking-widest">
               Answers
@@ -224,9 +235,14 @@ export function QAPanel({ paperId }: QAPanelProps) {
             </button>
           </div>
           {qaResults.map((item, i) => (
-            <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5 space-y-1">
-              <p className="text-[13px] font-medium">{item.question}</p>
-              <div className="text-[12px] text-muted-foreground"><Md>{item.answer}</Md></div>
+            <div key={i} className="space-y-1.5">
+              <div className="flex items-start gap-2 px-1">
+                <span className="text-[11px] font-bold text-muted-foreground/40 shrink-0 mt-0.5 tabular-nums">{i + 1}.</span>
+                <p className="text-[13px] font-semibold leading-snug">{item.question}</p>
+              </div>
+              <div className="rounded-xl glass-subtle px-3.5 py-2.5 ml-4 border-l-2 border-foreground/10">
+                <div className="text-[12px] text-muted-foreground"><Md>{item.answer}</Md></div>
+              </div>
             </div>
           ))}
         </div>

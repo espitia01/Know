@@ -28,10 +28,12 @@ from ..services.llm import (
     generate_derivation_exercise,
     summarize_paper,
     get_fast_provider,
+    get_provider,
     _get_figure_prompt,
     _get_selection_prompt,
     _resize_image_b64,
     _normalize_latex_delimiters,
+    _safe_parse_json,
     AnthropicProvider,
 )
 from ..services.pdf_parser import get_paper, get_figure_path, save_paper
@@ -327,6 +329,69 @@ async def summary(paper_id: str, user_id: str = Depends(require_auth)):
     except Exception as e:
         logger.exception("Summary generation failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Summary generation failed. Please try again.")
+
+
+@router.post("/{paper_id}/summary-stream")
+async def summary_stream(paper_id: str, user_id: str = Depends(require_auth)):
+    """Stream summary generation token-by-token, then send the parsed JSON at the end."""
+    import json as _json
+
+    check_feature_access(user_id, "summary")
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+
+    paper = get_paper(paper_id, user_id=user_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    provider = get_provider(user_id)
+    if not isinstance(provider, AnthropicProvider):
+        raise HTTPException(status_code=503, detail="Streaming requires Anthropic provider")
+
+    system = """You are an expert science educator and researcher. Produce an extremely detailed, structured summary of the academic paper. Return ONLY valid JSON. CRITICAL: For ALL math expressions, use $ delimiters for inline math and $$ for display math. NEVER use \\( \\) or \\[ \\] delimiters."""
+
+    user_text = f"""Create an extremely detailed summary of this academic paper. The summary should be comprehensive enough that someone could understand the paper's full contribution without reading the original.
+
+Structure your summary with ALL of the following sections:
+
+1. **overview**: A 3-5 sentence high-level overview of what the paper does and why it matters.
+2. **motivation**: Why was this work done? What gap in knowledge does it fill? (3-5 sentences)
+3. **key_contributions**: Array of the paper's main contributions (each as a string, 1-2 sentences).
+4. **methodology**: Detailed explanation of the methods, models, or theoretical framework used. Include equations where relevant. (Multiple paragraphs)
+5. **main_results**: Detailed description of the key findings, including quantitative results. Use LaTeX for any numbers or equations. (Multiple paragraphs)
+6. **discussion**: What do the results mean? How do they compare to prior work? What are the implications? (Multiple paragraphs)
+7. **limitations**: Array of limitations or caveats the authors mention or that are apparent.
+8. **future_work**: What follow-up research does this enable or suggest? (2-3 sentences)
+9. **key_equations**: Array of the most important equations in the paper, each as {{"equation": "LaTeX", "meaning": "what it represents"}}.
+10. **key_figures_and_tables**: Array of descriptions of the most important figures/tables: {{"id": "Fig. 1", "description": "what it shows and why it matters"}}.
+
+Paper content:
+{paper.raw_text[:12000]}
+
+Return JSON with all the above fields."""
+
+    async def event_stream():
+        full_text = ""
+        try:
+            async for chunk in provider.stream_complete(system, user_text, max_tokens=6000):
+                full_text += chunk
+                normalized = _normalize_latex_delimiters(chunk)
+                yield f"data: {_json.dumps({'type': 'chunk', 'text': normalized})}\n\n"
+
+            full_text_normalized = _normalize_latex_delimiters(full_text)
+            parsed = _safe_parse_json(full_text)
+            if parsed and parsed.get("overview"):
+                paper.cached_analysis["summary"] = parsed
+                save_paper(paper, user_id=user_id)
+                track_usage(user_id, paper_id, "api_call")
+                yield f"data: {_json.dumps({'type': 'done', 'summary': parsed, 'full_text': full_text_normalized})}\n\n"
+            else:
+                yield f"data: {_json.dumps({'type': 'done', 'full_text': full_text_normalized})}\n\n"
+        except Exception as e:
+            logger.exception("Summary stream error for paper %s", paper_id)
+            yield f"data: {_json.dumps({'type': 'error', 'message': 'Summary generation failed. Please try again.'})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/{paper_id}/figure-qa")

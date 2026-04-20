@@ -42,7 +42,11 @@ const actionLabels: Record<string, string> = {
 export function SelectionResultPanel({ result, loading, history, onFollowUp }: SelectionResultPanelProps) {
   const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
 
-  if (loading) {
+  const conversationThread = result
+    ? history.filter((h) => h === result || (h.action === "followup" && history.indexOf(h) < history.indexOf(result)))
+    : [];
+
+  if (loading && !result) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-12">
         <div className="w-full max-w-xs">
@@ -58,6 +62,12 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
       {result && (
         <>
           <ResultCard result={result} />
+          {loading && (
+            <div className="flex flex-col items-center gap-2 py-3">
+              <div className="w-full max-w-xs"><AnalysisProgressBar /></div>
+              <span className="text-[11px] text-muted-foreground animate-pulse">Processing follow-up...</span>
+            </div>
+          )}
           <FollowUpInput
             context={result.selected_text}
             onSubmit={onFollowUp}

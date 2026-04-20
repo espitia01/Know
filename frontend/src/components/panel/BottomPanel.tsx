@@ -55,11 +55,11 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
 
   const handleFollowUp = useCallback(async (question: string, context: string) => {
     setSelectionLoading(true);
-    setSelectionResult(null);
     try {
       const result = await api.analyzeSelection(paperId, `${context}\n\nFollow-up question: ${question}`, "question");
-      setSelectionResult(result);
-      addSelectionToHistory(result);
+      const followUpResult = { ...result, action: "followup" as const, selected_text: question };
+      addSelectionToHistory(followUpResult);
+      setSelectionResult(followUpResult);
     } catch (e) {
       setSelectionResult({
         action: "followup",
