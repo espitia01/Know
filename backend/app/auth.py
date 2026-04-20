@@ -57,15 +57,27 @@ async def require_auth(
         logger.critical("JWKS not configured — rejecting all authenticated requests")
         raise HTTPException(status_code=503, detail="Authentication not configured")
 
-    # Fail closed in production when audience binding is unset. Without it,
-    # a valid-but-foreign token (e.g. issued by this Clerk org for a
-    # different API) can be replayed against ours.
-    if _is_production() and not settings.clerk_audience:
+    # In production we require the token to be bound to *something*: either
+    # an audience (preferred — defends against cross-API token replay inside
+    # the same Clerk org) or at minimum an issuer (binds the token to our
+    # Clerk instance). If neither is configured, we're verifying signatures
+    # on effectively anonymous JWTs — fail closed.
+    if _is_production() and not settings.clerk_audience and not settings.clerk_issuer:
         logger.critical(
-            "KNOW_CLERK_AUDIENCE must be set in production — rejecting all "
-            "requests until configured"
+            "KNOW_CLERK_AUDIENCE and KNOW_CLERK_ISSUER are both unset in "
+            "production — rejecting all requests until one is configured"
         )
         raise HTTPException(status_code=503, detail="Authentication not configured")
+
+    if _is_production() and not settings.clerk_audience:
+        # Not fatal (issuer still binds the token to our Clerk instance), but
+        # audience binding is strictly stronger. Log once per request so it
+        # shows up in triage dashboards until it's set.
+        logger.warning(
+            "KNOW_CLERK_AUDIENCE unset in production — falling back to "
+            "issuer-only validation. Configure a Clerk JWT template audience "
+            "for defense-in-depth."
+        )
 
     try:
         try:
