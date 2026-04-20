@@ -797,23 +797,11 @@ function PaperContent() {
     </div>
   );
 
-  const panelBlock = isBottom ? (
+  const panelInner = (
     <div
-      className="shrink-0 overflow-hidden bg-background"
-      style={{ height: panelSize }}
-    >
-      <div className="mx-auto max-w-3xl h-full border-l border-r border-t rounded-t-xl">
-        <AnalysisPanel
-          paperId={activePaperId}
-          position={panelPos}
-          onCyclePosition={cyclePosition}
-        />
-      </div>
-    </div>
-  ) : (
-    <div
-      className="shrink-0 overflow-hidden bg-background border-l border-r border-t"
-      style={{ width: panelSize }}
+      className={`h-full ${
+        isBottom ? "mx-auto max-w-3xl border-l border-r border-t rounded-t-xl" : ""
+      }`}
     >
       <AnalysisPanel
         paperId={activePaperId}
@@ -823,8 +811,8 @@ function PaperContent() {
     </div>
   );
 
-  const pdfBlock = (
-    <div className="flex-1 overflow-hidden relative" style={{ minWidth: 0, minHeight: 0 }}>
+  const pdfInner = (
+    <>
       <PdfViewer
         url={api.getPdfUrl(activePaperId)}
         onTextSelected={handleTextSelected}
@@ -838,7 +826,7 @@ function PaperContent() {
           onDismiss={handleSelectionClear}
         />
       )}
-    </div>
+    </>
   );
 
   const showSessionBar = !isFree && sessionPapers.length > 1;
@@ -1144,34 +1132,34 @@ function PaperContent() {
         </div>
       )}
 
-      {/* Main content */}
-      {isBottom ? (
-        <div className="flex-1 flex flex-col overflow-hidden" style={{ minHeight: 0 }}>
-          {pdfBlock}
-          {panelVisible && (
-            <>
-              {dragHandle}
-              {panelBlock}
-            </>
-          )}
+      {/* Main content — single stable container so AnalysisPanel never unmounts on orientation change */}
+      <div
+        className={`flex-1 flex overflow-hidden ${isBottom ? "flex-col" : "flex-row"}`}
+        style={{ minHeight: 0 }}
+      >
+        <div
+          className="flex-1 overflow-hidden relative"
+          style={{ minWidth: 0, minHeight: 0, order: panelPos === "left" ? 3 : 1 }}
+        >
+          {pdfInner}
         </div>
-      ) : (
-        <div className="flex-1 flex overflow-hidden" style={{ minHeight: 0 }}>
-          {panelPos === "left" && panelVisible && (
-            <>
-              {panelBlock}
-              {dragHandle}
-            </>
-          )}
-          {pdfBlock}
-          {panelPos === "right" && panelVisible && (
-            <>
-              {dragHandle}
-              {panelBlock}
-            </>
-          )}
+        <div
+          className="shrink-0"
+          style={{ order: 2, display: panelVisible ? undefined : "none" }}
+        >
+          {dragHandle}
         </div>
-      )}
+        <div
+          className={`shrink-0 overflow-hidden bg-background ${isBottom ? "" : "border-l border-r border-t"}`}
+          style={{
+            ...(isBottom ? { height: panelSize } : { width: panelSize }),
+            order: panelPos === "left" ? 1 : 3,
+            display: panelVisible ? undefined : "none",
+          }}
+        >
+          {panelInner}
+        </div>
+      </div>
     </div>
 
       <BibtexModal
