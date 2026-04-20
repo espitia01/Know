@@ -36,7 +36,16 @@ async function authHeaders(): Promise<Record<string, string>> {
   return {};
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+// Matches the 429 detail emitted by backend `track_usage` when a per-model
+// daily cap is hit: "Daily limit reached for <model> (<n>/day on <tier> plan)."
+const MODEL_CAP_DETAIL_RE =
+  /Daily limit reached for (\S+) \((\d+)\/day on (\S+) plan\)/;
+
+async function request<T>(
+  path: string,
+  options?: RequestInit,
+  retryCount = 0
+): Promise<T> {
   const headers = await authHeaders();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 180_000);
@@ -64,6 +73,49 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       } catch {
         detail = `Request failed (${status})`;
       }
+
+      // Per-model cap: prompt the user to switch and retry once.
+      if (status === 429 && retryCount === 0) {
+        const match = detail.match(MODEL_CAP_DETAIL_RE);
+        if (match) {
+          const [, cappedModel, limitStr, tier] = match;
+          const { promptModelCap } = await import("./modelCapPrompt");
+          const result = await promptModelCap({
+            cappedModel,
+            limit: parseInt(limitStr, 10) || 0,
+            tier,
+          });
+          if (result && result.fallback) {
+            try {
+              // Only rewrite the slot(s) that point at the capped model so we
+              // don't silently change the other preference.
+              const current = await request<SettingsResponse>("/api/settings");
+              const update: Record<string, string> = {};
+              if (current.analysis_model === cappedModel)
+                update.analysis_model = result.fallback;
+              if (current.fast_model === cappedModel)
+                update.fast_model = result.fallback;
+              if (!update.analysis_model && !update.fast_model) {
+                // Capped model wasn't either pref (edge case, e.g. prefs
+                // changed mid-flight). Point both at the fallback so the
+                // retry actually uses something different.
+                update.analysis_model = result.fallback;
+                update.fast_model = result.fallback;
+              }
+              await request<SettingsResponse>("/api/settings", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(update),
+              });
+            } catch {
+              // If the model switch fails, fall through to the original error.
+              throw new Error(detail);
+            }
+            return request<T>(path, options, retryCount + 1);
+          }
+        }
+      }
+
       throw new Error(detail);
     }
     const text = await res.text();

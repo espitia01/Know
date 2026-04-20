@@ -30,9 +30,9 @@ TIER_LIMITS: dict[str, dict] = {
         "features": {"summary", "qa", "selection"},
         "models": {"claude-haiku-4-5"},
         "best_model": "claude-haiku-4-5",
-        "daily_api_calls": 20,
+        "daily_api_calls": 10,
         "per_model_daily": {
-            "claude-haiku-4-5": 20,
+            "claude-haiku-4-5": 10,
         },
     },
     "scholar": {
@@ -42,10 +42,10 @@ TIER_LIMITS: dict[str, dict] = {
         "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection"},
         "models": {"claude-haiku-4-5", "claude-sonnet-4-6"},
         "best_model": "claude-sonnet-4-6",
-        "daily_api_calls": 200,
+        "daily_api_calls": 100,
         "per_model_daily": {
-            "claude-haiku-4-5": 200,
-            "claude-sonnet-4-6": 100,
+            "claude-haiku-4-5": 100,
+            "claude-sonnet-4-6": 40,
         },
     },
     "researcher": {
@@ -55,11 +55,11 @@ TIER_LIMITS: dict[str, dict] = {
         "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "multi-qa"},
         "models": {"claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4"},
         "best_model": "claude-opus-4",
-        "daily_api_calls": 1000,
+        "daily_api_calls": 300,
         "per_model_daily": {
-            "claude-haiku-4-5": 1000,
-            "claude-sonnet-4-6": 500,
-            "claude-opus-4": 100,
+            "claude-haiku-4-5": 300,
+            "claude-sonnet-4-6": 150,
+            "claude-opus-4": 30,
         },
     },
 }
