@@ -242,6 +242,91 @@ def delete_paper_meta(paper_id: str, user_id: str) -> None:
 # Usage tracking (for free-tier rate limits)
 # ----------------------------------------------------------------
 
+_daily_api_bootstrap_done = False
+
+
+def _ensure_daily_api_usage_table(client) -> None:
+    """Lazily create daily_api_usage table + RPC if they don't exist.
+
+    We can't rely on hand-run migrations being applied against every Supabase
+    project, so the backend self-heals the schema the first time it touches
+    the table. Safe to call many times.
+    """
+    global _daily_api_bootstrap_done
+    if _daily_api_bootstrap_done:
+        return
+    try:
+        client.table("daily_api_usage").select("user_id").limit(1).execute()
+        _daily_api_bootstrap_done = True
+        return
+    except Exception:
+        pass
+
+    sql = """
+    CREATE TABLE IF NOT EXISTS daily_api_usage (
+        user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+        date    DATE NOT NULL,
+        count   INT  NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_id, date)
+    );
+    CREATE OR REPLACE FUNCTION increment_daily_api_usage(p_user_id text, p_date date)
+    RETURNS integer LANGUAGE plpgsql AS $$
+    DECLARE new_count integer;
+    BEGIN
+        INSERT INTO daily_api_usage (user_id, date, count)
+        VALUES (p_user_id, p_date, 1)
+        ON CONFLICT (user_id, date)
+        DO UPDATE SET count = daily_api_usage.count + 1
+        RETURNING count INTO new_count;
+        RETURN new_count;
+    END;
+    $$;
+    """
+    try:
+        client.rpc("exec_sql", {"query": sql}).execute()
+    except Exception as e:
+        logger.warning("daily_api_usage auto-create skipped: %s", e)
+    _daily_api_bootstrap_done = True
+
+
+def _record_daily_api_call(client, user_id: str, today_str: str) -> None:
+    """Increment today's account-wide API-call count for the user.
+
+    Writes to `daily_api_usage`, a user-scoped table that is NOT cascaded from
+    `papers`. This keeps the daily counter stable across paper deletions and
+    trial cleanups.
+    """
+    _ensure_daily_api_usage_table(client)
+    try:
+        client.rpc("increment_daily_api_usage", {
+            "p_user_id": user_id,
+            "p_date": today_str,
+        }).execute()
+        return
+    except Exception as e:
+        logger.debug("increment_daily_api_usage RPC failed, falling back to table ops: %s", e)
+
+    try:
+        existing = _safe_single(
+            client.table("daily_api_usage")
+            .select("count")
+            .eq("user_id", user_id)
+            .eq("date", today_str)
+        )
+        if existing is not None:
+            new_count = (existing.get("count") or 0) + 1
+            client.table("daily_api_usage").update({"count": new_count}) \
+                .eq("user_id", user_id).eq("date", today_str).execute()
+        else:
+            client.table("daily_api_usage").insert({
+                "user_id": user_id,
+                "date": today_str,
+                "count": 1,
+            }).execute()
+    except Exception as e:
+        logger.error("daily_api_usage write failed for user %s: %s", user_id, e)
+
+
 def record_usage(user_id: str, paper_id: str, action: str) -> int:
     """Record a usage event and return today's total for this action+paper."""
     client = get_db()
@@ -251,6 +336,10 @@ def record_usage(user_id: str, paper_id: str, action: str) -> int:
     from datetime import timezone, datetime
 
     today_str = datetime.now(timezone.utc).date().isoformat()
+
+    # Always increment the account-level daily counter in the paper-independent
+    # table, so it survives paper deletions / CASCADE cleanup.
+    _record_daily_api_call(client, user_id, today_str)
 
     existing = _safe_single(
         client.table("usage")
@@ -337,7 +426,12 @@ def get_usage_count(user_id: str, paper_id: str, action: str) -> int:
 
 
 def get_daily_api_count(user_id: str) -> int:
-    """Get total API calls across all actions for today."""
+    """Get total API calls for today, from the paper-independent daily table.
+
+    Falls back to summing the legacy `usage` table if `daily_api_usage` is not
+    available yet (e.g. first deploy before the migration ran), so the counter
+    never regresses silently.
+    """
     client = get_db()
     if not client:
         return 0
@@ -345,6 +439,22 @@ def get_daily_api_count(user_id: str) -> int:
     from datetime import datetime, timezone
 
     today_str = datetime.now(timezone.utc).date().isoformat()
+
+    try:
+        _ensure_daily_api_usage_table(client)
+        row = _safe_single(
+            client.table("daily_api_usage")
+            .select("count")
+            .eq("user_id", user_id)
+            .eq("date", today_str)
+        )
+        if row is not None:
+            return int(row.get("count") or 0)
+        # No row yet for today — still fall through to legacy sum so users who
+        # were active before the new table existed don't see a sudden zero.
+    except Exception as e:
+        logger.debug("daily_api_usage read failed, falling back: %s", e)
+
     try:
         res = (
             client.table("usage")
@@ -354,10 +464,10 @@ def get_daily_api_count(user_id: str) -> int:
             .lte("date", today_str)
             .execute()
         )
-        rows = res.data or [] if res else []
+        rows = (res.data if res else None) or []
         return sum(r.get("count", 0) for r in rows)
     except Exception as e:
-        logger.warning("get_daily_api_count failed: %s", e)
+        logger.warning("get_daily_api_count legacy fallback failed: %s", e)
         return 0
 
 
