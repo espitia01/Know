@@ -22,6 +22,19 @@ OPUS_MODEL = "claude-opus-4"
 
 MAX_IMAGE_DIMENSION = 1024
 
+LATEX_FORMAT_INSTRUCTIONS = """LATEX FORMATTING RULES (STRICT — follow exactly):
+- Use $...$ for inline math (variables, single symbols, short expressions)
+- Use $$...$$ for display math (any equation with \\frac, \\sum, \\int, \\prod, \\lim, matrices, multi-line expressions, or anything longer than a few tokens)
+- Put each display equation on its own line with a blank line before and after the $$...$$ block
+- NEVER use \\( \\) or \\[ \\] delimiters — always $ or $$
+- NEVER output Unicode math characters (e.g. σ, μ, ∑, ∫, ², ₙ, subscripts, superscripts, fractions as separate characters). ALWAYS write them in LaTeX: \\sigma, \\mu, \\sum, \\int, x^2, x_n, \\frac{a}{b}
+- NEVER mix bare/raw symbols and LaTeX in the same expression. If an equation has ANY math, wrap the ENTIRE equation in $...$ or $$...$$
+- For matrices use \\begin{pmatrix}...\\end{pmatrix} (or bmatrix/vmatrix) inside $$...$$
+- For multi-character function names use \\operatorname{name} or \\text{name}
+- Use \\cdot for multiplication, \\left( \\right) for auto-sized parens around large expressions
+- Do not break a single equation into multiple $...$ fragments — keep it as one continuous math expression"""
+
+
 
 def _ssl_context():
     """Build an SSL context, preferring certifi, falling back to system certs."""
@@ -399,7 +412,10 @@ Return JSON:
     }
 
     prompt = action_prompts.get(action, action_prompts["explain"])
-    system = "You are an expert science educator. Analyze academic paper content to help students learn. Return ONLY valid JSON. CRITICAL: For ALL math expressions, use $ delimiters for inline math and $$ for display math. NEVER use \\( \\) or \\[ \\] delimiters."
+    system = (
+        "You are an expert science educator. Analyze academic paper content to help students learn. "
+        "Return ONLY valid JSON.\n\n" + LATEX_FORMAT_INSTRUCTIONS
+    )
     raw = await provider.complete(system, prompt, max_tokens=8192)
     result = _safe_parse_json(raw)
     result["action"] = action
@@ -418,9 +434,9 @@ def _get_selection_prompt(paper_text: str, selected_text: str, action: str) -> t
     system = (
         "You are an expert science educator. Analyze academic paper content to help students learn. "
         "Use markdown formatting with clear structure. "
-        "CRITICAL: For ALL math, use $ for inline and $$ for display math. "
-        "NEVER use \\( \\) or \\[ \\] delimiters. Do NOT wrap output in JSON or code fences.\n\n"
-        "IMPORTANT: The selected text comes from a PDF text layer. Mathematical equations may appear garbled, "
+        "Do NOT wrap output in JSON or code fences.\n\n"
+        + LATEX_FORMAT_INSTRUCTIONS
+        + "\n\nIMPORTANT: The selected text comes from a PDF text layer. Mathematical equations may appear garbled, "
         "with symbols like subscripts, superscripts, Greek letters, or operators rendered as incorrect Unicode characters "
         "or missing entirely. Use the paper context to infer the correct equations and symbols. "
         "Always reproduce equations correctly in LaTeX even if the selected text is mangled."
@@ -483,7 +499,11 @@ async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
     """Run pre-reading analysis on paper content."""
     provider = get_provider(user_id)
 
-    system = """You are an expert science educator. Analyze the given academic paper and extract structured information to help a student prepare before reading. Return ONLY valid JSON with no other text. CRITICAL: For ALL math, use $ for inline and $$ for display math. NEVER use \\( \\) or \\[ \\] delimiters."""
+    system = (
+        "You are an expert science educator. Analyze the given academic paper and extract structured information "
+        "to help a student prepare before reading. Return ONLY valid JSON with no other text.\n\n"
+        + LATEX_FORMAT_INSTRUCTIONS
+    )
 
     user = f"""Analyze this paper and return a JSON object with these fields:
 
@@ -503,7 +523,10 @@ async def explain_term(paper_text: str, term: str, context: str, user_id: str | 
     """Explain a term in the context of the paper."""
     provider = get_provider(user_id)
 
-    system = """You are an expert science educator. Explain technical terms clearly and accurately. Return ONLY valid JSON."""
+    system = (
+        "You are an expert science educator. Explain technical terms clearly and accurately. "
+        "Return ONLY valid JSON.\n\n" + LATEX_FORMAT_INSTRUCTIONS
+    )
 
     user = f"""Given this paper context, explain the term "{term}".
 
@@ -525,7 +548,11 @@ async def find_skipped_steps(paper_text: str, section: str, user_id: str | None 
     """Identify and fill in skipped derivation steps."""
     provider = get_provider(user_id)
 
-    system = """You are an expert physicist and mathematics educator. When given a derivation from a paper, identify any steps that were skipped and provide the intermediate steps. Return ONLY valid JSON."""
+    system = (
+        "You are an expert physicist and mathematics educator. When given a derivation from a paper, "
+        "identify any steps that were skipped and provide the intermediate steps. Return ONLY valid JSON.\n\n"
+        + LATEX_FORMAT_INSTRUCTIONS
+    )
 
     user = f"""Analyze this section from a paper and identify any skipped steps in derivations.
 
@@ -556,7 +583,10 @@ async def extract_assumptions(paper_text: str, user_id: str | None = None) -> di
     """Extract explicit and implicit assumptions."""
     provider = get_provider(user_id)
 
-    system = """You are an expert science educator. Identify all assumptions in the paper, both those explicitly stated and those implied. Return ONLY valid JSON."""
+    system = (
+        "You are an expert science educator. Identify all assumptions in the paper, both those explicitly "
+        "stated and those implied. Return ONLY valid JSON.\n\n" + LATEX_FORMAT_INSTRUCTIONS
+    )
 
     user = f"""Analyze this paper and extract all assumptions, both explicit (clearly stated) and implicit (unstated but necessary for the conclusions to hold).
 
@@ -582,7 +612,11 @@ async def generate_derivation_exercise(paper_text: str, section: str, user_id: s
     """Generate an interactive derivation exercise with fill-in-the-blank steps."""
     provider = get_provider(user_id)
 
-    system = """You are an expert physics/mathematics educator creating interactive derivation exercises. Your exercises must be detailed, pedagogical, and genuinely useful for a student trying to learn the material. Return ONLY valid JSON."""
+    system = (
+        "You are an expert physics/mathematics educator creating interactive derivation exercises. "
+        "Your exercises must be detailed, pedagogical, and genuinely useful for a student trying to learn "
+        "the material. Return ONLY valid JSON.\n\n" + LATEX_FORMAT_INSTRUCTIONS
+    )
 
     user = f"""Create a thorough step-by-step derivation exercise based on the section titled "{section}" from this paper.
 
@@ -625,7 +659,10 @@ async def answer_questions(paper_text: str, questions: list[str], user_id: str |
     """Answer a batch of questions about the paper."""
     provider = get_provider(user_id)
 
-    system = """You are an expert science educator. Answer questions about the paper thoroughly but accessibly. Use LaTeX for math expressions. Return ONLY valid JSON."""
+    system = (
+        "You are an expert science educator. Answer questions about the paper thoroughly but accessibly. "
+        "Return ONLY valid JSON.\n\n" + LATEX_FORMAT_INSTRUCTIONS
+    )
 
     q_list = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
 
@@ -660,9 +697,8 @@ async def answer_questions_multi(paper_texts: list[tuple[str, str]], questions: 
     system = (
         "You are an expert science educator. You have access to multiple papers in a reading session. "
         "Answer questions by synthesizing information across all provided papers. "
-        "Reference specific papers by title when citing information. "
-        "Use LaTeX for math ($...$). Return ONLY valid JSON. "
-        "CRITICAL: For ALL math, use $ for inline and $$ for display. NEVER use \\( \\) or \\[ \\] delimiters."
+        "Reference specific papers by title when citing information. Return ONLY valid JSON.\n\n"
+        + LATEX_FORMAT_INSTRUCTIONS
     )
 
     q_list = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
@@ -703,7 +739,10 @@ async def summarize_paper(paper_text: str, model_override: str | None = None, us
     else:
         provider = get_provider(user_id)
 
-    system = """You are an expert science educator and researcher. Produce an extremely detailed, structured summary of the academic paper. Return ONLY valid JSON. CRITICAL: For ALL math expressions, use $ delimiters for inline math and $$ for display math. NEVER use \\( \\) or \\[ \\] delimiters."""
+    system = (
+        "You are an expert science educator and researcher. Produce an extremely detailed, structured summary "
+        "of the academic paper. Return ONLY valid JSON.\n\n" + LATEX_FORMAT_INSTRUCTIONS
+    )
 
     user = f"""Create an extremely detailed summary of this academic paper. The summary should be comprehensive enough that someone could understand the paper's full contribution without reading the original.
 
@@ -767,9 +806,8 @@ async def analyze_figure(paper_text: str, image_b64: str, question: str = "", us
 
     system = (
         "You are an expert science educator analyzing figures from academic papers. "
-        "Provide clear, thorough, educational explanations. Return ONLY valid JSON. "
-        "CRITICAL: For ALL math expressions, use $ delimiters for inline math and $$ "
-        "for display math. NEVER use \\( \\) or \\[ \\] delimiters."
+        "Provide clear, thorough, educational explanations. Return ONLY valid JSON.\n\n"
+        + LATEX_FORMAT_INSTRUCTIONS
     )
 
     if question.strip():
@@ -815,8 +853,7 @@ def _get_figure_prompt(paper_text: str, question: str) -> tuple[str, str]:
     system = (
         "You are an expert science educator analyzing figures from academic papers. "
         "Provide clear, thorough, educational explanations. Use markdown formatting. "
-        "CRITICAL: For ALL math, use $ for inline and $$ for display math. "
-        "NEVER use \\( \\) or \\[ \\] delimiters. Do NOT wrap output in JSON or code fences."
+        "Do NOT wrap output in JSON or code fences.\n\n" + LATEX_FORMAT_INSTRUCTIONS
     )
 
     if question.strip():

@@ -18,6 +18,37 @@ const MODEL_LABELS: Record<string, string> = {
   "claude-opus-4": "Highest quality — deepest analysis",
 };
 
+function UsageBar({ label, used, limit, hint }: { label: string; used: number; limit: number; hint?: string }) {
+  const unlimited = limit === -1;
+  const pct = unlimited ? 0 : Math.min(100, limit > 0 ? (used / limit) * 100 : 0);
+  const nearLimit = !unlimited && pct >= 80;
+  const over = !unlimited && used >= limit;
+  return (
+    <div className="space-y-1.5" title={hint}>
+      <div className="flex items-center justify-between text-[12px]">
+        <span className="text-gray-600 font-medium">{label}</span>
+        <span className="tabular-nums text-gray-500">
+          {unlimited ? (
+            <span className="font-medium text-gray-700">{used} <span className="text-gray-400">/ Unlimited</span></span>
+          ) : (
+            <span className={`font-medium ${over ? "text-red-500" : nearLimit ? "text-amber-600" : "text-gray-700"}`}>
+              {used} / {limit}
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="w-full h-1.5 bg-black/[0.05] rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-300 ${
+            unlimited ? "bg-gray-300" : over ? "bg-red-400" : nearLimit ? "bg-amber-400" : "bg-gray-700"
+          }`}
+          style={{ width: unlimited ? "8%" : `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function SettingsContent() {
   const router = useRouter();
   const { signOut } = useClerk();
@@ -37,6 +68,15 @@ function SettingsContent() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [upgradeLoading, setUpgradeLoading] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [usage, setUsage] = useState<{
+    tier: string;
+    papers_used: number;
+    papers_limit: number;
+    daily_api_used: number;
+    daily_api_limit: number;
+    qa_per_paper_limit: number;
+    selections_per_paper_limit: number;
+  } | null>(null);
 
   const tier = tierUser?.tier || "free";
   const showModels = tier !== "free";
@@ -51,6 +91,12 @@ function SettingsContent() {
       api.getModels().then((r) => setModels(r.models)).catch(() => {});
     }
   }, [showModels]);
+
+  useEffect(() => {
+    if (tierUser) {
+      api.getAccountUsage().then(setUsage).catch(() => {});
+    }
+  }, [tierUser]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -191,6 +237,55 @@ function SettingsContent() {
             )}
             {saveError && (
               <p className="text-[12px] text-center text-red-500">{saveError}</p>
+            )}
+          </div>
+        )}
+
+        {/* Usage */}
+        {usage && (
+          <div className="glass rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-[14px] font-semibold text-gray-900">Usage</p>
+              <span className="text-[11px] text-gray-500 glass-subtle px-2.5 py-1 rounded-full font-medium capitalize">
+                {usage.tier} Plan
+              </span>
+            </div>
+
+            <UsageBar
+              label="Papers in library"
+              used={usage.papers_used}
+              limit={usage.papers_limit}
+              hint="Total papers uploaded to your library."
+            />
+            <UsageBar
+              label="API calls today"
+              used={usage.daily_api_used}
+              limit={usage.daily_api_limit}
+              hint="Resets at midnight UTC. Counts all AI analyses."
+            />
+
+            <div className="pt-2 border-t border-black/[0.06] space-y-1.5 text-[11px] text-gray-500">
+              <div className="flex items-center justify-between">
+                <span>Q&amp;A per paper</span>
+                <span className="font-medium text-gray-700 tabular-nums">
+                  {usage.qa_per_paper_limit === -1 ? "Unlimited" : usage.qa_per_paper_limit}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Selections per paper</span>
+                <span className="font-medium text-gray-700 tabular-nums">
+                  {usage.selections_per_paper_limit === -1 ? "Unlimited" : usage.selections_per_paper_limit}
+                </span>
+              </div>
+            </div>
+
+            {tier !== "researcher" && (
+              <button
+                onClick={() => router.push("/#pricing")}
+                className="w-full text-[12px] font-medium text-gray-600 hover:text-gray-900 transition-colors pt-1"
+              >
+                Need more? View plans &rarr;
+              </button>
             )}
           </div>
         )}

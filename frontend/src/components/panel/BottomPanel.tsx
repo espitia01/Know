@@ -42,7 +42,7 @@ const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
 };
 
 export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPanelProps) {
-  const { activeTab, setActiveTab, selectionResult, selectionLoading, selectionHistory, setSelectionResult, setSelectionLoading, addSelectionToHistory, sessionPapers } = useStore();
+  const { activeTab, setActiveTab, selectionResult, selectionLoading, selectionHistory, setSelectionResult, setSelectionLoading, addSelectionToHistory, sessionPapers, bumpUsageRefresh } = useStore();
   const { user } = useUserTier();
   const tier = user?.tier || "free";
 
@@ -60,6 +60,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       const followUpResult = { ...result, action: "followup" as const, selected_text: question };
       addSelectionToHistory(followUpResult);
       setSelectionResult(followUpResult);
+      bumpUsageRefresh();
     } catch (e) {
       setSelectionResult({
         action: "followup",
@@ -69,7 +70,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
     } finally {
       setSelectionLoading(false);
     }
-  }, [paperId, setSelectionLoading, setSelectionResult, addSelectionToHistory]);
+  }, [paperId, setSelectionLoading, setSelectionResult, addSelectionToHistory, bumpUsageRefresh]);
 
   return (
     <Tabs

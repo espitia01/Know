@@ -504,4 +504,15 @@ export const api = {
       selections_limit: number;
       tier: string;
     }>(`/api/usage/${paperId}`),
+
+  getAccountUsage: () =>
+    request<{
+      tier: string;
+      papers_used: number;
+      papers_limit: number;
+      daily_api_used: number;
+      daily_api_limit: number;
+      qa_per_paper_limit: number;
+      selections_per_paper_limit: number;
+    }>(`/api/usage`),
 };

@@ -195,6 +195,34 @@ async def get_paper_usage(paper_id: str, user_id: str = Depends(require_auth)):
     }
 
 
+@app.get("/api/usage")
+async def get_account_usage(user_id: str = Depends(require_auth)):
+    """Return account-wide usage counts and tier limits for the current user."""
+    from .services.db import get_user, get_daily_api_count
+    from .gating import get_user_tier, TIER_LIMITS
+
+    tier = get_user_tier(user_id)
+    limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+
+    user = get_user(user_id) or {}
+    paper_count = user.get("paper_count", 0)
+
+    try:
+        daily_used = get_daily_api_count(user_id)
+    except Exception:
+        daily_used = 0
+
+    return {
+        "tier": tier,
+        "papers_used": paper_count,
+        "papers_limit": limits.get("max_papers", -1),
+        "daily_api_used": daily_used,
+        "daily_api_limit": limits.get("daily_api_calls", -1),
+        "qa_per_paper_limit": limits.get("qa_per_paper", -1),
+        "selections_per_paper_limit": limits.get("selections_per_paper", -1),
+    }
+
+
 # --- Trial endpoints (no auth, rate-limited by IP via Supabase) ---
 
 TRIAL_RATE_LIMIT = 5

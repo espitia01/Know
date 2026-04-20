@@ -48,7 +48,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
   const {
     questions, addQuestion, removeQuestion, clearQuestions,
     qaResults, setQAResults, qaLoading, setQALoading,
-    sessionPapers,
+    sessionPapers, bumpUsageRefresh,
   } = useStore();
   const { user } = useUserTier();
   const tier = user?.tier || "free";
@@ -91,6 +91,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
       }
       setQAResults([...qaResults, ...result.items]);
       clearQuestions();
+      bumpUsageRefresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Q&A failed";
       setQAError(msg.replace(/^API error \d+:\s*/, "").replace(/[{}"]/g, "").replace("detail:", "").trim());

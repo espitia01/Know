@@ -103,6 +103,9 @@ interface AppStore {
   clearPaperCache: (paperId: string) => void;
   updatePaperCache: (paperId: string, partial: Partial<PaperCache>) => void;
   resetAnalysisState: () => void;
+
+  usageRefreshKey: number;
+  bumpUsageRefresh: () => void;
 }
 
 export const useStore = create<AppStore>()(
@@ -268,6 +271,9 @@ export const useStore = create<AppStore>()(
         preReadingLoading: false, assumptionsLoading: false, summaryLoading: false,
         selectionLoading: false, qaLoading: false, exerciseLoading: false, searchLoading: false,
       }),
+
+      usageRefreshKey: 0,
+      bumpUsageRefresh: () => set((s) => ({ usageRefreshKey: s.usageRefreshKey + 1 })),
     }),
     {
       name: "know-paper-store",

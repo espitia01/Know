@@ -586,11 +586,13 @@ function PaperContent() {
     qa_used: number; qa_limit: number; selections_used: number; selections_limit: number;
   } | null>(null);
 
+  const usageRefreshKey = useStore((s) => s.usageRefreshKey);
+
   const refreshUsage = useCallback(() => {
     api.getPaperUsage(activePaperId).then(setPaperUsage).catch(() => {});
   }, [activePaperId]);
 
-  useEffect(() => { refreshUsage(); }, [refreshUsage]);
+  useEffect(() => { refreshUsage(); }, [refreshUsage, usageRefreshKey]);
 
   const handleTextSelected = useCallback((text: string, rect: DOMRect) => {
     setSelection({ text, rect });
