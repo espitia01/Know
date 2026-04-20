@@ -337,17 +337,28 @@ def _ensure_daily_model_usage_table(client) -> None:
     _daily_model_bootstrap_done = True
 
 
-def _record_daily_model_call(client, user_id: str, today_str: str, model: str) -> None:
-    """Increment today's per-model API count for the user. Best-effort."""
-    if not model:
+def _record_daily_model_call(
+    client, user_id: str, today_str: str, model: str, delta: int = 1
+) -> None:
+    """Increment today's per-model API count for the user. Best-effort.
+
+    ``delta`` controls how much to add, which matters for endpoints that
+    perform N sub-operations in a single HTTP call (e.g. a Q&A batch of N
+    questions counts as N model calls, not one).
+    """
+    if not model or delta <= 0:
         return
     _ensure_daily_model_usage_table(client)
+    # The RPC increments by 1; call it `delta` times. Typical N is 1–10,
+    # so the extra round trips are negligible and let us avoid a schema
+    # change to the existing RPC signature.
     try:
-        client.rpc("increment_daily_model_usage", {
-            "p_user_id": user_id,
-            "p_date": today_str,
-            "p_model": model,
-        }).execute()
+        for _ in range(delta):
+            client.rpc("increment_daily_model_usage", {
+                "p_user_id": user_id,
+                "p_date": today_str,
+                "p_model": model,
+            }).execute()
         return
     except Exception as e:
         logger.debug("increment_daily_model_usage RPC failed, falling back: %s", e)
@@ -361,7 +372,7 @@ def _record_daily_model_call(client, user_id: str, today_str: str, model: str) -
             .eq("model", model)
         )
         if existing is not None:
-            new_count = (existing.get("count") or 0) + 1
+            new_count = (existing.get("count") or 0) + delta
             client.table("daily_model_usage").update({"count": new_count}) \
                 .eq("user_id", user_id).eq("date", today_str).eq("model", model).execute()
         else:
@@ -369,7 +380,7 @@ def _record_daily_model_call(client, user_id: str, today_str: str, model: str) -
                 "user_id": user_id,
                 "date": today_str,
                 "model": model,
-                "count": 1,
+                "count": delta,
             }).execute()
     except Exception as e:
         logger.error("daily_model_usage write failed for user %s/%s: %s", user_id, model, e)
@@ -403,19 +414,22 @@ def get_daily_model_count(user_id: str, model: str) -> int:
     return 0
 
 
-def _record_daily_api_call(client, user_id: str, today_str: str) -> None:
+def _record_daily_api_call(client, user_id: str, today_str: str, delta: int = 1) -> None:
     """Increment today's account-wide API-call count for the user.
 
     Writes to `daily_api_usage`, a user-scoped table that is NOT cascaded from
     `papers`. This keeps the daily counter stable across paper deletions and
-    trial cleanups.
+    trial cleanups. ``delta`` controls the bump size (batched Q&A, etc.).
     """
+    if delta <= 0:
+        return
     _ensure_daily_api_usage_table(client)
     try:
-        client.rpc("increment_daily_api_usage", {
-            "p_user_id": user_id,
-            "p_date": today_str,
-        }).execute()
+        for _ in range(delta):
+            client.rpc("increment_daily_api_usage", {
+                "p_user_id": user_id,
+                "p_date": today_str,
+            }).execute()
         return
     except Exception as e:
         logger.debug("increment_daily_api_usage RPC failed, falling back to table ops: %s", e)
@@ -428,25 +442,41 @@ def _record_daily_api_call(client, user_id: str, today_str: str) -> None:
             .eq("date", today_str)
         )
         if existing is not None:
-            new_count = (existing.get("count") or 0) + 1
+            new_count = (existing.get("count") or 0) + delta
             client.table("daily_api_usage").update({"count": new_count}) \
                 .eq("user_id", user_id).eq("date", today_str).execute()
         else:
             client.table("daily_api_usage").insert({
                 "user_id": user_id,
                 "date": today_str,
-                "count": 1,
+                "count": delta,
             }).execute()
     except Exception as e:
         logger.error("daily_api_usage write failed for user %s: %s", user_id, e)
 
 
-def record_usage(user_id: str, paper_id: str, action: str, *, model: str | None = None) -> int:
+def record_usage(
+    user_id: str,
+    paper_id: str,
+    action: str,
+    *,
+    model: str | None = None,
+    count: int = 1,
+    record_daily: bool = True,
+) -> int:
     """Record a usage event and return today's total for this action+paper.
 
-    When ``model`` is provided, the call is also counted toward that model's
-    daily total in `daily_model_usage`, which powers per-model rate limits.
+    ``count`` is the number of sub-operations to record at once (e.g. a Q&A
+    batch of 3 questions = 3 call units). It must be >= 1.
+
+    When ``model`` is provided AND ``record_daily`` is True, the call is also
+    counted toward that model's daily total in `daily_model_usage`, which
+    powers per-model rate limits. Set ``record_daily=False`` for secondary
+    rows in multi-paper actions that share a single logical call (so the
+    daily account counter isn't inflated).
     """
+    if count < 1:
+        count = 1
     client = get_db()
     if not client:
         return 0
@@ -457,9 +487,10 @@ def record_usage(user_id: str, paper_id: str, action: str, *, model: str | None 
 
     # Always increment the account-level daily counter in the paper-independent
     # table, so it survives paper deletions / CASCADE cleanup.
-    _record_daily_api_call(client, user_id, today_str)
-    if model:
-        _record_daily_model_call(client, user_id, today_str, model)
+    if record_daily:
+        _record_daily_api_call(client, user_id, today_str, delta=count)
+        if model:
+            _record_daily_model_call(client, user_id, today_str, model, delta=count)
 
     existing = _safe_single(
         client.table("usage")
@@ -472,7 +503,7 @@ def record_usage(user_id: str, paper_id: str, action: str, *, model: str | None 
     )
 
     if existing:
-        new_count = (existing.get("count") or 0) + 1
+        new_count = (existing.get("count") or 0) + count
         try:
             client.table("usage").update({"count": new_count}).eq("id", existing["id"]).execute()
         except Exception as e:
@@ -484,12 +515,12 @@ def record_usage(user_id: str, paper_id: str, action: str, *, model: str | None 
                 "user_id": user_id,
                 "paper_id": paper_id,
                 "action": action,
-                "count": 1,
+                "count": count,
                 "date": today_str,
             }).execute()
         except Exception as e:
             logger.warning("Usage insert failed: %s", e)
-        return 1
+        return count
 
 
 def store_cancellation_feedback(user_id: str, reason: str, feedback: str) -> None:

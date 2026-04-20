@@ -51,18 +51,29 @@ router = APIRouter(prefix="/api/papers", tags=["analysis"])
 logger = logging.getLogger(__name__)
 
 
-def _track_analysis(user_id: str, paper_id: str, action: str) -> None:
+def _track_analysis(
+    user_id: str, paper_id: str, action: str, *, count: int = 1
+) -> None:
     """Record usage tagged with the user's resolved analysis model.
 
     Centralised so per-model daily limits are enforced wherever the analysis
-    provider is used (preReading, summary, qa, assumptions, ...).
+    provider is used (preReading, summary, qa, assumptions, ...). ``count``
+    is the number of sub-operations (e.g. questions in a Q&A batch).
     """
-    track_usage(user_id, paper_id, action, model=resolve_analysis_model(user_id))
+    track_usage(
+        user_id, paper_id, action,
+        model=resolve_analysis_model(user_id), count=count,
+    )
 
 
-def _track_fast(user_id: str, paper_id: str, action: str) -> None:
+def _track_fast(
+    user_id: str, paper_id: str, action: str, *, count: int = 1
+) -> None:
     """Record usage tagged with the user's resolved fast model (selections, figures)."""
-    track_usage(user_id, paper_id, action, model=resolve_fast_model(user_id))
+    track_usage(
+        user_id, paper_id, action,
+        model=resolve_fast_model(user_id), count=count,
+    )
 
 
 @router.post("/{paper_id}/analyze", response_model=PreReadingAnalysis)
@@ -301,7 +312,11 @@ async def derivation_exercise(paper_id: str, body: dict, user_id: str = Depends(
 @router.post("/{paper_id}/qa", response_model=QAResponse)
 async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)):
     check_feature_access(user_id, "qa")
-    check_usage_limit(user_id, paper_id, "qa")
+    # A batch of N questions consumes N units against both the daily budget
+    # and the per-paper Q&A cap — otherwise users could bypass the cap by
+    # clicking "Answer all" with many queued questions.
+    n_questions = max(1, len(req.questions))
+    check_usage_limit(user_id, paper_id, "qa", count=n_questions)
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
     paper = get_paper(paper_id, user_id=user_id)
@@ -318,7 +333,7 @@ async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)
         qa_sessions.append(resp.model_dump())
         paper.cached_analysis["qa_sessions"] = qa_sessions
         save_paper(paper, user_id=user_id)
-        _track_analysis(user_id, paper_id, "qa")
+        _track_analysis(user_id, paper_id, "qa", count=n_questions)
         return resp
     except ValueError:
         raise HTTPException(status_code=503, detail="Q&A service temporarily unavailable.")
@@ -548,8 +563,16 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
     try:
         result = await answer_questions_multi(paper_texts, questions, user_id=user_id)
         model = resolve_analysis_model(user_id)
-        for pid in paper_ids:
-            track_usage(user_id, pid, "qa", model=model)
+        n_questions = max(1, len(questions))
+        # Daily + per-model totals track the LLM call (which produced
+        # n_questions answers). Per-paper qa counters each track that the
+        # paper participated in n_questions of the user's Q&A on it.
+        for idx, pid in enumerate(paper_ids):
+            track_usage(
+                user_id, pid, "qa",
+                model=model, count=n_questions,
+                record_daily=(idx == 0),
+            )
         if isinstance(result, dict) and "items" in result:
             return result
         return {"items": result}

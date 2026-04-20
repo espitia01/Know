@@ -114,8 +114,18 @@ def check_paper_limit(user_id: str) -> str:
     return tier
 
 
-def check_usage_limit(user_id: str, paper_id: str, action: str) -> str:
-    """Check per-paper usage limits (QA, selections). Returns the tier. Raises 403 on deny."""
+def check_usage_limit(
+    user_id: str, paper_id: str, action: str, count: int = 1
+) -> str:
+    """Check per-paper usage limits (QA, selections). Returns the tier. Raises 403 on deny.
+
+    ``count`` is the number of sub-operations the caller intends to perform
+    (e.g. a batched Q&A answering 3 questions passes ``count=3``). The check
+    rejects if ``current + count`` would exceed the paper's limit, so we fail
+    fast before burning any LLM tokens.
+    """
+    if count < 1:
+        count = 1
     tier = get_user_tier(user_id)
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
 
@@ -132,65 +142,95 @@ def check_usage_limit(user_id: str, paper_id: str, action: str) -> str:
         return tier
 
     current = get_usage_count(user_id, paper_id, action)
-    if current >= max_count:
+    if current + count > max_count:
+        remaining = max(0, max_count - current)
         raise HTTPException(
             status_code=403,
-            detail=f"Usage limit reached ({max_count} {action}s per paper on {tier} plan). Upgrade to continue.",
+            detail=(
+                f"Usage limit reached ({max_count} {action}s per paper on {tier} plan)."
+                f" You have {remaining} left; tried to use {count}. Upgrade to continue."
+            ),
         )
     return tier
 
 
-def track_usage(user_id: str, paper_id: str, action: str, *, model: str | None = None) -> int:
+def track_usage(
+    user_id: str,
+    paper_id: str,
+    action: str,
+    *,
+    model: str | None = None,
+    count: int = 1,
+    record_daily: bool = True,
+) -> int:
     """Record a usage event and enforce daily + per-paper + per-model limits.
     Returns the updated daily count.
 
     This is the single enforcement point for rate limits to avoid TOCTOU races:
     daily, per-model, and per-paper checks happen right before the atomic
-    increment. When `model` is provided, the call also counts toward that
+    increment. When ``model`` is provided, the call also counts toward that
     model's daily sub-budget defined by ``TIER_LIMITS[tier]["per_model_daily"]``.
+
+    ``count`` is the number of sub-operations in this one request (e.g.
+    batched Q&A with N questions = N units). Limits are enforced against
+    ``current + count`` so a batch that would push the user over the cap
+    is rejected before any work is done.
+
+    ``record_daily`` lets callers that fan out the same logical call across
+    multiple papers (e.g. multi-paper Q&A) skip the daily / per-model bump
+    on secondary rows so the account-wide counter isn't inflated.
     """
+    if count < 1:
+        count = 1
     tier = get_user_tier(user_id)
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
 
-    max_daily = limits.get("daily_api_calls", 20)
-    if max_daily != -1:
-        from .services.db import get_daily_api_count
-        current = get_daily_api_count(user_id)
-        if current >= max_daily:
-            raise HTTPException(
-                status_code=429,
-                detail=f"Daily API limit reached ({max_daily} calls/day on {tier} plan). Try again tomorrow or upgrade.",
-            )
+    if record_daily:
+        max_daily = limits.get("daily_api_calls", 20)
+        if max_daily != -1:
+            from .services.db import get_daily_api_count
+            current = get_daily_api_count(user_id)
+            if current + count > max_daily:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Daily API limit reached ({max_daily} calls/day on {tier} plan). Try again tomorrow or upgrade.",
+                )
 
-    if model:
-        per_model = limits.get("per_model_daily") or {}
-        if model in per_model:
-            max_for_model = per_model[model]
-            if max_for_model >= 0:
-                current_model = get_daily_model_count(user_id, model)
-                if current_model >= max_for_model:
-                    raise HTTPException(
-                        status_code=429,
-                        detail=(
-                            f"Daily limit reached for {model} "
-                            f"({max_for_model}/day on {tier} plan). "
-                            "Pick a different model in Settings or try again tomorrow."
-                        ),
-                    )
+        if model:
+            per_model = limits.get("per_model_daily") or {}
+            if model in per_model:
+                max_for_model = per_model[model]
+                if max_for_model >= 0:
+                    current_model = get_daily_model_count(user_id, model)
+                    if current_model + count > max_for_model:
+                        raise HTTPException(
+                            status_code=429,
+                            detail=(
+                                f"Daily limit reached for {model} "
+                                f"({max_for_model}/day on {tier} plan). "
+                                "Pick a different model in Settings or try again tomorrow."
+                            ),
+                        )
 
     limit_key = {"qa": "qa_per_paper", "selection": "selections_per_paper"}.get(action)
     if limit_key:
         max_count = limits.get(limit_key, -1)
         if max_count != -1:
             current_paper = get_usage_count(user_id, paper_id, action)
-            if current_paper >= max_count:
+            if current_paper + count > max_count:
+                remaining = max(0, max_count - current_paper)
                 raise HTTPException(
                     status_code=403,
-                    detail=f"Usage limit reached ({max_count} {action}s per paper on {tier} plan). Upgrade to continue.",
+                    detail=(
+                        f"Usage limit reached ({max_count} {action}s per paper on {tier} plan)."
+                        f" You have {remaining} left; tried to use {count}. Upgrade to continue."
+                    ),
                 )
 
-    count = record_usage(user_id, paper_id, action, model=model)
-    return count
+    total = record_usage(
+        user_id, paper_id, action, model=model, count=count, record_daily=record_daily
+    )
+    return total
 
 
 def check_daily_api_limit(user_id: str) -> str:

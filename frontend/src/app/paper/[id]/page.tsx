@@ -385,9 +385,23 @@ function PaperContent() {
   // Load paper when activePaperId changes — always fetch fresh to pick up folder/tag updates
   // First try to restore from local cache for instant display
   const cacheRestoredRef = useRef(false);
+
+  // On mount (and whenever the URL paper changes without going through the
+  // in-session switcher, e.g. a hard refresh), rehydrate the top-level store
+  // from `paperCaches`. Zustand persists `paperCaches` to sessionStorage but
+  // NOT the active per-paper fields (preReading, summary, qaResults, ...),
+  // so without this effect a refresh would leave the analysis pane empty
+  // until the server-side `paper.cached_analysis` round-trip finishes — and
+  // local-only state (e.g. the queued questions list) would be lost entirely.
+  const initialRestoreDoneRef = useRef<string | null>(null);
   useEffect(() => {
+    if (initialRestoreDoneRef.current === activePaperId) return;
+    initialRestoreDoneRef.current = activePaperId;
     const store = useStore.getState();
-    if (store.preReading || store.summary) {
+    if (store.paperCaches[activePaperId]) {
+      const ok = store.restorePaperCache(activePaperId);
+      if (ok) cacheRestoredRef.current = true;
+    } else if (store.preReading || store.summary) {
       cacheRestoredRef.current = true;
     }
   }, [activePaperId]);
@@ -773,38 +787,48 @@ function PaperContent() {
   }, [activePaperId, setPanelVisible, setActiveTab, setSelectionLoading, setSelectionResult, addSelectionToHistory, refreshUsage]);
 
   const onDragStart = useCallback(
-    (e: React.MouseEvent) => {
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      // Pointer events + setPointerCapture give reliable move/up delivery even
+      // when the cursor leaves the thin handle, iframes are on the page, or
+      // the PDF canvas happens to be underneath. Previously we used mouse
+      // events on `window`, which lost the stream in some Safari/Webkit
+      // configurations once the cursor crossed back over the PDF on side
+      // layouts — so dragging felt broken on left/right orientations.
       e.preventDefault();
+      const target = e.currentTarget;
+      try { target.setPointerCapture(e.pointerId); } catch { /* older browsers */ }
       dragging.current = true;
       const isHoriz = panelPos !== "bottom";
       startCoord.current = isHoriz ? e.clientX : e.clientY;
       startSize.current = panelSize;
       document.body.style.cursor = isHoriz ? "col-resize" : "row-resize";
       document.body.style.userSelect = "none";
-
-      const min = isHoriz ? MIN_SIDE : MIN_BOTTOM;
-      const max = isHoriz ? MAX_SIDE : MAX_BOTTOM;
-
-      const onMove = (ev: MouseEvent) => {
-        if (!dragging.current) return;
-        let delta: number;
-        if (panelPos === "right") delta = startCoord.current - ev.clientX;
-        else if (panelPos === "left") delta = ev.clientX - startCoord.current;
-        else delta = startCoord.current - ev.clientY;
-        setPanelSize(Math.min(max, Math.max(min, startSize.current + delta)));
-      };
-      const onUp = () => {
-        dragging.current = false;
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-        window.removeEventListener("mousemove", onMove);
-        window.removeEventListener("mouseup", onUp);
-      };
-      window.addEventListener("mousemove", onMove);
-      window.addEventListener("mouseup", onUp);
     },
     [panelSize, panelPos]
   );
+
+  const onDragMove = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!dragging.current) return;
+      const isHoriz = panelPos !== "bottom";
+      const min = isHoriz ? MIN_SIDE : MIN_BOTTOM;
+      const max = isHoriz ? MAX_SIDE : MAX_BOTTOM;
+      let delta: number;
+      if (panelPos === "right") delta = startCoord.current - e.clientX;
+      else if (panelPos === "left") delta = e.clientX - startCoord.current;
+      else delta = startCoord.current - e.clientY;
+      setPanelSize(Math.min(max, Math.max(min, startSize.current + delta)));
+    },
+    [panelPos]
+  );
+
+  const onDragEnd = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+  }, []);
 
   const cyclePosition = useCallback(() => {
     setPanelPos((cur) => {
@@ -844,17 +868,30 @@ function PaperContent() {
 
   const isBottom = panelPos === "bottom";
 
+  // The 6px handles we had before were technically correct but too thin to
+  // grab on side layouts (the PDF canvas was often right next to them).
+  // Wider hit targets + pointer events fix reliable dragging on left/right.
   const dragHandle = isBottom ? (
     <div
-      className="shrink-0 h-1.5 flex items-center justify-center cursor-row-resize group hover:bg-accent/60 transition-colors"
-      onMouseDown={onDragStart}
+      className="shrink-0 h-2.5 flex items-center justify-center cursor-row-resize group hover:bg-accent/60 transition-colors touch-none select-none"
+      onPointerDown={onDragStart}
+      onPointerMove={onDragMove}
+      onPointerUp={onDragEnd}
+      onPointerCancel={onDragEnd}
+      role="separator"
+      aria-orientation="horizontal"
     >
       <div className="h-[2px] w-10 rounded-full bg-foreground/8 group-hover:bg-foreground/20 transition-colors" />
     </div>
   ) : (
     <div
-      className="shrink-0 w-1.5 flex items-center justify-center cursor-col-resize group hover:bg-accent/60 transition-colors"
-      onMouseDown={onDragStart}
+      className="shrink-0 w-2.5 flex items-center justify-center cursor-col-resize group hover:bg-accent/60 transition-colors touch-none select-none"
+      onPointerDown={onDragStart}
+      onPointerMove={onDragMove}
+      onPointerUp={onDragEnd}
+      onPointerCancel={onDragEnd}
+      role="separator"
+      aria-orientation="vertical"
     >
       <div className="w-[2px] h-8 rounded-full bg-foreground/8 group-hover:bg-foreground/20 transition-colors" />
     </div>
@@ -1207,8 +1244,12 @@ function PaperContent() {
           {pdfInner}
         </div>
         <div
-          className="shrink-0"
-          style={{ order: 2, display: panelVisible ? undefined : "none" }}
+          className="shrink-0 relative z-10"
+          style={{
+            order: 2,
+            display: panelVisible ? undefined : "none",
+            ...(isBottom ? { width: "100%" } : { height: "100%" }),
+          }}
         >
           {dragHandle}
         </div>
