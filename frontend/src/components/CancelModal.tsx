@@ -86,21 +86,21 @@ export function CancelModal({ tier, open, onClose, onCancelled }: CancelModalPro
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div
-        className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+        className="absolute inset-0 bg-foreground/30 backdrop-blur-sm"
         onClick={step !== "cancelling" ? onClose : undefined}
       />
-      <div className="relative bg-white rounded-2xl shadow-2xl border border-gray-100 max-w-md w-full mx-4 overflow-hidden animate-fade-in">
+      <div className="relative bg-card text-card-foreground rounded-2xl shadow-xl border border-border max-w-md w-full mx-4 overflow-hidden animate-fade-in">
 
         {step === "confirm" && (
           <>
             <div className="px-6 pt-7 pb-4 text-center">
-              <div className="w-11 h-11 rounded-full bg-red-50 flex items-center justify-center mx-auto mb-4">
-                <svg className="w-5 h-5 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <div className="w-11 h-11 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
+                <svg className="w-5 h-5 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
                 </svg>
               </div>
-              <h2 className="text-[17px] font-bold text-gray-900">Cancel your {tier} plan?</h2>
-              <p className="text-[13px] text-gray-500 mt-1.5">
+              <h2 className="text-[17px] font-bold text-foreground">Cancel your {tier} plan?</h2>
+              <p className="text-[13px] text-muted-foreground mt-1.5">
                 You&apos;ll lose access to these features:
               </p>
             </div>
@@ -108,8 +108,8 @@ export function CancelModal({ tier, open, onClose, onCancelled }: CancelModalPro
             <div className="px-6 pb-5">
               <ul className="space-y-2.5">
                 {losses.map((loss) => (
-                  <li key={loss} className="flex items-start gap-3 text-[13px] text-gray-600">
-                    <svg className="w-4 h-4 mt-0.5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <li key={loss} className="flex items-start gap-3 text-[13px] text-muted-foreground">
+                    <svg className="w-4 h-4 mt-0.5 text-destructive/80 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
                     <span>{loss}</span>
@@ -121,13 +121,13 @@ export function CancelModal({ tier, open, onClose, onCancelled }: CancelModalPro
             <div className="px-6 pb-6 flex gap-3">
               <button
                 onClick={onClose}
-                className="flex-1 text-[13px] font-semibold py-3 rounded-xl bg-gray-900 text-white hover:bg-gray-800 transition-colors"
+                className="flex-1 text-[13px] font-semibold py-3 rounded-xl btn-primary-glass"
               >
                 Keep my plan
               </button>
               <button
                 onClick={() => setStep("reason")}
-                className="flex-1 text-[13px] font-medium py-3 rounded-xl border border-red-200 text-red-500 hover:bg-red-50 transition-colors"
+                className="flex-1 text-[13px] font-medium py-3 rounded-xl border border-destructive/30 text-destructive hover:bg-destructive/10 transition-colors ring-focus"
               >
                 Continue cancelling
               </button>
@@ -138,8 +138,8 @@ export function CancelModal({ tier, open, onClose, onCancelled }: CancelModalPro
         {step === "reason" && (
           <>
             <div className="px-6 pt-7 pb-4">
-              <h2 className="text-[17px] font-bold text-gray-900">We&apos;re sorry to see you go</h2>
-              <p className="text-[13px] text-gray-500 mt-1">
+              <h2 className="text-[17px] font-bold text-foreground">We&apos;re sorry to see you go</h2>
+              <p className="text-[13px] text-muted-foreground mt-1">
                 Help us improve — why are you cancelling?
               </p>
             </div>
@@ -148,10 +148,10 @@ export function CancelModal({ tier, open, onClose, onCancelled }: CancelModalPro
               {CANCEL_REASONS.map((r) => (
                 <label
                   key={r.id}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-all duration-200 ${
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-colors duration-200 ${
                     selectedReason === r.id
-                      ? "border-gray-300 bg-gray-50"
-                      : "border-gray-100 hover:bg-gray-50/60"
+                      ? "border-border-strong bg-accent"
+                      : "border-border hover:bg-accent/60"
                   }`}
                 >
                   <input
@@ -160,9 +160,9 @@ export function CancelModal({ tier, open, onClose, onCancelled }: CancelModalPro
                     value={r.id}
                     checked={selectedReason === r.id}
                     onChange={() => setSelectedReason(r.id)}
-                    className="accent-gray-900"
+                    className="accent-foreground"
                   />
-                  <span className="text-[13px] text-gray-700">{r.label}</span>
+                  <span className="text-[13px] text-foreground">{r.label}</span>
                 </label>
               ))}
             </div>
@@ -173,26 +173,26 @@ export function CancelModal({ tier, open, onClose, onCancelled }: CancelModalPro
                   value={feedback}
                   onChange={(e) => setFeedback(e.target.value)}
                   placeholder="Anything else you'd like to share? (optional)"
-                  className="w-full text-[13px] border border-gray-100 rounded-xl px-4 py-3 resize-none h-20 focus:outline-none focus:ring-1 focus:ring-gray-300 focus:border-gray-300 placeholder:text-gray-400"
+                  className="w-full text-[13px] border border-border rounded-xl px-4 py-3 resize-none h-20 bg-background text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:border-ring/60 placeholder:text-muted-foreground/70"
                 />
               </div>
             )}
 
             {error && (
-              <p className="px-6 pb-2 text-[12px] text-red-500">{error}</p>
+              <p className="px-6 pb-2 text-[12px] text-destructive">{error}</p>
             )}
 
             <div className="px-6 pb-6 flex gap-3">
               <button
                 onClick={() => setStep("confirm")}
-                className="flex-1 text-[13px] font-medium py-3 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
+                className="flex-1 text-[13px] font-medium py-3 rounded-xl border border-border text-foreground hover:bg-accent transition-colors ring-focus"
               >
                 Go back
               </button>
               <button
                 onClick={handleCancel}
                 disabled={!selectedReason}
-                className="flex-1 text-[13px] font-medium py-3 rounded-xl bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex-1 text-[13px] font-medium py-3 rounded-xl bg-destructive text-white hover:brightness-110 transition disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Cancel subscription
               </button>
@@ -202,33 +202,33 @@ export function CancelModal({ tier, open, onClose, onCancelled }: CancelModalPro
 
         {step === "cancelling" && (
           <div className="px-6 py-14 text-center">
-            <div className="w-7 h-7 border-2 border-gray-200 border-t-gray-600 rounded-full animate-spin mx-auto mb-4" />
-            <p className="text-[13px] text-gray-500">Processing cancellation...</p>
+            <div className="w-7 h-7 border-2 border-border border-t-foreground rounded-full animate-spin mx-auto mb-4" />
+            <p className="text-[13px] text-muted-foreground">Processing cancellation…</p>
           </div>
         )}
 
         {step === "done" && (
           <>
             <div className="px-6 pt-8 pb-4 text-center">
-              <div className="w-11 h-11 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4">
-                <svg className="w-5 h-5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <div className="w-11 h-11 rounded-full bg-warning/10 flex items-center justify-center mx-auto mb-4">
+                <svg className="w-5 h-5 text-warning" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <h2 className="text-[17px] font-bold text-gray-900">Subscription cancelled</h2>
-              <p className="text-[13px] text-gray-500 mt-2 leading-relaxed">
+              <h2 className="text-[17px] font-bold text-foreground">Subscription cancelled</h2>
+              <p className="text-[13px] text-muted-foreground mt-2 leading-relaxed text-pretty">
                 You&apos;ll keep full access until{" "}
-                <span className="font-medium text-gray-800">{cancelDate || "the end of your billing period"}</span>.
+                <span className="font-medium text-foreground">{cancelDate || "the end of your billing period"}</span>.
                 After that, you&apos;ll be moved to the Free plan.
               </p>
-              <p className="text-[12px] text-gray-400 mt-2">
+              <p className="text-[12px] text-muted-foreground/80 mt-2">
                 You can resubscribe anytime from settings.
               </p>
             </div>
             <div className="px-6 pb-6">
               <button
                 onClick={() => { onClose(); onCancelled(); }}
-                className="w-full text-[13px] font-semibold py-3 rounded-xl bg-gray-900 text-white hover:bg-gray-800 transition-colors"
+                className="w-full text-[13px] font-semibold py-3 rounded-xl btn-primary-glass"
               >
                 Got it
               </button>

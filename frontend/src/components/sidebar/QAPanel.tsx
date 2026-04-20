@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
@@ -61,6 +61,13 @@ export function QAPanel({ paperId }: QAPanelProps) {
   const hasMultiplePapers = sessionPapers.length > 1 && canMultiQA;
 
   const [justAdded, setJustAdded] = useState(false);
+  const justAddedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (justAddedTimerRef.current) clearTimeout(justAddedTimerRef.current);
+    };
+  }, []);
 
   const handleAdd = () => {
     const q = input.trim();
@@ -68,13 +75,16 @@ export function QAPanel({ paperId }: QAPanelProps) {
       addQuestion(q);
       setInput("");
       setJustAdded(true);
-      setTimeout(() => setJustAdded(false), 1200);
+      if (justAddedTimerRef.current) clearTimeout(justAddedTimerRef.current);
+      justAddedTimerRef.current = setTimeout(() => setJustAdded(false), 1200);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleAdd(); }
   };
+
+  const [qaErrorKind, setQAErrorKind] = useState<"limit" | "error">("error");
 
   const handleAnswerAll = async () => {
     if (questions.length === 0) return;
@@ -93,8 +103,15 @@ export function QAPanel({ paperId }: QAPanelProps) {
       clearQuestions();
       bumpUsageRefresh();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Q&A failed";
-      setQAError(msg.replace(/^API error \d+:\s*/, "").replace(/[{}"]/g, "").replace("detail:", "").trim());
+      const rawMsg = e instanceof Error ? e.message : "Q&A failed";
+      const msg = rawMsg.replace(/^API error \d+:\s*/, "").replace(/[{}"]/g, "").replace("detail:", "").trim();
+      // Only label the error "Limit reached" when the backend actually said
+      // so — otherwise generic network/server failures were getting mis-
+      // filed as quota issues, which is misleading and sends users to the
+      // billing page for no reason.
+      const isLimit = /limit|cap|quota|exceed|too many|upgrade/i.test(msg);
+      setQAErrorKind(isLimit ? "limit" : "error");
+      setQAError(msg);
     } finally {
       setQALoading(false);
     }
@@ -146,7 +163,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
                   addQuestion(prompt);
                   setUsedPrompts((prev) => new Set(prev).add(prompt));
                 }}
-                className="text-[11px] px-2.5 py-1 rounded-full glass-subtle text-muted-foreground hover:text-foreground hover:bg-white/60 transition-colors font-medium"
+                className="text-[11px] px-2.5 py-1 rounded-full glass-subtle text-muted-foreground hover:text-foreground hover:bg-accent transition-colors font-medium"
               >
                 {prompt}
               </button>
@@ -193,9 +210,11 @@ export function QAPanel({ paperId }: QAPanelProps) {
       )}
 
       {qaError && (
-        <div className="rounded-lg bg-red-50 border border-red-100 px-3.5 py-2.5 space-y-1">
-          <p className="text-[12px] text-red-600 font-medium">Limit reached</p>
-          <p className="text-[11px] text-red-500">{qaError}</p>
+        <div role="alert" className="rounded-lg bg-destructive/10 border border-destructive/20 px-3.5 py-2.5 space-y-1">
+          <p className="text-[12px] text-destructive font-medium">
+            {qaErrorKind === "limit" ? "Limit reached" : "Couldn't answer"}
+          </p>
+          <p className="text-[11px] text-destructive">{qaError}</p>
         </div>
       )}
 

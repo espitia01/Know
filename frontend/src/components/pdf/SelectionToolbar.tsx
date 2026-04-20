@@ -104,9 +104,16 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
         }
       }
     };
+    // Escape closes the toolbar for keyboard users who can't easily reach
+    // outside the floating UI to dismiss via click.
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onDismiss();
+    };
     window.addEventListener("mousedown", handleClick, true);
+    window.addEventListener("keydown", handleKey);
     return () => {
       window.removeEventListener("mousedown", handleClick, true);
+      window.removeEventListener("keydown", handleKey);
     };
   }, [onDismiss]);
 
@@ -118,7 +125,7 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
       className="fixed z-50 animate-fade-in"
       style={{ top: pos.top, left: pos.left }}
     >
-      <div className="bg-white shadow-2xl rounded-2xl px-1.5 py-1.5 flex items-center gap-0.5 border border-gray-200">
+      <div className="bg-card shadow-2xl rounded-2xl px-1.5 py-1.5 flex items-center gap-0.5 border border-border">
         {visibleActions.map((a) => (
           <button
             key={a.id}
@@ -127,7 +134,7 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
               e.stopPropagation();
               onAction(a.id, cleanText);
             }}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-colors whitespace-nowrap"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors whitespace-nowrap"
           >
             <a.Icon />
             {a.label}
@@ -135,7 +142,7 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
         ))}
       </div>
       {cleanText.length > 40 && (
-        <div className="mt-1.5 mx-1 px-2.5 py-1.5 text-[10px] text-gray-400 bg-white border border-gray-100 rounded-xl max-w-sm leading-relaxed line-clamp-2 shadow-sm">
+        <div className="mt-1.5 mx-1 px-2.5 py-1.5 text-[10px] text-muted-foreground/80 bg-card border border-border rounded-xl max-w-sm leading-relaxed line-clamp-2 shadow-sm">
           {cleanText.slice(0, 120)}{cleanText.length > 120 ? "..." : ""}
         </div>
       )}

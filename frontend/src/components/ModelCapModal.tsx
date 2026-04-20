@@ -83,15 +83,15 @@ export function ModelCapModal() {
       aria-label={`${cappedLabel} daily limit reached`}
     >
       <div
-        className="absolute inset-0 bg-black/20 backdrop-blur-md"
+        className="absolute inset-0 bg-foreground/25 backdrop-blur-md"
         onClick={() => finish(null)}
       />
-      <div className="relative glass-strong rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden animate-fade-in">
-        <div className="px-6 pt-6 pb-5 border-b border-black/[0.06]">
+      <div className="relative glass-strong rounded-2xl shadow-xl max-w-md w-full mx-4 overflow-hidden animate-fade-in">
+        <div className="px-6 pt-6 pb-5 border-b border-border">
           <div className="flex items-start gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-warning/15 flex items-center justify-center shrink-0">
               <svg
-                className="w-5 h-5 text-amber-600"
+                className="w-5 h-5 text-warning"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -105,10 +105,10 @@ export function ModelCapModal() {
               </svg>
             </div>
             <div className="flex-1">
-              <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-gray-900">
+              <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-foreground">
                 {cappedLabel} daily limit reached
               </h2>
-              <p className="text-[13px] text-gray-500 mt-1 leading-relaxed">
+              <p className="text-[13px] text-muted-foreground mt-1 leading-relaxed text-pretty">
                 You&apos;ve used all {pending.limit} {cappedLabel} calls for today on
                 the <span className="capitalize">{pending.tier}</span> plan.
                 {fallbackLabel
@@ -123,7 +123,7 @@ export function ModelCapModal() {
           {pending.fallback && fallbackLabel && (
             <button
               onClick={() => finish({ fallback: pending.fallback! })}
-              className="w-full text-[13px] font-semibold py-3 rounded-xl btn-primary-glass text-white transition-all"
+              className="w-full text-[13px] font-semibold py-3 rounded-xl btn-primary-glass"
             >
               Switch to {fallbackLabel} and retry
             </button>
@@ -133,13 +133,13 @@ export function ModelCapModal() {
               finish(null);
               router.push("/settings");
             }}
-            className="w-full text-[13px] font-medium py-3 rounded-xl glass text-gray-700 hover:bg-white/60 transition-all"
+            className="w-full text-[13px] font-medium py-3 rounded-xl glass glass-hover text-foreground ring-focus"
           >
             Open settings
           </button>
           <button
             onClick={() => finish(null)}
-            className="w-full text-[12px] font-medium py-2 text-gray-500 hover:text-gray-700 transition-colors"
+            className="w-full text-[12px] font-medium py-2 text-muted-foreground hover:text-foreground transition-colors ring-focus rounded"
           >
             Cancel
           </button>

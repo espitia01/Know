@@ -1,9 +1,27 @@
-"""API routes for AI-powered paper analysis."""
+"""API routes for AI-powered paper analysis.
+
+Every route follows the same reservation contract:
+
+    token = reserve_usage(user_id, paper_id, action, model=..., count=N)
+    try:
+        <LLM / streaming / side effects>
+    except Exception:
+        release_usage(token)
+        raise
+
+``reserve_usage`` atomically debits the user's daily total, per-model daily
+sub-budget, and per-paper action counter BEFORE any expensive work, so
+bursts can't waste LLM tokens and concurrent requests can't race past a cap
+(see migration 008). ``release_usage`` rolls the reservation back when the
+downstream work fails so users aren't debited for a call that produced
+nothing.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from ..models.schemas import (
@@ -36,12 +54,17 @@ from ..services.llm import (
     _safe_parse_json,
     AnthropicProvider,
 )
-from ..services.pdf_parser import get_paper, get_figure_path, save_paper
+from ..services.pdf_parser import (
+    append_capped,
+    get_paper,
+    get_figure_path,
+    mutate_paper,
+)
 from ..auth import require_auth
 from ..gating import (
     check_feature_access,
-    check_usage_limit,
-    track_usage,
+    reserve_usage,
+    release_usage,
     resolve_analysis_model,
     resolve_fast_model,
 )
@@ -49,31 +72,6 @@ from ..api.papers import _validate_id, _verify_paper_owner
 
 router = APIRouter(prefix="/api/papers", tags=["analysis"])
 logger = logging.getLogger(__name__)
-
-
-def _track_analysis(
-    user_id: str, paper_id: str, action: str, *, count: int = 1
-) -> None:
-    """Record usage tagged with the user's resolved analysis model.
-
-    Centralised so per-model daily limits are enforced wherever the analysis
-    provider is used (preReading, summary, qa, assumptions, ...). ``count``
-    is the number of sub-operations (e.g. questions in a Q&A batch).
-    """
-    track_usage(
-        user_id, paper_id, action,
-        model=resolve_analysis_model(user_id), count=count,
-    )
-
-
-def _track_fast(
-    user_id: str, paper_id: str, action: str, *, count: int = 1
-) -> None:
-    """Record usage tagged with the user's resolved fast model (selections, figures)."""
-    track_usage(
-        user_id, paper_id, action,
-        model=resolve_fast_model(user_id), count=count,
-    )
 
 
 @router.post("/{paper_id}/analyze", response_model=PreReadingAnalysis)
@@ -85,6 +83,9 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
+    token = reserve_usage(
+        user_id, paper_id, "api_call", model=resolve_analysis_model(user_id)
+    )
     try:
         result = await analyze_paper(paper.raw_text, user_id=user_id)
         analysis = PreReadingAnalysis(
@@ -93,13 +94,18 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
             prior_work=result.get("prior_work", []),
             concepts=result.get("concepts", []),
         )
-        paper.cached_analysis["pre_reading"] = analysis.model_dump()
-        save_paper(paper, user_id=user_id)
-        _track_analysis(user_id, paper_id, "api_call")
+        def _apply(p):
+            p.cached_analysis["pre_reading"] = analysis.model_dump()
+        mutate_paper(paper_id, user_id, _apply)
         return analysis
     except ValueError:
+        release_usage(token)
         raise HTTPException(status_code=503, detail="Analysis service temporarily unavailable.")
-    except Exception as e:
+    except HTTPException:
+        release_usage(token)
+        raise
+    except Exception:
+        release_usage(token)
         logger.exception("Analysis failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Analysis failed. Please try again.")
 
@@ -108,7 +114,6 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
 async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(require_auth)):
     """Analyze user-highlighted text from the PDF viewer."""
     check_feature_access(user_id, "selection")
-    check_usage_limit(user_id, paper_id, "selection")
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
     paper = get_paper(paper_id, user_id=user_id)
@@ -124,28 +129,42 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
     if not selected_text:
         raise HTTPException(status_code=400, detail="No text selected")
 
+    token = reserve_usage(
+        user_id, paper_id, "selection", model=resolve_fast_model(user_id)
+    )
     try:
         result = await analyze_selection(paper.raw_text, selected_text, action, user_id=user_id)
-        selections = paper.cached_analysis.get("selections", [])
-        selections.append(result)
-        paper.cached_analysis["selections"] = selections
-        save_paper(paper, user_id=user_id)
-        _track_fast(user_id, paper_id, "selection")
+        def _apply(p):
+            append_capped(p.cached_analysis, "selections", result)
+        mutate_paper(paper_id, user_id, _apply)
         return result
     except ValueError:
+        release_usage(token)
         raise HTTPException(status_code=503, detail="Selection analysis service temporarily unavailable.")
-    except Exception as e:
+    except HTTPException:
+        release_usage(token)
+        raise
+    except Exception:
+        release_usage(token)
         logger.exception("Selection analysis failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Selection analysis failed. Please try again.")
 
 
 @router.post("/{paper_id}/selection-stream")
-async def selection_analysis_stream(paper_id: str, body: dict, user_id: str = Depends(require_auth)):
-    """Stream selection analysis token-by-token via SSE."""
+async def selection_analysis_stream(
+    paper_id: str, body: dict, request: Request,
+    user_id: str = Depends(require_auth),
+):
+    """Stream selection analysis token-by-token via SSE.
+
+    Cancels the upstream Anthropic call when the client disconnects so we
+    don't keep paying for tokens the user will never see. Emits a terminal
+    ``done`` event even on failure so the frontend state machine can't get
+    stuck in "loading" on a dropped stream.
+    """
     import json as _json
 
     check_feature_access(user_id, "selection")
-    check_usage_limit(user_id, paper_id, "selection")
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
 
@@ -166,15 +185,29 @@ async def selection_analysis_stream(paper_id: str, body: dict, user_id: str = De
     if not isinstance(provider, AnthropicProvider):
         raise HTTPException(status_code=503, detail="Streaming requires Anthropic provider")
 
+    token = reserve_usage(user_id, paper_id, "selection", model=provider.model)
+
     system, user_text = _get_selection_prompt(paper.raw_text, selected_text, action)
 
     async def event_stream():
         full_text = ""
+        completed = False
+        disconnected = False
         try:
             async for chunk in provider.stream_complete(system, user_text, max_tokens=4096):
+                if await request.is_disconnected():
+                    # Abort upstream Anthropic call by exiting the async-for.
+                    # The httpx.AsyncClient.stream() context manager cancels
+                    # the underlying HTTP request when its generator is
+                    # closed, which releases the API-side token budget too.
+                    disconnected = True
+                    break
                 full_text += chunk
                 normalized = _normalize_latex_delimiters(chunk)
                 yield f"data: {_json.dumps({'type': 'chunk', 'text': normalized})}\n\n"
+
+            if disconnected:
+                return
 
             full_text = _normalize_latex_delimiters(full_text)
             yield f"data: {_json.dumps({'type': 'done', 'full_text': full_text})}\n\n"
@@ -184,14 +217,26 @@ async def selection_analysis_stream(paper_id: str, body: dict, user_id: str = De
                 "selected_text": selected_text,
                 "explanation": full_text,
             }
-            selections = paper.cached_analysis.get("selections", [])
-            selections.append(result)
-            paper.cached_analysis["selections"] = selections
-            save_paper(paper, user_id=user_id)
-            track_usage(user_id, paper_id, "selection", model=provider.model)
-        except Exception as e:
+
+            def _apply(p):
+                append_capped(p.cached_analysis, "selections", result)
+            try:
+                mutate_paper(paper_id, user_id, _apply)
+            except Exception:
+                logger.exception("Failed to persist selection stream for %s", paper_id)
+            completed = True
+        except asyncio.CancelledError:
+            disconnected = True
+            raise
+        except Exception:
             logger.exception("Selection stream error for paper %s", paper_id)
             yield f"data: {_json.dumps({'type': 'error', 'message': 'Analysis failed. Please try again.'})}\n\n"
+            # Always follow `error` with a terminal `done` so the client's
+            # state machine can't get stuck waiting for the next event.
+            yield f"data: {_json.dumps({'type': 'done', 'full_text': ''})}\n\n"
+        finally:
+            if not completed:
+                release_usage(token)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -199,13 +244,15 @@ async def selection_analysis_stream(paper_id: str, body: dict, user_id: str = De
 @router.post("/{paper_id}/explain", response_model=ExplainResponse)
 async def explain(paper_id: str, req: ExplainRequest, user_id: str = Depends(require_auth)):
     check_feature_access(user_id, "selection")
-    check_usage_limit(user_id, paper_id, "selection")
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
     paper = get_paper(paper_id, user_id=user_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
+    token = reserve_usage(
+        user_id, paper_id, "selection", model=resolve_analysis_model(user_id)
+    )
     try:
         result = await explain_term(paper.raw_text, req.term, req.context, user_id=user_id)
         resp = ExplainResponse(
@@ -214,13 +261,15 @@ async def explain(paper_id: str, req: ExplainRequest, user_id: str = Depends(req
             source=result.get("source", ""),
             in_paper=result.get("in_paper", False),
         )
-        explains = paper.cached_analysis.get("explains", [])
-        explains.append(resp.model_dump())
-        paper.cached_analysis["explains"] = explains
-        save_paper(paper, user_id=user_id)
-        _track_analysis(user_id, paper_id, "selection")
+        def _apply(p):
+            append_capped(p.cached_analysis, "explains", resp.model_dump())
+        mutate_paper(paper_id, user_id, _apply)
         return resp
-    except Exception as e:
+    except HTTPException:
+        release_usage(token)
+        raise
+    except Exception:
+        release_usage(token)
         logger.exception("Explain failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Explain failed. Please try again.")
 
@@ -228,7 +277,6 @@ async def explain(paper_id: str, req: ExplainRequest, user_id: str = Depends(req
 @router.post("/{paper_id}/skipped-steps")
 async def skipped_steps(paper_id: str, body: dict, user_id: str = Depends(require_auth)):
     check_feature_access(user_id, "selection")
-    check_usage_limit(user_id, paper_id, "selection")
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
     paper = get_paper(paper_id, user_id=user_id)
@@ -237,17 +285,23 @@ async def skipped_steps(paper_id: str, body: dict, user_id: str = Depends(requir
 
     section_content = body.get("section", "")[:10000]
 
+    token = reserve_usage(
+        user_id, paper_id, "selection", model=resolve_analysis_model(user_id)
+    )
     try:
         result = await find_skipped_steps(paper.raw_text, section_content, user_id=user_id)
-        skipped = paper.cached_analysis.get("skipped_steps", [])
-        skipped.append(result)
-        paper.cached_analysis["skipped_steps"] = skipped
-        save_paper(paper, user_id=user_id)
-        _track_analysis(user_id, paper_id, "selection")
+        def _apply(p):
+            append_capped(p.cached_analysis, "skipped_steps", result)
+        mutate_paper(paper_id, user_id, _apply)
         return result
     except ValueError:
+        release_usage(token)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
-    except Exception as e:
+    except HTTPException:
+        release_usage(token)
+        raise
+    except Exception:
+        release_usage(token)
         logger.exception("Skipped steps failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Skipped steps failed. Please try again.")
 
@@ -261,16 +315,24 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
+    token = reserve_usage(
+        user_id, paper_id, "api_call", model=resolve_analysis_model(user_id)
+    )
     try:
         result = await extract_assumptions(paper.raw_text, user_id=user_id)
         resp = AssumptionsResponse(assumptions=result.get("assumptions", []))
-        paper.cached_analysis["assumptions"] = resp.model_dump()
-        save_paper(paper, user_id=user_id)
-        _track_analysis(user_id, paper_id, "api_call")
+        def _apply(p):
+            p.cached_analysis["assumptions"] = resp.model_dump()
+        mutate_paper(paper_id, user_id, _apply)
         return resp
     except ValueError:
+        release_usage(token)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
-    except Exception as e:
+    except HTTPException:
+        release_usage(token)
+        raise
+    except Exception:
+        release_usage(token)
         logger.exception("Assumptions extraction failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Assumptions extraction failed. Please try again.")
 
@@ -278,7 +340,6 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
 @router.post("/{paper_id}/derivation/exercise", response_model=DerivationExercise)
 async def derivation_exercise(paper_id: str, body: dict, user_id: str = Depends(require_auth)):
     check_feature_access(user_id, "selection")
-    check_usage_limit(user_id, paper_id, "selection")
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
     paper = get_paper(paper_id, user_id=user_id)
@@ -287,6 +348,9 @@ async def derivation_exercise(paper_id: str, body: dict, user_id: str = Depends(
 
     section_content = body.get("section", "")[:10000]
 
+    token = reserve_usage(
+        user_id, paper_id, "selection", model=resolve_analysis_model(user_id)
+    )
     try:
         result = await generate_derivation_exercise(paper.raw_text, section_content, user_id=user_id)
         exercise = DerivationExercise(
@@ -296,15 +360,18 @@ async def derivation_exercise(paper_id: str, body: dict, user_id: str = Depends(
             final_result=result.get("final_result", ""),
             steps=result.get("steps", []),
         )
-        exercises = paper.cached_analysis.get("derivation_exercises", [])
-        exercises.append(exercise.model_dump())
-        paper.cached_analysis["derivation_exercises"] = exercises
-        save_paper(paper, user_id=user_id)
-        _track_analysis(user_id, paper_id, "selection")
+        def _apply(p):
+            append_capped(p.cached_analysis, "derivation_exercises", exercise.model_dump())
+        mutate_paper(paper_id, user_id, _apply)
         return exercise
     except ValueError:
+        release_usage(token)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
-    except Exception as e:
+    except HTTPException:
+        release_usage(token)
+        raise
+    except Exception:
+        release_usage(token)
         logger.exception("Exercise generation failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Exercise generation failed. Please try again.")
 
@@ -312,32 +379,38 @@ async def derivation_exercise(paper_id: str, body: dict, user_id: str = Depends(
 @router.post("/{paper_id}/qa", response_model=QAResponse)
 async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)):
     check_feature_access(user_id, "qa")
-    # A batch of N questions consumes N units against both the daily budget
-    # and the per-paper Q&A cap — otherwise users could bypass the cap by
-    # clicking "Answer all" with many queued questions.
-    n_questions = max(1, len(req.questions))
-    check_usage_limit(user_id, paper_id, "qa", count=n_questions)
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
     paper = get_paper(paper_id, user_id=user_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
+    # A batch of N questions consumes N units against both the daily budget
+    # and the per-paper Q&A cap — otherwise users could bypass the cap by
+    # clicking "Answer all" with many queued questions.
+    n_questions = max(1, len(req.questions))
+    token = reserve_usage(
+        user_id, paper_id, "qa",
+        model=resolve_analysis_model(user_id), count=n_questions,
+    )
     try:
         result = await answer_questions(paper.raw_text, req.questions, user_id=user_id)
         if isinstance(result, dict) and "items" in result:
             resp = QAResponse(**result)
         else:
             resp = QAResponse(items=[QAItem(**item) for item in result])
-        qa_sessions = paper.cached_analysis.get("qa_sessions", [])
-        qa_sessions.append(resp.model_dump())
-        paper.cached_analysis["qa_sessions"] = qa_sessions
-        save_paper(paper, user_id=user_id)
-        _track_analysis(user_id, paper_id, "qa", count=n_questions)
+        def _apply(p):
+            append_capped(p.cached_analysis, "qa_sessions", resp.model_dump())
+        mutate_paper(paper_id, user_id, _apply)
         return resp
     except ValueError:
+        release_usage(token)
         raise HTTPException(status_code=503, detail="Q&A service temporarily unavailable.")
-    except Exception as e:
+    except HTTPException:
+        release_usage(token)
+        raise
+    except Exception:
+        release_usage(token)
         logger.exception("Q&A failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Q&A failed. Please try again.")
 
@@ -351,24 +424,37 @@ async def summary(paper_id: str, user_id: str = Depends(require_auth)):
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
+    token = reserve_usage(
+        user_id, paper_id, "api_call", model=resolve_analysis_model(user_id)
+    )
     try:
         result = await summarize_paper(paper.raw_text, user_id=user_id)
         if not result or not result.get("overview"):
+            release_usage(token)
             raise HTTPException(status_code=502, detail="Summary generation returned empty results. Please retry.")
-        paper.cached_analysis["summary"] = result
-        save_paper(paper, user_id=user_id)
-        _track_analysis(user_id, paper_id, "api_call")
+        def _apply(p):
+            p.cached_analysis["summary"] = result
+        mutate_paper(paper_id, user_id, _apply)
         return result
     except ValueError:
+        release_usage(token)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
-    except Exception as e:
+    except HTTPException:
+        release_usage(token)
+        raise
+    except Exception:
+        release_usage(token)
         logger.exception("Summary generation failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Summary generation failed. Please try again.")
 
 
 @router.post("/{paper_id}/summary-stream")
-async def summary_stream(paper_id: str, user_id: str = Depends(require_auth)):
-    """Stream summary generation token-by-token, then send the parsed JSON at the end."""
+async def summary_stream(
+    paper_id: str, request: Request, user_id: str = Depends(require_auth),
+):
+    """Stream summary generation token-by-token, then send the parsed JSON at
+    the end. Cancels the upstream call on client disconnect (C4) and emits a
+    terminal ``done`` after any error (M3)."""
     import json as _json
 
     check_feature_access(user_id, "summary")
@@ -382,6 +468,8 @@ async def summary_stream(paper_id: str, user_id: str = Depends(require_auth)):
     provider = get_provider(user_id)
     if not isinstance(provider, AnthropicProvider):
         raise HTTPException(status_code=503, detail="Streaming requires Anthropic provider")
+
+    token = reserve_usage(user_id, paper_id, "api_call", model=provider.model)
 
     system = """You are an expert science educator and researcher. Produce an extremely detailed, structured summary of the academic paper. Return ONLY valid JSON. CRITICAL: For ALL math expressions, use $ delimiters for inline math and $$ for display math. NEVER use \\( \\) or \\[ \\] delimiters."""
 
@@ -407,24 +495,43 @@ Return JSON with all the above fields."""
 
     async def event_stream():
         full_text = ""
+        completed = False
+        disconnected = False
         try:
             async for chunk in provider.stream_complete(system, user_text, max_tokens=6000):
+                if await request.is_disconnected():
+                    disconnected = True
+                    break
                 full_text += chunk
                 normalized = _normalize_latex_delimiters(chunk)
                 yield f"data: {_json.dumps({'type': 'chunk', 'text': normalized})}\n\n"
 
+            if disconnected:
+                return
+
             full_text_normalized = _normalize_latex_delimiters(full_text)
             parsed = _safe_parse_json(full_text)
             if parsed and parsed.get("overview"):
-                paper.cached_analysis["summary"] = parsed
-                save_paper(paper, user_id=user_id)
-                track_usage(user_id, paper_id, "api_call", model=provider.model)
+                def _apply(p):
+                    p.cached_analysis["summary"] = parsed
+                try:
+                    mutate_paper(paper_id, user_id, _apply)
+                except Exception:
+                    logger.exception("Failed to persist summary for %s", paper_id)
+                completed = True
                 yield f"data: {_json.dumps({'type': 'done', 'summary': parsed, 'full_text': full_text_normalized})}\n\n"
             else:
                 yield f"data: {_json.dumps({'type': 'done', 'full_text': full_text_normalized})}\n\n"
-        except Exception as e:
+        except asyncio.CancelledError:
+            disconnected = True
+            raise
+        except Exception:
             logger.exception("Summary stream error for paper %s", paper_id)
             yield f"data: {_json.dumps({'type': 'error', 'message': 'Summary generation failed. Please try again.'})}\n\n"
+            yield f"data: {_json.dumps({'type': 'done', 'full_text': ''})}\n\n"
+        finally:
+            if not completed:
+                release_usage(token)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -454,27 +561,39 @@ async def figure_qa(paper_id: str, body: dict, user_id: str = Depends(require_au
 
     image_b64 = base64.b64encode(fig_path.read_bytes()).decode("utf-8")
 
+    # Figure Q&A is a real Q&A call on the paper — count it against the
+    # user's per-paper qa quota so figure questions can't bypass the cap.
+    token = reserve_usage(
+        user_id, paper_id, "qa", model=resolve_fast_model(user_id)
+    )
     try:
         result = await analyze_figure(paper.raw_text, image_b64, question, user_id=user_id)
         result["figure_id"] = fig_id
         result["question"] = question
 
-        figure_analyses = paper.cached_analysis.get("figure_analyses", [])
-        figure_analyses.append(result)
-        paper.cached_analysis["figure_analyses"] = figure_analyses
-        save_paper(paper, user_id=user_id)
-        _track_fast(user_id, paper_id, "api_call")
+        def _apply(p):
+            append_capped(p.cached_analysis, "figure_analyses", result)
+        mutate_paper(paper_id, user_id, _apply)
         return result
     except ValueError:
+        release_usage(token)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
-    except Exception as e:
+    except HTTPException:
+        release_usage(token)
+        raise
+    except Exception:
+        release_usage(token)
         logger.exception("Figure analysis failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Figure analysis failed. Please try again.")
 
 
 @router.post("/{paper_id}/figure-qa-stream")
-async def figure_qa_stream(paper_id: str, body: dict, user_id: str = Depends(require_auth)):
-    """Stream figure analysis token-by-token via SSE."""
+async def figure_qa_stream(
+    paper_id: str, body: dict, request: Request,
+    user_id: str = Depends(require_auth),
+):
+    """Stream figure analysis token-by-token via SSE. Cancels upstream on
+    client disconnect (C4) and emits terminal ``done`` after errors (M3)."""
     import base64
     import json as _json
     check_feature_access(user_id, "figures")
@@ -504,17 +623,27 @@ async def figure_qa_stream(paper_id: str, body: dict, user_id: str = Depends(req
     if not isinstance(provider, AnthropicProvider):
         raise HTTPException(status_code=503, detail="Streaming requires Anthropic provider")
 
+    token = reserve_usage(user_id, paper_id, "qa", model=provider.model)
+
     system, user_text = _get_figure_prompt(paper.raw_text, question)
 
     async def event_stream():
         full_text = ""
+        completed = False
+        disconnected = False
         try:
             async for chunk in provider.stream_complete_with_image(
                 system, user_text, image_b64, max_tokens=2048
             ):
+                if await request.is_disconnected():
+                    disconnected = True
+                    break
                 full_text += chunk
                 normalized = _normalize_latex_delimiters(chunk)
                 yield f"data: {_json.dumps({'type': 'chunk', 'text': normalized})}\n\n"
+
+            if disconnected:
+                return
 
             full_text = _normalize_latex_delimiters(full_text)
             yield f"data: {_json.dumps({'type': 'done', 'full_text': full_text})}\n\n"
@@ -526,23 +655,53 @@ async def figure_qa_stream(paper_id: str, body: dict, user_id: str = Depends(req
                 "key_observations": [],
                 "relation_to_paper": "",
             }
-            figure_analyses = paper.cached_analysis.get("figure_analyses", [])
-            figure_analyses.append(result)
-            paper.cached_analysis["figure_analyses"] = figure_analyses
-            save_paper(paper, user_id=user_id)
-            track_usage(user_id, paper_id, "api_call", model=provider.model)
-        except Exception as e:
+            def _apply(p):
+                append_capped(p.cached_analysis, "figure_analyses", result)
+            try:
+                mutate_paper(paper_id, user_id, _apply)
+            except Exception:
+                logger.exception("Failed to persist figure stream for %s", paper_id)
+            completed = True
+        except asyncio.CancelledError:
+            disconnected = True
+            raise
+        except Exception:
             logger.exception("Figure stream error for paper %s", paper_id)
             yield f"data: {_json.dumps({'type': 'error', 'message': 'Figure analysis failed. Please try again.'})}\n\n"
+            yield f"data: {_json.dumps({'type': 'done', 'full_text': ''})}\n\n"
+        finally:
+            if not completed:
+                release_usage(token)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/multi-qa")
 async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
-    """Answer questions using context from multiple papers in a session."""
+    """Answer questions using context from multiple papers in a session.
+
+    Callers sometimes pass the same paper id multiple times (e.g. a stale
+    workspace with duplicates). Previously we reserved a per-paper quota row
+    per occurrence, double-charging the user for a single logical call; the
+    list is deduped here while preserving order so the quota math is honest.
+    """
     check_feature_access(user_id, "multi-qa")
-    paper_ids = body.get("paper_ids", [])[:10]
+    raw_ids = body.get("paper_ids", [])
+    if not isinstance(raw_ids, list):
+        raw_ids = []
+
+    seen: set[str] = set()
+    paper_ids: list[str] = []
+    for pid in raw_ids[:50]:
+        if not isinstance(pid, str):
+            continue
+        if pid in seen:
+            continue
+        seen.add(pid)
+        paper_ids.append(pid)
+        if len(paper_ids) >= 10:
+            break
+
     questions = body.get("questions", [])[:20]
     questions = [q[:2000] for q in questions if isinstance(q, str)]
 
@@ -560,24 +719,37 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
     if not paper_texts:
         raise HTTPException(status_code=404, detail="No valid papers found")
 
+    model = resolve_analysis_model(user_id)
+    n_questions = max(1, len(questions))
+
+    tokens: list[dict] = []
     try:
-        result = await answer_questions_multi(paper_texts, questions, user_id=user_id)
-        model = resolve_analysis_model(user_id)
-        n_questions = max(1, len(questions))
-        # Daily + per-model totals track the LLM call (which produced
-        # n_questions answers). Per-paper qa counters each track that the
-        # paper participated in n_questions of the user's Q&A on it.
         for idx, pid in enumerate(paper_ids):
-            track_usage(
+            tokens.append(reserve_usage(
                 user_id, pid, "qa",
                 model=model, count=n_questions,
                 record_daily=(idx == 0),
-            )
+            ))
+    except HTTPException:
+        for t in tokens:
+            release_usage(t)
+        raise
+
+    try:
+        result = await answer_questions_multi(paper_texts, questions, user_id=user_id)
         if isinstance(result, dict) and "items" in result:
             return result
         return {"items": result}
     except ValueError:
+        for t in tokens:
+            release_usage(t)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
-    except Exception as e:
+    except HTTPException:
+        for t in tokens:
+            release_usage(t)
+        raise
+    except Exception:
+        for t in tokens:
+            release_usage(t)
         logger.exception("Multi-paper Q&A failed")
         raise HTTPException(status_code=500, detail="Multi-paper Q&A failed. Please try again.")

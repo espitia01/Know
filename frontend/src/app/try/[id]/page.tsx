@@ -5,11 +5,8 @@ import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import remarkGfm from "remark-gfm";
-import rehypeKatex from "rehype-katex";
-import { preprocessLatex } from "@/lib/latex";
+import { Md as SafeMd } from "@/components/ui/Md";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import type { PaperSummary } from "@/lib/api";
 import { FEATURE_TOOLTIPS } from "@/lib/tooltips";
 
@@ -21,20 +18,14 @@ const PdfViewer = dynamic(
     ssr: false,
     loading: () => (
       <div className="flex items-center justify-center h-full">
-        <div className="w-5 h-5 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+        <div className="w-5 h-5 border-2 border-border border-t-foreground rounded-full animate-spin" />
       </div>
     ),
   }
 );
 
 function Md({ children }: { children: string }) {
-  return (
-    <div className="analysis-content">
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
-        {preprocessLatex(children)}
-      </ReactMarkdown>
-    </div>
-  );
+  return <SafeMd>{children}</SafeMd>;
 }
 
 function TrialSummary({ paperId }: { paperId: string }) {
@@ -57,11 +48,11 @@ function TrialSummary({ paperId }: { paperId: string }) {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center py-12 gap-3">
-        <div className="w-full max-w-xs h-1.5 bg-gray-100 rounded-full overflow-hidden">
-          <div className="h-full bg-gray-400 rounded-full animate-pulse" style={{ width: "60%" }} />
+        <div className="w-full max-w-xs h-1.5 bg-muted rounded-full overflow-hidden">
+          <div className="h-full bg-foreground/40 rounded-full animate-pulse" style={{ width: "60%" }} />
         </div>
-        <p className="text-[13px] text-gray-500">Generating detailed summary...</p>
-        <p className="text-[11px] text-gray-400">This may take 30-60 seconds</p>
+        <p className="text-[13px] text-muted-foreground">Generating detailed summary…</p>
+        <p className="text-[11px] text-muted-foreground/70">This may take 30-60 seconds</p>
       </div>
     );
   }
@@ -69,32 +60,35 @@ function TrialSummary({ paperId }: { paperId: string }) {
   if (!summary) {
     return (
       <div className="text-center py-8">
-        <p className="text-[13px] text-gray-500">Summary not available.</p>
+        <p className="text-[13px] text-muted-foreground">Summary not available.</p>
       </div>
     );
   }
+
+  const sectionLabel =
+    "text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground mb-2";
 
   return (
     <div className="space-y-5">
       {summary.overview && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Overview</h3>
+          <h3 className={sectionLabel}>Overview</h3>
           <Md>{summary.overview}</Md>
         </section>
       )}
       {summary.motivation && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Motivation</h3>
+          <h3 className={sectionLabel}>Motivation</h3>
           <Md>{summary.motivation}</Md>
         </section>
       )}
       {summary.key_contributions?.length > 0 && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Key Contributions</h3>
+          <h3 className={sectionLabel}>Key Contributions</h3>
           <ul className="space-y-1.5">
             {summary.key_contributions.map((c, i) => (
               <li key={i} className="flex gap-2">
-                <span className="text-[12px] text-gray-300 shrink-0 mt-0.5">{i + 1}.</span>
+                <span className="text-[12px] text-muted-foreground/70 shrink-0 mt-0.5">{i + 1}.</span>
                 <Md>{c}</Md>
               </li>
             ))}
@@ -103,23 +97,23 @@ function TrialSummary({ paperId }: { paperId: string }) {
       )}
       {summary.methodology && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Methodology</h3>
+          <h3 className={sectionLabel}>Methodology</h3>
           <Md>{summary.methodology}</Md>
         </section>
       )}
       {summary.main_results && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Main Results</h3>
+          <h3 className={sectionLabel}>Main Results</h3>
           <Md>{summary.main_results}</Md>
         </section>
       )}
       {summary.limitations?.length > 0 && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-gray-400 mb-2">Limitations</h3>
+          <h3 className={sectionLabel}>Limitations</h3>
           <ul className="space-y-1">
             {summary.limitations.map((l, i) => (
               <li key={i} className="flex gap-2">
-                <span className="text-[12px] text-gray-300 shrink-0">•</span>
+                <span className="text-[12px] text-muted-foreground/70 shrink-0">•</span>
                 <Md>{l}</Md>
               </li>
             ))}
@@ -144,13 +138,19 @@ export default function TrialPaperView() {
       .catch(() => {});
   }, [id]);
 
+  const tabBase =
+    "px-3 py-2 text-[12px] font-medium border-b-2 transition-colors whitespace-nowrap";
+  const tabOn = "border-foreground text-foreground";
+  const tabOff =
+    "border-transparent text-muted-foreground hover:text-foreground";
+
   return (
-    <div className="h-screen flex flex-col bg-white">
+    <div className="h-screen flex flex-col bg-background text-foreground">
       {/* Trial banner */}
-      <div className="bg-gray-900 text-center py-2.5 px-4 shrink-0">
-        <p className="text-[13px] text-gray-300">
+      <div className="bg-foreground text-background text-center py-2.5 px-4 shrink-0">
+        <p className="text-[13px] opacity-90">
           Trial mode — only the summary is available.{" "}
-          <Link href="/sign-up" className="text-white font-medium hover:underline">
+          <Link href="/sign-up" className="underline underline-offset-2 font-medium">
             Sign up free
           </Link>{" "}
           to unlock all features.
@@ -158,18 +158,19 @@ export default function TrialPaperView() {
       </div>
 
       {/* Header */}
-      <header className="shrink-0 flex items-center gap-3 px-4 h-[48px] border-b border-gray-100 bg-white">
-        <Link href="/try" className="text-gray-400 hover:text-gray-700 transition-colors text-[13px] font-medium">
+      <header className="shrink-0 flex items-center gap-3 px-4 h-[48px] border-b border-border bg-background">
+        <Link href="/try" className="text-muted-foreground hover:text-foreground transition-colors text-[13px] font-medium ring-focus rounded">
           &larr;
         </Link>
-        <div className="h-4 w-px bg-gray-200" />
+        <div className="h-4 w-px bg-border" />
         <Image src="/logo.png" alt="Know" width={20} height={20} className="shrink-0 rounded-md" />
-        <p className="text-[13px] font-medium text-gray-900 truncate flex-1">
+        <p className="text-[13px] font-medium text-foreground truncate flex-1">
           {title || "Paper"}
         </p>
+        <ThemeToggle />
         <Link
           href="/sign-up"
-          className="text-[12px] font-medium bg-gray-900 text-white px-3 py-1 rounded-lg hover:bg-gray-800 transition-colors shrink-0"
+          className="text-[12px] font-medium btn-primary-glass px-3 py-1.5 rounded-lg shrink-0"
         >
           Sign Up
         </Link>
@@ -178,23 +179,18 @@ export default function TrialPaperView() {
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
         {/* PDF viewer */}
-        <div className="flex-1 overflow-auto bg-gray-50">
+        <div className="flex-1 overflow-auto bg-muted/40">
           <PdfViewer url={`${API_BASE}/api/trial/paper/${id}/pdf`} />
         </div>
 
         {/* Side panel */}
-        <div className="w-[400px] border-l border-gray-100 flex flex-col bg-white shrink-0">
-          {/* Tabs */}
-          <div className="shrink-0 border-b border-gray-100 overflow-x-auto">
+        <div className="w-[400px] border-l border-border flex flex-col bg-background shrink-0">
+          <div className="shrink-0 border-b border-border overflow-x-auto">
             <div className="flex gap-0 px-2 pt-1.5">
               <button
                 onClick={() => setActiveTab("Summary")}
                 title={FEATURE_TOOLTIPS["Summary"]}
-                className={`px-3 py-2 text-[12px] font-medium border-b-2 transition-colors whitespace-nowrap ${
-                  activeTab === "Summary"
-                    ? "border-gray-900 text-gray-900"
-                    : "border-transparent text-gray-400 hover:text-gray-600"
-                }`}
+                className={`${tabBase} ${activeTab === "Summary" ? tabOn : tabOff}`}
               >
                 Summary
               </button>
@@ -203,10 +199,8 @@ export default function TrialPaperView() {
                   key={tab}
                   onClick={() => setActiveTab(tab)}
                   title={FEATURE_TOOLTIPS[tab] || ""}
-                  className={`px-3 py-2 text-[12px] font-medium border-b-2 transition-colors whitespace-nowrap flex items-center gap-1 ${
-                    activeTab === tab
-                      ? "border-gray-900 text-gray-900"
-                      : "border-transparent text-gray-400 hover:text-gray-600"
+                  className={`${tabBase} flex items-center gap-1 ${
+                    activeTab === tab ? tabOn : tabOff
                   }`}
                 >
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -218,26 +212,25 @@ export default function TrialPaperView() {
             </div>
           </div>
 
-          {/* Content */}
           <div className="flex-1 overflow-y-auto p-4">
             {activeTab === "Summary" ? (
               <TrialSummary paperId={id} />
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-center px-6">
-                <div className="w-16 h-16 rounded-2xl bg-gray-50 flex items-center justify-center mb-4">
-                  <svg className="w-8 h-8 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-4">
+                  <svg className="w-8 h-8 text-muted-foreground/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                   </svg>
                 </div>
-                <h3 className="text-[15px] font-semibold text-gray-900 mb-1.5">
+                <h3 className="text-[15px] font-semibold text-foreground mb-1.5">
                   {activeTab} is a paid feature
                 </h3>
-                <p className="text-[13px] text-gray-500 mb-5 max-w-xs">
-                  Sign up for free to access {activeTab}, Q&A, figure analysis, notes, and more.
+                <p className="text-[13px] text-muted-foreground mb-5 max-w-xs text-pretty">
+                  Sign up for free to access {activeTab}, Q&amp;A, figure analysis, notes, and more.
                 </p>
                 <Link
                   href="/sign-up"
-                  className="text-[13px] font-medium bg-gray-900 text-white px-5 py-2 rounded-xl hover:bg-gray-800 transition-colors"
+                  className="text-[13px] font-medium btn-primary-glass px-5 py-2 rounded-xl"
                 >
                   Sign Up Free &rarr;
                 </Link>

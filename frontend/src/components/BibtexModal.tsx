@@ -20,6 +20,7 @@ export function BibtexModal({ open, onClose, paperIds, folder, workspaceId, labe
   const [copied, setCopied] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const exportKeyRef = useRef("");
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const key = JSON.stringify({ paperIds, folder, workspaceId });
@@ -66,27 +67,49 @@ export function BibtexModal({ open, onClose, paperIds, folder, workspaceId, labe
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(bibtex).then(() => {
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
     });
   }, [bibtex]);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
+
+  // Global Escape handler — the previous onKeyDown on a non-focusable wrapper
+  // never fired, so the keyboard shortcut was silently broken.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
 
   if (!open) return null;
 
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center"
-      onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
-    >      <div className="absolute inset-0 bg-black/20 backdrop-blur-md" onClick={onClose} />
-      <div className="relative glass-strong rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[80vh] animate-fade-in">
+      role="dialog"
+      aria-modal="true"
+      aria-label="BibTeX export"
+    >
+      <div className="absolute inset-0 bg-foreground/25 backdrop-blur-md" onClick={onClose} />
+      <div className="relative glass-strong rounded-2xl shadow-xl w-full max-w-lg mx-4 flex flex-col max-h-[80vh] animate-fade-in">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-black/[0.06]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div>
-            <h3 className="text-[14px] font-semibold text-gray-900">BibTeX Export</h3>
-            {label && <p className="text-[11px] text-gray-400 mt-0.5">{label}</p>}
+            <h3 className="text-[14px] font-semibold text-foreground">BibTeX Export</h3>
+            {label && <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>}
           </div>
           <button
             onClick={onClose}
-            className="w-7 h-7 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 flex items-center justify-center transition-all"
+            aria-label="Close"
+            className="w-7 h-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent flex items-center justify-center transition-colors ring-focus"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -98,24 +121,24 @@ export function BibtexModal({ open, onClose, paperIds, folder, workspaceId, labe
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <div className="w-5 h-5 border-2 border-gray-200 border-t-gray-500 rounded-full animate-spin" />
+              <div className="w-5 h-5 border-2 border-border border-t-foreground rounded-full animate-spin" />
             </div>
           ) : error ? (
             <div className="text-center py-8">
-              <p className="text-[13px] text-red-500">{error}</p>
+              <p className="text-[13px] text-destructive">{error}</p>
               <button
                 onClick={onClose}
-                className="mt-3 text-[12px] text-gray-500 hover:text-gray-700 transition-colors"
+                className="mt-3 text-[12px] text-muted-foreground hover:text-foreground transition-colors"
               >
                 Close
               </button>
             </div>
           ) : (
             <>
-              <p className="text-[11px] text-gray-400 mb-2">
+              <p className="text-[11px] text-muted-foreground mb-2">
                 {count} {count === 1 ? "entry" : "entries"}
               </p>
-              <pre className="text-[12px] leading-relaxed text-gray-700 glass-subtle rounded-xl p-4 whitespace-pre-wrap font-mono overflow-x-auto select-all">
+              <pre className="text-[12px] leading-relaxed text-foreground glass-subtle rounded-xl p-4 whitespace-pre-wrap overflow-x-auto select-all" style={{ fontFamily: "var(--font-mono)" }}>
                 {bibtex}
               </pre>
             </>
@@ -124,16 +147,16 @@ export function BibtexModal({ open, onClose, paperIds, folder, workspaceId, labe
 
         {/* Footer */}
         {!loading && !error && bibtex && (
-          <div className="px-5 py-3 border-t border-black/[0.06] flex items-center justify-end gap-2">
+          <div className="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
             <button
               onClick={onClose}
-              className="text-[12px] text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg transition-colors"
+              className="text-[12px] text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-lg transition-colors ring-focus"
             >
               Close
             </button>
             <button
               onClick={handleCopy}
-              className="text-[12px] font-semibold px-4 py-1.5 rounded-xl btn-primary-glass text-white transition-all flex items-center gap-1.5"
+              className="text-[12px] font-semibold px-4 py-1.5 rounded-xl btn-primary-glass flex items-center gap-1.5"
             >
               {copied ? (
                 <>

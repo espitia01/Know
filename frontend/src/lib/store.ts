@@ -139,12 +139,23 @@ export const useStore = create<AppStore>()(
             paperCaches: rest,
           };
         }),
-      clearSession: () => set({
-        sessionPapers: [], paperCaches: {}, crossPaperResults: [],
-        preReading: null, assumptions: [], summary: null, notes: [],
-        selectionHistory: [], selectionResult: null, qaResults: [], questions: [],
-        exercise: null, searchResults: [],
-      }),
+      clearSession: () => {
+        set({
+          sessionPapers: [], paperCaches: {}, crossPaperResults: [],
+          papersById: {},
+          preReading: null, assumptions: [], summary: null, notes: [],
+          selectionHistory: [], selectionResult: null, qaResults: [], questions: [],
+          exercise: null, searchResults: [],
+        });
+        // Drop the persisted blob too — otherwise signing out and signing
+        // back in as a different user in the same tab would rehydrate the
+        // previous user's papers from sessionStorage.
+        if (typeof window !== "undefined") {
+          try {
+            sessionStorage.removeItem("know-paper-store");
+          } catch { /* best-effort */ }
+        }
+      },
 
       crossPaperResults: [],
       addCrossPaperResults: (items) =>
@@ -180,7 +191,10 @@ export const useStore = create<AppStore>()(
         set((s) => ({ questions: s.questions.filter((_, i) => i !== idx) })),
       clearQuestions: () => set({ questions: [] }),
       qaResults: [],
-      setQAResults: (items) => set({ qaResults: items }),
+      // Cap QA history to the most recent 200 items so the panel — and the
+      // persisted blob in sessionStorage — can't grow unbounded in long
+      // reading sessions.
+      setQAResults: (items) => set({ qaResults: items.slice(-200) }),
       qaLoading: false,
       setQALoading: (l) => set({ qaLoading: l }),
 
@@ -307,11 +321,16 @@ export const useStore = create<AppStore>()(
         },
         removeItem: (name: string) => sessionStorage.removeItem(name),
       },
+      // Keep the persisted blob small: omit `papersById` (each ParsedPaper
+      // carries the full `raw_text` and `cached_analysis` payload, which is
+      // easily hundreds of KB per paper and blows sessionStorage quota for
+      // multi-paper sessions). The in-memory cache still hydrates on
+      // navigation via the usual API call, and `paperCaches` retains all
+      // analysis results keyed by id so no UI state is lost on refresh.
       partialize: (state) => ({
         paperCaches: state.paperCaches,
         sessionPapers: state.sessionPapers,
         crossPaperResults: state.crossPaperResults,
-        papersById: state.papersById,
       }),
     }
   )

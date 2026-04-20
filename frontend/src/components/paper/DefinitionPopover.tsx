@@ -2,10 +2,7 @@
 
 import { useState } from "react";
 import { api, ExplainResponse } from "@/lib/api";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import { preprocessLatex } from "@/lib/latex";
+import { Md } from "@/components/ui/Md";
 
 interface DefinitionPopoverProps {
   paperId: string;
@@ -72,10 +69,8 @@ export function DefinitionPopover({
 
         {result && (
           <div className="space-y-1.5">
-            <div className="text-[12px] leading-relaxed analysis-content">
-              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                {preprocessLatex(result.explanation)}
-              </ReactMarkdown>
+            <div className="text-[12px] leading-relaxed">
+              <Md>{result.explanation}</Md>
             </div>
             {result.source && (
               <p className="text-[11px] text-muted-foreground/70">

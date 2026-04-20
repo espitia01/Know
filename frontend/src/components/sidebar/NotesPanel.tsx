@@ -10,11 +10,12 @@ interface NotesPanelProps {
 }
 
 export function NotesPanel({ paperId }: NotesPanelProps) {
-  const { notes, addNote, updateNote, removeNote } = useStore();
+  const { notes, addNote, updateNote, removeNote, setNotes } = useStore();
   const [input, setInput] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const currentPaperRef = useRef(paperId);
   currentPaperRef.current = paperId;
 
@@ -23,6 +24,7 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
     if (!text || saving) return;
     const targetId = paperId;
     setSaving(true);
+    setError(null);
     try {
       const note = await api.addNote(targetId, text);
       if (currentPaperRef.current === targetId) {
@@ -30,7 +32,7 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
         setInput("");
       }
     } catch (e) {
-      console.error("Failed to save note:", e);
+      setError(e instanceof Error ? e.message : "Failed to save note.");
     } finally {
       setSaving(false);
     }
@@ -39,21 +41,28 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
   const handleUpdate = async (noteId: string) => {
     const text = editText.trim();
     if (!text) return;
+    // Optimistic update: reflect the edit immediately and roll back if the
+    // request fails. Previously the UI waited on the network round-trip
+    // before closing the editor, which felt laggy on slow connections.
+    const prev = useStore.getState().notes;
+    updateNote(noteId, text);
+    setEditing(null);
     try {
       await api.updateNote(paperId, noteId, text);
-      updateNote(noteId, text);
-      setEditing(null);
     } catch (e) {
-      console.error("Failed to update note:", e);
+      setNotes(prev);
+      setError(e instanceof Error ? e.message : "Failed to update note.");
     }
   };
 
   const handleDelete = async (noteId: string) => {
+    const prev = useStore.getState().notes;
+    removeNote(noteId);
     try {
       await api.deleteNote(paperId, noteId);
-      removeNote(noteId);
     } catch (e) {
-      console.error("Failed to delete note:", e);
+      setNotes(prev);
+      setError(e instanceof Error ? e.message : "Failed to delete note.");
     }
   };
 
@@ -86,6 +95,9 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
             {saving ? "Saving..." : "Save Note"}
           </button>
         </div>
+        {error && (
+          <p role="alert" className="text-[11px] text-destructive">{error}</p>
+        )}
       </div>
 
       {notes.length > 0 && (

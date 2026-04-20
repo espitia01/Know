@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import asyncio
 import collections
@@ -116,7 +117,25 @@ async def health():
 
 @app.get("/api/user/me")
 async def get_current_user(user_id: str = Depends(require_auth)):
-    """Return current user info including tier. Syncs with Stripe if needed."""
+    """Return current user info including tier.
+
+    Stripe webhooks are the **single writer** for ``users.tier`` in steady
+    state. This endpoint used to sync tier state from Stripe on every read,
+    which raced with webhook writes and could silently upgrade/downgrade
+    users (especially while a webhook was still in-flight).
+
+    Now we only reconcile as a fallback:
+        * tier=free but an active subscription exists → upgrade once. This
+          covers the brief window between checkout success and the
+          ``checkout.session.completed`` webhook.
+        * tier!=free but no active subscription exists → do NOT downgrade
+          here. The webhook (``customer.subscription.deleted``) is the
+          source of truth for cancellations; downgrading on an API 5xx
+          or a stale Stripe read would be catastrophic for paying users.
+
+    Read-only fields like ``cancel_at_period_end`` still come from Stripe
+    because the DB doesn't persist them.
+    """
     from .services.db import get_or_create_user, update_user_tier
     user = get_or_create_user(user_id)
 
@@ -125,44 +144,36 @@ async def get_current_user(user_id: str = Depends(require_auth)):
     cancel_at_period_end = False
     cancel_at = None
 
-    if customer_id and tier == "free":
+    if customer_id:
         try:
             from .api.billing import PRICE_TO_TIER
             import stripe as _stripe
             subs = _stripe.Subscription.list(customer=customer_id, status="active", limit=1)
             if subs.data:
                 sub = subs.data[0]
-                price_id = sub["items"]["data"][0]["price"]["id"]
-                resolved = PRICE_TO_TIER.get(price_id)
-                if resolved and resolved != "free":
-                    update_user_tier(user_id, resolved)
-                    tier = resolved
                 cancel_at_period_end = bool(sub.cancel_at_period_end)
                 if cancel_at_period_end:
                     try:
                         cancel_at = sub.current_period_end
                     except Exception:
                         pass
+                if tier == "free":
+                    price_id = sub["items"]["data"][0]["price"]["id"]
+                    resolved = PRICE_TO_TIER.get(price_id)
+                    if resolved and resolved != "free":
+                        update_user_tier(user_id, resolved)
+                        tier = resolved
+                        _main_logger.info(
+                            "Backfilled tier for %s from Stripe (%s) — "
+                            "webhook likely still in flight",
+                            user_id, resolved,
+                        )
+            # Intentionally NOT downgrading here: the webhook owns the
+            # downgrade path. A transient Stripe list failure (5xx, network
+            # blip, list pagination edge case) must not kick a paying user
+            # to free mid-session.
         except Exception as e:
-            _main_logger.warning("Stripe sync for user %s failed: %s", user_id, e)
-    elif customer_id and tier != "free":
-        try:
-            import stripe as _stripe
-            subs = _stripe.Subscription.list(customer=customer_id, status="active", limit=1)
-            if subs.data:
-                sub = subs.data[0]
-                cancel_at_period_end = bool(sub.cancel_at_period_end)
-                if cancel_at_period_end:
-                    try:
-                        cancel_at = sub.current_period_end
-                    except Exception:
-                        pass
-            else:
-                update_user_tier(user_id, "free")
-                tier = "free"
-                _main_logger.info("User %s demoted to free: no active Stripe subscription", user_id)
-        except Exception as e:
-            _main_logger.warning("Stripe fetch for user %s failed: %s", user_id, e)
+            _main_logger.warning("Stripe sync for user %s failed: %s", user_id, e.__class__.__name__)
 
     return {
         "user_id": user.get("user_id", user_id),
@@ -174,11 +185,27 @@ async def get_current_user(user_id: str = Depends(require_auth)):
     }
 
 
+_PAPER_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
 @app.get("/api/usage/{paper_id}")
 async def get_paper_usage(paper_id: str, user_id: str = Depends(require_auth)):
-    """Return per-paper usage counts and limits for the current user."""
-    from .services.db import get_usage_count
+    """Return per-paper usage counts and limits for the current user.
+
+    M10: validate ``paper_id`` and verify ownership before returning counts.
+    Without this a caller could probe arbitrary IDs (or path-traversal-like
+    strings) to learn whether specific papers exist in the system. We now
+    enforce the same regex used in ``/api/papers/*`` and short-circuit with
+    a 404 if the paper isn't owned by the caller.
+    """
+    if not _PAPER_ID_RE.match(paper_id or ""):
+        raise HTTPException(status_code=400, detail="Invalid paper_id")
+
+    from .services.db import get_usage_count, get_paper_meta
     from .gating import get_user_tier, TIER_LIMITS
+
+    if not get_paper_meta(paper_id, user_id=user_id):
+        raise HTTPException(status_code=404, detail="Paper not found")
 
     tier = get_user_tier(user_id)
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
@@ -236,6 +263,20 @@ TRIAL_WINDOW = 3600
 
 
 def _check_trial_rate(request: Request):
+    """Enforce IP-based rate limiting on unauthenticated trial endpoints.
+
+    C3: Previously, if the Supabase RPC raised (DB down, migration missing,
+    etc.) we silently fell through to an in-memory fallback. The fallback
+    is per-process, so a restart/redeploy wiped counters and a cluster of
+    workers meant each had its own quota — a trivial abuse path for
+    unauthenticated endpoints. We now:
+
+      * keep the in-memory deque ONLY as a last resort when Supabase isn't
+        configured at all (dev / self-host),
+      * fail closed (503) when Supabase IS configured but the RPC call
+        fails. We'd rather reject a legit user with a retryable 503 than
+        hand a free-LLM-calls-per-IP oracle to attackers.
+    """
     ip = request.client.host if request.client else "unknown"
     if ip in ("127.0.0.1", "::1", "unknown"):
         forwarded = request.headers.get("x-forwarded-for", "")
@@ -243,6 +284,7 @@ def _check_trial_rate(request: Request):
             ip = forwarded.split(",")[0].strip()
     if not ip or ip == "unknown":
         raise HTTPException(status_code=429, detail="Cannot determine client IP for rate limiting.")
+
     from .services.db import get_db
     client = get_db()
     if client:
@@ -252,15 +294,17 @@ def _check_trial_rate(request: Request):
                 "p_max_requests": TRIAL_RATE_LIMIT,
                 "p_window_seconds": TRIAL_WINDOW,
             }).execute()
-            if res and res.data is False:
-                raise HTTPException(status_code=429, detail="Trial rate limit exceeded. Sign up to continue.")
-            return
-        except HTTPException:
-            raise
-        except Exception:
-            pass
+        except Exception as e:
+            _main_logger.error("Trial rate-limit RPC failed, failing closed: %s", e.__class__.__name__)
+            raise HTTPException(
+                status_code=503,
+                detail="Trial rate limiter temporarily unavailable. Please retry shortly.",
+            )
+        if res and res.data is False:
+            raise HTTPException(status_code=429, detail="Trial rate limit exceeded. Sign up to continue.")
+        return
 
-    # Fallback: in-memory (only used when Supabase is not configured)
+    # Only reachable in local dev / self-host where Supabase isn't configured.
     now = time.time()
     if ip not in _trial_fallback:
         if len(_trial_fallback) > 10000:
@@ -429,31 +473,110 @@ def _require_paid_tier(user_id: str) -> str:
     return tier
 
 
+def _require_multi_paper(user_id: str) -> str:
+    """Workspaces save multi-paper sessions, which are only useful with
+    cross-paper Q&A. Gate them on the `multi-qa` capability so tiers without
+    cross-paper analysis don't accumulate sessions they can't meaningfully use.
+    """
+    from .gating import check_feature_access
+    return check_feature_access(user_id, "multi-qa")
+
+
 @app.get("/api/workspaces")
 async def list_user_workspaces(user_id: str = Depends(require_auth)):
-    _require_paid_tier(user_id)
+    _require_multi_paper(user_id)
     from .services.db import list_workspaces
     return list_workspaces(user_id)
 
 
+_MAX_WS_NAME = 100
+_MAX_WS_PAPERS = 50
+_MAX_WS_RESULTS = 200
+_MAX_WS_RESULT_ITEM = 50_000  # chars per cross-paper result item (JSON-serialized)
+
+
+def _cap_cross_paper_results(items: list) -> list:
+    """M13: cap each cross-paper result so one runaway entry can't blow up
+    the ``workspaces.cross_paper_results`` JSONB column. We serialize each
+    item to JSON to measure its real size in the stored form, then truncate
+    long string fields in-place.
+    """
+    import json as _json
+    capped: list = []
+    for item in items[:_MAX_WS_RESULTS]:
+        try:
+            serialized = _json.dumps(item, ensure_ascii=False)
+        except Exception:
+            continue
+        if len(serialized) <= _MAX_WS_RESULT_ITEM:
+            capped.append(item)
+            continue
+        if isinstance(item, dict):
+            trimmed: dict = {}
+            for k, v in item.items():
+                if isinstance(v, str) and len(v) > _MAX_WS_RESULT_ITEM // 4:
+                    trimmed[k] = v[: _MAX_WS_RESULT_ITEM // 4]
+                else:
+                    trimmed[k] = v
+            capped.append(trimmed)
+        else:
+            capped.append(str(item)[:_MAX_WS_RESULT_ITEM])
+    return capped
+
+
 @app.post("/api/workspaces")
 async def save_user_workspace(body: dict, user_id: str = Depends(require_auth)):
-    _require_paid_tier(user_id)
-    from .services.db import save_workspace, get_paper_meta
+    """Create or update a workspace.
+
+    M9: an existing ``id`` is now verified to belong to the caller before
+    we proceed. Previously ``save_workspace`` would happily UPDATE any
+    row matching the id (RLS caught this at the DB layer, but the API
+    still looked like it succeeded on a cross-user id from the caller's
+    perspective). We now return 404 so clients don't get false positives.
+
+    M13: every field that lands in JSONB has a hard cap, and individual
+    ``cross_paper_results`` entries are trimmed so one huge answer can't
+    push the row over Postgres's row size limits.
+    """
+    _require_multi_paper(user_id)
+    from .services.db import save_workspace, get_paper_meta, get_workspace
     from .api.papers import _validate_id
-    ws_name = body.get("name", "Untitled Session")[:100]
-    paper_ids = body.get("paper_ids", [])[:50]
-    validated_ids = []
-    for pid in paper_ids:
+
+    ws_id = body.get("id")
+    if ws_id:
+        if not isinstance(ws_id, str):
+            raise HTTPException(status_code=400, detail="Invalid workspace id")
+        existing = get_workspace(ws_id, user_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+
+    raw_name = body.get("name", "Untitled Session")
+    if not isinstance(raw_name, str):
+        raw_name = "Untitled Session"
+    ws_name = raw_name[:_MAX_WS_NAME]
+
+    paper_ids = body.get("paper_ids", [])
+    if not isinstance(paper_ids, list):
+        paper_ids = []
+    validated_ids: list[str] = []
+    for pid in paper_ids[:_MAX_WS_PAPERS]:
+        if not isinstance(pid, str):
+            continue
         _validate_id(pid, "paper_id")
         if get_paper_meta(pid, user_id=user_id):
             validated_ids.append(pid)
+
+    raw_results = body.get("cross_paper_results", [])
+    if not isinstance(raw_results, list):
+        raw_results = []
+    capped_results = _cap_cross_paper_results(raw_results)
+
     result = save_workspace(
         user_id=user_id,
-        workspace_id=body.get("id"),
+        workspace_id=ws_id,
         name=ws_name,
         paper_ids=validated_ids,
-        cross_paper_results=body.get("cross_paper_results", [])[:200],
+        cross_paper_results=capped_results,
     )
     if not result:
         raise HTTPException(status_code=500, detail="Failed to save workspace")
@@ -462,8 +585,12 @@ async def save_user_workspace(body: dict, user_id: str = Depends(require_auth)):
 
 @app.delete("/api/workspaces/{workspace_id}")
 async def delete_user_workspace(workspace_id: str, user_id: str = Depends(require_auth)):
-    _require_paid_tier(user_id)
-    from .services.db import delete_workspace
+    """M9: verify ownership before delete so a stray id returns 404 instead
+    of silently no-op'ing."""
+    _require_multi_paper(user_id)
+    from .services.db import delete_workspace, get_workspace
+    if not get_workspace(workspace_id, user_id):
+        raise HTTPException(status_code=404, detail="Workspace not found")
     delete_workspace(workspace_id, user_id)
     return {"status": "deleted"}
 

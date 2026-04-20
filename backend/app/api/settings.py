@@ -14,37 +14,11 @@ from ..services.db import get_user, get_db
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 logger = logging.getLogger(__name__)
 
-_columns_verified = False
-
-
-def _ensure_columns() -> None:
-    """Add analysis_model / fast_model columns to users table if missing."""
-    global _columns_verified
-    if _columns_verified:
-        return
-    client = get_db()
-    if not client:
-        _columns_verified = True
-        return
-    try:
-        row = client.table("users").select("analysis_model").limit(1).execute()
-        _columns_verified = True
-    except Exception:
-        logger.info("Adding analysis_model and fast_model columns to users table")
-        try:
-            client.postgrest.schema("public")
-            client.rpc(
-                "exec_sql",
-                {"query": "ALTER TABLE users ADD COLUMN IF NOT EXISTS analysis_model text; ALTER TABLE users ADD COLUMN IF NOT EXISTS fast_model text;"},
-            ).execute()
-            _columns_verified = True
-        except Exception:
-            logger.warning(
-                "Could not auto-add columns. Please run in Supabase SQL Editor:\n"
-                "  ALTER TABLE users ADD COLUMN IF NOT EXISTS analysis_model text;\n"
-                "  ALTER TABLE users ADD COLUMN IF NOT EXISTS fast_model text;"
-            )
-            _columns_verified = True
+# NOTE: M1 — the previous `_ensure_columns` helper used `exec_sql` to
+# self-heal the users table schema at runtime. That coupled runtime code to
+# having DDL privileges (dangerous in managed DBs) and silently hid missing
+# migrations. Schema now lives in migration `009_hardening.sql` and this
+# module assumes it has been applied.
 
 
 def _get_user_model_prefs(user_id: str) -> tuple[str, str]:
@@ -56,8 +30,13 @@ def _get_user_model_prefs(user_id: str) -> tuple[str, str]:
 
 
 def _save_user_model_prefs(user_id: str, analysis_model: str | None = None, fast_model: str | None = None) -> bool:
-    """Save model prefs. Returns True on success, False if columns missing."""
-    _ensure_columns()
+    """Save model prefs. Returns True on success, False on DB failure.
+
+    Caller never sees the raw exception string: M11 removed the SQL-hint
+    response that leaked PostgREST error codes and DDL snippets to clients.
+    A 500 with a generic message is all the client gets; operators read
+    the structured server log.
+    """
     client = get_db()
     if not client:
         return False
@@ -72,11 +51,7 @@ def _save_user_model_prefs(user_id: str, analysis_model: str | None = None, fast
         client.table("users").update(updates).eq("user_id", user_id).execute()
         return True
     except Exception as exc:
-        err_str = str(exc)
-        if "PGRST204" in err_str or "schema cache" in err_str:
-            logger.warning("Model pref columns not found in users table — save skipped")
-            return False
-        logger.error("Failed to save model prefs for %s: %s", user_id, exc)
+        logger.error("Failed to save model prefs for %s: %s", user_id, exc.__class__.__name__)
         return False
 
 
@@ -94,36 +69,47 @@ async def get_settings(user_id: str = Depends(require_auth)):
 
 @router.put("", response_model=SettingsResponse)
 async def update_settings(update: SettingsUpdate, user_id: str = Depends(require_auth)):
+    """Save the user's preferred analysis/fast model.
+
+    L7: the old behavior validated against ``get_allowed_models`` but stored
+    whatever the client sent. If the set of allowed models for a tier
+    changed server-side between the GET and PUT, a stale value could
+    linger in the DB. We now pass each incoming model through
+    ``enforce_model`` — the same function the runtime uses to pick a model
+    for LLM calls — so the stored value is always one this tier is
+    currently authorized to use. If a client sends an unavailable model
+    we return 403 up front (so the UX is honest) and never persist it.
+
+    M11: failure responses no longer embed SQL DDL or PostgREST error
+    codes. The client just gets a generic 500 and the operator reads the
+    log for the specific failure class.
+    """
     allowed = get_allowed_models(user_id)
 
-    if update.analysis_model is not None:
-        if update.analysis_model not in allowed:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Model '{update.analysis_model}' is not available on your plan. Allowed: {', '.join(allowed)}",
-            )
+    if update.analysis_model is not None and update.analysis_model not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Model '{update.analysis_model}' is not available on your plan. Allowed: {', '.join(allowed)}",
+        )
 
-    if update.fast_model is not None:
-        if update.fast_model not in allowed:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Model '{update.fast_model}' is not available on your plan. Allowed: {', '.join(allowed)}",
-            )
+    if update.fast_model is not None and update.fast_model not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Model '{update.fast_model}' is not available on your plan. Allowed: {', '.join(allowed)}",
+        )
 
     ok = True
     if update.analysis_model:
-        ok = _save_user_model_prefs(user_id, analysis_model=update.analysis_model) and ok
+        normalized = enforce_model(user_id, update.analysis_model)
+        ok = _save_user_model_prefs(user_id, analysis_model=normalized) and ok
     if update.fast_model:
-        ok = _save_user_model_prefs(user_id, fast_model=update.fast_model) and ok
+        normalized = enforce_model(user_id, update.fast_model)
+        ok = _save_user_model_prefs(user_id, fast_model=normalized) and ok
 
     if not ok:
         raise HTTPException(
             status_code=500,
-            detail="Could not save model preferences. Please add the columns to the users table. "
-                   "Run this SQL in Supabase SQL Editor:\n"
-                   "ALTER TABLE users ADD COLUMN IF NOT EXISTS analysis_model text;\n"
-                   "ALTER TABLE users ADD COLUMN IF NOT EXISTS fast_model text;\n"
-                   "Then notify PostgREST to reload the schema cache by calling: NOTIFY pgrst, 'reload schema';",
+            detail="Could not save model preferences. Please try again later.",
         )
 
     analysis, fast = _get_user_model_prefs(user_id)

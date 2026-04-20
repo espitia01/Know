@@ -324,13 +324,14 @@ def _normalize_latex_delimiters(obj):
 async def extract_metadata(raw_text: str, user_id: str | None = None) -> dict:
     """Extract just title and authors from raw PDF text using the fast provider."""
     provider = get_fast_provider(user_id)
+    snippet = _sanitize_user_text(raw_text, max_chars=3000)
     system = "Extract the paper title and author names from the given text. Return ONLY valid JSON."
     user = f"""Extract the title and authors from this academic paper text.
 
 Return JSON: {{"title": "...", "authors": ["Author One", "Author Two", ...]}}
 
 Text (first 3000 chars):
-{raw_text[:3000]}"""
+{snippet}"""
 
     raw = await provider.complete(system, user, max_tokens=512)
     return _safe_parse_json(raw)
@@ -344,6 +345,7 @@ async def analyze_selection(paper_text: str, selected_text: str, action: str, us
     """Analyze a user-highlighted selection from the PDF using the fast provider."""
     provider = get_fast_provider(user_id)
     selected_text = _sanitize_user_text(selected_text)
+    paper_text = _sanitize_user_text(paper_text, max_chars=6000)
 
     action_prompts = {
         "explain": f"""Explain the following passage from an academic paper clearly and thoroughly.
@@ -423,14 +425,48 @@ Return JSON:
     return result
 
 
-def _sanitize_user_text(text: str) -> str:
-    """Sanitize user-supplied text before embedding in LLM prompts."""
-    return text.replace('"""', '""').replace("'''", "''")[:10000]
+def _sanitize_user_text(text: str, *, max_chars: int = 10000) -> str:
+    """Sanitize user-supplied text before embedding in an LLM prompt.
+
+    This is deliberately conservative: the LLM treats the prompt as one big
+    string, so a motivated user inserting triple-quote delimiters or
+    role-imitation tokens (``Assistant:`` / ``<|im_end|>``) can try to
+    break out of the instructions. We can't fully prevent injection inside
+    the generated response, but we can:
+
+    - collapse triple-quote delimiters so they can't close our prompt fences
+    - strip zero-width / direction-override characters that let attackers
+      smuggle instructions past visual review
+    - enforce a hard length cap so a single field can't blow out the budget
+
+    The cap is tunable per call site so e.g. paper titles can be bounded
+    much tighter than free-form selection text.
+    """
+    if not isinstance(text, str):
+        return ""
+    text = text.replace('"""', '""').replace("'''", "''")
+    # Drop control / zero-width / bidirectional override characters. We keep
+    # \n and \t explicitly; everything else below U+0020 or in the
+    # "dangerous" set is stripped.
+    banned = {
+        "\u200b", "\u200c", "\u200d", "\u200e", "\u200f",
+        "\u202a", "\u202b", "\u202c", "\u202d", "\u202e",
+        "\u2066", "\u2067", "\u2068", "\u2069", "\ufeff",
+    }
+    out_chars = []
+    for ch in text:
+        if ch in banned:
+            continue
+        if ch < " " and ch not in ("\n", "\t"):
+            continue
+        out_chars.append(ch)
+    return "".join(out_chars)[:max_chars]
 
 
 def _get_selection_prompt(paper_text: str, selected_text: str, action: str) -> tuple[str, str]:
     """Return (system, user_text) for selection analysis with markdown output (for streaming)."""
     selected_text = _sanitize_user_text(selected_text)
+    paper_text = _sanitize_user_text(paper_text, max_chars=6000)
     system = (
         "You are an expert science educator. Analyze academic paper content to help students learn. "
         "Use markdown formatting with clear structure. "
@@ -498,6 +534,7 @@ Paper context:
 async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
     """Run pre-reading analysis on paper content."""
     provider = get_provider(user_id)
+    paper_text = _sanitize_user_text(paper_text, max_chars=15000)
 
     system = (
         "You are an expert science educator. Analyze the given academic paper and extract structured information "
@@ -522,6 +559,9 @@ Paper content:
 async def explain_term(paper_text: str, term: str, context: str, user_id: str | None = None) -> dict:
     """Explain a term in the context of the paper."""
     provider = get_provider(user_id)
+    term = _sanitize_user_text(term, max_chars=500)
+    context = _sanitize_user_text(context, max_chars=5000)
+    paper_text = _sanitize_user_text(paper_text, max_chars=10000)
 
     system = (
         "You are an expert science educator. Explain technical terms clearly and accurately. "
@@ -540,13 +580,15 @@ Return JSON: {{"term": "...", "explanation": "...", "source": "name of source if
 Paper excerpt:
 {paper_text[:10000]}"""
 
-    raw = await provider.complete(system, user)
+    raw = await provider.complete(system, user, max_tokens=4096)
     return _safe_parse_json(raw)
 
 
 async def find_skipped_steps(paper_text: str, section: str, user_id: str | None = None) -> dict:
     """Identify and fill in skipped derivation steps."""
     provider = get_provider(user_id)
+    section = _sanitize_user_text(section, max_chars=10000)
+    paper_text = _sanitize_user_text(paper_text, max_chars=10000)
 
     system = (
         "You are an expert physicist and mathematics educator. When given a derivation from a paper, "
@@ -575,13 +617,14 @@ Return JSON:
   ]
 }}"""
 
-    raw = await provider.complete(system, user)
+    raw = await provider.complete(system, user, max_tokens=4096)
     return _safe_parse_json(raw)
 
 
 async def extract_assumptions(paper_text: str, user_id: str | None = None) -> dict:
     """Extract explicit and implicit assumptions."""
     provider = get_provider(user_id)
+    paper_text = _sanitize_user_text(paper_text, max_chars=6000)
 
     system = (
         "You are an expert science educator. Identify all assumptions in the paper, both those explicitly "
@@ -604,13 +647,15 @@ Return JSON:
   ]
 }}"""
 
-    raw = await provider.complete(system, user)
+    raw = await provider.complete(system, user, max_tokens=4096)
     return _safe_parse_json(raw)
 
 
 async def generate_derivation_exercise(paper_text: str, section: str, user_id: str | None = None) -> dict:
     """Generate an interactive derivation exercise with fill-in-the-blank steps."""
     provider = get_provider(user_id)
+    section = _sanitize_user_text(section, max_chars=10000)
+    paper_text = _sanitize_user_text(paper_text, max_chars=6000)
 
     system = (
         "You are an expert physics/mathematics educator creating interactive derivation exercises. "
@@ -658,6 +703,8 @@ Return JSON:
 async def answer_questions(paper_text: str, questions: list[str], user_id: str | None = None) -> list[dict]:
     """Answer a batch of questions about the paper."""
     provider = get_provider(user_id)
+    paper_text = _sanitize_user_text(paper_text, max_chars=6000)
+    questions = [_sanitize_user_text(q, max_chars=2000) for q in questions]
 
     system = (
         "You are an expert science educator. Answer questions about the paper thoroughly but accessibly. "
@@ -688,11 +735,20 @@ Return JSON:
     return _safe_parse_json(raw)
 
 
+MULTI_QA_TOTAL_CHAR_BUDGET = 30_000
+
+
 async def answer_questions_multi(paper_texts: list[tuple[str, str]], questions: list[str], user_id: str | None = None) -> list[dict]:
     """Answer questions using context from multiple papers.
     paper_texts: list of (title, raw_text) tuples.
+
+    The total context is capped at ``MULTI_QA_TOTAL_CHAR_BUDGET`` so a
+    workspace with many large papers can't produce a multi-megabyte prompt
+    (and the corresponding Anthropic bill). Each paper gets an equal share
+    of the budget, with at least 2k chars each and a floor of 1 paper.
     """
     provider = get_provider(user_id)
+    questions = [_sanitize_user_text(q, max_chars=2000) for q in questions]
 
     system = (
         "You are an expert science educator. You have access to multiple papers in a reading session. "
@@ -704,9 +760,12 @@ async def answer_questions_multi(paper_texts: list[tuple[str, str]], questions: 
     q_list = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
 
     papers_context = ""
-    chars_per_paper = max(2000, 12000 // len(paper_texts))
+    n_papers = max(1, len(paper_texts))
+    chars_per_paper = max(2000, MULTI_QA_TOTAL_CHAR_BUDGET // n_papers)
     for i, (title, text) in enumerate(paper_texts):
-        papers_context += f"\n--- Paper {i+1}: {title} ---\n{text[:chars_per_paper]}\n"
+        safe_title = _sanitize_user_text(title or "", max_chars=200)
+        safe_text = _sanitize_user_text(text or "", max_chars=chars_per_paper)
+        papers_context += f"\n--- Paper {i+1}: {safe_title} ---\n{safe_text}\n"
 
     user = f"""Answer these questions using all the papers in the session. Synthesize across papers where relevant.
 
@@ -738,6 +797,8 @@ async def summarize_paper(paper_text: str, model_override: str | None = None, us
         provider = AnthropicProvider(settings.anthropic_api_key, model=model_override)
     else:
         provider = get_provider(user_id)
+
+    paper_text = _sanitize_user_text(paper_text, max_chars=12000)
 
     system = (
         "You are an expert science educator and researcher. Produce an extremely detailed, structured summary "
@@ -803,6 +864,8 @@ async def analyze_figure(paper_text: str, image_b64: str, question: str = "", us
         raise ValueError("Figure analysis requires an Anthropic provider with vision support.")
 
     image_b64 = _resize_image_b64(image_b64)
+    paper_text = _sanitize_user_text(paper_text, max_chars=4000)
+    question = _sanitize_user_text(question, max_chars=2000)
 
     system = (
         "You are an expert science educator analyzing figures from academic papers. "
@@ -850,6 +913,8 @@ Return JSON:
 
 def _get_figure_prompt(paper_text: str, question: str) -> tuple[str, str]:
     """Return (system, user_text) for figure analysis."""
+    paper_text = _sanitize_user_text(paper_text, max_chars=4000)
+    question = _sanitize_user_text(question, max_chars=2000)
     system = (
         "You are an expert science educator analyzing figures from academic papers. "
         "Provide clear, thorough, educational explanations. Use markdown formatting. "

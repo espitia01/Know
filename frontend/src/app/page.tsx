@@ -7,8 +7,8 @@ import { UserButton, useAuth } from "@clerk/nextjs";
 import { FEATURE_TOOLTIPS } from "@/lib/tooltips";
 import { api } from "@/lib/api";
 import { FeedbackModal } from "@/components/FeedbackModal";
-
-const DISCORD_URL = "https://discord.gg/BgNdPsVfDE";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { DISCORD_URL } from "@/lib/constants";
 
 function useInView(threshold = 0.15) {
   const ref = useRef<HTMLDivElement>(null);
@@ -178,45 +178,46 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-mesh">
+    <div className="min-h-screen bg-background text-foreground bg-mesh">
       {/* Nav */}
       <nav className="sticky top-0 z-50 glass-nav">
         <div className="max-w-6xl mx-auto px-6 h-[60px] flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-2 ring-focus rounded-md">
             <Image src="/logo.png" alt="Know" width={26} height={26} className="rounded-md" />
-            <span className="text-[15px] font-semibold tracking-[-0.03em] text-gray-900">Know</span>
+            <span className="text-[15px] font-semibold tracking-[-0.03em] text-foreground">Know</span>
           </Link>
-          <div className="flex items-center gap-6">
-            <div className="hidden sm:flex items-center gap-6 text-[13px] text-gray-600">
-              <a href="#features" className="hover:text-gray-900 transition-colors">Features</a>
-              <a href="#pricing" className="hover:text-gray-900 transition-colors">Pricing</a>
-              <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors">Discord</a>
+          <div className="flex items-center gap-5">
+            <div className="hidden sm:flex items-center gap-5 text-[13px] text-muted-foreground">
+              <a href="#features" className="hover:text-foreground transition-colors">Features</a>
+              <a href="#pricing" className="hover:text-foreground transition-colors">Pricing</a>
+              <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">Discord</a>
             </div>
+            <ThemeToggle />
             {isLoaded && !isSignedIn && (
               <>
-              <Link
-                href="/sign-in"
-                className="text-[13px] font-medium text-gray-600 hover:text-gray-900 transition-colors"
-              >
-                Sign in
-              </Link>
-              <Link
-                href="/sign-up"
-                className="text-[13px] font-medium btn-primary-glass text-white px-4 py-2 rounded-xl transition-all"
-              >
-                Get Started
-              </Link>
+                <Link
+                  href="/sign-in"
+                  className="hidden sm:inline text-[13px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Sign in
+                </Link>
+                <Link
+                  href="/sign-up"
+                  className="text-[13px] font-medium btn-primary-glass px-4 py-2 rounded-xl"
+                >
+                  Get Started
+                </Link>
               </>
             )}
             {isLoaded && isSignedIn && (
               <>
-              <Link
-                href="/dashboard"
-                className="text-[13px] font-medium text-gray-600 hover:text-gray-900 transition-colors px-3 py-1.5"
-              >
-                Dashboard
-              </Link>
-              <UserButton appearance={{ elements: { userButtonPopoverActionButton__manageAccount: { display: "none" } } }} />
+                <Link
+                  href="/dashboard"
+                  className="text-[13px] font-medium text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5"
+                >
+                  Dashboard
+                </Link>
+                <UserButton appearance={{ elements: { userButtonPopoverActionButton__manageAccount: { display: "none" } } }} />
               </>
             )}
           </div>
@@ -226,63 +227,63 @@ export default function LandingPage() {
       {/* Hero */}
       <section
         ref={hero.ref}
-        className={`relative pt-28 pb-24 px-6 overflow-hidden transition-all duration-1000 ${hero.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"}`}
+        className={`relative pt-28 pb-24 px-6 overflow-hidden transition-all duration-700 ${hero.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
       >
         <div className="absolute inset-0 bg-mesh-hero" />
         <div className="relative max-w-3xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full glass text-[12px] font-medium text-gray-600 mb-8">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full glass text-[12px] font-medium text-muted-foreground mb-8">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-soft-pulse" />
             v0.1
           </div>
-          <h1 className="text-[clamp(2.5rem,6vw,4.5rem)] font-extrabold tracking-[-0.04em] text-gray-950 leading-[1.05]">
+          <h1 className="font-display text-[clamp(2.5rem,6vw,4.5rem)] font-extrabold text-foreground leading-[1.05] text-balance">
             Know papers<br className="hidden sm:block" /> like never before
           </h1>
-          <p className="mt-6 text-[17px] sm:text-lg text-gray-600 max-w-xl mx-auto leading-relaxed">
+          <p className="mt-6 text-[17px] sm:text-lg text-muted-foreground max-w-xl mx-auto leading-relaxed text-pretty">
             Upload any academic paper and let AI transform it into an interactive
-            learning experience with summaries, Q&A, derivations, and smart notes.
+            learning experience with summaries, Q&amp;A, derivations, and smart notes.
           </p>
-          <div className="mt-10 flex items-center justify-center gap-4">
+          <div className="mt-10 flex items-center justify-center gap-3 sm:gap-4 flex-wrap">
             <Link
               href="/try"
-              className="text-[14px] font-medium px-6 py-3 rounded-xl glass glass-hover text-gray-700 transition-all duration-200"
+              className="text-[14px] font-medium px-6 py-3 rounded-xl glass glass-hover text-foreground ring-focus"
             >
               Try for Free
             </Link>
             <Link
               href="/sign-up"
-              className="text-[14px] font-medium px-6 py-3 rounded-xl btn-primary-glass text-white transition-all duration-200"
+              className="text-[14px] font-medium px-6 py-3 rounded-xl btn-primary-glass"
             >
-              Get Started &rarr;
+              Get Started <span aria-hidden>&rarr;</span>
             </Link>
           </div>
-          <p className="mt-5 text-[12px] text-gray-400">No credit card required</p>
+          <p className="mt-5 text-[12px] text-muted-foreground/70">No credit card required</p>
         </div>
       </section>
 
       {/* How it works */}
       <section
         ref={howItWorks.ref}
-        className="py-28 px-6 border-t border-black/[0.06]"
+        className="py-28 px-6 border-t border-border"
       >
         <div className="max-w-4xl mx-auto">
-          <p className="text-center text-[12px] uppercase tracking-[0.2em] font-semibold text-gray-400 mb-4">
+          <p className="text-center text-[11px] uppercase tracking-[0.22em] font-semibold text-muted-foreground mb-4">
             How it works
           </p>
-          <p className="text-center text-[28px] sm:text-3xl font-bold tracking-[-0.03em] text-gray-900 mb-20">
+          <p className="font-display text-center text-[28px] sm:text-[34px] font-bold text-foreground mb-20 text-balance">
             Three steps to deep understanding
           </p>
           <div className="grid md:grid-cols-3 gap-12 md:gap-8">
             {steps.map((s, i) => (
               <div
                 key={s.num}
-                className={`relative transition-all duration-700 ${howItWorks.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"}`}
-                style={{ transitionDelay: `${i * 150}ms` }}
+                className={`relative transition-all duration-700 ${howItWorks.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
+                style={{ transitionDelay: `${i * 120}ms` }}
               >
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-b from-gray-800 to-gray-950 text-white flex items-center justify-center text-[14px] font-semibold mb-5 shadow-lg shadow-gray-900/15">
+                <div className="w-10 h-10 rounded-2xl btn-primary-glass flex items-center justify-center text-[14px] font-semibold mb-5">
                   {s.num}
                 </div>
-                <h3 className="text-[16px] font-semibold text-gray-900 mb-2 tracking-[-0.01em]">{s.title}</h3>
-                <p className="text-[14px] text-gray-600 leading-relaxed">{s.desc}</p>
+                <h3 className="text-[15px] font-semibold text-foreground mb-2 tracking-[-0.01em]">{s.title}</h3>
+                <p className="text-[14px] text-muted-foreground leading-relaxed text-pretty">{s.desc}</p>
               </div>
             ))}
           </div>
@@ -292,28 +293,28 @@ export default function LandingPage() {
       {/* Features */}
       <section
         ref={featuresSection.ref}
-        className="py-28 px-6 bg-mesh-section border-t border-black/[0.06]"
+        className="py-28 px-6 bg-mesh-section border-t border-border"
         id="features"
       >
         <div className="max-w-5xl mx-auto">
-          <p className="text-center text-[12px] uppercase tracking-[0.2em] font-semibold text-gray-400 mb-4">
+          <p className="text-center text-[11px] uppercase tracking-[0.22em] font-semibold text-muted-foreground mb-4">
             Features
           </p>
-          <p className="text-center text-[28px] sm:text-3xl font-bold tracking-[-0.03em] text-gray-900 mb-20">
+          <p className="font-display text-center text-[28px] sm:text-[34px] font-bold text-foreground mb-20 text-balance">
             Everything you need to truly understand a paper
           </p>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {features.map((f, i) => (
               <div
                 key={f.title}
-                className={`group glass glass-hover p-6 rounded-2xl transition-all duration-300 ${featuresSection.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
-                style={{ transitionDelay: `${i * 80}ms` }}
+                className={`group glass glass-hover p-6 rounded-2xl transition-opacity duration-500 ${featuresSection.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}
+                style={{ transitionDelay: `${i * 70}ms` }}
               >
-                <div className="w-9 h-9 rounded-xl glass-subtle flex items-center justify-center text-gray-400 group-hover:text-gray-600 transition-all duration-300 mb-4">
+                <div className="w-9 h-9 rounded-xl glass-subtle flex items-center justify-center text-muted-foreground group-hover:text-foreground transition-colors duration-300 mb-4">
                   {f.icon}
                 </div>
-                <h3 className="text-[15px] font-semibold text-gray-900 mb-1.5 tracking-[-0.01em]">{f.title}</h3>
-                <p className="text-[13px] text-gray-600 leading-relaxed">{f.desc}</p>
+                <h3 className="text-[15px] font-semibold text-foreground mb-1.5 tracking-[-0.01em]">{f.title}</h3>
+                <p className="text-[13px] text-muted-foreground leading-relaxed text-pretty">{f.desc}</p>
               </div>
             ))}
           </div>
@@ -323,17 +324,17 @@ export default function LandingPage() {
       {/* Pricing */}
       <section
         ref={pricing.ref}
-        className="py-28 px-6 border-t border-black/[0.06]"
+        className="py-28 px-6 border-t border-border"
         id="pricing"
       >
         <div className="max-w-5xl mx-auto">
-          <p className="text-center text-[12px] uppercase tracking-[0.2em] font-semibold text-gray-400 mb-4">
+          <p className="text-center text-[11px] uppercase tracking-[0.22em] font-semibold text-muted-foreground mb-4">
             Pricing
           </p>
-          <p className="text-center text-[28px] sm:text-3xl font-bold tracking-[-0.03em] text-gray-900 mb-4">
+          <p className="font-display text-center text-[28px] sm:text-[34px] font-bold text-foreground mb-4 text-balance">
             Simple, transparent pricing
           </p>
-          <p className="text-center text-[15px] text-gray-600 mb-16 max-w-md mx-auto">
+          <p className="text-center text-[15px] text-muted-foreground mb-16 max-w-md mx-auto text-pretty">
             Start free, upgrade when you need more. No hidden fees.
           </p>
           <div className="grid md:grid-cols-3 gap-5 items-start">
@@ -342,38 +343,38 @@ export default function LandingPage() {
                 key={t.name}
                 className={`relative rounded-2xl p-7 transition-all duration-700 ${
                   t.highlight
-                    ? "glass-strong glass-border-glow shadow-[0_8px_40px_rgba(0,0,0,0.06)] scale-[1.02] z-10"
+                    ? "glass-strong glass-border-glow scale-[1.02] z-10"
                     : "glass glass-hover"
-                } ${pricing.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"}`}
-                style={{ transitionDelay: `${i * 120}ms` }}
+                } ${pricing.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
+                style={{ transitionDelay: `${i * 110}ms` }}
               >
                 {t.highlight && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 bg-gradient-to-r from-violet-500 to-purple-600 text-white text-[11px] font-semibold rounded-full tracking-wide shadow-lg shadow-violet-500/25">
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3.5 py-1 bg-gradient-to-r from-violet-500 to-purple-600 text-white text-[11px] font-semibold rounded-full tracking-wide shadow-lg shadow-violet-500/25">
                     Most Popular
                   </div>
                 )}
                 <div className="mb-5">
-                  <h3 className="text-[15px] font-semibold text-gray-900">{t.name}</h3>
-                  <p className="text-[13px] text-gray-600 mt-0.5">{t.desc}</p>
+                  <h3 className="text-[15px] font-semibold text-foreground">{t.name}</h3>
+                  <p className="text-[13px] text-muted-foreground mt-0.5">{t.desc}</p>
                 </div>
                 <div className="flex items-baseline gap-1 mb-7">
-                  <span className="text-[36px] font-extrabold tracking-[-0.03em] text-gray-900">{t.price}</span>
-                  <span className="text-[14px] text-gray-400 font-medium">{t.period}</span>
+                  <span className="font-display text-[36px] font-extrabold text-foreground">{t.price}</span>
+                  <span className="text-[14px] text-muted-foreground/80 font-medium">{t.period}</span>
                 </div>
                 <button
                   onClick={() => handleTierClick(t.tier)}
                   disabled={checkoutLoading !== null}
-                  className={`block w-full text-center text-[13px] font-semibold py-3 rounded-xl transition-all duration-200 disabled:opacity-50 ${
+                  className={`block w-full text-center text-[13px] font-semibold py-3 rounded-xl transition-all duration-200 disabled:opacity-50 ring-focus ${
                     t.highlight
-                      ? "btn-primary-glass text-white"
-                      : "glass glass-hover text-gray-900"
+                      ? "btn-primary-glass"
+                      : "glass glass-hover text-foreground"
                   }`}
                 >
-                  {checkoutLoading === t.tier ? "Redirecting..." : t.cta}
+                  {checkoutLoading === t.tier ? "Redirecting…" : t.cta}
                 </button>
                 <ul className="mt-7 space-y-3">
                   {t.features.map((feat) => (
-                    <li key={feat} className="flex items-start gap-3 text-[13px] text-gray-600" title={FEATURE_TOOLTIPS[feat] || ""}>
+                    <li key={feat} className="flex items-start gap-3 text-[13px] text-muted-foreground" title={FEATURE_TOOLTIPS[feat] || ""}>
                       <svg className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                       </svg>
@@ -384,9 +385,9 @@ export default function LandingPage() {
               </div>
             ))}
           </div>
-          <p className="text-center text-[12px] text-gray-400 mt-10">
+          <p className="text-center text-[12px] text-muted-foreground/80 mt-10">
             All payments are final. By subscribing, you agree to our{" "}
-            <Link href="/terms" className="underline hover:text-gray-600 transition-colors">
+            <Link href="/terms" className="underline underline-offset-2 hover:text-foreground transition-colors">
               Terms of Service
             </Link>.
           </p>
@@ -394,53 +395,53 @@ export default function LandingPage() {
       </section>
 
       {/* CTA */}
-      <section className="py-28 px-6 bg-mesh-section border-t border-black/[0.06]">
+      <section className="py-28 px-6 bg-mesh-section border-t border-border">
         <div className="max-w-2xl mx-auto text-center">
-          <h2 className="text-[28px] sm:text-3xl font-bold tracking-[-0.03em] text-gray-900 mb-4">
+          <h2 className="font-display text-[28px] sm:text-[34px] font-bold text-foreground mb-4 text-balance">
             Ready to know your papers?
           </h2>
-          <p className="text-[15px] text-gray-600 mb-10 leading-relaxed">
+          <p className="text-[15px] text-muted-foreground mb-10 leading-relaxed text-pretty">
             Join researchers and students who use Know to deeply understand academic literature.
           </p>
-          <div className="flex items-center justify-center gap-4">
+          <div className="flex items-center justify-center gap-3 sm:gap-4 flex-wrap">
             <Link
               href="/try"
-              className="text-[14px] font-medium px-6 py-3 rounded-xl glass glass-hover text-gray-700 transition-all duration-200"
+              className="text-[14px] font-medium px-6 py-3 rounded-xl glass glass-hover text-foreground ring-focus"
             >
               Try for Free
             </Link>
             <Link
               href="/sign-up"
-              className="text-[14px] font-medium px-6 py-3 rounded-xl btn-primary-glass text-white transition-all duration-200"
+              className="text-[14px] font-medium px-6 py-3 rounded-xl btn-primary-glass"
             >
-              Get Started &rarr;
+              Get Started <span aria-hidden>&rarr;</span>
             </Link>
           </div>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-black/[0.06] py-10 px-6 glass-subtle">
+      <footer className="border-t border-border py-10 px-6 glass-subtle">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <Image src="/logo.png" alt="Know" width={18} height={18} className="rounded-sm" />
-            <span className="text-[13px] text-gray-400">&copy; {new Date().getFullYear()} Know</span>
+            <span className="text-[13px] text-muted-foreground">&copy; {new Date().getFullYear()} Know</span>
           </div>
-          <div className="flex items-center gap-8">
-            <a href="#pricing" className="text-[12px] text-gray-500 hover:text-gray-700 transition-colors">
+          <div className="flex items-center gap-6">
+            <a href="#pricing" className="text-[12px] text-muted-foreground hover:text-foreground transition-colors">
               Pricing
             </a>
-            <Link href="/terms" className="text-[12px] text-gray-500 hover:text-gray-700 transition-colors">
+            <Link href="/terms" className="text-[12px] text-muted-foreground hover:text-foreground transition-colors">
               Terms
             </Link>
             <button
               onClick={() => setShowFeedback(true)}
-              className="text-[12px] text-gray-500 hover:text-gray-700 transition-colors"
+              className="text-[12px] text-muted-foreground hover:text-foreground transition-colors"
             >
               Feedback
             </button>
-            <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="text-[12px] text-gray-500 hover:text-gray-700 transition-colors flex items-center gap-1.5">
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+            <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="text-[12px] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                 <path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
               </svg>
               Discord

@@ -51,3 +51,20 @@ export function getProgressStart(paperId: string, kind: AnalysisKind): number {
 export function clearProgressStart(paperId: string, kind: AnalysisKind) {
   progressStartTimes.delete(progressKey(paperId, kind));
 }
+
+// Drop every trace of tracking for a paper. Call this when the paper is
+// removed from the session / workspace so the `autoAnalyzedPapers` guard
+// doesn't swell unboundedly and so a paper that's re-added later triggers
+// a fresh auto-analyze instead of silently skipping it.
+export function forgetPaper(paperId: string) {
+  autoAnalyzedPapers.delete(paperId);
+  activeRequests.delete(paperId);
+  const stream = activeSummaryStreams.get(paperId);
+  if (stream) {
+    try { stream.abort(); } catch { /* ignore */ }
+    activeSummaryStreams.delete(paperId);
+  }
+  for (const key of Array.from(progressStartTimes.keys())) {
+    if (key.startsWith(`${paperId}:`)) progressStartTimes.delete(key);
+  }
+}

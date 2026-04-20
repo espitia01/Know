@@ -10,6 +10,7 @@ import { useStore } from "@/lib/store";
 import { SelectionToolbar, type SelectionAction } from "@/components/pdf/SelectionToolbar";
 import { AnalysisPanel, type PanelPosition } from "@/components/panel/BottomPanel";
 import { BibtexModal } from "@/components/BibtexModal";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import {
   autoAnalyzedPapers,
@@ -17,15 +18,18 @@ import {
   markRequestStart,
   markRequestEnd,
   clearProgressStart,
+  forgetPaper,
 } from "@/lib/analysisState";
+
+const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 const PdfViewer = dynamic(
   () => import("@/components/pdf/PdfViewer").then((m) => m.PdfViewer),
   {
     ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-5 h-5 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin" />
+      loading: () => (
+      <div className="flex items-center justify-center h-full bg-background">
+        <div className="w-5 h-5 border-2 border-border border-t-foreground rounded-full animate-spin" />
       </div>
     ),
   }
@@ -77,6 +81,7 @@ function AddPaperPopover({
   const [papers, setPapers] = useState<PaperListEntry[]>([]);
   const [loadingPapers, setLoadingPapers] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -101,12 +106,25 @@ function AddPaperPopover({
   }, [onClose]);
 
   const handleUpload = useCallback(async (file: File) => {
+    setUploadError(null);
+    // Client-side guardrail: the backend also enforces this, but checking
+    // here avoids a doomed upload of a 100MB PDF over slow connections.
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadError(
+        `PDF is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max ${(MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0)} MB.`
+      );
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setUploadError("Only PDF files are supported.");
+      return;
+    }
     setUploading(true);
     try {
       const paper = await api.uploadPaper(file);
       onAdd(paper.id, paper.title);
     } catch (e) {
-      console.error("Upload failed:", e);
+      setUploadError(e instanceof Error ? e.message : "Upload failed.");
     } finally {
       setUploading(false);
     }
@@ -130,7 +148,7 @@ function AddPaperPopover({
       className="absolute top-full right-0 mt-1 z-50 glass-strong rounded-2xl shadow-xl w-80 max-h-[420px] flex flex-col animate-fade-in overflow-hidden"
     >
       {/* Upload section */}
-      <div className="p-2.5 border-b border-black/[0.06] space-y-2">
+      <div className="p-2.5 border-b border-border space-y-2">
         <input
           ref={fileInputRef}
           type="file"
@@ -160,17 +178,22 @@ function AddPaperPopover({
             </>
           )}
         </button>
+        {uploadError && (
+          <p role="alert" className="text-[11px] text-destructive leading-snug px-1">
+            {uploadError}
+          </p>
+        )}
       </div>
 
       <div className="overflow-y-auto flex-1">
         {loadingPapers ? (
           <div className="flex items-center justify-center py-8">
-            <div className="w-4 h-4 border-2 border-gray-200 border-t-gray-500 rounded-full animate-spin" />
+            <div className="w-4 h-4 border-2 border-border border-t-foreground rounded-full animate-spin" />
           </div>
         ) : selectedFolder === null ? (
           /* Folder list */
           <div className="p-1.5">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400 px-2.5 py-1.5">
+            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80 px-2.5 py-1.5">
               Select a folder
             </p>
             {folders.map((f) => {
@@ -181,14 +204,14 @@ function AddPaperPopover({
                 <button
                   key={f}
                   onClick={() => setSelectedFolder(f)}
-                  className="w-full text-left flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 hover:bg-gray-50 transition-colors group"
+                  className="w-full text-left flex items-center gap-2.5 rounded-lg px-2.5 py-2.5 hover:bg-accent/60 transition-colors group"
                 >
-                  <svg className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <svg className="w-4 h-4 text-muted-foreground/60 group-hover:text-muted-foreground transition-colors shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
                   </svg>
-                  <span className="text-[12px] font-medium text-gray-700 flex-1 truncate">{f}</span>
-                  <span className="text-[10px] text-gray-400 tabular-nums">{count}</span>
-                  <svg className="w-3.5 h-3.5 text-gray-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <span className="text-[12px] font-medium text-foreground/90 flex-1 truncate">{f}</span>
+                  <span className="text-[10px] text-muted-foreground/80 tabular-nums">{count}</span>
+                  <svg className="w-3.5 h-3.5 text-muted-foreground/60 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
                   </svg>
                 </button>
@@ -200,7 +223,7 @@ function AddPaperPopover({
           <div className="p-1.5">
             <button
               onClick={() => setSelectedFolder(null)}
-              className="flex items-center gap-1.5 text-[11px] font-medium text-gray-400 hover:text-gray-700 transition-colors px-2 py-1.5 mb-0.5"
+              className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground/80 hover:text-foreground/90 transition-colors px-2 py-1.5 mb-0.5"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
@@ -208,7 +231,7 @@ function AddPaperPopover({
               {selectedFolder}
             </button>
             {folderPapers.length === 0 ? (
-              <p className="text-[12px] text-gray-400 text-center py-6">No papers in this folder</p>
+              <p className="text-[12px] text-muted-foreground/80 text-center py-6">No papers in this folder</p>
             ) : (
               folderPapers.map((p) => {
                 const inSession = sessionIds.has(p.id);
@@ -220,13 +243,13 @@ function AddPaperPopover({
                     className={`w-full text-left rounded-lg px-2.5 py-2.5 transition-colors ${
                       inSession
                         ? "opacity-40 cursor-default"
-                        : "hover:bg-gray-50 cursor-pointer"
+                        : "hover:bg-accent/60 cursor-pointer"
                     }`}
                   >
-                    <p className="text-[12px] font-medium text-gray-800 truncate leading-tight">
+                    <p className="text-[12px] font-medium text-foreground truncate leading-tight">
                       {p.title}
                     </p>
-                    <p className="text-[10px] text-gray-400 truncate mt-0.5">
+                    <p className="text-[10px] text-muted-foreground/80 truncate mt-0.5">
                       {(p.authors || []).slice(0, 2).join(", ")}
                       {(p.authors || []).length > 2 ? " et al." : ""}
                       {inSession && " · In session"}
@@ -247,6 +270,10 @@ function PaperContent() {
   const router = useRouter();
   const { user: tierUser, loading: tierLoading } = useUserTier();
   const isFree = tierLoading ? true : (!tierUser || tierUser.tier === "free");
+  // Multi-paper sessions + workspaces are only useful alongside cross-paper
+  // Q&A. Gate them on the same `multi-qa` feature so Scholar users don't
+  // open a session they can't meaningfully use.
+  const canMultiPaper = !tierLoading && !!tierUser && canAccess(tierUser.tier, "multi-qa");
   const paperId = params.id as string;
   const {
     paper, setPaper, loading, setLoading,
@@ -386,25 +413,36 @@ function PaperContent() {
   // First try to restore from local cache for instant display
   const cacheRestoredRef = useRef(false);
 
-  // On mount (and whenever the URL paper changes without going through the
-  // in-session switcher, e.g. a hard refresh), rehydrate the top-level store
-  // from `paperCaches`. Zustand persists `paperCaches` to sessionStorage but
-  // NOT the active per-paper fields (preReading, summary, qaResults, ...),
-  // so without this effect a refresh would leave the analysis pane empty
-  // until the server-side `paper.cached_analysis` round-trip finishes — and
-  // local-only state (e.g. the queued questions list) would be lost entirely.
-  const initialRestoreDoneRef = useRef<string | null>(null);
+  // On first mount only, rehydrate the top-level store from `paperCaches`.
+  // Zustand persists `paperCaches` to sessionStorage but NOT the active
+  // per-paper fields (preReading, summary, qaResults, ...), so a refresh
+  // would otherwise leave the analysis pane empty until the server-side
+  // `paper.cached_analysis` round-trip finishes — and local-only state
+  // (e.g. queued questions) would be lost entirely.
+  //
+  // Subsequent switches go through `handleSwitchPaper`, which owns the
+  // save/restore + loading-state syncing; we deliberately don't re-run on
+  // `activePaperId` changes here because that would overwrite the loading
+  // flags `handleSwitchPaper` just set for an in-flight background request.
+  const initialRestoreDoneRef = useRef(false);
   useEffect(() => {
-    if (initialRestoreDoneRef.current === activePaperId) return;
-    initialRestoreDoneRef.current = activePaperId;
+    if (initialRestoreDoneRef.current) return;
+    initialRestoreDoneRef.current = true;
     const store = useStore.getState();
     if (store.paperCaches[activePaperId]) {
       const ok = store.restorePaperCache(activePaperId);
-      if (ok) cacheRestoredRef.current = true;
+      if (ok) {
+        cacheRestoredRef.current = true;
+        // Re-apply loading flags for any background requests that are still
+        // running for this paper (restorePaperCache resets them to false).
+        if (hasActiveRequest(activePaperId, "preReading")) setPreReadingLoading(true);
+        if (hasActiveRequest(activePaperId, "assumptions")) setAssumptionsLoading(true);
+        if (hasActiveRequest(activePaperId, "summary")) setSummaryLoading(true);
+      }
     } else if (store.preReading || store.summary) {
       cacheRestoredRef.current = true;
     }
-  }, [activePaperId]);
+  }, [activePaperId, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
 
   useEffect(() => {
     let stale = false;
@@ -475,17 +513,19 @@ function PaperContent() {
       api.analyze(pid)
         .then((r) => {
           const s = useStore.getState();
+          // Always write to the per-paper cache so switching back restores
+          // the result without triggering a regenerate.
+          updatePaperCache(pid, { preReading: r });
           if (s.paper?.id === pid) setPreReading(r);
-          else updatePaperCache(pid, { preReading: r });
         })
         .catch(() => {})
         .finally(() => {
           markRequestEnd(pid, "preReading");
           clearProgressStart(pid, "preReading");
-          const s = useStore.getState();
-          if (s.paper?.id === pid) {
-            setPreReadingLoading(false);
-          } else if (s.preReadingLoading) {
+          // Only clear loading for the currently-active paper; otherwise we
+          // would wipe out the real loading state of a different paper the
+          // user switched to while this request was in flight.
+          if (useStore.getState().paper?.id === pid) {
             setPreReadingLoading(false);
           }
         });
@@ -499,17 +539,14 @@ function PaperContent() {
       api.getAssumptions(pid)
         .then((r) => {
           const s = useStore.getState();
+          updatePaperCache(pid, { assumptions: r.assumptions });
           if (s.paper?.id === pid) setAssumptions(r.assumptions);
-          else updatePaperCache(pid, { assumptions: r.assumptions });
         })
         .catch(() => {})
         .finally(() => {
           markRequestEnd(pid, "assumptions");
           clearProgressStart(pid, "assumptions");
-          const s = useStore.getState();
-          if (s.paper?.id === pid) {
-            setAssumptionsLoading(false);
-          } else if (s.assumptionsLoading) {
+          if (useStore.getState().paper?.id === pid) {
             setAssumptionsLoading(false);
           }
         });
@@ -545,7 +582,13 @@ function PaperContent() {
     if (hasActiveRequest(id, "assumptions")) setAssumptionsLoading(true);
     if (hasActiveRequest(id, "summary")) setSummaryLoading(true);
     setActivePaperId(id);
-  }, [activePaperId, savePaperCache, restorePaperCache, resetAnalysisState, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
+    // Keep the URL in sync with the active paper so deep links, browser
+    // history, and copy-URL all reflect reality. `router.replace` (not push)
+    // avoids polluting history every time the user clicks a tab.
+    if (typeof window !== "undefined" && id !== paperId) {
+      router.replace(`/paper/${id}`);
+    }
+  }, [activePaperId, paperId, router, savePaperCache, restorePaperCache, resetAnalysisState, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
 
   const handleAddPaper = useCallback((id: string, title: string) => {
     addSessionPaper({ id, title });
@@ -555,6 +598,7 @@ function PaperContent() {
   const handleRemoveSessionPaper = useCallback((id: string) => {
     if (sessionPapers.length <= 1) return;
     removeSessionPaper(id);
+    forgetPaper(id);
     if (id === activePaperId) {
       const remaining = sessionPapers.filter((p) => p.id !== id);
       if (remaining.length > 0) {
@@ -591,31 +635,44 @@ function PaperContent() {
   }, [workspaceNameInput, sessionPapers, crossPaperResults, activePaperId, savePaperCache]);
 
   const handleLoadWorkspace = useCallback(async (ws: typeof savedWorkspaces[0]) => {
+    // Fetch papers BEFORE mutating state so we don't leave the user on a
+    // blank session if every paper in the workspace has since been deleted.
+    const loaded: { id: string; title: string }[] = [];
+    const missing: string[] = [];
+    for (const pid of ws.paper_ids) {
+      try {
+        const p = await api.getPaper(pid);
+        loaded.push({ id: p.id, title: p.title });
+      } catch {
+        missing.push(pid);
+      }
+    }
+
+    if (loaded.length === 0) {
+      setError(
+        "This workspace can't be opened — every paper it references has been deleted."
+      );
+      setShowWorkspaceMenu(false);
+      return;
+    }
+
     clearSession();
     clearCrossPaperResults();
 
     if (ws.cross_paper_results && ws.cross_paper_results.length > 0) {
       addCrossPaperResults(ws.cross_paper_results);
     }
+    for (const p of loaded) addSessionPaper(p);
 
-    for (const pid of ws.paper_ids) {
-      try {
-        const p = await api.getPaper(pid);
-        addSessionPaper({ id: p.id, title: p.title });
-      } catch {
-        // paper may have been deleted
-      }
-    }
-
-    if (ws.paper_ids.length > 0) {
-      const firstId = ws.paper_ids[0];
-      setActivePaperId(firstId);
-      if (firstId !== paperId) {
-        router.push(`/paper/${firstId}`);
-      }
+    const firstId = loaded[0].id;
+    setActivePaperId(firstId);
+    if (firstId !== paperId) {
+      router.push(`/paper/${firstId}`);
     }
     setShowWorkspaceMenu(false);
-    setActiveWorkspaceName(ws.name);
+    setActiveWorkspaceName(
+      missing.length > 0 ? `${ws.name} (${missing.length} missing)` : ws.name
+    );
   }, [clearSession, clearCrossPaperResults, addCrossPaperResults, addSessionPaper, paperId, router]);
 
   const handleOpenWorkspaceMenu = useCallback(async () => {
@@ -635,13 +692,19 @@ function PaperContent() {
   }, [showWorkspaceMenu]);
 
   const handleDeleteWorkspace = useCallback(async (wsId: string) => {
+    const ws = savedWorkspaces.find((w) => w.id === wsId);
+    const name = ws?.name || "this workspace";
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(`Delete "${name}"? This cannot be undone.`);
+      if (!ok) return;
+    }
     try {
       await api.deleteWorkspace(wsId);
       setSavedWorkspaces((prev) => prev.filter((w) => w.id !== wsId));
-    } catch {
-      // ignore
+    } catch (e) {
+      console.error("Failed to delete workspace:", e);
     }
-  }, []);
+  }, [savedWorkspaces]);
 
   const [bibtexModal, setBibtexModal] = useState<{
     open: boolean;
@@ -705,7 +768,7 @@ function PaperContent() {
     setSelectionResult(null);
 
     try {
-      const res = await api.analyzeSelectionStream(activePaperId, text, action);
+      const res = await api.analyzeSelectionStream(activePaperId, text, action, controller.signal);
       if (controller.signal.aborted) return;
       if (!res.ok) {
         const detail = await res.text();
@@ -841,10 +904,10 @@ function PaperContent() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center h-screen bg-white">
+      <div className="flex-1 flex items-center justify-center h-screen bg-background text-foreground">
         <div className="text-center space-y-3 animate-fade-in">
-          <div className="w-6 h-6 border-2 border-gray-200 border-t-gray-600 rounded-full animate-spin mx-auto" />
-          <p className="text-[14px] text-gray-500">Loading paper...</p>
+          <div className="w-6 h-6 border-2 border-border border-t-foreground rounded-full animate-spin mx-auto" />
+          <p className="text-[14px] text-muted-foreground">Loading paper…</p>
         </div>
       </div>
     );
@@ -852,12 +915,12 @@ function PaperContent() {
 
   if (error || !paper) {
     return (
-      <div className="flex-1 flex items-center justify-center h-screen bg-white">
+      <div className="flex-1 flex items-center justify-center h-screen bg-background text-foreground">
         <div className="text-center space-y-4 animate-fade-in">
-          <p className="text-red-500 text-[14px]">{error || "Paper not found"}</p>
+          <p className="text-destructive text-[14px]">{error || "Paper not found"}</p>
           <button
             onClick={() => router.push("/dashboard")}
-            className="text-[13px] text-gray-500 hover:text-gray-700 transition-colors"
+            className="text-[13px] text-muted-foreground hover:text-foreground/90 transition-colors"
           >
             &larr; Back to library
           </button>
@@ -900,7 +963,7 @@ function PaperContent() {
   const panelInner = (
     <div
       className={`h-full ${
-        isBottom ? "mx-auto max-w-3xl border-l border-r border-t rounded-t-xl" : ""
+        isBottom ? "mx-auto max-w-3xl border-l border-r border-t border-border rounded-t-xl" : ""
       }`}
     >
       <AnalysisPanel
@@ -929,41 +992,42 @@ function PaperContent() {
     </>
   );
 
-  const showSessionBar = !isFree && sessionPapers.length > 1;
+  const showSessionBar = canMultiPaper && sessionPapers.length > 1;
 
   return (
     <>
     <div className="flex flex-col h-screen overflow-hidden">
       {/* Header */}
-      <header className="shrink-0 flex items-center gap-3 px-4 h-[48px] border-b border-black/[0.06] glass-nav z-30 relative">
+      <header className="shrink-0 flex items-center gap-3 px-4 h-[48px] border-b border-border glass-nav z-30 relative">
         <button
           onClick={() => { clearSession(); router.push("/dashboard"); }}
-          className="text-gray-500 hover:text-gray-700 transition-colors text-[13px] font-medium shrink-0"
+          className="text-muted-foreground hover:text-foreground transition-colors text-[13px] font-medium shrink-0 ring-focus rounded-md px-1"
+          aria-label="Back to dashboard"
         >
           &larr;
         </button>
-        <div className="h-4 w-px bg-black/[0.06] shrink-0" />
+        <div className="h-4 w-px bg-border shrink-0" />
         <Image src="/logo.png" alt="Know" width={20} height={20} className="shrink-0 rounded-md" />
 
         {!showSessionBar && (
-          <span className="text-[13px] text-gray-600 truncate flex-1 font-medium">
+          <span className="text-[13px] text-muted-foreground truncate flex-1 font-medium">
             {paper.title}
           </span>
         )}
 
         {showSessionBar && (
-          <span className="text-[11px] text-gray-500 truncate flex-1 font-medium uppercase tracking-wider">
+          <span className="text-[11px] text-muted-foreground truncate flex-1 font-medium uppercase tracking-wider">
             Session · {sessionPapers.length} papers
           </span>
         )}
 
         {/* Usage indicator */}
         {paperUsage && paperUsage.qa_limit > 0 && (
-          <div className="hidden sm:flex items-center gap-2 shrink-0 text-[10px] text-gray-500">
+          <div className="hidden sm:flex items-center gap-2 shrink-0 text-[10px] text-muted-foreground">
             <span title={`${paperUsage.qa_used} of ${paperUsage.qa_limit} Q&A used on this paper`}>
               Q&A {paperUsage.qa_used}/{paperUsage.qa_limit}
             </span>
-            <span className="text-gray-200">|</span>
+            <span className="text-muted-foreground/50">|</span>
             <span title={`${paperUsage.selections_used} of ${paperUsage.selections_limit} selections used on this paper`}>
               Selections {paperUsage.selections_used}/{paperUsage.selections_limit}
             </span>
@@ -971,11 +1035,11 @@ function PaperContent() {
         )}
 
         {/* Add paper button */}
-        {!isFree && (
+        {canMultiPaper && (
         <div className="relative shrink-0" data-dropdown>
           <button
             onClick={() => { setShowFolderPicker(false); setShowWorkspaceMenu(false); setShowAddPaper(!showAddPaper); }}
-            className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground/90 px-2 py-1 rounded-md hover:bg-accent/60 transition-colors"
             title="Add paper to session"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -997,7 +1061,7 @@ function PaperContent() {
         <div className="relative shrink-0" data-dropdown>
           <button
             onClick={() => { setShowAddPaper(false); setShowWorkspaceMenu(false); setShowFolderPicker(!showFolderPicker); }}
-            className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground/90 px-2 py-1 rounded-md hover:bg-accent/60 transition-colors"
             title="Assign to folder"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -1026,14 +1090,14 @@ function PaperContent() {
                   {f}
                 </button>
               ))}
-              <div className="border-t pt-1.5 mt-1.5">
+              <div className="border-t border-border pt-1.5 mt-1.5">
                 <div className="flex gap-1">
                   <input
                     value={folderInput}
                     onChange={(e) => setFolderInput(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleCreateAndMoveToFolder()}
                     placeholder="New folder..."
-                    className="flex-1 text-[11px] px-2 py-1 rounded border bg-background"
+                    className="flex-1 text-[11px] px-2 py-1 rounded border border-border bg-background focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                     autoFocus
                   />
                   <button
@@ -1052,7 +1116,7 @@ function PaperContent() {
         {!isFree && (
         <button
           onClick={() => handleExportBibtex({ paper_ids: [activePaperId] }, "Current paper")}
-          className="shrink-0 flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+          className="shrink-0 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground/90 px-2 py-1 rounded-md hover:bg-accent/60 transition-colors"
           title="Export citations for current paper"
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -1063,11 +1127,11 @@ function PaperContent() {
         )}
 
         {/* Workspace save/load */}
-        {!isFree && (
+        {canMultiPaper && (
         <div className="relative shrink-0" data-dropdown>
           <button
             onClick={handleOpenWorkspaceMenu}
-            className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-700 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground/90 px-2 py-1 rounded-md hover:bg-accent/60 transition-colors"
             title="Save or load workspace"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -1077,15 +1141,15 @@ function PaperContent() {
           </button>
           {showWorkspaceMenu && (
             <div className="absolute right-0 top-full mt-1 z-50 glass-strong rounded-2xl shadow-xl w-80 max-h-[400px] flex flex-col animate-fade-in">
-              <div className="p-3 border-b border-black/[0.06] space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400">Save Current Session</p>
+              <div className="p-3 border-b border-border space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80">Save Current Session</p>
                 <div className="flex gap-1.5">
                   <input
                     value={workspaceNameInput}
                     onChange={(e) => setWorkspaceNameInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") handleSaveWorkspace(); }}
                     placeholder={`Session — ${sessionPapers.length} papers`}
-                    className="flex-1 text-[12px] px-2.5 py-1.5 rounded-xl border border-black/[0.06] bg-white/50 placeholder:text-gray-300 focus:outline-none focus:ring-1 focus:ring-white/40"
+                    className="flex-1 text-[12px] px-2.5 py-1.5 rounded-xl border border-border bg-background/70 placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus-visible:ring-ring/40"
                   />
                   <button
                     onClick={handleSaveWorkspace}
@@ -1100,26 +1164,26 @@ function PaperContent() {
               <div className="overflow-y-auto flex-1 p-1.5">
                 {!workspacesLoaded ? (
                   <div className="flex items-center justify-center py-6">
-                    <div className="w-4 h-4 border-2 border-gray-200 border-t-gray-500 rounded-full animate-spin" />
+                    <div className="w-4 h-4 border-2 border-border border-t-foreground rounded-full animate-spin" />
                   </div>
                 ) : savedWorkspaces.length === 0 ? (
-                  <p className="text-[12px] text-gray-400 text-center py-6">No saved workspaces yet</p>
+                  <p className="text-[12px] text-muted-foreground/80 text-center py-6">No saved workspaces yet</p>
                 ) : (
                   <>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-gray-400 px-2 py-1.5">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80 px-2 py-1.5">
                       Load Workspace
                     </p>
                     {savedWorkspaces.map((ws) => (
                       <div
                         key={ws.id}
-                        className="flex items-center gap-2 rounded-xl px-2.5 py-2 hover:bg-white/40 transition-colors group"
+                        className="flex items-center gap-2 rounded-xl px-2.5 py-2 hover:bg-accent/50 transition-colors group"
                       >
                         <button
                           onClick={() => handleLoadWorkspace(ws)}
                           className="flex-1 text-left min-w-0"
                         >
-                          <p className="text-[12px] font-medium text-gray-700 truncate">{ws.name}</p>
-                          <p className="text-[10px] text-gray-400">
+                          <p className="text-[12px] font-medium text-foreground/90 truncate">{ws.name}</p>
+                          <p className="text-[10px] text-muted-foreground/80">
                             {ws.paper_ids.length} paper{ws.paper_ids.length !== 1 ? "s" : ""}
                             {" · "}
                             {new Date(ws.updated_at).toLocaleDateString()}
@@ -1127,7 +1191,7 @@ function PaperContent() {
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleExportBibtex({ workspace_id: ws.id }, `Workspace: ${ws.name}`); }}
-                          className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-gray-600 transition-all shrink-0"
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground/60 hover:text-muted-foreground transition-all shrink-0"
                           title="Export BibTeX"
                         >
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -1136,7 +1200,7 @@ function PaperContent() {
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleDeleteWorkspace(ws.id); }}
-                          className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all shrink-0"
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground/60 hover:text-destructive transition-all shrink-0"
                           title="Delete workspace"
                         >
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1149,10 +1213,10 @@ function PaperContent() {
                 )}
               </div>
 
-              <div className="p-2 border-t border-black/[0.06]">
+              <div className="p-2 border-t border-border">
                 <button
                   onClick={() => setShowWorkspaceMenu(false)}
-                  className="w-full text-[11px] text-gray-400 hover:text-gray-700 py-1 transition-colors"
+                  className="w-full text-[11px] text-muted-foreground/80 hover:text-foreground/90 py-1 transition-colors"
                 >
                   Close
                 </button>
@@ -1165,14 +1229,16 @@ function PaperContent() {
         <button
           onClick={togglePanel}
           className={`text-[12px] font-medium transition-colors shrink-0 ${
-            panelVisible ? "text-gray-800" : "text-gray-500 hover:text-gray-700"
+            panelVisible ? "text-foreground" : "text-muted-foreground hover:text-foreground/90"
           }`}
         >
           {panelVisible ? "Hide Analysis" : "Show Analysis"}
         </button>
+        <ThemeToggle />
         <button
           onClick={() => router.push("/settings")}
-          className="text-gray-300 hover:text-gray-500 transition-colors shrink-0"
+          className="text-muted-foreground/60 hover:text-muted-foreground transition-colors shrink-0 ring-focus rounded-md p-1"
+          aria-label="Settings"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
@@ -1190,43 +1256,51 @@ function PaperContent() {
 
       {/* Session paper tabs */}
       {showSessionBar && (
-        <div className="shrink-0 border-b border-black/[0.06] glass-subtle px-3 py-1.5">
+        <div className="shrink-0 border-b border-border glass-subtle px-3 py-1.5">
           <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
             {sessionPapers.map((sp) => (
-              <button
+              // Tab + close button are siblings inside a group wrapper so we
+              // avoid the invalid/confusing pattern of a focusable close
+              // control nested inside a <button>. Keyboard users can now tab
+              // to each control independently and both announce their own
+              // accessible name.
+              <div
                 key={sp.id}
-                type="button"
-                className={`group flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium transition-all cursor-pointer shrink-0 ${
+                role="group"
+                aria-label={sp.title}
+                className={`group flex items-center rounded-full text-[11px] font-medium transition-all shrink-0 ${
                   sp.id === activePaperId
-                    ? "bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-md shadow-gray-900/10"
-                    : "glass-subtle text-gray-500 hover:bg-white/60 hover:text-gray-800"
+                    ? "btn-primary-glass"
+                    : "glass-subtle text-muted-foreground hover:bg-accent hover:text-foreground"
                 }`}
-                onClick={() => handleSwitchPaper(sp.id)}
               >
-                <span className="max-w-[180px] truncate">
-                  {sp.title.length > 35 ? sp.title.slice(0, 35) + "..." : sp.title}
-                </span>
+                <button
+                  type="button"
+                  onClick={() => handleSwitchPaper(sp.id)}
+                  className="pl-3 pr-1.5 py-1 flex items-center rounded-l-full"
+                  aria-current={sp.id === activePaperId ? "page" : undefined}
+                >
+                  <span className="max-w-[180px] truncate">
+                    {sp.title.length > 35 ? sp.title.slice(0, 35) + "..." : sp.title}
+                  </span>
+                </button>
                 {sessionPapers.length > 1 && (
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRemoveSessionPaper(sp.id);
-                    }}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); handleRemoveSessionPaper(sp.id); } }}
-                    className={`w-3.5 h-3.5 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveSessionPaper(sp.id)}
+                    aria-label={`Remove ${sp.title} from session`}
+                    className={`mr-1.5 w-3.5 h-3.5 rounded-full flex items-center justify-center shrink-0 transition-colors ${
                       sp.id === activePaperId
                         ? "hover:bg-background/20 text-background/60 hover:text-background"
-                        : "hover:bg-foreground/10 text-muted-foreground/30 hover:text-muted-foreground opacity-0 group-hover:opacity-100"
+                        : "hover:bg-foreground/10 text-muted-foreground/30 hover:text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100"
                     }`}
                   >
                     <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
-                  </span>
+                  </button>
                 )}
-              </button>
+              </div>
             ))}
           </div>
         </div>
@@ -1254,7 +1328,7 @@ function PaperContent() {
           {dragHandle}
         </div>
         <div
-          className={`shrink-0 overflow-hidden bg-background ${isBottom ? "" : "border-l border-r border-t"}`}
+          className={`shrink-0 overflow-hidden bg-background ${isBottom ? "" : "border-l border-r border-t border-border"}`}
           style={{
             ...(isBottom ? { height: panelSize } : { width: panelSize }),
             order: panelPos === "left" ? 1 : 3,

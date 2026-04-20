@@ -1,13 +1,32 @@
 let _getToken: (() => Promise<string | null>) | null = null;
 let _cachedToken: string | null = null;
 let _tokenRefreshInterval: ReturnType<typeof setInterval> | null = null;
+// Dedupe concurrent refreshes: if a refresh is already in flight, subsequent
+// callers await the same promise instead of kicking off parallel requests
+// whose resolution order can clobber `_cachedToken` out-of-order.
+let _inflightRefresh: Promise<string | null> | null = null;
+
+function refreshToken(): Promise<string | null> {
+  if (!_getToken) return Promise.resolve(null);
+  if (_inflightRefresh) return _inflightRefresh;
+  const fn = _getToken;
+  _inflightRefresh = fn()
+    .then((t) => {
+      _cachedToken = t;
+      return t;
+    })
+    .finally(() => {
+      _inflightRefresh = null;
+    });
+  return _inflightRefresh;
+}
 
 export function setClerkTokenGetter(fn: () => Promise<string | null>) {
   _getToken = fn;
-  fn().then((t) => { _cachedToken = t; });
   clearTokenRefreshInterval();
+  void refreshToken();
   _tokenRefreshInterval = setInterval(() => {
-    fn().then((t) => { _cachedToken = t; });
+    void refreshToken();
   }, 45_000);
 }
 
@@ -18,9 +37,18 @@ export function clearTokenRefreshInterval() {
   }
 }
 
+// Drop every scrap of the previous user's auth state. Called on sign-out so
+// a subsequent sign-in in the same tab can't reuse the old bearer.
+export function clearAuthState() {
+  clearTokenRefreshInterval();
+  _getToken = null;
+  _cachedToken = null;
+  _inflightRefresh = null;
+}
+
 export function getAuthHeadersSync(): Record<string, string> {
   if (_getToken && _cachedToken) {
-    _getToken().then((t) => { _cachedToken = t; });
+    void refreshToken();
   }
   return _cachedToken ? { Authorization: `Bearer ${_cachedToken}` } : {};
 }
@@ -29,17 +57,37 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 async function authHeaders(): Promise<Record<string, string>> {
   if (_getToken) {
-    const token = await _getToken();
-    _cachedToken = token;
+    const token = await refreshToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
   }
   return {};
 }
 
-// Matches the 429 detail emitted by backend `track_usage` when a per-model
-// daily cap is hit: "Daily limit reached for <model> (<n>/day on <tier> plan)."
+// Legacy string match kept for backward compatibility with any backend that
+// hasn't shipped the structured-detail change yet. New code paths branch on
+// `detail.code` — see `StructuredErrorDetail` below.
 const MODEL_CAP_DETAIL_RE =
   /Daily limit reached for (\S+) \((\d+)\/day on (\S+) plan\)/;
+
+type StructuredErrorDetail = {
+  code?: "daily_cap" | "model_cap" | "paper_cap";
+  model?: string;
+  limit?: number;
+  tier?: string;
+  action?: string;
+  message?: string;
+};
+
+function parseDetail(
+  raw: unknown
+): { message: string; structured: StructuredErrorDetail | null } {
+  if (raw && typeof raw === "object") {
+    const obj = raw as StructuredErrorDetail;
+    return { message: obj.message || "Request failed", structured: obj };
+  }
+  if (typeof raw === "string") return { message: raw, structured: null };
+  return { message: "Request failed", structured: null };
+}
 
 async function request<T>(
   path: string,
@@ -66,25 +114,41 @@ async function request<T>(
     }
     if (!res.ok) {
       const status = res.status;
-      let detail: string;
+      let message: string = `Request failed (${status})`;
+      let structured: StructuredErrorDetail | null = null;
       try {
         const body = await res.json();
-        detail = body?.detail || `Request failed (${status})`;
+        const parsed = parseDetail(body?.detail);
+        message = parsed.message;
+        structured = parsed.structured;
       } catch {
-        detail = `Request failed (${status})`;
+        // Non-JSON response; fall through with default message.
       }
 
-      // Per-model cap: prompt the user to switch and retry once.
+      // Per-model cap: prompt the user to switch and retry once. Accept
+      // both the structured `{code: "model_cap", model, limit, tier}` form
+      // and the legacy free-text detail so older backends keep working.
       if (status === 429 && retryCount === 0) {
-        const match = detail.match(MODEL_CAP_DETAIL_RE);
-        if (match) {
-          const [, cappedModel, limitStr, tier] = match;
+        let cappedModel: string | null = null;
+        let limit = 0;
+        let tier = "";
+
+        if (structured?.code === "model_cap" && structured.model) {
+          cappedModel = structured.model;
+          limit = structured.limit || 0;
+          tier = structured.tier || "";
+        } else {
+          const match = message.match(MODEL_CAP_DETAIL_RE);
+          if (match) {
+            cappedModel = match[1];
+            limit = parseInt(match[2], 10) || 0;
+            tier = match[3];
+          }
+        }
+
+        if (cappedModel) {
           const { promptModelCap } = await import("./modelCapPrompt");
-          const result = await promptModelCap({
-            cappedModel,
-            limit: parseInt(limitStr, 10) || 0,
-            tier,
-          });
+          const result = await promptModelCap({ cappedModel, limit, tier });
           if (result && result.fallback) {
             try {
               // Only rewrite the slot(s) that point at the capped model so we
@@ -108,15 +172,14 @@ async function request<T>(
                 body: JSON.stringify(update),
               });
             } catch {
-              // If the model switch fails, fall through to the original error.
-              throw new Error(detail);
+              throw new Error(message);
             }
             return request<T>(path, options, retryCount + 1);
           }
         }
       }
 
-      throw new Error(detail);
+      throw new Error(message);
     }
     const text = await res.text();
     if (!text) return {} as T;

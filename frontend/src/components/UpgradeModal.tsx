@@ -54,30 +54,30 @@ export function UpgradeModal({ tier, open, onClose }: UpgradeModalProps) {
       aria-modal="true"
       aria-label={`Welcome to ${info.title}`}
     >
-      <div className="absolute inset-0 bg-black/20 backdrop-blur-md" onClick={onClose} />
+      <div className="absolute inset-0 bg-foreground/25 backdrop-blur-md" onClick={onClose} />
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className="relative glass-strong rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden animate-fade-in"
+        className="relative glass-strong rounded-2xl shadow-xl max-w-md w-full mx-4 overflow-hidden animate-fade-in"
       >
         <button
           onClick={onClose}
           aria-label="Close modal"
-          className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 transition-colors text-gray-400 hover:text-gray-600 z-10"
+          className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full hover:bg-accent transition-colors text-muted-foreground hover:text-foreground z-10 ring-focus"
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
 
-        <div className="glass-subtle px-6 pt-8 pb-5 text-center border-b border-black/[0.06]">
+        <div className="glass-subtle px-6 pt-8 pb-5 text-center border-b border-border">
           <div className="w-12 h-12 rounded-xl glass flex items-center justify-center mx-auto mb-4 shadow-sm">
-            <svg className="w-6 h-6 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <svg className="w-6 h-6 text-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
             </svg>
           </div>
-          <h2 className="text-[18px] font-bold tracking-[-0.02em] text-gray-900">Welcome to {info.title}</h2>
-          <p className="text-[13px] text-gray-500 mt-1.5">
+          <h2 className="font-display text-[19px] font-bold tracking-[-0.02em] text-foreground">Welcome to {info.title}</h2>
+          <p className="text-[13px] text-muted-foreground mt-1.5">
             Here&apos;s what you&apos;ve unlocked
           </p>
         </div>
@@ -85,7 +85,7 @@ export function UpgradeModal({ tier, open, onClose }: UpgradeModalProps) {
         <div className="px-6 py-6">
           <ul className="space-y-3">
             {info.features.map((feat) => (
-              <li key={feat} className="flex items-start gap-3 text-[13px] text-gray-600">
+              <li key={feat} className="flex items-start gap-3 text-[13px] text-muted-foreground">
                 <svg className="w-4 h-4 mt-0.5 text-emerald-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                 </svg>
@@ -98,7 +98,7 @@ export function UpgradeModal({ tier, open, onClose }: UpgradeModalProps) {
         <div className="px-6 pb-6">
           <button
             onClick={onClose}
-            className="w-full text-[13px] font-semibold py-3 rounded-xl btn-primary-glass text-white transition-all"
+            className="w-full text-[13px] font-semibold py-3 rounded-xl btn-primary-glass"
           >
             Start exploring
           </button>

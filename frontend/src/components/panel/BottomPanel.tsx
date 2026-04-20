@@ -78,7 +78,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       onValueChange={setActiveTab}
       className="flex flex-col h-full"
     >
-      <div className="shrink-0 flex items-center gap-1 px-2 pt-2 pb-1.5 border-b border-black/[0.06] glass-subtle min-w-0">
+      <div className="shrink-0 flex items-center gap-1 px-2 pt-2 pb-1.5 border-b border-border glass-subtle min-w-0">
         <div className="overflow-x-auto scrollbar-hide min-w-0 flex-1">
           <TabsList className="h-8 gap-0.5 bg-transparent p-0 flex-nowrap inline-flex w-max">
             {showSelectionTab && (

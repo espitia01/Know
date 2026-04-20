@@ -81,7 +81,7 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
             History
           </p>
           {history.slice(result ? 1 : 0).map((item, i) => (
-            <div key={i} className="rounded-xl border border-black/[0.06] glass-subtle overflow-hidden">
+            <div key={i} className="rounded-xl border border-border glass-subtle overflow-hidden">
               <button
                 onClick={() => setExpandedHistory(expandedHistory === i ? null : i)}
                 className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors"
@@ -136,7 +136,7 @@ function FollowUpInput({ context, onSubmit }: { context: string; onSubmit: (q: s
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
         placeholder="Ask a follow-up question..."
         disabled={submitting}
-        className="flex-1 text-[12px] px-3 py-1.5 rounded-xl border border-black/[0.06] glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+        className="flex-1 text-[12px] px-3 py-1.5 rounded-xl border border-border glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
       />
       <button
         onClick={handleSubmit}
@@ -203,8 +203,8 @@ function ResultCard({ result }: { result: SelectionAnalysisResult }) {
               <div className="flex items-start gap-2">
                 <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-lg shrink-0 ${
                   a.type === "explicit"
-                    ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
-                    : "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300"
+                    ? "bg-success/15 text-success"
+                    : "bg-warning/15 text-warning"
                 }`}>
                   {a.type}
                 </span>
@@ -244,8 +244,8 @@ const DerivationView = memo(function DerivationView({ result }: { result: Select
       </div>
 
       {result.final_result && (
-        <div className="bg-green-50 dark:bg-green-950/50 rounded-lg px-3 py-2.5 border border-green-200 dark:border-green-800/50">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-green-600 dark:text-green-400 mb-1">Final Result</p>
+        <div className="bg-success/10 rounded-lg px-3 py-2.5 border border-success/25">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-success mb-1">Final Result</p>
           <div className="text-[13px]"><Md>{result.final_result}</Md></div>
         </div>
       )}
@@ -258,7 +258,7 @@ const StepCard = memo(function StepCard({ step }: { step: NonNullable<SelectionA
   const [showHint, setShowHint] = useState(false);
 
   return (
-    <div className="rounded-xl border border-black/[0.06] glass-subtle overflow-hidden">
+    <div className="rounded-xl border border-border glass-subtle overflow-hidden">
       <div className="px-3 py-2 glass">
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-bold text-muted-foreground/50 w-5 h-5 flex items-center justify-center rounded-full glass shrink-0">
@@ -287,7 +287,7 @@ const StepCard = memo(function StepCard({ step }: { step: NonNullable<SelectionA
           )}
         </div>
         {showHint && !showAnswer && (
-          <div className="text-[11px] text-muted-foreground/70 italic bg-amber-50 dark:bg-amber-950/50 px-2.5 py-1.5 rounded border border-amber-200 dark:border-amber-800/50">
+          <div className="text-[11px] text-warning italic bg-warning/10 px-2.5 py-1.5 rounded border border-warning/25">
             <Md>{step.hint}</Md>
           </div>
         )}

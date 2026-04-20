@@ -109,10 +109,14 @@ def increment_paper_count(user_id: str, delta: int = 1) -> None:
 
 
 def check_and_increment_paper_count(user_id: str, max_papers: int) -> bool:
-    """Atomically check the paper limit and increment if under. Returns True on success.
-    
-    Uses the DB-level RPC when available; falls back to read-then-write with a recheck
-    to minimize the race window.
+    """Atomically check the paper limit and increment if under. Returns True on
+    success, False when the cap is reached or the DB is unreachable.
+
+    Enforcement is centralized in the SQL function (migration 009): one
+    ``UPDATE ... WHERE paper_count < max`` with ``RETURNING`` gives us check
+    and increment in a single statement, so concurrent uploads can't race past
+    the cap. Previously a Python fallback read the count and then wrote it
+    separately, which was a TOCTOU window under any concurrency.
     """
     client = get_db()
     if not client:
@@ -120,21 +124,21 @@ def check_and_increment_paper_count(user_id: str, max_papers: int) -> bool:
 
     try:
         res = client.rpc("check_and_increment_paper_count", {
-            "uid": user_id, "max_count": max_papers
+            "uid": user_id, "max_count": int(max_papers),
         }).execute()
-        if res and res.data is not None:
-            return bool(res.data)
     except Exception as e:
-        logger.debug("check_and_increment_paper_count RPC unavailable: %s", e)
+        logger.error(
+            "check_and_increment_paper_count RPC failed for %s: %s", user_id, e,
+        )
+        return False
 
-    user = get_user(user_id)
-    if not user:
+    if not res or res.data is None:
         return False
-    current = user.get("paper_count", 0)
-    if current >= max_papers:
-        return False
-    increment_paper_count(user_id, 1)
-    return True
+
+    data = res.data
+    if isinstance(data, list) and data:
+        data = list(data[0].values())[0] if isinstance(data[0], dict) else data[0]
+    return bool(data)
 
 
 # ----------------------------------------------------------------
@@ -168,15 +172,22 @@ def save_paper_meta(paper_dict: dict, user_id: str) -> None:
             logger.error("save_paper_meta failed: %s", e)
 
 
-def get_paper_meta(paper_id: str, user_id: str | None = None) -> dict | None:
+def get_paper_meta(paper_id: str, user_id: str) -> dict | None:
+    """Fetch a paper row scoped to ``user_id``.
+
+    ``user_id`` is required — the service-role key bypasses RLS, so every
+    query must filter by owner explicitly. A prior version allowed
+    ``user_id=None`` for internal callers, which was a latent IDOR footgun.
+    """
     client = get_db()
     if not client:
         return None
+    if not user_id:
+        raise ValueError("get_paper_meta requires user_id")
 
-    q = client.table("papers").select("*").eq("id", paper_id)
-    if user_id:
-        q = q.eq("user_id", user_id)
-    return _safe_single(q)
+    return _safe_single(
+        client.table("papers").select("*").eq("id", paper_id).eq("user_id", user_id)
+    )
 
 
 def get_cached_analysis(paper_id: str, user_id: str) -> dict:
@@ -208,10 +219,24 @@ def update_cached_analysis(paper_id: str, user_id: str, cached_analysis: dict) -
         logger.error("Failed to update cached_analysis: %s", e)
 
 
-def list_papers_meta(user_id: str) -> list[dict]:
+MAX_LIST_LIMIT = 500
+
+
+def list_papers_meta(
+    user_id: str, *, limit: int = MAX_LIST_LIMIT, offset: int = 0,
+) -> list[dict]:
+    """Return the user's papers, newest first.
+
+    The list is bounded by ``limit`` (hard-capped at ``MAX_LIST_LIMIT``) so a
+    runaway library can't produce a multi-megabyte response or pin a worker
+    on the JSONB deserialize path.
+    """
     client = get_db()
     if not client:
         return []
+
+    limit = max(1, min(int(limit or MAX_LIST_LIMIT), MAX_LIST_LIMIT))
+    offset = max(0, int(offset or 0))
 
     try:
         res = (
@@ -219,6 +244,7 @@ def list_papers_meta(user_id: str) -> list[dict]:
             .select("id, title, folder, tags, authors, notes, created_at")
             .eq("user_id", user_id)
             .order("created_at", desc=True)
+            .range(offset, offset + limit - 1)
             .execute()
         )
         rows = res.data or [] if res else []
@@ -232,10 +258,59 @@ def list_papers_meta(user_id: str) -> list[dict]:
 
 
 def delete_paper_meta(paper_id: str, user_id: str) -> None:
+    """Delete a paper row. Also prunes the id from any workspace arrays so
+    deleted papers don't leave dead references in `workspaces.paper_ids`
+    (JSONB arrays don't participate in foreign keys)."""
     client = get_db()
     if not client:
         return
     client.table("papers").delete().eq("id", paper_id).eq("user_id", user_id).execute()
+    try:
+        remove_paper_from_workspaces(paper_id, user_id)
+    except Exception as e:
+        logger.warning(
+            "Failed to prune paper %s from workspaces for %s: %s",
+            paper_id, user_id, e,
+        )
+
+
+def remove_paper_from_workspaces(paper_id: str, user_id: str) -> None:
+    """Remove ``paper_id`` from every workspace's ``paper_ids`` array.
+
+    Scans workspaces owned by ``user_id`` and rewrites any whose array still
+    contains the deleted id. We do this in Python because Supabase's
+    PostgREST interface doesn't cleanly expose `jsonb - element` operators,
+    and the user's workspace count is always small (O(10-100)).
+    """
+    client = get_db()
+    if not client:
+        return
+    try:
+        res = (
+            client.table("workspaces")
+            .select("id, paper_ids")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        rows = (res.data if res else None) or []
+    except Exception as e:
+        logger.warning("workspace scan for paper pruning failed: %s", e)
+        return
+
+    for row in rows:
+        ids = row.get("paper_ids") or []
+        if not isinstance(ids, list) or paper_id not in ids:
+            continue
+        new_ids = [pid for pid in ids if pid != paper_id]
+        try:
+            client.table("workspaces").update({"paper_ids": new_ids}).eq(
+                "id", row["id"]
+            ).eq("user_id", user_id).execute()
+        except Exception as e:
+            logger.warning(
+                "Failed to prune paper %s from workspace %s: %s",
+                paper_id, row.get("id"), e,
+            )
 
 
 # ----------------------------------------------------------------
@@ -246,46 +321,24 @@ _daily_api_bootstrap_done = False
 
 
 def _ensure_daily_api_usage_table(client) -> None:
-    """Lazily create daily_api_usage table + RPC if they don't exist.
+    """Cheap existence probe for `daily_api_usage`.
 
-    We can't rely on hand-run migrations being applied against every Supabase
-    project, so the backend self-heals the schema the first time it touches
-    the table. Safe to call many times.
+    The table + reserve/release RPCs live in migrations 006 / 008. We used to
+    run `exec_sql` to self-heal the schema when the migration hadn't been
+    applied, but that relied on an undocumented DDL-through-RPC hatch that's
+    a hidden superuser endpoint from the app's perspective. It's gone — apply
+    the migrations via your Supabase CLI instead.
     """
     global _daily_api_bootstrap_done
     if _daily_api_bootstrap_done:
         return
     try:
         client.table("daily_api_usage").select("user_id").limit(1).execute()
-        _daily_api_bootstrap_done = True
-        return
-    except Exception:
-        pass
-
-    sql = """
-    CREATE TABLE IF NOT EXISTS daily_api_usage (
-        user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-        date    DATE NOT NULL,
-        count   INT  NOT NULL DEFAULT 0,
-        PRIMARY KEY (user_id, date)
-    );
-    CREATE OR REPLACE FUNCTION increment_daily_api_usage(p_user_id text, p_date date)
-    RETURNS integer LANGUAGE plpgsql AS $$
-    DECLARE new_count integer;
-    BEGIN
-        INSERT INTO daily_api_usage (user_id, date, count)
-        VALUES (p_user_id, p_date, 1)
-        ON CONFLICT (user_id, date)
-        DO UPDATE SET count = daily_api_usage.count + 1
-        RETURNING count INTO new_count;
-        RETURN new_count;
-    END;
-    $$;
-    """
-    try:
-        client.rpc("exec_sql", {"query": sql}).execute()
     except Exception as e:
-        logger.warning("daily_api_usage auto-create skipped: %s", e)
+        logger.warning(
+            "daily_api_usage not reachable; run migrations 006+008 to enable "
+            "atomic daily-API-call limits: %s", e,
+        )
     _daily_api_bootstrap_done = True
 
 
@@ -293,102 +346,30 @@ _daily_model_bootstrap_done = False
 
 
 def _ensure_daily_model_usage_table(client) -> None:
-    """Lazily create daily_model_usage table + RPC if missing.
-
-    Mirrors `_ensure_daily_api_usage_table` so deploys that haven't applied
-    migration 006 still get correct per-model accounting.
-    """
+    """Cheap existence probe for `daily_model_usage`. See the docstring on
+    `_ensure_daily_api_usage_table` for why we no longer self-heal."""
     global _daily_model_bootstrap_done
     if _daily_model_bootstrap_done:
         return
     try:
         client.table("daily_model_usage").select("user_id").limit(1).execute()
-        _daily_model_bootstrap_done = True
-        return
-    except Exception:
-        pass
-
-    sql = """
-    CREATE TABLE IF NOT EXISTS daily_model_usage (
-        user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-        date    DATE NOT NULL,
-        model   TEXT NOT NULL,
-        count   INT  NOT NULL DEFAULT 0,
-        PRIMARY KEY (user_id, date, model)
-    );
-    CREATE OR REPLACE FUNCTION increment_daily_model_usage(
-        p_user_id text, p_date date, p_model text
-    ) RETURNS integer LANGUAGE plpgsql AS $$
-    DECLARE new_count integer;
-    BEGIN
-        INSERT INTO daily_model_usage (user_id, date, model, count)
-        VALUES (p_user_id, p_date, p_model, 1)
-        ON CONFLICT (user_id, date, model)
-        DO UPDATE SET count = daily_model_usage.count + 1
-        RETURNING count INTO new_count;
-        RETURN new_count;
-    END;
-    $$;
-    """
-    try:
-        client.rpc("exec_sql", {"query": sql}).execute()
     except Exception as e:
-        logger.warning("daily_model_usage auto-create skipped: %s", e)
+        logger.warning(
+            "daily_model_usage not reachable; run migrations 006+008 to "
+            "enable atomic per-model caps: %s", e,
+        )
     _daily_model_bootstrap_done = True
 
 
-def _record_daily_model_call(
-    client, user_id: str, today_str: str, model: str, delta: int = 1
-) -> None:
-    """Increment today's per-model API count for the user. Best-effort.
-
-    ``delta`` controls how much to add, which matters for endpoints that
-    perform N sub-operations in a single HTTP call (e.g. a Q&A batch of N
-    questions counts as N model calls, not one).
-    """
-    if not model or delta <= 0:
-        return
-    _ensure_daily_model_usage_table(client)
-    # The RPC increments by 1; call it `delta` times. Typical N is 1–10,
-    # so the extra round trips are negligible and let us avoid a schema
-    # change to the existing RPC signature.
-    try:
-        for _ in range(delta):
-            client.rpc("increment_daily_model_usage", {
-                "p_user_id": user_id,
-                "p_date": today_str,
-                "p_model": model,
-            }).execute()
-        return
-    except Exception as e:
-        logger.debug("increment_daily_model_usage RPC failed, falling back: %s", e)
-
-    try:
-        existing = _safe_single(
-            client.table("daily_model_usage")
-            .select("count")
-            .eq("user_id", user_id)
-            .eq("date", today_str)
-            .eq("model", model)
-        )
-        if existing is not None:
-            new_count = (existing.get("count") or 0) + delta
-            client.table("daily_model_usage").update({"count": new_count}) \
-                .eq("user_id", user_id).eq("date", today_str).eq("model", model).execute()
-        else:
-            client.table("daily_model_usage").insert({
-                "user_id": user_id,
-                "date": today_str,
-                "model": model,
-                "count": delta,
-            }).execute()
-    except Exception as e:
-        logger.error("daily_model_usage write failed for user %s/%s: %s", user_id, model, e)
-
-
 def get_daily_model_count(user_id: str, model: str) -> int:
-    """Return today's API-call count for a specific model. Returns 0 when DB is
-    unavailable or the table hasn't been provisioned yet."""
+    """Return today's API-call count for a specific model, or raise on DB
+    errors for the display API to translate into a 5xx. We deliberately do NOT
+    swallow read failures to zero here: that would paint the usage UI as
+    "0 used" when the cap has actually been reached, which is misleading and
+    delays the user noticing a platform issue.
+
+    Returns 0 cleanly only when Supabase isn't configured at all (local dev).
+    """
     if not model:
         return 0
     client = get_db()
@@ -398,129 +379,164 @@ def get_daily_model_count(user_id: str, model: str) -> int:
     from datetime import datetime, timezone
     today_str = datetime.now(timezone.utc).date().isoformat()
 
-    try:
-        _ensure_daily_model_usage_table(client)
-        row = _safe_single(
-            client.table("daily_model_usage")
-            .select("count")
-            .eq("user_id", user_id)
-            .eq("date", today_str)
-            .eq("model", model)
-        )
-        if row is not None:
-            return int(row.get("count") or 0)
-    except Exception as e:
-        logger.debug("daily_model_usage read failed: %s", e)
+    _ensure_daily_model_usage_table(client)
+    row = _safe_single(
+        client.table("daily_model_usage")
+        .select("count")
+        .eq("user_id", user_id)
+        .eq("date", today_str)
+        .eq("model", model)
+    )
+    if row is not None:
+        return int(row.get("count") or 0)
     return 0
 
 
-def _record_daily_api_call(client, user_id: str, today_str: str, delta: int = 1) -> None:
-    """Increment today's account-wide API-call count for the user.
+def reserve_daily_api_usage(
+    user_id: str, today_str: str, delta: int, max_calls: int
+) -> int:
+    """Atomically reserve `delta` daily API calls and return the new total.
 
-    Writes to `daily_api_usage`, a user-scoped table that is NOT cascaded from
-    `papers`. This keeps the daily counter stable across paper deletions and
-    trial cleanups. ``delta`` controls the bump size (batched Q&A, etc.).
+    Returns -1 when the reservation would exceed ``max_calls``. Raises on DB
+    connectivity errors — enforcement is fail-closed by design because a
+    silent fallback to "no cap" would be worse than a short outage.
+
+    ``max_calls = -1`` means unlimited (Researcher-equivalent).
     """
     if delta <= 0:
-        return
-    _ensure_daily_api_usage_table(client)
-    try:
-        for _ in range(delta):
-            client.rpc("increment_daily_api_usage", {
-                "p_user_id": user_id,
-                "p_date": today_str,
-            }).execute()
-        return
-    except Exception as e:
-        logger.debug("increment_daily_api_usage RPC failed, falling back to table ops: %s", e)
-
-    try:
-        existing = _safe_single(
-            client.table("daily_api_usage")
-            .select("count")
-            .eq("user_id", user_id)
-            .eq("date", today_str)
-        )
-        if existing is not None:
-            new_count = (existing.get("count") or 0) + delta
-            client.table("daily_api_usage").update({"count": new_count}) \
-                .eq("user_id", user_id).eq("date", today_str).execute()
-        else:
-            client.table("daily_api_usage").insert({
-                "user_id": user_id,
-                "date": today_str,
-                "count": delta,
-            }).execute()
-    except Exception as e:
-        logger.error("daily_api_usage write failed for user %s: %s", user_id, e)
-
-
-def record_usage(
-    user_id: str,
-    paper_id: str,
-    action: str,
-    *,
-    model: str | None = None,
-    count: int = 1,
-    record_daily: bool = True,
-) -> int:
-    """Record a usage event and return today's total for this action+paper.
-
-    ``count`` is the number of sub-operations to record at once (e.g. a Q&A
-    batch of 3 questions = 3 call units). It must be >= 1.
-
-    When ``model`` is provided AND ``record_daily`` is True, the call is also
-    counted toward that model's daily total in `daily_model_usage`, which
-    powers per-model rate limits. Set ``record_daily=False`` for secondary
-    rows in multi-paper actions that share a single logical call (so the
-    daily account counter isn't inflated).
-    """
-    if count < 1:
-        count = 1
+        return 0
     client = get_db()
     if not client:
+        # No DB configured → can't enforce → refuse.
+        return -1
+    _ensure_daily_api_usage_table(client)
+    res = client.rpc("reserve_daily_api_usage", {
+        "p_user_id": user_id,
+        "p_date": today_str,
+        "p_delta": int(delta),
+        "p_max": int(max_calls),
+    }).execute()
+    if res and res.data is not None:
+        # RPC returns either scalar int or [{"reserve_daily_api_usage": int}]
+        data = res.data
+        if isinstance(data, list) and data:
+            data = list(data[0].values())[0] if isinstance(data[0], dict) else data[0]
+        return int(data)
+    return -1
+
+
+def release_daily_api_usage(user_id: str, today_str: str, delta: int) -> None:
+    """Undo a prior ``reserve_daily_api_usage`` so a failed LLM call doesn't
+    leave the user debited. Best-effort (logs on failure) because we never
+    want compensation errors to mask the original exception."""
+    if delta <= 0:
+        return
+    client = get_db()
+    if not client:
+        return
+    try:
+        client.rpc("release_daily_api_usage", {
+            "p_user_id": user_id,
+            "p_date": today_str,
+            "p_delta": int(delta),
+        }).execute()
+    except Exception as e:
+        logger.error("release_daily_api_usage failed for %s: %s", user_id, e)
+
+
+def reserve_daily_model_usage(
+    user_id: str, today_str: str, model: str, delta: int, max_calls: int
+) -> int:
+    """Atomic per-model daily reservation. See ``reserve_daily_api_usage``."""
+    if delta <= 0 or not model:
         return 0
+    client = get_db()
+    if not client:
+        return -1
+    _ensure_daily_model_usage_table(client)
+    res = client.rpc("reserve_daily_model_usage", {
+        "p_user_id": user_id,
+        "p_date": today_str,
+        "p_model": model,
+        "p_delta": int(delta),
+        "p_max": int(max_calls),
+    }).execute()
+    if res and res.data is not None:
+        data = res.data
+        if isinstance(data, list) and data:
+            data = list(data[0].values())[0] if isinstance(data[0], dict) else data[0]
+        return int(data)
+    return -1
 
-    from datetime import timezone, datetime
 
-    today_str = datetime.now(timezone.utc).date().isoformat()
+def release_daily_model_usage(
+    user_id: str, today_str: str, model: str, delta: int
+) -> None:
+    """Undo a prior per-model reservation."""
+    if delta <= 0 or not model:
+        return
+    client = get_db()
+    if not client:
+        return
+    try:
+        client.rpc("release_daily_model_usage", {
+            "p_user_id": user_id,
+            "p_date": today_str,
+            "p_model": model,
+            "p_delta": int(delta),
+        }).execute()
+    except Exception as e:
+        logger.error("release_daily_model_usage failed for %s/%s: %s", user_id, model, e)
 
-    # Always increment the account-level daily counter in the paper-independent
-    # table, so it survives paper deletions / CASCADE cleanup.
-    if record_daily:
-        _record_daily_api_call(client, user_id, today_str, delta=count)
-        if model:
-            _record_daily_model_call(client, user_id, today_str, model, delta=count)
 
-    existing = _safe_single(
-        client.table("usage")
-        .select("id, count")
-        .eq("user_id", user_id)
-        .eq("paper_id", paper_id)
-        .eq("action", action)
-        .gte("date", today_str)
-        .lte("date", today_str)
-    )
+def reserve_paper_usage(
+    user_id: str, paper_id: str, action: str,
+    today_str: str, delta: int, max_count: int,
+) -> int:
+    """Atomic per-paper per-action reservation. ``max_count = -1`` = unlimited."""
+    if delta <= 0:
+        return 0
+    client = get_db()
+    if not client:
+        return -1
+    res = client.rpc("reserve_paper_usage", {
+        "p_user_id": user_id,
+        "p_paper_id": paper_id,
+        "p_action": action,
+        "p_date": today_str,
+        "p_delta": int(delta),
+        "p_max": int(max_count),
+    }).execute()
+    if res and res.data is not None:
+        data = res.data
+        if isinstance(data, list) and data:
+            data = list(data[0].values())[0] if isinstance(data[0], dict) else data[0]
+        return int(data)
+    return -1
 
-    if existing:
-        new_count = (existing.get("count") or 0) + count
-        try:
-            client.table("usage").update({"count": new_count}).eq("id", existing["id"]).execute()
-        except Exception as e:
-            logger.warning("Usage update failed: %s", e)
-        return new_count
-    else:
-        try:
-            client.table("usage").insert({
-                "user_id": user_id,
-                "paper_id": paper_id,
-                "action": action,
-                "count": count,
-                "date": today_str,
-            }).execute()
-        except Exception as e:
-            logger.warning("Usage insert failed: %s", e)
-        return count
+
+def release_paper_usage(
+    user_id: str, paper_id: str, action: str, today_str: str, delta: int
+) -> None:
+    """Undo a prior per-paper reservation."""
+    if delta <= 0:
+        return
+    client = get_db()
+    if not client:
+        return
+    try:
+        client.rpc("release_paper_usage", {
+            "p_user_id": user_id,
+            "p_paper_id": paper_id,
+            "p_action": action,
+            "p_date": today_str,
+            "p_delta": int(delta),
+        }).execute()
+    except Exception as e:
+        logger.error(
+            "release_paper_usage failed for %s/%s/%s: %s",
+            user_id, paper_id, action, e,
+        )
 
 
 def store_cancellation_feedback(user_id: str, reason: str, feedback: str) -> None:
@@ -664,17 +680,23 @@ def save_workspace(user_id: str, workspace_id: str | None, name: str,
     return row
 
 
-def list_workspaces(user_id: str) -> list[dict]:
-    """List all workspaces for a user, newest first."""
+def list_workspaces(
+    user_id: str, *, limit: int = MAX_LIST_LIMIT, offset: int = 0,
+) -> list[dict]:
+    """List workspaces for a user, newest first, bounded by ``limit``."""
     client = get_db()
     if not client:
         return []
+
+    limit = max(1, min(int(limit or MAX_LIST_LIMIT), MAX_LIST_LIMIT))
+    offset = max(0, int(offset or 0))
     try:
         res = (
             client.table("workspaces")
             .select("id, name, paper_ids, cross_paper_results, updated_at, created_at")
             .eq("user_id", user_id)
             .order("updated_at", desc=True)
+            .range(offset, offset + limit - 1)
             .execute()
         )
         return res.data or [] if res else []
@@ -696,6 +718,21 @@ def get_workspace(workspace_id: str, user_id: str) -> dict | None:
     )
 
 
+def save_workspace_by_owner(workspace_id: str, user_id: str, name: str,
+                            paper_ids: list[str], cross_paper_results: list[dict]) -> dict | None:
+    """Helper used when the caller has already verified the workspace belongs
+    to ``user_id`` — skips the existence check in ``save_workspace`` so a
+    cross-user id collision can be surfaced as 404 upstream instead of
+    conflating with a 500."""
+    return save_workspace(
+        user_id=user_id,
+        workspace_id=workspace_id,
+        name=name,
+        paper_ids=paper_ids,
+        cross_paper_results=cross_paper_results,
+    )
+
+
 def delete_workspace(workspace_id: str, user_id: str) -> None:
     """Delete a workspace."""
     client = get_db()
@@ -705,3 +742,59 @@ def delete_workspace(workspace_id: str, user_id: str) -> None:
         client.table("workspaces").delete().eq("id", workspace_id).eq("user_id", user_id).execute()
     except Exception as e:
         logger.error("Failed to delete workspace: %s", e)
+
+
+# ----------------------------------------------------------------
+# Stripe webhook idempotency (migration 009)
+# ----------------------------------------------------------------
+
+def mark_stripe_event_processed(event_id: str, event_type: str) -> bool:
+    """Record that we've fully processed this Stripe event. Returns False if
+    the event was already recorded (caller should short-circuit and skip
+    re-processing side effects).
+
+    We rely on the table's PK (`event_id`) to make this atomic: the INSERT
+    fails with a unique-violation on replays, which we translate to "already
+    processed" without touching the row.
+    """
+    client = get_db()
+    if not client:
+        # No DB → can't dedupe. Err on the side of processing; the caller's
+        # side effects are generally idempotent (tier updates are set, not
+        # increment) so this is acceptable.
+        return True
+    try:
+        client.table("processed_stripe_events").insert({
+            "event_id": event_id,
+            "event_type": event_type,
+        }).execute()
+        return True
+    except Exception as e:
+        msg = str(e).lower()
+        if "duplicate" in msg or "23505" in msg or "unique" in msg:
+            return False
+        logger.warning("stripe event dedup insert failed (processing anyway): %s", e)
+        return True
+
+
+def is_stripe_event_processed(event_id: str) -> bool:
+    """Cheap lookup: was this Stripe event already handled? Used as a fast
+    short-circuit before we bother parsing the event body."""
+    if not event_id:
+        return False
+    client = get_db()
+    if not client:
+        return False
+    try:
+        res = (
+            client.table("processed_stripe_events")
+            .select("event_id")
+            .eq("event_id", event_id)
+            .limit(1)
+            .execute()
+        )
+        rows = (res.data if res else None) or []
+        return bool(rows)
+    except Exception as e:
+        logger.debug("is_stripe_event_processed check failed: %s", e)
+        return False

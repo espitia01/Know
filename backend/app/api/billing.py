@@ -17,7 +17,13 @@ from ..services.db import (
     get_or_create_user,
     store_cancellation_feedback,
     store_feedback,
+    is_stripe_event_processed,
+    mark_stripe_event_processed,
 )
+
+MAX_CANCEL_REASON = 200
+MAX_CANCEL_FEEDBACK = 2000
+MAX_FEEDBACK_MESSAGE = 5000
 
 logger = logging.getLogger(__name__)
 
@@ -148,8 +154,8 @@ async def cancel_subscription(body: dict, user_id: str = Depends(require_auth)):
     if not customer_id:
         raise HTTPException(status_code=400, detail="No active subscription found")
 
-    reason = body.get("reason", "")
-    feedback = body.get("feedback", "")
+    reason = (body.get("reason") or "")[:MAX_CANCEL_REASON]
+    feedback = (body.get("feedback") or "")[:MAX_CANCEL_FEEDBACK]
 
     try:
         subs = stripe.Subscription.list(customer=customer_id, status="active", limit=1)
@@ -161,8 +167,8 @@ async def cancel_subscription(body: dict, user_id: str = Depends(require_auth)):
             sub.id,
             cancel_at_period_end=True,
             metadata={
-                "cancel_reason": reason,
-                "cancel_feedback": feedback,
+                "cancel_reason": reason[:MAX_CANCEL_REASON],
+                "cancel_feedback": feedback[:MAX_CANCEL_FEEDBACK],
             },
         )
 
@@ -181,8 +187,11 @@ async def cancel_subscription(body: dict, user_id: str = Depends(require_auth)):
             "message": "Your subscription will remain active until the end of your billing period.",
         }
     except stripe.StripeError as e:
+        # Stripe is an upstream dependency — surface its errors as 502 (bad
+        # gateway) so infra dashboards can distinguish "our code broke" from
+        # "Stripe is having a bad day". 500 used to lump the two together.
         logger.error("Cancel subscription failed: %s", e)
-        raise HTTPException(status_code=500, detail="Failed to cancel subscription. Please try again.")
+        raise HTTPException(status_code=502, detail="Failed to cancel subscription. Please try again.")
 
 
 @router.post("/api/billing/resubscribe")
@@ -208,7 +217,7 @@ async def resubscribe(user_id: str = Depends(require_auth)):
         return {"status": "resubscribed", "message": "Your subscription has been renewed."}
     except stripe.StripeError as e:
         logger.error("Resubscribe failed: %s", e)
-        raise HTTPException(status_code=500, detail="Failed to resubscribe. Please try again.")
+        raise HTTPException(status_code=502, detail="Failed to resubscribe. Please try again.")
 
 
 TIER_ORDER = {"free": 0, "scholar": 1, "researcher": 2}
@@ -261,7 +270,7 @@ async def upgrade_subscription(body: dict, user_id: str = Depends(require_auth))
         return {"status": "upgraded", "tier": target_tier}
     except stripe.StripeError as e:
         logger.error("Upgrade subscription failed: %s", e)
-        raise HTTPException(status_code=500, detail="Failed to upgrade subscription. Please try again.")
+        raise HTTPException(status_code=502, detail="Failed to upgrade subscription. Please try again.")
 
 
 def _to_dict(obj) -> dict:
@@ -279,14 +288,20 @@ def _to_dict(obj) -> dict:
 
 @router.post("/api/webhooks/stripe")
 async def stripe_webhook(request: Request):
-    """Handle Stripe webhook events (no auth — verified by signature)."""
+    """Handle Stripe webhook events (no auth — verified by signature).
+
+    Stripe retries deliveries on timeout / 5xx, so this endpoint must be
+    idempotent. We dedupe by ``event.id`` against the
+    ``processed_stripe_events`` table (migration 009): a replay returns 200
+    without re-running side effects. This prevents scenarios like
+    ``customer.subscription.deleted`` running twice and double-downgrading
+    a user who re-subscribed in the gap between the two deliveries.
+    """
     if not settings.stripe_secret_key:
         raise HTTPException(status_code=503, detail="Stripe not configured")
 
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
-
-    logger.info("Webhook received: payload_len=%d", len(payload))
 
     try:
         if not settings.stripe_webhook_secret:
@@ -297,26 +312,45 @@ async def stripe_webhook(request: Request):
         logger.error("Webhook signature verification failed")
         raise HTTPException(status_code=400, detail="Invalid signature")
     except Exception as e:
-        logger.error("Webhook parse error: %s", e)
+        logger.error("Webhook parse error: %s", e.__class__.__name__)
         raise HTTPException(status_code=400, detail="Webhook processing error")
 
     event_type = event.get("type", "") if isinstance(event, dict) else getattr(event, "type", "")
-    logger.info("Webhook event type: %s", event_type)
+    event_id = event.get("id", "") if isinstance(event, dict) else getattr(event, "id", "")
+
+    if event_id and is_stripe_event_processed(event_id):
+        logger.info("Skipping duplicate Stripe event %s (%s)", event_id, event_type)
+        return {"status": "ok", "duplicate": True}
 
     if isinstance(event, dict):
         event_data_obj = event.get("data", {}).get("object", {})
     else:
         event_data_obj = _to_dict(event.data.object)
 
-    if event_type == "checkout.session.completed":
-        logger.info("Checkout completed: %s", {k: event_data_obj.get(k) for k in ("customer", "metadata", "subscription")})
-        _handle_checkout_completed(event_data_obj)
+    try:
+        if event_type == "checkout.session.completed":
+            _handle_checkout_completed(event_data_obj)
+        elif event_type in ("customer.subscription.updated", "customer.subscription.deleted"):
+            _handle_subscription_change(event_data_obj, event_type)
+        elif event_type == "invoice.payment_failed":
+            # Observability only — see note in `_handle_subscription_change`
+            # about why we don't downgrade here.
+            logger.warning(
+                "Payment failed: customer=%s, attempt=%s",
+                event_data_obj.get("customer"),
+                event_data_obj.get("attempt_count"),
+            )
+        else:
+            logger.info("Unhandled webhook event type: %s", event_type)
+    except Exception:
+        # Don't record the event as processed if handling failed: we want
+        # Stripe's retry to try again. Log and re-raise so the HTTP
+        # response is 500 (Stripe will retry on 5xx).
+        logger.exception("Stripe webhook handler failed for %s", event_type)
+        raise
 
-    elif event_type in ("customer.subscription.updated", "customer.subscription.deleted"):
-        logger.info("Subscription change: status=%s, customer=%s", event_data_obj.get("status"), event_data_obj.get("customer"))
-        _handle_subscription_change(event_data_obj, event_type)
-    else:
-        logger.info("Unhandled webhook event type: %s", event_type)
+    if event_id:
+        mark_stripe_event_processed(event_id, event_type)
 
     return {"status": "ok"}
 
@@ -366,19 +400,48 @@ def _handle_subscription_change(subscription: dict, event_type: str):
     if event_type == "customer.subscription.deleted":
         update_user_tier(user["user_id"], "free")
         logger.info("User %s downgraded to free (subscription deleted)", user["user_id"])
-    else:
-        status = subscription.get("status", "")
-        items = subscription.get("items", {}).get("data", [])
-        price_id = items[0].get("price", {}).get("id", "") if items else ""
-        new_tier = PRICE_TO_TIER.get(price_id, "free")
+        return
 
-        logger.info("Subscription update: status=%s, price=%s, resolved_tier=%s, PRICE_TO_TIER=%s", status, price_id, new_tier, PRICE_TO_TIER)
+    status = subscription.get("status", "")
+    items = subscription.get("items", {}).get("data", [])
+    price_id = items[0].get("price", {}).get("id", "") if items else ""
+    resolved_tier = PRICE_TO_TIER.get(price_id)
 
-        if status in ("active", "trialing"):
-            update_user_tier(user["user_id"], new_tier)
-            logger.info("User %s tier set to %s", user["user_id"], new_tier)
-        elif status in ("unpaid", "past_due"):
-            update_user_tier(user["user_id"], "free")
+    logger.info(
+        "Subscription update: status=%s, price=%s, resolved_tier=%s, PRICE_TO_TIER=%s",
+        status, price_id, resolved_tier, PRICE_TO_TIER,
+    )
+
+    if status in ("active", "trialing"):
+        if resolved_tier is None:
+            # Unknown price id → this is almost always a misconfigured
+            # Stripe env var on our side, not "this user should be free".
+            # Defaulting to free would silently downgrade a paying customer
+            # on every webhook tick. Keep their current tier and alert.
+            logger.error(
+                "Unknown Stripe price %s for user %s — keeping current tier %s "
+                "(fix STRIPE_PRICE_SCHOLAR/STRIPE_PRICE_RESEARCHER env vars)",
+                price_id, user["user_id"], user.get("tier"),
+            )
+            return
+        update_user_tier(user["user_id"], resolved_tier)
+        logger.info("User %s tier set to %s", user["user_id"], resolved_tier)
+    elif status in ("unpaid", "past_due", "incomplete"):
+        # Dunning states: Stripe is still retrying the payment. Don't
+        # downgrade yet — doing so would punish users for a transient
+        # failure (expired card, bank outage, manual review, etc.) and they
+        # couldn't use the product while we waited for the retry. The
+        # downgrade happens on `customer.subscription.deleted` once Stripe
+        # gives up, typically 3 retries / ~2 weeks later.
+        logger.warning(
+            "User %s subscription in %s state — keeping tier until final cancellation",
+            user["user_id"], status,
+        )
+    elif status == "canceled":
+        # Final cancellation via the portal / `subscription.deleted` often
+        # arrives as `status=canceled` on `subscription.updated` too.
+        update_user_tier(user["user_id"], "free")
+        logger.info("User %s downgraded to free (status=canceled)", user["user_id"])
 
 
 _feedback_rate: dict[str, float] = {}

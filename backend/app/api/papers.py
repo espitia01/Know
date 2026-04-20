@@ -11,11 +11,19 @@ from fastapi.responses import FileResponse, Response
 
 from ..config import settings
 from ..models.schemas import ParsedPaper
-from ..services.pdf_parser import extract_pdf, extract_figures, get_figure_path, get_paper, list_papers, save_paper
+from ..services.pdf_parser import (
+    extract_pdf,
+    extract_figures,
+    get_figure_path,
+    get_paper,
+    list_papers,
+    save_paper,
+    _forget_paper_lock,
+)
 from ..services.llm import extract_metadata
 from ..services import storage as cloud_storage
 from ..auth import require_auth
-from ..gating import check_paper_limit, check_feature_access
+from ..gating import check_paper_limit, check_feature_access, reserve_usage, release_usage
 
 router = APIRouter(prefix="/api/papers", tags=["papers"])
 
@@ -43,8 +51,17 @@ def _verify_paper_owner(paper_id: str, user_id: str) -> None:
 
 @router.post("/upload", response_model=ParsedPaper)
 async def upload_paper(request: Request, user_id: str = Depends(require_auth)):
+    """Upload a new paper.
+
+    ``check_paper_limit`` atomically reserves a slot in ``users.paper_count``
+    (migration 009 `check_and_increment_paper_count`). If any step below
+    fails, the ``finally`` block releases that slot so failed uploads don't
+    permanently count against the user's cap. This also handles
+    ``HTTPException`` (e.g. 400/422 validations), which a prior version
+    missed because it only decremented inside a broad ``except Exception``.
+    """
     check_paper_limit(user_id)
-    _paper_count_incremented = True
+    slot_reserved = True
 
     try:
         content_type = request.headers.get("content-type", "")
@@ -76,7 +93,7 @@ async def upload_paper(request: Request, user_id: str = Depends(require_auth)):
 
         try:
             raw = extract_pdf(pdf_path, paper_id)
-        except Exception as e:
+        except Exception:
             pdf_path.unlink(missing_ok=True)
             raise HTTPException(status_code=422, detail="Failed to parse PDF. Please try a different file.")
 
@@ -95,7 +112,6 @@ async def upload_paper(request: Request, user_id: str = Depends(require_auth)):
 
         save_paper(paper, user_id=user_id)
 
-        # Persist PDF and figures to Supabase Storage
         cloud_storage.upload_file(user_id, f"{paper_id}.pdf", content, "application/pdf")
         figures_dir = settings.papers_dir / paper_id / "figures"
         if figures_dir.exists():
@@ -108,10 +124,10 @@ async def upload_paper(request: Request, user_id: str = Depends(require_auth)):
                         "image/png",
                     )
 
-        _paper_count_incremented = False
+        slot_reserved = False
         return paper
-    except Exception:
-        if _paper_count_incremented:
+    except BaseException:
+        if slot_reserved:
             try:
                 from ..services.db import increment_paper_count
                 increment_paper_count(user_id, -1)
@@ -195,6 +211,11 @@ async def delete_paper(paper_id: str, user_id: str = Depends(require_auth)):
     from ..services.db import delete_paper_meta, increment_paper_count
     delete_paper_meta(paper_id, user_id)
     increment_paper_count(user_id, delta=-1)
+
+    # L8: drop the in-memory per-paper lock now that the paper is gone; otherwise
+    # _paper_locks would grow unboundedly in long-lived workers as users churn
+    # through uploads.
+    _forget_paper_lock(paper_id)
 
     return {"status": "deleted", "id": paper_id}
 
@@ -282,7 +303,15 @@ async def delete_note(paper_id: str, note_id: str, user_id: str = Depends(requir
 
 @router.post("/{paper_id}/reextract-figures")
 async def reextract_figures(paper_id: str, user_id: str = Depends(require_auth)):
-    """Re-extract figures using the improved caption-based method."""
+    """Re-extract figures using the improved caption-based method.
+
+    H7: This endpoint re-parses the entire PDF (potentially MB of image data)
+    and rewrites cloud storage on every call. Without a reservation it was
+    free to spam — a single user could loop and effectively DoS the worker's
+    CPU / storage egress without touching their LLM quota. We now reserve
+    against the user's daily API budget and release on any failure so a
+    busted re-extract doesn't permanently debit them.
+    """
     check_feature_access(user_id, "figures")
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
@@ -292,33 +321,41 @@ async def reextract_figures(paper_id: str, user_id: str = Depends(require_auth))
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    pdf_path = settings.papers_dir / f"{paper_id}.pdf"
-    if not pdf_path.exists():
-        pdf_bytes = cloud_storage.download_file(user_id, f"{paper_id}.pdf")
-        if not pdf_bytes:
-            raise HTTPException(status_code=404, detail="PDF not found")
-        pdf_path.parent.mkdir(parents=True, exist_ok=True)
-        pdf_path.write_bytes(pdf_bytes)
+    token = reserve_usage(user_id, paper_id, "reextract_figures")
+    try:
+        pdf_path = settings.papers_dir / f"{paper_id}.pdf"
+        if not pdf_path.exists():
+            pdf_bytes = cloud_storage.download_file(user_id, f"{paper_id}.pdf")
+            if not pdf_bytes:
+                raise HTTPException(status_code=404, detail="PDF not found")
+            pdf_path.parent.mkdir(parents=True, exist_ok=True)
+            pdf_path.write_bytes(pdf_bytes)
 
-    paper_dir = settings.papers_dir / paper_id
-    old_figs = paper_dir / "figures"
-    if old_figs.exists():
-        shutil.rmtree(old_figs)
+        paper_dir = settings.papers_dir / paper_id
+        old_figs = paper_dir / "figures"
+        if old_figs.exists():
+            shutil.rmtree(old_figs)
 
-    doc = fitz_mod.open(str(pdf_path))
-    figures = extract_figures(doc, paper_dir)
-    doc.close()
+        doc = fitz_mod.open(str(pdf_path))
+        figures = extract_figures(doc, paper_dir)
+        doc.close()
 
-    for fig in figures:
-        fig_file = paper_dir / "figures" / f"{fig.id}.png"
-        if fig_file.exists():
-            cloud_storage.upload_file(
-                user_id,
-                f"{paper_id}/figures/{fig_file.name}",
-                fig_file.read_bytes(),
-                "image/png",
-            )
+        for fig in figures:
+            fig_file = paper_dir / "figures" / f"{fig.id}.png"
+            if fig_file.exists():
+                cloud_storage.upload_file(
+                    user_id,
+                    f"{paper_id}/figures/{fig_file.name}",
+                    fig_file.read_bytes(),
+                    "image/png",
+                )
 
-    paper.figures = figures
-    save_paper(paper, user_id=user_id)
-    return {"status": "ok", "figures_count": len(figures), "figures": [f.model_dump() for f in figures]}
+        paper.figures = figures
+        save_paper(paper, user_id=user_id)
+        return {"status": "ok", "figures_count": len(figures), "figures": [f.model_dump() for f in figures]}
+    except BaseException:
+        try:
+            release_usage(token)
+        except Exception:
+            pass
+        raise

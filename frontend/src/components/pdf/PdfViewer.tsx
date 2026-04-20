@@ -6,7 +6,15 @@ import { getAuthHeadersSync } from "@/lib/api";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 
-pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+// Bundle the PDF.js worker from node_modules via the URL constructor pattern
+// Next.js/Webpack understands. Previously we pulled it from unpkg.com on
+// every load, which (a) breaks the app if unpkg is down, (b) leaks the
+// session to a third-party CDN, and (c) can desync with the installed
+// pdfjs-dist version.
+pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+  "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url,
+).toString();
 
 interface PdfViewerProps {
   url: string;
@@ -203,11 +211,11 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-black/[0.06] glass-subtle">
+      <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border glass-subtle">
         <div className="flex items-center gap-1">
           <button
             onClick={zoomOut}
-            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/50 transition-all text-[15px]"
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/70 transition-all text-[15px]"
             title="Zoom out"
             aria-label="Zoom out"
           >
@@ -215,14 +223,14 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
           </button>
           <button
             onClick={zoomReset}
-            className="h-7 px-2 flex items-center justify-center rounded-lg text-[11px] text-muted-foreground hover:text-foreground hover:bg-white/50 transition-all font-mono"
+            className="h-7 px-2 flex items-center justify-center rounded-lg text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/70 transition-all font-mono"
             aria-label={`Reset zoom (currently ${Math.round(scale * 100)}%)`}
           >
             {Math.round(scale * 100)}%
           </button>
           <button
             onClick={zoomIn}
-            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/50 transition-all text-[15px]"
+            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/70 transition-all text-[15px]"
             title="Zoom in"
             aria-label="Zoom in"
           >
@@ -230,7 +238,7 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
           </button>
         </div>
 
-        <div className="h-4 w-px bg-black/[0.06]" />
+        <div className="h-4 w-px bg-border" />
 
         {numPages > 0 && (
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -239,7 +247,7 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
               onChange={(e) => setPageInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handlePageInputSubmit()}
               onBlur={handlePageInputSubmit}
-              className="w-10 h-6 text-center rounded-lg border border-black/[0.06] bg-white/40 text-[11px] backdrop-blur-sm"
+              className="w-10 h-6 text-center rounded-lg border border-border bg-background/60 text-[11px] backdrop-blur-sm"
             />
             <span>/ {numPages}</span>
           </div>
@@ -263,15 +271,15 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
             <div className="text-center space-y-3 max-w-sm px-6">
               {loadError === "PDF_NOT_FOUND" ? (
                 <>
-                  <p className="text-[13px] font-medium text-gray-700">PDF no longer available</p>
-                  <p className="text-[12px] text-gray-500">This paper&apos;s file was lost during a server update. Please re-upload the PDF from your library.</p>
+                  <p className="text-[13px] font-medium text-foreground/90">PDF no longer available</p>
+                  <p className="text-[12px] text-muted-foreground">This paper&apos;s file was lost during a server update. Please re-upload the PDF from your library.</p>
                 </>
               ) : (
                 <>
                   <p className="text-[13px] text-destructive">Failed to load PDF</p>
                   <button
                     onClick={() => { setLoadError(""); retryCount.current = 0; setRetryKey((k) => k + 1); }}
-                    className="text-[12px] font-medium text-gray-600 hover:text-gray-900 transition-all px-3 py-1.5 rounded-xl glass hover:bg-white/60"
+                    className="text-[12px] font-medium text-muted-foreground hover:text-foreground transition-all px-3 py-1.5 rounded-xl glass hover:bg-accent"
                   >
                     Retry
                   </button>
@@ -328,7 +336,7 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
                     key={pageNum}
                     pageNumber={pageNum}
                     scale={scale}
-                    className="shadow-lg bg-white"
+                    className="shadow-lg bg-card"
                     renderTextLayer={true}
                     renderAnnotationLayer={true}
                     onRenderSuccess={() => handlePageRender(pageNum)}

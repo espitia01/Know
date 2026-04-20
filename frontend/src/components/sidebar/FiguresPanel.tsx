@@ -68,7 +68,7 @@ function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: ()
 
   return (
     <div
-      className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-8 animate-fade-in"
+      className="fixed inset-0 z-[100] bg-foreground/85 backdrop-blur-sm flex items-center justify-center p-8 animate-fade-in"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -142,6 +142,12 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     }
   }, [paperId]);
 
+  // Abort any in-flight figure stream when the panel unmounts so we don't
+  // keep a dangling LLM request alive after navigation.
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [conversations, selected, loading]);
@@ -177,7 +183,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
       setLoading(true);
 
       try {
-        const res = await api.analyzeFigureStream(paperId, figId, q);
+        const res = await api.analyzeFigureStream(paperId, figId, q, controller.signal);
         if (controller.signal.aborted) return;
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
@@ -311,17 +317,19 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         </div>
 
         <div className="flex-1 overflow-y-auto min-h-0 py-3 space-y-3">
-          <div
-            className="rounded-xl glass-subtle overflow-hidden cursor-zoom-in hover:bg-white/60 transition-colors"
+          <button
+            type="button"
             onClick={() => setLightboxFig(selected)}
+            className="block w-full rounded-xl glass-subtle overflow-hidden cursor-zoom-in hover:bg-accent transition-colors focus:outline-none focus:ring-2 focus:ring-foreground/20"
             title="Click to expand"
+            aria-label="Expand figure"
           >
             <AuthImage
               src={api.getFigureUrl(paperId, selected.id)}
               alt={selected.caption || selected.id}
               className="w-full object-contain max-h-[250px]"
             />
-          </div>
+          </button>
 
           {selected.caption && (
             <p className="text-[11px] text-muted-foreground/60 italic leading-relaxed line-clamp-3">
@@ -395,7 +403,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               }}
               placeholder="Ask about this figure..."
               disabled={loading}
-              className="flex-1 text-[12px] px-3 py-2 rounded-xl border border-black/[0.06] glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+              className="flex-1 text-[12px] px-3 py-2 rounded-xl border border-border glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
             />
             <button
               onClick={handleAsk}
@@ -421,7 +429,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           <button
             key={fig.id}
             onClick={() => setSelected(fig)}
-            className="group rounded-xl glass-subtle overflow-hidden hover:bg-white/60 transition-colors"
+            className="group rounded-xl glass-subtle overflow-hidden hover:bg-accent transition-colors"
           >
             <div className="aspect-[4/3] overflow-hidden relative">
               <AuthImage

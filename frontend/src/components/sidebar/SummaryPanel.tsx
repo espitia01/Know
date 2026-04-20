@@ -38,17 +38,38 @@ function SummaryProgressBar({ paperId }: { paperId: string }) {
   );
 }
 
-async function fetchSummaryInBackground(paperId: string, setSummary: (s: PaperSummary) => void, setSummaryLoading: (l: boolean) => void) {
-  if (activeStreams.has(paperId)) return;
+async function fetchSummaryInBackground(
+  paperId: string,
+  setSummary: (s: PaperSummary) => void,
+  setSummaryLoading: (l: boolean) => void
+): Promise<{ ok: boolean; error?: string }> {
+  if (activeStreams.has(paperId)) return { ok: true };
 
   const controller = new AbortController();
   activeStreams.set(paperId, controller);
-  setSummaryLoading(true);
+  // Only toggle global loading when we're actually looking at this paper;
+  // otherwise we'd clobber another paper's loading indicator.
+  if (useStore.getState().paper?.id === paperId) {
+    setSummaryLoading(true);
+  }
+
+  let streamError: string | null = null;
 
   try {
     const res = await api.getSummaryStream(paperId, controller.signal);
-    if (controller.signal.aborted) return;
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (controller.signal.aborted) return { ok: true };
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        if (body?.detail) {
+          detail = typeof body.detail === "string"
+            ? body.detail
+            : body.detail.message || detail;
+        }
+      } catch { /* non-JSON */ }
+      throw new Error(detail);
+    }
     const reader = res.body?.getReader();
     if (!reader) throw new Error("No stream");
 
@@ -71,11 +92,18 @@ async function fetchSummaryInBackground(paperId: string, setSummary: (s: PaperSu
           if (event.type === "chunk") {
             accumulated += event.text;
           } else if (event.type === "done") {
-            if (event.summary && useStore.getState().paper?.id === paperId) {
-              setSummary(event.summary);
+            if (event.summary) {
+              // Always persist the finished summary to the per-paper cache so
+              // switching back shows it without regenerating.
+              useStore.getState().updatePaperCache(paperId, { summary: event.summary });
+              // If the user is still viewing this paper, also push it to the
+              // top-level store for immediate render.
+              if (useStore.getState().paper?.id === paperId) {
+                setSummary(event.summary);
+              }
             }
           } else if (event.type === "error") {
-            throw new Error(event.message);
+            throw new Error(event.message || "Stream error");
           }
         } catch (e) {
           if (e instanceof SyntaxError) continue;
@@ -83,27 +111,38 @@ async function fetchSummaryInBackground(paperId: string, setSummary: (s: PaperSu
         }
       }
     }
-  } catch {
-    // stream failed or was aborted
+    return { ok: true };
+  } catch (e) {
+    if (controller.signal.aborted) return { ok: true };
+    streamError = e instanceof Error ? e.message : "Summary generation failed";
+    return { ok: false, error: streamError };
   } finally {
     activeStreams.delete(paperId);
     clearProgressStart(paperId, "summary");
-    setSummaryLoading(false);
+    // Only clear the global loading indicator if we're still on this paper.
+    // If the user has navigated elsewhere, their current paper owns that flag
+    // and we must not touch it.
+    if (useStore.getState().paper?.id === paperId) {
+      setSummaryLoading(false);
+    }
   }
 }
 
 export function SummaryPanel({ paperId }: SummaryPanelProps) {
   const { summary, setSummary, summaryLoading, setSummaryLoading, paper } = useStore();
   const fetchAttempted = useRef<string | null>(null);
-  const [fetchError, setFetchError] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const effectiveSummary = summary ?? (paper?.id === paperId ? paper?.cached_analysis?.summary : null) ?? null;
 
   const startFetch = useCallback((targetId: string) => {
-    setFetchError(false);
-    fetchSummaryInBackground(targetId, setSummary, setSummaryLoading).catch(() => {
-      if (useStore.getState().paper?.id === targetId && !useStore.getState().summary) {
-        setFetchError(true);
+    setFetchError(null);
+    fetchSummaryInBackground(targetId, setSummary, setSummaryLoading).then((result) => {
+      // Only surface the failure if the user is still looking at this paper
+      // AND there's nothing already rendered (a previous cached summary
+      // should not be replaced with an error banner).
+      if (!result.ok && useStore.getState().paper?.id === targetId && !useStore.getState().summary) {
+        setFetchError(result.error || "Summary generation failed");
       }
     });
   }, [setSummary, setSummaryLoading]);
@@ -141,6 +180,9 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
         <p className="text-[13px] text-muted-foreground/60">
           {fetchError ? "Failed to generate summary." : "Summary not available yet."}
         </p>
+        {fetchError && (
+          <p className="mt-1 text-[11px] text-destructive/80 max-w-xs mx-auto">{fetchError}</p>
+        )}
         <button
           onClick={() => {
             fetchAttempted.current = null;
