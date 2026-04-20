@@ -171,14 +171,17 @@ $$;
 -- usage (per-paper per-action daily counter)
 -- ---------------------------------------------------------------------------
 --
--- `usage.date` was created as TEXT in 001_initial.sql (yyyy-mm-dd strings),
--- so we accept/return text here to match the existing `increment_usage` RPC.
+-- `usage.date` is a DATE column (see 001_initial.sql). PostgREST will
+-- coerce the ISO-date string sent by the Python caller into DATE at the
+-- boundary, so we declare `p_date date` here and let Postgres handle it.
+-- (010_fix_paper_usage_date_type.sql retrofits this onto DBs that already
+-- installed the earlier buggy text signature.)
 
 CREATE OR REPLACE FUNCTION reserve_paper_usage(
     p_user_id  text,
     p_paper_id text,
     p_action   text,
-    p_date     text,
+    p_date     date,
     p_delta    integer,
     p_max      integer
 ) RETURNS integer
@@ -225,7 +228,7 @@ CREATE OR REPLACE FUNCTION release_paper_usage(
     p_user_id  text,
     p_paper_id text,
     p_action   text,
-    p_date     text,
+    p_date     date,
     p_delta    integer
 ) RETURNS void
 LANGUAGE plpgsql
