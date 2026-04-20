@@ -199,7 +199,7 @@ async def get_paper_usage(paper_id: str, user_id: str = Depends(require_auth)):
 async def get_account_usage(user_id: str = Depends(require_auth)):
     """Return account-wide usage counts and tier limits for the current user."""
     from .services.db import get_user, get_daily_api_count
-    from .gating import get_user_tier, TIER_LIMITS
+    from .gating import get_user_tier, TIER_LIMITS, get_per_model_daily_usage
 
     tier = get_user_tier(user_id)
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
@@ -212,6 +212,11 @@ async def get_account_usage(user_id: str = Depends(require_auth)):
     except Exception:
         daily_used = 0
 
+    try:
+        per_model = get_per_model_daily_usage(user_id)
+    except Exception:
+        per_model = []
+
     return {
         "tier": tier,
         "papers_used": paper_count,
@@ -220,6 +225,7 @@ async def get_account_usage(user_id: str = Depends(require_auth)):
         "daily_api_limit": limits.get("daily_api_calls", -1),
         "qa_per_paper_limit": limits.get("qa_per_paper", -1),
         "selections_per_paper_limit": limits.get("selections_per_paper", -1),
+        "per_model_usage": per_model,
     }
 
 

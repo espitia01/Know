@@ -18,6 +18,12 @@ const MODEL_LABELS: Record<string, string> = {
   "claude-opus-4": "Highest quality — deepest analysis",
 };
 
+const MODEL_SHORT: Record<string, string> = {
+  "claude-haiku-4-5": "Haiku",
+  "claude-sonnet-4-6": "Sonnet",
+  "claude-opus-4": "Opus",
+};
+
 function UsageBar({ label, used, limit, hint }: { label: string; used: number; limit: number; hint?: string }) {
   const unlimited = limit === -1;
   const pct = unlimited ? 0 : Math.min(100, limit > 0 ? (used / limit) * 100 : 0);
@@ -76,6 +82,7 @@ function SettingsContent() {
     daily_api_limit: number;
     qa_per_paper_limit: number;
     selections_per_paper_limit: number;
+    per_model_usage: { model: string; used: number; limit: number }[];
   } | null>(null);
 
   const tier = tierUser?.tier || "free";
@@ -263,6 +270,23 @@ function SettingsContent() {
               limit={usage.daily_api_limit}
               hint="Resets at midnight UTC. Counts all AI analyses."
             />
+
+            {usage.per_model_usage && usage.per_model_usage.length > 0 && (
+              <div className="pt-2 border-t border-black/[0.06] space-y-3">
+                <p className="text-[11px] text-gray-500 font-medium uppercase tracking-wide">
+                  Per-model daily caps
+                </p>
+                {usage.per_model_usage.map((m) => (
+                  <UsageBar
+                    key={m.model}
+                    label={MODEL_SHORT[m.model] || m.model}
+                    used={m.used}
+                    limit={m.limit}
+                    hint={`Daily cap on ${m.model}. Counts toward your total daily API budget. Pick a smaller model in Settings if you hit the cap.`}
+                  />
+                ))}
+              </div>
+            )}
 
             <div className="pt-2 border-t border-black/[0.06] space-y-1.5 text-[11px] text-gray-500">
               <div className="flex items-center justify-between">

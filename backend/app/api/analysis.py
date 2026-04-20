@@ -38,11 +38,31 @@ from ..services.llm import (
 )
 from ..services.pdf_parser import get_paper, get_figure_path, save_paper
 from ..auth import require_auth
-from ..gating import check_feature_access, check_usage_limit, track_usage
+from ..gating import (
+    check_feature_access,
+    check_usage_limit,
+    track_usage,
+    resolve_analysis_model,
+    resolve_fast_model,
+)
 from ..api.papers import _validate_id, _verify_paper_owner
 
 router = APIRouter(prefix="/api/papers", tags=["analysis"])
 logger = logging.getLogger(__name__)
+
+
+def _track_analysis(user_id: str, paper_id: str, action: str) -> None:
+    """Record usage tagged with the user's resolved analysis model.
+
+    Centralised so per-model daily limits are enforced wherever the analysis
+    provider is used (preReading, summary, qa, assumptions, ...).
+    """
+    track_usage(user_id, paper_id, action, model=resolve_analysis_model(user_id))
+
+
+def _track_fast(user_id: str, paper_id: str, action: str) -> None:
+    """Record usage tagged with the user's resolved fast model (selections, figures)."""
+    track_usage(user_id, paper_id, action, model=resolve_fast_model(user_id))
 
 
 @router.post("/{paper_id}/analyze", response_model=PreReadingAnalysis)
@@ -64,7 +84,7 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
         )
         paper.cached_analysis["pre_reading"] = analysis.model_dump()
         save_paper(paper, user_id=user_id)
-        track_usage(user_id, paper_id, "api_call")
+        _track_analysis(user_id, paper_id, "api_call")
         return analysis
     except ValueError:
         raise HTTPException(status_code=503, detail="Analysis service temporarily unavailable.")
@@ -99,7 +119,7 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
         selections.append(result)
         paper.cached_analysis["selections"] = selections
         save_paper(paper, user_id=user_id)
-        track_usage(user_id, paper_id, "selection")
+        _track_fast(user_id, paper_id, "selection")
         return result
     except ValueError:
         raise HTTPException(status_code=503, detail="Selection analysis service temporarily unavailable.")
@@ -157,7 +177,7 @@ async def selection_analysis_stream(paper_id: str, body: dict, user_id: str = De
             selections.append(result)
             paper.cached_analysis["selections"] = selections
             save_paper(paper, user_id=user_id)
-            track_usage(user_id, paper_id, "selection")
+            track_usage(user_id, paper_id, "selection", model=provider.model)
         except Exception as e:
             logger.exception("Selection stream error for paper %s", paper_id)
             yield f"data: {_json.dumps({'type': 'error', 'message': 'Analysis failed. Please try again.'})}\n\n"
@@ -187,7 +207,7 @@ async def explain(paper_id: str, req: ExplainRequest, user_id: str = Depends(req
         explains.append(resp.model_dump())
         paper.cached_analysis["explains"] = explains
         save_paper(paper, user_id=user_id)
-        track_usage(user_id, paper_id, "selection")
+        _track_analysis(user_id, paper_id, "selection")
         return resp
     except Exception as e:
         logger.exception("Explain failed for paper %s", paper_id)
@@ -212,7 +232,7 @@ async def skipped_steps(paper_id: str, body: dict, user_id: str = Depends(requir
         skipped.append(result)
         paper.cached_analysis["skipped_steps"] = skipped
         save_paper(paper, user_id=user_id)
-        track_usage(user_id, paper_id, "selection")
+        _track_analysis(user_id, paper_id, "selection")
         return result
     except ValueError:
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
@@ -235,7 +255,7 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
         resp = AssumptionsResponse(assumptions=result.get("assumptions", []))
         paper.cached_analysis["assumptions"] = resp.model_dump()
         save_paper(paper, user_id=user_id)
-        track_usage(user_id, paper_id, "api_call")
+        _track_analysis(user_id, paper_id, "api_call")
         return resp
     except ValueError:
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
@@ -269,7 +289,7 @@ async def derivation_exercise(paper_id: str, body: dict, user_id: str = Depends(
         exercises.append(exercise.model_dump())
         paper.cached_analysis["derivation_exercises"] = exercises
         save_paper(paper, user_id=user_id)
-        track_usage(user_id, paper_id, "selection")
+        _track_analysis(user_id, paper_id, "selection")
         return exercise
     except ValueError:
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
@@ -298,7 +318,7 @@ async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)
         qa_sessions.append(resp.model_dump())
         paper.cached_analysis["qa_sessions"] = qa_sessions
         save_paper(paper, user_id=user_id)
-        track_usage(user_id, paper_id, "qa")
+        _track_analysis(user_id, paper_id, "qa")
         return resp
     except ValueError:
         raise HTTPException(status_code=503, detail="Q&A service temporarily unavailable.")
@@ -322,7 +342,7 @@ async def summary(paper_id: str, user_id: str = Depends(require_auth)):
             raise HTTPException(status_code=502, detail="Summary generation returned empty results. Please retry.")
         paper.cached_analysis["summary"] = result
         save_paper(paper, user_id=user_id)
-        track_usage(user_id, paper_id, "api_call")
+        _track_analysis(user_id, paper_id, "api_call")
         return result
     except ValueError:
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
@@ -383,7 +403,7 @@ Return JSON with all the above fields."""
             if parsed and parsed.get("overview"):
                 paper.cached_analysis["summary"] = parsed
                 save_paper(paper, user_id=user_id)
-                track_usage(user_id, paper_id, "api_call")
+                track_usage(user_id, paper_id, "api_call", model=provider.model)
                 yield f"data: {_json.dumps({'type': 'done', 'summary': parsed, 'full_text': full_text_normalized})}\n\n"
             else:
                 yield f"data: {_json.dumps({'type': 'done', 'full_text': full_text_normalized})}\n\n"
@@ -428,7 +448,7 @@ async def figure_qa(paper_id: str, body: dict, user_id: str = Depends(require_au
         figure_analyses.append(result)
         paper.cached_analysis["figure_analyses"] = figure_analyses
         save_paper(paper, user_id=user_id)
-        track_usage(user_id, paper_id, "api_call")
+        _track_fast(user_id, paper_id, "api_call")
         return result
     except ValueError:
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
@@ -495,7 +515,7 @@ async def figure_qa_stream(paper_id: str, body: dict, user_id: str = Depends(req
             figure_analyses.append(result)
             paper.cached_analysis["figure_analyses"] = figure_analyses
             save_paper(paper, user_id=user_id)
-            track_usage(user_id, paper_id, "api_call")
+            track_usage(user_id, paper_id, "api_call", model=provider.model)
         except Exception as e:
             logger.exception("Figure stream error for paper %s", paper_id)
             yield f"data: {_json.dumps({'type': 'error', 'message': 'Figure analysis failed. Please try again.'})}\n\n"
@@ -527,8 +547,9 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
 
     try:
         result = await answer_questions_multi(paper_texts, questions, user_id=user_id)
+        model = resolve_analysis_model(user_id)
         for pid in paper_ids:
-            track_usage(user_id, pid, "qa")
+            track_usage(user_id, pid, "qa", model=model)
         if isinstance(result, dict) and "items" in result:
             return result
         return {"items": result}

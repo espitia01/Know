@@ -514,5 +514,6 @@ export const api = {
       daily_api_limit: number;
       qa_per_paper_limit: number;
       selections_per_paper_limit: number;
+      per_model_usage: { model: string; used: number; limit: number }[];
     }>(`/api/usage`),
 };

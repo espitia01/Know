@@ -289,6 +289,120 @@ def _ensure_daily_api_usage_table(client) -> None:
     _daily_api_bootstrap_done = True
 
 
+_daily_model_bootstrap_done = False
+
+
+def _ensure_daily_model_usage_table(client) -> None:
+    """Lazily create daily_model_usage table + RPC if missing.
+
+    Mirrors `_ensure_daily_api_usage_table` so deploys that haven't applied
+    migration 006 still get correct per-model accounting.
+    """
+    global _daily_model_bootstrap_done
+    if _daily_model_bootstrap_done:
+        return
+    try:
+        client.table("daily_model_usage").select("user_id").limit(1).execute()
+        _daily_model_bootstrap_done = True
+        return
+    except Exception:
+        pass
+
+    sql = """
+    CREATE TABLE IF NOT EXISTS daily_model_usage (
+        user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+        date    DATE NOT NULL,
+        model   TEXT NOT NULL,
+        count   INT  NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_id, date, model)
+    );
+    CREATE OR REPLACE FUNCTION increment_daily_model_usage(
+        p_user_id text, p_date date, p_model text
+    ) RETURNS integer LANGUAGE plpgsql AS $$
+    DECLARE new_count integer;
+    BEGIN
+        INSERT INTO daily_model_usage (user_id, date, model, count)
+        VALUES (p_user_id, p_date, p_model, 1)
+        ON CONFLICT (user_id, date, model)
+        DO UPDATE SET count = daily_model_usage.count + 1
+        RETURNING count INTO new_count;
+        RETURN new_count;
+    END;
+    $$;
+    """
+    try:
+        client.rpc("exec_sql", {"query": sql}).execute()
+    except Exception as e:
+        logger.warning("daily_model_usage auto-create skipped: %s", e)
+    _daily_model_bootstrap_done = True
+
+
+def _record_daily_model_call(client, user_id: str, today_str: str, model: str) -> None:
+    """Increment today's per-model API count for the user. Best-effort."""
+    if not model:
+        return
+    _ensure_daily_model_usage_table(client)
+    try:
+        client.rpc("increment_daily_model_usage", {
+            "p_user_id": user_id,
+            "p_date": today_str,
+            "p_model": model,
+        }).execute()
+        return
+    except Exception as e:
+        logger.debug("increment_daily_model_usage RPC failed, falling back: %s", e)
+
+    try:
+        existing = _safe_single(
+            client.table("daily_model_usage")
+            .select("count")
+            .eq("user_id", user_id)
+            .eq("date", today_str)
+            .eq("model", model)
+        )
+        if existing is not None:
+            new_count = (existing.get("count") or 0) + 1
+            client.table("daily_model_usage").update({"count": new_count}) \
+                .eq("user_id", user_id).eq("date", today_str).eq("model", model).execute()
+        else:
+            client.table("daily_model_usage").insert({
+                "user_id": user_id,
+                "date": today_str,
+                "model": model,
+                "count": 1,
+            }).execute()
+    except Exception as e:
+        logger.error("daily_model_usage write failed for user %s/%s: %s", user_id, model, e)
+
+
+def get_daily_model_count(user_id: str, model: str) -> int:
+    """Return today's API-call count for a specific model. Returns 0 when DB is
+    unavailable or the table hasn't been provisioned yet."""
+    if not model:
+        return 0
+    client = get_db()
+    if not client:
+        return 0
+
+    from datetime import datetime, timezone
+    today_str = datetime.now(timezone.utc).date().isoformat()
+
+    try:
+        _ensure_daily_model_usage_table(client)
+        row = _safe_single(
+            client.table("daily_model_usage")
+            .select("count")
+            .eq("user_id", user_id)
+            .eq("date", today_str)
+            .eq("model", model)
+        )
+        if row is not None:
+            return int(row.get("count") or 0)
+    except Exception as e:
+        logger.debug("daily_model_usage read failed: %s", e)
+    return 0
+
+
 def _record_daily_api_call(client, user_id: str, today_str: str) -> None:
     """Increment today's account-wide API-call count for the user.
 
@@ -327,8 +441,12 @@ def _record_daily_api_call(client, user_id: str, today_str: str) -> None:
         logger.error("daily_api_usage write failed for user %s: %s", user_id, e)
 
 
-def record_usage(user_id: str, paper_id: str, action: str) -> int:
-    """Record a usage event and return today's total for this action+paper."""
+def record_usage(user_id: str, paper_id: str, action: str, *, model: str | None = None) -> int:
+    """Record a usage event and return today's total for this action+paper.
+
+    When ``model`` is provided, the call is also counted toward that model's
+    daily total in `daily_model_usage`, which powers per-model rate limits.
+    """
     client = get_db()
     if not client:
         return 0
@@ -340,6 +458,8 @@ def record_usage(user_id: str, paper_id: str, action: str) -> int:
     # Always increment the account-level daily counter in the paper-independent
     # table, so it survives paper deletions / CASCADE cleanup.
     _record_daily_api_call(client, user_id, today_str)
+    if model:
+        _record_daily_model_call(client, user_id, today_str, model)
 
     existing = _safe_single(
         client.table("usage")
