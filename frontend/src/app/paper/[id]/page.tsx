@@ -377,7 +377,6 @@ function PaperContent() {
     autoAnalyzedRef.current = activePaperId;
 
     const pid = activePaperId;
-    let stale = false;
     const cache = paper.cached_analysis || {};
 
     if (paper.notes) setNotes(paper.notes);
@@ -397,11 +396,14 @@ function PaperContent() {
       setPreReadingLoading(true);
       api.analyze(pid)
         .then((r) => {
-          if (stale) { updatePaperCache(pid, { preReading: r }); return; }
-          setPreReading(r);
+          const s = useStore.getState();
+          if (s.paper?.id === pid) setPreReading(r);
+          else updatePaperCache(pid, { preReading: r });
         })
         .catch(() => {})
-        .finally(() => { if (!stale) setPreReadingLoading(false); });
+        .finally(() => {
+          if (useStore.getState().paper?.id === pid) setPreReadingLoading(false);
+        });
     }
 
     if (cache.assumptions) {
@@ -410,11 +412,14 @@ function PaperContent() {
       setAssumptionsLoading(true);
       api.getAssumptions(pid)
         .then((r) => {
-          if (stale) { updatePaperCache(pid, { assumptions: r.assumptions }); return; }
-          setAssumptions(r.assumptions);
+          const s = useStore.getState();
+          if (s.paper?.id === pid) setAssumptions(r.assumptions);
+          else updatePaperCache(pid, { assumptions: r.assumptions });
         })
         .catch(() => {})
-        .finally(() => { if (!stale) setAssumptionsLoading(false); });
+        .finally(() => {
+          if (useStore.getState().paper?.id === pid) setAssumptionsLoading(false);
+        });
     }
 
     if (cache.summary) {
@@ -429,8 +434,6 @@ function PaperContent() {
         useStore.getState().setQAResults(allItems);
       }
     }
-
-    return () => { stale = true; };
   }, [paper, activePaperId, tierUser?.tier, tierLoading, setPreReading, setPreReadingLoading, setAssumptions, setAssumptionsLoading, setNotes, setSummary, updatePaperCache]);
 
   const handleSwitchPaper = useCallback((id: string) => {

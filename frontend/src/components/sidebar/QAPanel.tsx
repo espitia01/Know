@@ -55,6 +55,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
   const [input, setInput] = useState("");
   const [crossPaper, setCrossPaper] = useState(false);
   const [qaError, setQAError] = useState("");
+  const [usedPrompts, setUsedPrompts] = useState<Set<string>>(new Set());
 
   const canMultiQA = canAccess(tier, "multi-qa");
   const hasMultiplePapers = sessionPapers.length > 1 && canMultiQA;
@@ -133,12 +134,15 @@ export function QAPanel({ paperId }: QAPanelProps) {
           </button>
         )}
 
-        {qaResults.length === 0 && (
+        {qaResults.length === 0 && !qaLoading && (
           <div className="flex flex-wrap gap-1.5">
-            {prompts.map((prompt, i) => (
+            {prompts.filter((p) => !usedPrompts.has(p)).map((prompt, i) => (
               <button
                 key={i}
-                onClick={() => addQuestion(prompt)}
+                onClick={() => {
+                  addQuestion(prompt);
+                  setUsedPrompts((prev) => new Set(prev).add(prompt));
+                }}
                 className="text-[11px] px-2.5 py-1 rounded-full glass-subtle text-muted-foreground hover:text-foreground hover:bg-white/60 transition-colors font-medium"
               >
                 {prompt}
@@ -228,7 +232,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
               )}
             </p>
             <button
-              onClick={() => { setQAResults([]); clearQuestions(); }}
+              onClick={() => { setQAResults([]); clearQuestions(); setUsedPrompts(new Set()); }}
               className="text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors font-medium"
             >
               Clear

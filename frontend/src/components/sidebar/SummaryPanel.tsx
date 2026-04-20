@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { api } from "@/lib/api";
+import { api, type PaperSummary } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
 
@@ -9,75 +9,95 @@ interface SummaryPanelProps {
   paperId: string;
 }
 
+function SummaryProgressBar() {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const interval = setInterval(() => {
+      const elapsed = (Date.now() - start) / 1000;
+      setWidth(Math.min(90, 90 * (1 - Math.exp(-elapsed / 20))));
+    }, 200);
+    return () => clearInterval(interval);
+  }, []);
+  return (
+    <div className="w-full max-w-xs h-1.5 bg-accent rounded-full overflow-hidden">
+      <div
+        className="h-full bg-foreground/60 rounded-full transition-all duration-300 ease-out"
+        style={{ width: `${width}%` }}
+      />
+    </div>
+  );
+}
+
+const activeStreams = new Map<string, AbortController>();
+
+async function fetchSummaryInBackground(paperId: string, setSummary: (s: PaperSummary) => void, setSummaryLoading: (l: boolean) => void) {
+  if (activeStreams.has(paperId)) return;
+
+  const controller = new AbortController();
+  activeStreams.set(paperId, controller);
+  setSummaryLoading(true);
+
+  try {
+    const res = await api.getSummaryStream(paperId, controller.signal);
+    if (controller.signal.aborted) return;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("No stream");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let accumulated = "";
+
+    while (true) {
+      if (controller.signal.aborted) { reader.cancel(); break; }
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const event = JSON.parse(line.slice(6));
+          if (event.type === "chunk") {
+            accumulated += event.text;
+          } else if (event.type === "done") {
+            if (event.summary && useStore.getState().paper?.id === paperId) {
+              setSummary(event.summary);
+            }
+          } else if (event.type === "error") {
+            throw new Error(event.message);
+          }
+        } catch (e) {
+          if (e instanceof SyntaxError) continue;
+          throw e;
+        }
+      }
+    }
+  } catch {
+    // stream failed or was aborted
+  } finally {
+    activeStreams.delete(paperId);
+    setSummaryLoading(false);
+  }
+}
+
 export function SummaryPanel({ paperId }: SummaryPanelProps) {
   const { summary, setSummary, summaryLoading, setSummaryLoading, paper } = useStore();
   const fetchAttempted = useRef<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
   const [fetchError, setFetchError] = useState(false);
-  const [streamText, setStreamText] = useState("");
-  const [streaming, setStreaming] = useState(false);
 
   const effectiveSummary = summary ?? (paper?.id === paperId ? paper?.cached_analysis?.summary : null) ?? null;
 
-  const startStream = useCallback(async (targetId: string) => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
+  const startFetch = useCallback((targetId: string) => {
     setFetchError(false);
-    setSummaryLoading(true);
-    setStreaming(true);
-    setStreamText("");
-
-    try {
-      const res = await api.getSummaryStream(targetId, controller.signal);
-      if (controller.signal.aborted) return;
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+    fetchSummaryInBackground(targetId, setSummary, setSummaryLoading).catch(() => {
+      if (useStore.getState().paper?.id === targetId && !useStore.getState().summary) {
+        setFetchError(true);
       }
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No stream");
-
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let accumulated = "";
-
-      while (true) {
-        if (controller.signal.aborted) { reader.cancel(); break; }
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const event = JSON.parse(line.slice(6));
-            if (event.type === "chunk") {
-              accumulated += event.text;
-              setStreamText(accumulated);
-            } else if (event.type === "done") {
-              if (event.summary && useStore.getState().paper?.id === targetId) {
-                setSummary(event.summary);
-              }
-              setStreaming(false);
-              setSummaryLoading(false);
-            } else if (event.type === "error") {
-              throw new Error(event.message);
-            }
-          } catch (e) {
-            if (e instanceof SyntaxError) continue;
-            throw e;
-          }
-        }
-      }
-    } catch (e) {
-      if (controller.signal.aborted) return;
-      if (useStore.getState().paper?.id === targetId) setFetchError(true);
-    } finally {
-      setStreaming(false);
-      setSummaryLoading(false);
-    }
+    });
   }, [setSummary, setSummaryLoading]);
 
   useEffect(() => {
@@ -87,26 +107,17 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     }
     if (paper?.id !== paperId) return;
     if (fetchAttempted.current === paperId) return;
+    if (activeStreams.has(paperId)) return;
     fetchAttempted.current = paperId;
-    startStream(paperId);
-    return () => { abortRef.current?.abort(); };
-  }, [paperId, effectiveSummary, summary, paper, setSummary, startStream]);
+    startFetch(paperId);
+  }, [paperId, effectiveSummary, summary, paper, setSummary, startFetch]);
 
-  if (streaming || (summaryLoading && !effectiveSummary)) {
+  if (summaryLoading && !effectiveSummary) {
     return (
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin shrink-0" />
-          <p className="text-[13px] text-muted-foreground">Generating summary...</p>
-        </div>
-        {streamText ? (
-          <div className="prose prose-sm dark:prose-invert max-w-none text-[13px] leading-relaxed opacity-80">
-            <Md>{streamText}</Md>
-            <span className="inline-block w-1.5 h-4 bg-foreground/60 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
-          </div>
-        ) : (
-          <p className="text-[11px] text-muted-foreground/50">This may take 30-60 seconds</p>
-        )}
+      <div className="flex flex-col items-center justify-center py-12 gap-3">
+        <SummaryProgressBar />
+        <p className="text-[13px] text-muted-foreground">Generating detailed summary...</p>
+        <p className="text-[11px] text-muted-foreground/50">This may take 30-60 seconds</p>
       </div>
     );
   }
@@ -120,7 +131,9 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
         <button
           onClick={() => {
             fetchAttempted.current = null;
-            startStream(paperId);
+            const ctrl = activeStreams.get(paperId);
+            if (ctrl) { ctrl.abort(); activeStreams.delete(paperId); }
+            startFetch(paperId);
           }}
           className="mt-2 text-[12px] font-medium text-foreground hover:opacity-80 transition-opacity"
         >

@@ -9,7 +9,7 @@
 const MATH_REGION =
   /(\$\$[\s\S]*?\$\$|\$(?!\$)(?:\\.|[^$])*?\$)/g;
 
-const MAX_WRAP_LENGTH = 8000;
+const MAX_WRAP_LENGTH = 4000;
 
 function containsLatex(s: string): boolean {
   return /\\[A-Za-z]/.test(s) || /[_^]\{/.test(s) || /[_^][A-Za-z0-9]/.test(s);
@@ -56,7 +56,7 @@ function wrapBareLatex(segment: string): string {
 
 function consumeLatexExpr(s: string, i: number): number {
   const maxDepth = 10;
-  const end = Math.min(s.length, i + 2000);
+  const end = Math.min(s.length, i + 500);
 
   while (i < end) {
     if (s[i] === '\\' && i + 1 < end && /[A-Za-z]/.test(s[i + 1])) {
@@ -129,6 +129,13 @@ export function preprocessLatex(text: string): string {
 
   s = s.replace(/\\\(/g, "$").replace(/\\\)/g, "$");
   s = s.replace(/\\\[/g, "\n$$\n").replace(/\\\]/g, "\n$$\n");
+
+  s = s.replace(
+    /(?<!\$)\\begin\{(\w+)\}([\s\S]*?)\\end\{\1\}(?!\$)/g,
+    (match) => {
+      return '\n$$\n' + match + '\n$$\n';
+    }
+  );
 
   s = s.replace(/(?<!\n)\$\$(?!\$)/g, '\n$$');
   s = s.replace(/\$\$(?!\n)/g, '$$\n');

@@ -30,6 +30,8 @@ function LibraryContent() {
   const [search, setSearch] = useState("");
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleteAffectedWs, setDeleteAffectedWs] = useState<{ id: string; name: string; paper_ids: string[]; cross_paper_results: { question: string; answer: string }[]; updated_at: string }[]>([]);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [movingPaper, setMovingPaper] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [showNewFolder, setShowNewFolder] = useState(false);
@@ -128,13 +130,43 @@ function LibraryContent() {
 
   useEffect(() => { setVisibleCount(PAGE_SIZE); setSelectedPapers(new Set()); }, [filtered]);
 
-  const handleDelete = useCallback(async (id: string) => {
+  const handleStartDelete = useCallback(async (id: string) => {
+    setDeleteConfirm(id);
     try {
+      const wsList = await api.listWorkspaces();
+      setDeleteAffectedWs(wsList.filter((ws) => ws.paper_ids.includes(id)));
+    } catch {
+      setDeleteAffectedWs([]);
+    }
+  }, []);
+
+  const handleDelete = useCallback(async (id: string) => {
+    setDeleteLoading(true);
+    try {
+      for (const ws of deleteAffectedWs) {
+        const remaining = ws.paper_ids.filter((pid) => pid !== id);
+        if (remaining.length === 0) {
+          await api.deleteWorkspace(ws.id);
+          setWorkspaces((prev) => prev.filter((w) => w.id !== ws.id));
+        } else {
+          await api.saveWorkspace({
+            id: ws.id,
+            name: ws.name,
+            paper_ids: remaining,
+            cross_paper_results: ws.cross_paper_results || [],
+          });
+          setWorkspaces((prev) =>
+            prev.map((w) => w.id === ws.id ? { ...w, paper_ids: remaining } : w)
+          );
+        }
+      }
       await api.deletePaper(id);
       setPapers((prev) => prev.filter((p) => p.id !== id));
     } catch (e) { console.error(e); }
     setDeleteConfirm(null);
-  }, []);
+    setDeleteAffectedWs([]);
+    setDeleteLoading(false);
+  }, [deleteAffectedWs]);
 
   const handleMoveToFolder = useCallback(async (paperId: string, folder: string) => {
     try {
@@ -194,6 +226,28 @@ function LibraryContent() {
   const handleBulkDelete = useCallback(async () => {
     setBulkDeleting(true);
     const ids = [...selectedPapers];
+    try {
+      const wsList = await api.listWorkspaces();
+      for (const ws of wsList) {
+        const remaining = ws.paper_ids.filter((pid) => !selectedPapers.has(pid));
+        if (remaining.length < ws.paper_ids.length) {
+          if (remaining.length === 0) {
+            await api.deleteWorkspace(ws.id);
+            setWorkspaces((prev) => prev.filter((w) => w.id !== ws.id));
+          } else {
+            await api.saveWorkspace({
+              id: ws.id,
+              name: ws.name,
+              paper_ids: remaining,
+              cross_paper_results: ws.cross_paper_results || [],
+            });
+            setWorkspaces((prev) =>
+              prev.map((w) => w.id === ws.id ? { ...w, paper_ids: remaining } : w)
+            );
+          }
+        }
+      }
+    } catch { /* continue with deletion */ }
     for (const id of ids) {
       try { await api.deletePaper(id); } catch { /* continue */ }
     }
@@ -773,23 +827,36 @@ function LibraryContent() {
                     )}
 
                     {deleteConfirm === p.id ? (
-                      <div className="flex items-center gap-1 animate-fade-in">
-                        <button
-                          onClick={() => handleDelete(p.id)}
-                          className="text-[10px] px-2 py-0.5 rounded-md bg-red-500 text-white font-medium"
-                        >
-                          Delete
-                        </button>
-                        <button
-                          onClick={() => setDeleteConfirm(null)}
-                          className="text-[10px] text-gray-400"
-                        >
-                          Cancel
-                        </button>
+                      <div className="flex flex-col gap-1.5 animate-fade-in max-w-[200px]">
+                        {deleteAffectedWs.length > 0 && (
+                          <div className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded-md px-2 py-1">
+                            Used in: {deleteAffectedWs.map((w) => w.name).join(", ")}
+                            {deleteAffectedWs.some((w) => w.paper_ids.length === 1) && (
+                              <span className="block text-red-500 mt-0.5 font-medium">
+                                {deleteAffectedWs.filter((w) => w.paper_ids.length === 1).length} workspace(s) will be deleted
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleDelete(p.id)}
+                            disabled={deleteLoading}
+                            className="text-[10px] px-2 py-0.5 rounded-md bg-red-500 text-white font-medium disabled:opacity-50"
+                          >
+                            {deleteLoading ? "..." : "Delete"}
+                          </button>
+                          <button
+                            onClick={() => { setDeleteConfirm(null); setDeleteAffectedWs([]); }}
+                            className="text-[10px] text-gray-400"
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       </div>
                     ) : (
                       <button
-                        onClick={() => setDeleteConfirm(p.id)}
+                        onClick={() => handleStartDelete(p.id)}
                         className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
                         title="Delete"
                       >

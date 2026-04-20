@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, memo } from "react";
 import { Md } from "@/components/ui/Md";
 import type { SelectionAnalysisResult } from "@/lib/api";
 
@@ -227,7 +227,7 @@ function ResultCard({ result }: { result: SelectionAnalysisResult }) {
   );
 }
 
-function DerivationView({ result }: { result: SelectionAnalysisResult }) {
+const DerivationView = memo(function DerivationView({ result }: { result: SelectionAnalysisResult }) {
   return (
     <div className="space-y-3">
       {result.starting_point && (
@@ -251,9 +251,9 @@ function DerivationView({ result }: { result: SelectionAnalysisResult }) {
       )}
     </div>
   );
-}
+});
 
-function StepCard({ step }: { step: NonNullable<SelectionAnalysisResult["steps"]>[0] }) {
+const StepCard = memo(function StepCard({ step }: { step: NonNullable<SelectionAnalysisResult["steps"]>[0] }) {
   const [showAnswer, setShowAnswer] = useState(false);
   const [showHint, setShowHint] = useState(false);
 
@@ -300,4 +300,4 @@ function StepCard({ step }: { step: NonNullable<SelectionAnalysisResult["steps"]
       </div>
     </div>
   );
-}
+});
