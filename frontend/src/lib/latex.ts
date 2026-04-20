@@ -3,7 +3,8 @@
  *
  * 1. \( … \)  →  $ … $     (inline)
  * 2. \[ … \]  →  $$ … $$   (display)
- * 3. Bare LaTeX commands not already inside $ delimiters get wrapped in $ … $.
+ * 3. \begin{env}…\end{env} not inside delimiters → $$ … $$
+ * 4. Bare LaTeX commands/expressions not inside $ → wrapped in $ or $$.
  */
 
 const MATH_REGION =
@@ -15,10 +16,6 @@ function containsLatex(s: string): boolean {
   return /\\[A-Za-z]/.test(s) || /[_^]\{/.test(s) || /[_^][A-Za-z0-9]/.test(s);
 }
 
-/**
- * Iterative parser that finds bare LaTeX expressions and wraps them in $.
- * Avoids nested quantifiers to prevent ReDoS.
- */
 const TEXT_COMMANDS = new Set([
   'textbf', 'textit', 'textrm', 'textsf', 'texttt', 'textsc',
   'emph', 'underline', 'text', 'mathrm', 'cite', 'ref', 'label',
@@ -28,11 +25,27 @@ const TEXT_COMMANDS = new Set([
   'begin', 'end',
 ]);
 
+const DISPLAY_COMMANDS = new Set([
+  'frac', 'dfrac', 'tfrac', 'sum', 'prod', 'int', 'iint', 'iiint', 'oint',
+  'lim', 'sup', 'inf', 'max', 'min', 'sqrt', 'binom',
+  'overset', 'underset', 'overbrace', 'underbrace',
+  'left', 'right',
+]);
+
 function tryConsumeEnvironment(segment: string, pos: number): { end: number; match: string } | null {
   const rest = segment.slice(pos);
   const m = rest.match(/^\\begin\{(\w+)\}([\s\S]*?)\\end\{\1\}/);
   if (!m) return null;
   return { end: pos + m[0].length, match: m[0] };
+}
+
+function isDisplayMath(expr: string): boolean {
+  const cmdRegex = /\\([A-Za-z]+)/g;
+  let m;
+  while ((m = cmdRegex.exec(expr)) !== null) {
+    if (DISPLAY_COMMANDS.has(m[1])) return true;
+  }
+  return false;
 }
 
 function wrapBareLatex(segment: string): string {
@@ -59,21 +72,26 @@ function wrapBareLatex(segment: string): string {
 
       const start = i;
       i = consumeLatexExpr(segment, i);
-      const expr = segment.slice(start, i);
-      if (containsLatex(expr) && expr.length > 1) {
-        result.push('$' + expr.trim() + '$');
+      if (i === start) { result.push(segment[i]); i++; continue; }
+      const expr = segment.slice(start, i).trim();
+      if (expr.length > 1 && containsLatex(expr)) {
+        if (isDisplayMath(expr)) {
+          result.push('\n$$\n' + expr + '\n$$\n');
+        } else {
+          result.push('$' + expr + '$');
+        }
       } else {
-        result.push(expr);
+        result.push(segment.slice(start, i));
       }
     } else if (/[A-Za-z0-9]/.test(segment[i]) && i + 1 < segment.length && /[_^]/.test(segment[i + 1])) {
       const start = i;
       i++;
       i = consumeLatexExpr(segment, i);
-      const expr = segment.slice(start, i);
+      const expr = segment.slice(start, i).trim();
       if (containsLatex(expr)) {
-        result.push('$' + expr.trim() + '$');
+        result.push('$' + expr + '$');
       } else {
-        result.push(expr);
+        result.push(segment.slice(start, i));
       }
     } else {
       result.push(segment[i]);
@@ -85,18 +103,24 @@ function wrapBareLatex(segment: string): string {
 }
 
 function consumeLatexExpr(s: string, i: number): number {
+  const start = i;
   const maxDepth = 10;
-  const end = Math.min(s.length, i + 500);
+  const end = Math.min(s.length, i + 2000);
 
   while (i < end) {
-    if (s[i] === '\\' && i + 1 < end && /[A-Za-z]/.test(s[i + 1])) {
+    const c = s[i];
+
+    if (c === '\\' && i + 1 < end && /[A-Za-z]/.test(s[i + 1])) {
+      const rest = s.slice(i, Math.min(i + 30, end));
+      const cmdMatch = rest.match(/^\\([A-Za-z]+)/);
+      if (cmdMatch && TEXT_COMMANDS.has(cmdMatch[1])) break;
       i++;
       while (i < end && /[A-Za-z]/.test(s[i])) i++;
-    } else if (s[i] === '{') {
+    } else if (c === '{') {
       i = consumeBraced(s, i, end, maxDepth);
-    } else if (s[i] === '[' && i > 0 && s[i - 1] !== '\\') {
+    } else if (c === '[' && i > 0 && s[i - 1] !== '\\') {
       i = consumeBracketed(s, i, end, maxDepth);
-    } else if (s[i] === '_' || s[i] === '^') {
+    } else if (c === '_' || c === '^') {
       i++;
       if (i < end && s[i] === '{') {
         i = consumeBraced(s, i, end, maxDepth);
@@ -108,15 +132,33 @@ function consumeLatexExpr(s: string, i: number): number {
           i++;
         }
       }
-    } else if (/[=<>≈≡≤≥~+\-±×·,;!|]/.test(s[i])) {
+    } else if (/[=<>≈≡≤≥~+\-±×·,;!|()\/0-9*:]/.test(c)) {
       i++;
-      while (i < end && s[i] === ' ') i++;
-    } else if (s[i] === ' ' && i + 1 < end && (s[i + 1] === '\\' || /[_^{]/.test(s[i + 1]))) {
-      i++;
+    } else if (/[A-Za-z]/.test(c)) {
+      const next = i + 1 < end ? s[i + 1] : '';
+      if (/[_^=\\{()+\-*\/|,;:<>0-9]/.test(next)) {
+        i++;
+      } else if (next === ' ' && i + 2 < end && /[_^\\{=+\-<>|]/.test(s[i + 2])) {
+        i++;
+      } else {
+        break;
+      }
+    } else if (c === ' ') {
+      const next = i + 1 < end ? s[i + 1] : '';
+      if (/[\\_{^|=<>+\-±×·!0-9]/.test(next)) {
+        i++;
+      } else if (/[A-Za-z]/.test(next) && i + 2 < end && /[_^=\\{(+\-*\/|,]/.test(s[i + 2])) {
+        i++;
+      } else {
+        break;
+      }
     } else {
       break;
     }
   }
+
+  while (i > start && /[\s,]/.test(s[i - 1])) i--;
+
   return i;
 }
 
