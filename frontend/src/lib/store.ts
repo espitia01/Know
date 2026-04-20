@@ -148,12 +148,13 @@ export const useStore = create<AppStore>()(
           exercise: null, searchResults: [],
         });
         // Drop the persisted blob too — otherwise signing out and signing
-        // back in as a different user in the same tab would rehydrate the
-        // previous user's papers from sessionStorage.
+        // back in as a different user in the same browser would rehydrate
+        // the previous user's papers from localStorage.
         if (typeof window !== "undefined") {
-          try {
-            sessionStorage.removeItem("know-paper-store");
-          } catch { /* best-effort */ }
+          try { localStorage.removeItem("know-paper-store"); } catch { /* best-effort */ }
+          // Also clear the legacy sessionStorage key for anyone upgrading
+          // from the previous release so stale data doesn't linger.
+          try { sessionStorage.removeItem("know-paper-store"); } catch { /* best-effort */ }
         }
       },
 
@@ -302,33 +303,39 @@ export const useStore = create<AppStore>()(
     }),
     {
       name: "know-paper-store",
+      // localStorage survives tab close/reopen (sessionStorage does not),
+      // so the session-paper list and cross-paper results come back when
+      // the user returns to the app later. Analysis state is NOT kept here
+      // — it's always hydrated from the backend on paper load.
       storage: {
         getItem: (name: string) => {
           try {
-            const str = sessionStorage.getItem(name);
+            const str = localStorage.getItem(name);
             return str ? JSON.parse(str) : null;
           } catch {
-            sessionStorage.removeItem(name);
+            try { localStorage.removeItem(name); } catch { /* ignore */ }
             return null;
           }
         },
         setItem: (name: string, value: unknown) => {
           try {
-            sessionStorage.setItem(name, JSON.stringify(value));
+            localStorage.setItem(name, JSON.stringify(value));
           } catch {
-            // sessionStorage quota exceeded — silently drop
+            // localStorage quota exceeded — silently drop; next page load
+            // will still work (just re-fetches from backend).
           }
         },
-        removeItem: (name: string) => sessionStorage.removeItem(name),
+        removeItem: (name: string) => {
+          try { localStorage.removeItem(name); } catch { /* ignore */ }
+        },
       },
-      // Keep the persisted blob small: omit `papersById` (each ParsedPaper
-      // carries the full `raw_text` and `cached_analysis` payload, which is
-      // easily hundreds of KB per paper and blows sessionStorage quota for
-      // multi-paper sessions). The in-memory cache still hydrates on
-      // navigation via the usual API call, and `paperCaches` retains all
-      // analysis results keyed by id so no UI state is lost on refresh.
+      // The server is the source of truth for every analysis artifact:
+      // `paper.cached_analysis` is re-hydrated on each mount, so we do NOT
+      // persist `paperCaches` (previously did — caused stale/ghost data
+      // when a user returned hours later or the browser swapped sessions).
+      // We only persist lightweight UX state: the multi-paper session list
+      // and cross-paper QA results, which have no server mirror.
       partialize: (state) => ({
-        paperCaches: state.paperCaches,
         sessionPapers: state.sessionPapers,
         crossPaperResults: state.crossPaperResults,
       }),

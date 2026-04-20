@@ -121,7 +121,14 @@ function ProgressBar({ running }: { running: boolean }) {
 
 export function FiguresPanel({ paperId }: FiguresPanelProps) {
   const { paper, setPaper } = useStore();
-  const figures = (paper?.id === paperId ? paper?.figures : null) ?? [];
+  // `paper` is driven by a global store: it may be stale (another paper)
+  // or `null` on a fresh mount before the API call resolves. Only trust
+  // it when it actually matches the panel's paperId. Tracking the
+  // matched/unmatched states separately lets us show a spinner during
+  // hydration instead of immediately flashing "No figures detected."
+  const paperMatches = paper?.id === paperId;
+  const figures = paperMatches ? paper?.figures ?? [] : [];
+  const paperReady = paperMatches && Array.isArray(paper?.figures);
   const [selected, setSelected] = useState<FigureInfo | null>(null);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
@@ -282,13 +289,38 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     setQuestion("");
   }, [selected, question, handleAnalyze]);
 
+  // Paper metadata hasn't arrived yet — show a spinner instead of a
+  // misleading "no figures" message. This covers both the initial mount
+  // (paper=null while /api/papers/:id is in flight) and the brief window
+  // during a paper switch where `paper` still points at the previous one.
+  if (!paperReady) {
+    return (
+      <div className="flex flex-col items-center justify-center py-10 gap-3">
+        <div className="w-5 h-5 border-2 border-muted-foreground/20 border-t-muted-foreground/60 rounded-full animate-spin" />
+        <p className="text-[12px] text-muted-foreground/60">Loading figures...</p>
+      </div>
+    );
+  }
+
   if (figures.length === 0) {
     return (
-      <div className="text-center py-8">
-        <svg className="w-10 h-10 mx-auto text-muted-foreground/20 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-        </svg>
-        <p className="text-[13px] text-muted-foreground/60">No figures detected in this paper.</p>
+      <div className="text-center py-10 space-y-4">
+        <div className="space-y-2">
+          <svg className="w-10 h-10 mx-auto text-muted-foreground/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+          </svg>
+          <p className="text-[13px] text-muted-foreground/70">No figures detected yet.</p>
+          <p className="text-[11px] text-muted-foreground/50 max-w-xs mx-auto leading-relaxed">
+            Extraction can miss figures on scanned or unusually laid-out PDFs. Try re-extracting — the updated pipeline often finds them on a second pass.
+          </p>
+        </div>
+        <button
+          onClick={handleReextract}
+          disabled={reextracting}
+          className="text-[12px] font-medium btn-primary-glass text-background px-4 py-2 rounded-xl transition-opacity disabled:opacity-50"
+        >
+          {reextracting ? "Re-extracting figures..." : "Re-extract figures"}
+        </button>
       </div>
     );
   }
@@ -454,13 +486,16 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         ))}
       </div>
 
-      <div className="pt-2 border-t border-border/30">
+      <div className="pt-3 mt-1 border-t border-border/40 flex items-center justify-between gap-3">
+        <p className="text-[11px] text-muted-foreground/60">
+          Missing something? Run extraction again.
+        </p>
         <button
           onClick={handleReextract}
           disabled={reextracting}
-          className="text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors disabled:opacity-40"
+          className="text-[11px] font-medium px-3 py-1.5 rounded-lg border border-border hover:bg-accent transition-colors disabled:opacity-40 shrink-0"
         >
-          {reextracting ? "Re-extracting..." : "Re-extract figures"}
+          {reextracting ? "Re-extracting..." : "Re-extract"}
         </button>
       </div>
     </div>

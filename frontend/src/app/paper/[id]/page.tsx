@@ -287,8 +287,7 @@ function PaperContent() {
     setSummary, setSummaryLoading,
     cachePaper,
     sessionPapers, addSessionPaper, removeSessionPaper, clearSession,
-    savePaperCache, restorePaperCache, updatePaperCache,
-    setQAResults, clearQuestions,
+    savePaperCache, restorePaperCache,
     crossPaperResults, addCrossPaperResults, clearCrossPaperResults,
     resetAnalysisState,
   } = useStore();
@@ -304,7 +303,6 @@ function PaperContent() {
       savePaperCache(activePaperId);
       const restored = restorePaperCache(paperId);
       if (!restored) resetAnalysisState();
-      cacheRestoredRef.current = restored;
       // If a background fetch for the incoming paper is still in flight,
       // re-show its loading state so the UI doesn't flash "Analyze Paper".
       if (hasActiveRequest(paperId, "preReading")) setPreReadingLoading(true);
@@ -409,21 +407,11 @@ function PaperContent() {
     };
   }, [activePaperId]);
 
-  // Load paper when activePaperId changes — always fetch fresh to pick up folder/tag updates
-  // First try to restore from local cache for instant display
-  const cacheRestoredRef = useRef(false);
-
-  // On first mount only, rehydrate the top-level store from `paperCaches`.
-  // Zustand persists `paperCaches` to sessionStorage but NOT the active
-  // per-paper fields (preReading, summary, qaResults, ...), so a refresh
-  // would otherwise leave the analysis pane empty until the server-side
-  // `paper.cached_analysis` round-trip finishes — and local-only state
-  // (e.g. queued questions) would be lost entirely.
-  //
-  // Subsequent switches go through `handleSwitchPaper`, which owns the
-  // save/restore + loading-state syncing; we deliberately don't re-run on
-  // `activePaperId` changes here because that would overwrite the loading
-  // flags `handleSwitchPaper` just set for an in-flight background request.
+  // `paperCaches` is an in-memory-only fast-switch cache. It is NOT
+  // persisted (see the store's `partialize`), so on a full-page reload
+  // every analysis field starts empty and must be re-hydrated from the
+  // server via `paper.cached_analysis` in the effect below. We keep the
+  // in-session cache so flipping between open papers stays snappy.
   const initialRestoreDoneRef = useRef(false);
   useEffect(() => {
     if (initialRestoreDoneRef.current) return;
@@ -432,15 +420,12 @@ function PaperContent() {
     if (store.paperCaches[activePaperId]) {
       const ok = store.restorePaperCache(activePaperId);
       if (ok) {
-        cacheRestoredRef.current = true;
-        // Re-apply loading flags for any background requests that are still
-        // running for this paper (restorePaperCache resets them to false).
+        // Re-apply loading flags for any in-flight background requests
+        // for this paper (restorePaperCache resets them to false).
         if (hasActiveRequest(activePaperId, "preReading")) setPreReadingLoading(true);
         if (hasActiveRequest(activePaperId, "assumptions")) setAssumptionsLoading(true);
         if (hasActiveRequest(activePaperId, "summary")) setSummaryLoading(true);
       }
-    } else if (store.preReading || store.summary) {
-      cacheRestoredRef.current = true;
     }
   }, [activePaperId, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
 
@@ -477,94 +462,113 @@ function PaperContent() {
     return () => { stale = true; };
   }, [activePaperId, setPaper, setLoading, cachePaper]);
 
-  // Auto-analyze when paper loads (skip if cache was already restored or already analyzed this paper)
+  // Hydrate the analysis pane from the freshly loaded paper.
+  //
+  // The server (`paper.cached_analysis`) is the source of truth for every
+  // artifact — pre-reading, assumptions, summary, selection history, QA
+  // history. The frontend local cache is a fast-switch hint only, never a
+  // replacement for server data.
+  //
+  // We re-run this effect every time `paper.id` becomes `activePaperId`
+  // (i.e. on mount and on paper switch). Previously we short-circuited
+  // when a "local cache was restored" signal was set, which left the pane
+  // stuck showing a partial snapshot (e.g. selection history empty) and
+  // gave the user no way to retry because `autoAnalyzedPapers` blocked
+  // re-entry.
   useEffect(() => {
     if (!paper || paper.id !== activePaperId) return;
     if (tierLoading) return;
-    if (autoAnalyzedPapers.has(activePaperId)) return;
-
-    const store = useStore.getState();
-    if (cacheRestoredRef.current || store.preReading || store.summary) {
-      autoAnalyzedPapers.add(activePaperId);
-      return;
-    }
-
-    autoAnalyzedPapers.add(activePaperId);
 
     const pid = activePaperId;
     const cache = paper.cached_analysis || {};
 
     if (paper.notes) setNotes(paper.notes);
 
-    if (cache.selections && cache.selections.length > 0) {
-      const currentHistory = store.selectionHistory;
-      if (currentHistory.length === 0) {
-        for (const sel of cache.selections) {
-          store.addSelectionToHistory(sel as SelectionAnalysisResult);
-        }
+    // Selection history: always mirror the server list. Previously this
+    // only ran once per session and only if the store was empty, so a
+    // "Derive" performed before the last reload was invisible on return.
+    if (Array.isArray(cache.selections)) {
+      const store = useStore.getState();
+      const serverSelections = cache.selections as SelectionAnalysisResult[];
+      const merged = [...serverSelections].reverse();
+      // Reverse so the newest-first ordering matches what addSelectionToHistory
+      // produces at runtime. Replace wholesale — server has every selection.
+      if (JSON.stringify(store.selectionHistory) !== JSON.stringify(merged)) {
+        useStore.setState({ selectionHistory: merged.slice(0, 50) });
       }
     }
 
+    // Pre-reading: prefer the server cache; otherwise kick off a fresh
+    // analysis for users with the "prepare" feature.
     if (cache.pre_reading) {
       setPreReading(cache.pre_reading);
     } else if (canAccess(tierUser?.tier || "free", "prepare") && !hasActiveRequest(pid, "preReading")) {
-      markRequestStart(pid, "preReading");
-      setPreReadingLoading(true);
-      api.analyze(pid)
-        .then((r) => {
-          const s = useStore.getState();
-          // Always write to the per-paper cache so switching back restores
-          // the result without triggering a regenerate.
-          updatePaperCache(pid, { preReading: r });
-          if (s.paper?.id === pid) setPreReading(r);
-        })
-        .catch(() => {})
-        .finally(() => {
-          markRequestEnd(pid, "preReading");
-          clearProgressStart(pid, "preReading");
-          // Only clear loading for the currently-active paper; otherwise we
-          // would wipe out the real loading state of a different paper the
-          // user switched to while this request was in flight.
-          if (useStore.getState().paper?.id === pid) {
-            setPreReadingLoading(false);
-          }
-        });
+      if (!autoAnalyzedPapers.has(`${pid}:preReading`)) {
+        autoAnalyzedPapers.add(`${pid}:preReading`);
+        markRequestStart(pid, "preReading");
+        setPreReadingLoading(true);
+        api.analyze(pid)
+          .then((r) => {
+            const s = useStore.getState();
+            if (s.paper?.id === pid) setPreReading(r);
+          })
+          .catch(() => {})
+          .finally(() => {
+            markRequestEnd(pid, "preReading");
+            clearProgressStart(pid, "preReading");
+            if (useStore.getState().paper?.id === pid) {
+              setPreReadingLoading(false);
+            }
+          });
+      }
+    } else {
+      // Server has nothing and user can't trigger one — clear the pane so
+      // we don't show another paper's pre-reading.
+      setPreReading(null);
     }
 
     if (cache.assumptions) {
       setAssumptions(cache.assumptions.assumptions || []);
     } else if (canAccess(tierUser?.tier || "free", "assumptions") && !hasActiveRequest(pid, "assumptions")) {
-      markRequestStart(pid, "assumptions");
-      setAssumptionsLoading(true);
-      api.getAssumptions(pid)
-        .then((r) => {
-          const s = useStore.getState();
-          updatePaperCache(pid, { assumptions: r.assumptions });
-          if (s.paper?.id === pid) setAssumptions(r.assumptions);
-        })
-        .catch(() => {})
-        .finally(() => {
-          markRequestEnd(pid, "assumptions");
-          clearProgressStart(pid, "assumptions");
-          if (useStore.getState().paper?.id === pid) {
-            setAssumptionsLoading(false);
-          }
-        });
+      if (!autoAnalyzedPapers.has(`${pid}:assumptions`)) {
+        autoAnalyzedPapers.add(`${pid}:assumptions`);
+        markRequestStart(pid, "assumptions");
+        setAssumptionsLoading(true);
+        api.getAssumptions(pid)
+          .then((r) => {
+            const s = useStore.getState();
+            if (s.paper?.id === pid) setAssumptions(r.assumptions);
+          })
+          .catch(() => {})
+          .finally(() => {
+            markRequestEnd(pid, "assumptions");
+            clearProgressStart(pid, "assumptions");
+            if (useStore.getState().paper?.id === pid) {
+              setAssumptionsLoading(false);
+            }
+          });
+      }
+    } else {
+      setAssumptions([]);
     }
 
     if (cache.summary) {
       setSummary(cache.summary);
+    } else {
+      // Summary is streamed lazily by SummaryPanel; clear so the new
+      // paper's panel starts in its own fetch-or-empty state.
+      setSummary(null);
     }
 
     if (cache.qa_sessions && cache.qa_sessions.length > 0) {
       const allItems = cache.qa_sessions.flatMap(
         (session: { items?: { question: string; answer: string }[] }) => session.items || []
       );
-      if (allItems.length > 0) {
-        useStore.getState().setQAResults(allItems);
-      }
+      useStore.getState().setQAResults(allItems);
+    } else {
+      useStore.getState().setQAResults([]);
     }
-  }, [paper, activePaperId, tierUser?.tier, tierLoading, setPreReading, setPreReadingLoading, setAssumptions, setAssumptionsLoading, setNotes, setSummary, updatePaperCache]);
+  }, [paper, activePaperId, tierUser?.tier, tierLoading, setPreReading, setPreReadingLoading, setAssumptions, setAssumptionsLoading, setNotes, setSummary]);
 
   const handleSwitchPaper = useCallback((id: string) => {
     if (id === activePaperId) return;
@@ -577,7 +581,6 @@ function PaperContent() {
     if (!restored) {
       resetAnalysisState();
     }
-    cacheRestoredRef.current = restored;
     if (hasActiveRequest(id, "preReading")) setPreReadingLoading(true);
     if (hasActiveRequest(id, "assumptions")) setAssumptionsLoading(true);
     if (hasActiveRequest(id, "summary")) setSummaryLoading(true);
@@ -746,12 +749,22 @@ function PaperContent() {
     setSelection(null);
     window.getSelection()?.removeAllRanges();
 
+    // Capture the paper this action was started for. Every state write
+    // below must verify the user is still viewing this paper — otherwise
+    // a slow "Derive" on paper A could repaint the analysis pane for
+    // paper B once the user switches.
+    const startedFor = activePaperId;
+    const stillOnStartedPaper = () =>
+      useStore.getState().paper?.id === startedFor;
+
     if (action === "note") {
       setPanelVisible(true);
       setActiveTab("notes");
       try {
-        const note = await api.addNote(activePaperId, text, "PDF Selection");
-        useStore.getState().addNote(note);
+        const note = await api.addNote(startedFor, text, "PDF Selection");
+        if (stillOnStartedPaper()) {
+          useStore.getState().addNote(note);
+        }
       } catch (e) {
         console.error("Failed to save note:", e);
       }
@@ -767,16 +780,25 @@ function PaperContent() {
     setSelectionLoading(true);
     setSelectionResult(null);
 
+    const guardedSetSelectionResult = (r: SelectionAnalysisResult | null) => {
+      if (!stillOnStartedPaper()) return;
+      setSelectionResult(r);
+    };
+    const guardedSetSelectionLoading = (l: boolean) => {
+      if (!stillOnStartedPaper()) return;
+      setSelectionLoading(l);
+    };
+
     try {
-      const res = await api.analyzeSelectionStream(activePaperId, text, action, controller.signal);
+      const res = await api.analyzeSelectionStream(startedFor, text, action, controller.signal);
       if (controller.signal.aborted) return;
       if (!res.ok) {
         const detail = await res.text();
         let msg = `HTTP ${res.status}`;
         try { msg = JSON.parse(detail).detail || msg; } catch { /* ignore */ }
         if (res.status === 403 || res.status === 429) {
-          setSelectionResult({ action, selected_text: text, explanation: `**Limit reached.** ${msg}\n\nUpgrade your plan to continue.` });
-          setSelectionLoading(false);
+          guardedSetSelectionResult({ action, selected_text: text, explanation: `**Limit reached.** ${msg}\n\nUpgrade your plan to continue.` });
+          guardedSetSelectionLoading(false);
           return;
         }
         throw new Error(msg);
@@ -788,13 +810,13 @@ function PaperContent() {
       let accumulated = "";
       let buffer = "";
 
-      setSelectionResult({
+      guardedSetSelectionResult({
         action,
         selected_text: text,
         explanation: "",
         streaming: true,
       });
-      setSelectionLoading(false);
+      guardedSetSelectionLoading(false);
 
       while (true) {
         if (controller.signal.aborted) { reader.cancel(); break; }
@@ -810,7 +832,7 @@ function PaperContent() {
             const event = JSON.parse(line.slice(6));
             if (event.type === "chunk") {
               accumulated += event.text;
-              setSelectionResult({
+              guardedSetSelectionResult({
                 action,
                 selected_text: text,
                 explanation: accumulated,
@@ -823,11 +845,19 @@ function PaperContent() {
                 selected_text: text,
                 explanation: finalText,
               };
-              setSelectionResult(finalResult);
-              addSelectionToHistory(finalResult);
-              refreshUsage();
+              guardedSetSelectionResult(finalResult);
+              // Server already persisted the selection to
+              // `paper.cached_analysis.selections` via `append_capped`
+              // before returning `done`, so on any future page load the
+              // hydrate-from-server effect will restore it. Here we only
+              // update the in-memory history — and only if we're still
+              // viewing the paper this stream started for.
+              if (stillOnStartedPaper()) {
+                addSelectionToHistory(finalResult);
+                refreshUsage();
+              }
             } else if (event.type === "error") {
-              setSelectionResult({
+              guardedSetSelectionResult({
                 action,
                 selected_text: text,
                 explanation: `Error: ${event.message}`,
@@ -840,12 +870,12 @@ function PaperContent() {
       }
     } catch (e) {
       if (controller.signal.aborted) return;
-      setSelectionResult({
+      guardedSetSelectionResult({
         action,
         selected_text: text,
         explanation: `Analysis failed: ${e instanceof Error ? e.message : "Unknown error"}`,
       });
-      setSelectionLoading(false);
+      guardedSetSelectionLoading(false);
     }
   }, [activePaperId, setPanelVisible, setActiveTab, setSelectionLoading, setSelectionResult, addSelectionToHistory, refreshUsage]);
 
