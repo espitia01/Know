@@ -936,7 +936,7 @@ function PaperContent() {
   // Wider hit targets + pointer events fix reliable dragging on left/right.
   const dragHandle = isBottom ? (
     <div
-      className="shrink-0 h-2.5 flex items-center justify-center cursor-row-resize group hover:bg-accent/60 transition-colors touch-none select-none"
+      className="shrink-0 h-2.5 w-full flex items-center justify-center cursor-row-resize group hover:bg-accent/60 transition-colors touch-none select-none"
       onPointerDown={onDragStart}
       onPointerMove={onDragMove}
       onPointerUp={onDragEnd}
@@ -944,11 +944,11 @@ function PaperContent() {
       role="separator"
       aria-orientation="horizontal"
     >
-      <div className="h-[2px] w-10 rounded-full bg-foreground/8 group-hover:bg-foreground/20 transition-colors" />
+      <div className="h-[2px] w-10 rounded-full bg-foreground/8 group-hover:bg-foreground/20 transition-colors pointer-events-none" />
     </div>
   ) : (
     <div
-      className="shrink-0 w-2.5 flex items-center justify-center cursor-col-resize group hover:bg-accent/60 transition-colors touch-none select-none"
+      className="shrink-0 w-2.5 h-full flex items-center justify-center cursor-col-resize group hover:bg-accent/60 transition-colors touch-none select-none"
       onPointerDown={onDragStart}
       onPointerMove={onDragMove}
       onPointerUp={onDragEnd}
@@ -956,7 +956,7 @@ function PaperContent() {
       role="separator"
       aria-orientation="vertical"
     >
-      <div className="w-[2px] h-8 rounded-full bg-foreground/8 group-hover:bg-foreground/20 transition-colors" />
+      <div className="w-[2px] h-8 rounded-full bg-foreground/8 group-hover:bg-foreground/20 transition-colors pointer-events-none" />
     </div>
   );
 
