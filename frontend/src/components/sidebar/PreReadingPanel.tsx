@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
 import { Button } from "@/components/ui/button";
+import { getProgressStart, clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
 import {
   Accordion,
   AccordionContent,
@@ -12,16 +13,20 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 
-function ProgressBar() {
-  const [width, setWidth] = useState(0);
+function ProgressBar({ paperId }: { paperId: string }) {
+  const [width, setWidth] = useState(() => {
+    const start = getProgressStart(paperId, "preReading");
+    const elapsed = (Date.now() - start) / 1000;
+    return Math.min(90, 90 * (1 - Math.exp(-elapsed / 10)));
+  });
   useEffect(() => {
-    const start = Date.now();
+    const start = getProgressStart(paperId, "preReading");
     const interval = setInterval(() => {
       const elapsed = (Date.now() - start) / 1000;
       setWidth(Math.min(90, 90 * (1 - Math.exp(-elapsed / 10))));
     }, 150);
     return () => clearInterval(interval);
-  }, []);
+  }, [paperId]);
   return (
     <div className="w-full max-w-xs h-1 bg-accent rounded-full overflow-hidden">
       <div className="h-full bg-foreground/60 rounded-full transition-all duration-200 ease-out" style={{ width: `${width}%` }} />
@@ -40,6 +45,8 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
 
   const handleAnalyze = async () => {
     const targetId = paperId;
+    clearProgressStart(targetId, "preReading");
+    markRequestStart(targetId, "preReading");
     setPreReadingLoading(true);
     try {
       const result = await api.analyze(targetId);
@@ -49,6 +56,8 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
     } catch (e) {
       console.error("Analysis failed:", e);
     } finally {
+      markRequestEnd(targetId, "preReading");
+      clearProgressStart(targetId, "preReading");
       if (currentPaperRef.current === targetId) {
         setPreReadingLoading(false);
       }
@@ -58,7 +67,7 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
   if (preReadingLoading) {
     return (
       <div className="flex flex-col items-center gap-3 py-8 justify-center animate-fade-in">
-        <ProgressBar />
+        <ProgressBar paperId={paperId} />
         <p className="text-[13px] text-muted-foreground">Analyzing paper...</p>
       </div>
     );

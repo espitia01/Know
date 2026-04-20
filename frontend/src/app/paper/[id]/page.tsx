@@ -11,6 +11,13 @@ import { SelectionToolbar, type SelectionAction } from "@/components/pdf/Selecti
 import { AnalysisPanel, type PanelPosition } from "@/components/panel/BottomPanel";
 import { BibtexModal } from "@/components/BibtexModal";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
+import {
+  autoAnalyzedPapers,
+  hasActiveRequest,
+  markRequestStart,
+  markRequestEnd,
+  clearProgressStart,
+} from "@/lib/analysisState";
 
 const PdfViewer = dynamic(
   () => import("@/components/pdf/PdfViewer").then((m) => m.PdfViewer),
@@ -33,8 +40,30 @@ const DEFAULT_BOTTOM = 300;
 
 const POSITIONS: PanelPosition[] = ["right", "bottom", "left"];
 
-const autoAnalyzedPapers = new Set<string>();
-const activeRequests = new Map<string, Set<string>>();
+const PANEL_POS_KEY = "know-panel-pos";
+const PANEL_SIZE_SIDE_KEY = "know-panel-size-side";
+const PANEL_SIZE_BOTTOM_KEY = "know-panel-size-bottom";
+
+function readStoredPos(): PanelPosition {
+  if (typeof window === "undefined") return "right";
+  const v = window.localStorage.getItem(PANEL_POS_KEY);
+  if (v === "right" || v === "left" || v === "bottom") return v;
+  return "right";
+}
+
+function readStoredSize(pos: PanelPosition): number {
+  if (typeof window === "undefined") return pos === "bottom" ? DEFAULT_BOTTOM : DEFAULT_SIDE;
+  const key = pos === "bottom" ? PANEL_SIZE_BOTTOM_KEY : PANEL_SIZE_SIDE_KEY;
+  const v = window.localStorage.getItem(key);
+  if (v) {
+    const n = parseInt(v, 10);
+    if (!isNaN(n)) {
+      if (pos === "bottom") return Math.min(MAX_BOTTOM, Math.max(MIN_BOTTOM, n));
+      return Math.min(MAX_SIDE, Math.max(MIN_SIDE, n));
+    }
+  }
+  return pos === "bottom" ? DEFAULT_BOTTOM : DEFAULT_SIDE;
+}
 
 function AddPaperPopover({
   sessionIds,
@@ -228,7 +257,8 @@ function PaperContent() {
     selectionResult,
     setSelectionResult, setSelectionLoading, addSelectionToHistory,
     setActiveTab,
-    setSummary,
+    setSummary, setSummaryLoading,
+    cachePaper,
     sessionPapers, addSessionPaper, removeSessionPaper, clearSession,
     savePaperCache, restorePaperCache, updatePaperCache,
     setQAResults, clearQuestions,
@@ -248,14 +278,30 @@ function PaperContent() {
       const restored = restorePaperCache(paperId);
       if (!restored) resetAnalysisState();
       cacheRestoredRef.current = restored;
+      // If a background fetch for the incoming paper is still in flight,
+      // re-show its loading state so the UI doesn't flash "Analyze Paper".
+      if (hasActiveRequest(paperId, "preReading")) setPreReadingLoading(true);
+      if (hasActiveRequest(paperId, "assumptions")) setAssumptionsLoading(true);
+      if (hasActiveRequest(paperId, "summary")) setSummaryLoading(true);
       setActivePaperId(paperId);
     }
   }, [paperId]);
-  const [panelSize, setPanelSize] = useState(DEFAULT_SIDE);
-  const [panelPos, setPanelPos] = useState<PanelPosition>("right");
+  const [panelPos, setPanelPos] = useState<PanelPosition>(() => readStoredPos());
+  const [panelSize, setPanelSize] = useState(() => readStoredSize(readStoredPos()));
   const dragging = useRef(false);
   const startCoord = useRef(0);
   const startSize = useRef(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(PANEL_POS_KEY, panelPos);
+  }, [panelPos]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const key = panelPos === "bottom" ? PANEL_SIZE_BOTTOM_KEY : PANEL_SIZE_SIDE_KEY;
+    window.localStorage.setItem(key, String(panelSize));
+  }, [panelPos, panelSize]);
 
   const [selection, setSelection] = useState<{ text: string; rect: DOMRect } | null>(null);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
@@ -348,21 +394,36 @@ function PaperContent() {
 
   useEffect(() => {
     let stale = false;
-    if (!initialLoadDone.current) setLoading(true);
     setError("");
+
+    // If we have a cached ParsedPaper, show it immediately — avoids the full-page
+    // spinner during paper switches. We still refetch in the background to pick up
+    // fresh folder/tag updates.
+    const cached = useStore.getState().papersById[activePaperId];
+    if (cached) {
+      setPaper(cached);
+      initialLoadDone.current = true;
+      setLoading(false);
+    } else if (!initialLoadDone.current) {
+      setLoading(true);
+    }
+
     api
       .getPaper(activePaperId)
       .then((p) => {
-        if (!stale) { setPaper(p); initialLoadDone.current = true; }
+        if (stale) return;
+        setPaper(p);
+        cachePaper(p);
+        initialLoadDone.current = true;
       })
       .catch((e) => {
-        if (!stale) setError(e.message);
+        if (!stale && !cached) setError(e.message);
       })
       .finally(() => {
         if (!stale) setLoading(false);
       });
     return () => { stale = true; };
-  }, [activePaperId, setPaper, setLoading]);
+  }, [activePaperId, setPaper, setLoading, cachePaper]);
 
   // Auto-analyze when paper loads (skip if cache was already restored or already analyzed this paper)
   useEffect(() => {
@@ -392,13 +453,10 @@ function PaperContent() {
       }
     }
 
-    const pending = activeRequests.get(pid) ?? new Set<string>();
-    activeRequests.set(pid, pending);
-
     if (cache.pre_reading) {
       setPreReading(cache.pre_reading);
-    } else if (canAccess(tierUser?.tier || "free", "prepare") && !pending.has("preReading")) {
-      pending.add("preReading");
+    } else if (canAccess(tierUser?.tier || "free", "prepare") && !hasActiveRequest(pid, "preReading")) {
+      markRequestStart(pid, "preReading");
       setPreReadingLoading(true);
       api.analyze(pid)
         .then((r) => {
@@ -408,7 +466,8 @@ function PaperContent() {
         })
         .catch(() => {})
         .finally(() => {
-          pending.delete("preReading");
+          markRequestEnd(pid, "preReading");
+          clearProgressStart(pid, "preReading");
           const s = useStore.getState();
           if (s.paper?.id === pid) {
             setPreReadingLoading(false);
@@ -420,8 +479,8 @@ function PaperContent() {
 
     if (cache.assumptions) {
       setAssumptions(cache.assumptions.assumptions || []);
-    } else if (canAccess(tierUser?.tier || "free", "assumptions") && !pending.has("assumptions")) {
-      pending.add("assumptions");
+    } else if (canAccess(tierUser?.tier || "free", "assumptions") && !hasActiveRequest(pid, "assumptions")) {
+      markRequestStart(pid, "assumptions");
       setAssumptionsLoading(true);
       api.getAssumptions(pid)
         .then((r) => {
@@ -431,7 +490,8 @@ function PaperContent() {
         })
         .catch(() => {})
         .finally(() => {
-          pending.delete("assumptions");
+          markRequestEnd(pid, "assumptions");
+          clearProgressStart(pid, "assumptions");
           const s = useStore.getState();
           if (s.paper?.id === pid) {
             setAssumptionsLoading(false);
@@ -467,8 +527,11 @@ function PaperContent() {
       resetAnalysisState();
     }
     cacheRestoredRef.current = restored;
+    if (hasActiveRequest(id, "preReading")) setPreReadingLoading(true);
+    if (hasActiveRequest(id, "assumptions")) setAssumptionsLoading(true);
+    if (hasActiveRequest(id, "summary")) setSummaryLoading(true);
     setActivePaperId(id);
-  }, [activePaperId, savePaperCache, restorePaperCache, resetAnalysisState]);
+  }, [activePaperId, savePaperCache, restorePaperCache, resetAnalysisState, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
 
   const handleAddPaper = useCallback((id: string, title: string) => {
     addSessionPaper({ id, title });
@@ -747,7 +810,7 @@ function PaperContent() {
     setPanelPos((cur) => {
       const idx = POSITIONS.indexOf(cur);
       const next = POSITIONS[(idx + 1) % POSITIONS.length];
-      setPanelSize(next === "bottom" ? DEFAULT_BOTTOM : DEFAULT_SIDE);
+      setPanelSize(readStoredSize(next));
       return next;
     });
   }, []);

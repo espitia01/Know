@@ -4,21 +4,30 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { api, type PaperSummary } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
+import {
+  activeSummaryStreams as activeStreams,
+  getProgressStart,
+  clearProgressStart,
+} from "@/lib/analysisState";
 
 interface SummaryPanelProps {
   paperId: string;
 }
 
-function SummaryProgressBar() {
-  const [width, setWidth] = useState(0);
+function SummaryProgressBar({ paperId }: { paperId: string }) {
+  const [width, setWidth] = useState(() => {
+    const start = getProgressStart(paperId, "summary");
+    const elapsed = (Date.now() - start) / 1000;
+    return Math.min(90, 90 * (1 - Math.exp(-elapsed / 20)));
+  });
   useEffect(() => {
-    const start = Date.now();
+    const start = getProgressStart(paperId, "summary");
     const interval = setInterval(() => {
       const elapsed = (Date.now() - start) / 1000;
       setWidth(Math.min(90, 90 * (1 - Math.exp(-elapsed / 20))));
     }, 200);
     return () => clearInterval(interval);
-  }, []);
+  }, [paperId]);
   return (
     <div className="w-full max-w-xs h-1.5 bg-accent rounded-full overflow-hidden">
       <div
@@ -28,8 +37,6 @@ function SummaryProgressBar() {
     </div>
   );
 }
-
-const activeStreams = new Map<string, AbortController>();
 
 async function fetchSummaryInBackground(paperId: string, setSummary: (s: PaperSummary) => void, setSummaryLoading: (l: boolean) => void) {
   if (activeStreams.has(paperId)) return;
@@ -80,6 +87,7 @@ async function fetchSummaryInBackground(paperId: string, setSummary: (s: PaperSu
     // stream failed or was aborted
   } finally {
     activeStreams.delete(paperId);
+    clearProgressStart(paperId, "summary");
     setSummaryLoading(false);
   }
 }
@@ -120,7 +128,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   if (summaryLoading && !effectiveSummary) {
     return (
       <div className="flex flex-col items-center justify-center py-12 gap-3">
-        <SummaryProgressBar />
+        <SummaryProgressBar paperId={paperId} />
         <p className="text-[13px] text-muted-foreground">Generating detailed summary...</p>
         <p className="text-[11px] text-muted-foreground/50">This may take 30-60 seconds</p>
       </div>
@@ -138,6 +146,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
             fetchAttempted.current = null;
             const ctrl = activeStreams.get(paperId);
             if (ctrl) { ctrl.abort(); activeStreams.delete(paperId); }
+            clearProgressStart(paperId, "summary");
             startFetch(paperId);
           }}
           className="mt-2 text-[12px] font-medium text-foreground hover:opacity-80 transition-opacity"

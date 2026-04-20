@@ -4,21 +4,26 @@ import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
+import { getProgressStart, clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
 
 interface AssumptionsPanelProps {
   paperId: string;
 }
 
-function ProgressBar() {
-  const [width, setWidth] = useState(0);
+function ProgressBar({ paperId }: { paperId: string }) {
+  const [width, setWidth] = useState(() => {
+    const start = getProgressStart(paperId, "assumptions");
+    const elapsed = (Date.now() - start) / 1000;
+    return Math.min(90, 90 * (1 - Math.exp(-elapsed / 10)));
+  });
   useEffect(() => {
-    const start = Date.now();
+    const start = getProgressStart(paperId, "assumptions");
     const interval = setInterval(() => {
       const elapsed = (Date.now() - start) / 1000;
       setWidth(Math.min(90, 90 * (1 - Math.exp(-elapsed / 10))));
     }, 150);
     return () => clearInterval(interval);
-  }, []);
+  }, [paperId]);
   return (
     <div className="w-full max-w-xs h-1 bg-accent rounded-full overflow-hidden">
       <div className="h-full bg-foreground/60 rounded-full transition-all duration-200 ease-out" style={{ width: `${width}%` }} />
@@ -33,6 +38,8 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
 
   const handleExtract = async () => {
     const targetId = paperId;
+    clearProgressStart(targetId, "assumptions");
+    markRequestStart(targetId, "assumptions");
     setAssumptionsLoading(true);
     try {
       const result = await api.getAssumptions(targetId);
@@ -42,6 +49,8 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
     } catch (e) {
       console.error("Assumptions extraction failed:", e);
     } finally {
+      markRequestEnd(targetId, "assumptions");
+      clearProgressStart(targetId, "assumptions");
       if (currentPaperRef.current === targetId) {
         setAssumptionsLoading(false);
       }
@@ -51,7 +60,7 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
   if (assumptionsLoading) {
     return (
       <div className="flex flex-col items-center gap-3 py-8 justify-center animate-fade-in">
-        <ProgressBar />
+        <ProgressBar paperId={paperId} />
         <p className="text-[13px] text-muted-foreground">Extracting assumptions...</p>
       </div>
     );

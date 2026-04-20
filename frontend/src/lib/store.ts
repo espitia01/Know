@@ -31,6 +31,12 @@ interface AppStore {
   paper: ParsedPaper | null;
   setPaper: (p: ParsedPaper | null) => void;
 
+  // Cache of full ParsedPaper objects keyed by id — lets us show a paper
+  // instantly while a background refresh runs.
+  papersById: Record<string, ParsedPaper>;
+  cachePaper: (p: ParsedPaper) => void;
+  getCachedPaper: (id: string) => ParsedPaper | undefined;
+
   sessionPapers: { id: string; title: string }[];
   addSessionPaper: (p: { id: string; title: string }) => void;
   removeSessionPaper: (id: string) => void;
@@ -113,6 +119,11 @@ export const useStore = create<AppStore>()(
     (set, get) => ({
       paper: null,
       setPaper: (p) => set({ paper: p }),
+
+      papersById: {},
+      cachePaper: (p) =>
+        set((s) => ({ papersById: { ...s.papersById, [p.id]: p } })),
+      getCachedPaper: (id) => get().papersById[id],
 
       sessionPapers: [],
       addSessionPaper: (p) =>
@@ -300,6 +311,7 @@ export const useStore = create<AppStore>()(
         paperCaches: state.paperCaches,
         sessionPapers: state.sessionPapers,
         crossPaperResults: state.crossPaperResults,
+        papersById: state.papersById,
       }),
     }
   )
