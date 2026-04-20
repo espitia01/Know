@@ -98,8 +98,9 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
             p.cached_analysis["pre_reading"] = analysis.model_dump()
         mutate_paper(paper_id, user_id, _apply)
         return analysis
-    except ValueError:
+    except ValueError as exc:
         release_usage(token)
+        logger.warning("Analysis 503 for paper %s: %s", paper_id, exc)
         raise HTTPException(status_code=503, detail="Analysis service temporarily unavailable.")
     except HTTPException:
         release_usage(token)
@@ -138,8 +139,9 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
             append_capped(p.cached_analysis, "selections", result)
         mutate_paper(paper_id, user_id, _apply)
         return result
-    except ValueError:
+    except ValueError as exc:
         release_usage(token)
+        logger.warning("Selection 503 for paper %s: %s", paper_id, exc)
         raise HTTPException(status_code=503, detail="Selection analysis service temporarily unavailable.")
     except HTTPException:
         release_usage(token)
@@ -294,8 +296,9 @@ async def skipped_steps(paper_id: str, body: dict, user_id: str = Depends(requir
             append_capped(p.cached_analysis, "skipped_steps", result)
         mutate_paper(paper_id, user_id, _apply)
         return result
-    except ValueError:
+    except ValueError as exc:
         release_usage(token)
+        logger.warning("Analysis endpoint 503 for paper %s: %s", paper_id, exc)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
     except HTTPException:
         release_usage(token)
@@ -325,8 +328,9 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
             p.cached_analysis["assumptions"] = resp.model_dump()
         mutate_paper(paper_id, user_id, _apply)
         return resp
-    except ValueError:
+    except ValueError as exc:
         release_usage(token)
+        logger.warning("Analysis endpoint 503 for paper %s: %s", paper_id, exc)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
     except HTTPException:
         release_usage(token)
@@ -364,8 +368,9 @@ async def derivation_exercise(paper_id: str, body: dict, user_id: str = Depends(
             append_capped(p.cached_analysis, "derivation_exercises", exercise.model_dump())
         mutate_paper(paper_id, user_id, _apply)
         return exercise
-    except ValueError:
+    except ValueError as exc:
         release_usage(token)
+        logger.warning("Analysis endpoint 503 for paper %s: %s", paper_id, exc)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
     except HTTPException:
         release_usage(token)
@@ -403,8 +408,9 @@ async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)
             append_capped(p.cached_analysis, "qa_sessions", resp.model_dump())
         mutate_paper(paper_id, user_id, _apply)
         return resp
-    except ValueError:
+    except ValueError as exc:
         release_usage(token)
+        logger.warning("Q&A 503 for paper %s: %s", paper_id, exc)
         raise HTTPException(status_code=503, detail="Q&A service temporarily unavailable.")
     except HTTPException:
         release_usage(token)
@@ -436,8 +442,9 @@ async def summary(paper_id: str, user_id: str = Depends(require_auth)):
             p.cached_analysis["summary"] = result
         mutate_paper(paper_id, user_id, _apply)
         return result
-    except ValueError:
+    except ValueError as exc:
         release_usage(token)
+        logger.warning("Analysis endpoint 503 for paper %s: %s", paper_id, exc)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
     except HTTPException:
         release_usage(token)
@@ -575,8 +582,9 @@ async def figure_qa(paper_id: str, body: dict, user_id: str = Depends(require_au
             append_capped(p.cached_analysis, "figure_analyses", result)
         mutate_paper(paper_id, user_id, _apply)
         return result
-    except ValueError:
+    except ValueError as exc:
         release_usage(token)
+        logger.warning("Analysis endpoint 503 for paper %s: %s", paper_id, exc)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
     except HTTPException:
         release_usage(token)
@@ -740,9 +748,10 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
         if isinstance(result, dict) and "items" in result:
             return result
         return {"items": result}
-    except ValueError:
+    except ValueError as exc:
         for t in tokens:
             release_usage(t)
+        logger.warning("Cross-paper 503: %s", exc)
         raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
     except HTTPException:
         for t in tokens:

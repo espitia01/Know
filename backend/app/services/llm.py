@@ -8,11 +8,16 @@ import io
 from abc import ABC, abstractmethod
 from typing import AsyncIterator
 
+import logging
+
 import httpx
 import ssl
 import certifi
 
 from ..config import settings
+
+logger = logging.getLogger(__name__)
+_warned_missing_key = False
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -241,6 +246,13 @@ class LocalModelProvider(LLMProvider):
 def get_provider(user_id: str | None = None) -> LLMProvider:
     """Get the LLM provider for heavy analysis tasks, enforcing tier model limits."""
     if not settings.anthropic_api_key:
+        global _warned_missing_key
+        if not _warned_missing_key:
+            logger.critical(
+                "KNOW_ANTHROPIC_API_KEY is not set — all LLM-backed endpoints "
+                "will return 503 until it is configured."
+            )
+            _warned_missing_key = True
         raise ValueError("No API key configured. Set KNOW_ANTHROPIC_API_KEY.")
     model = settings.analysis_model
     if user_id:
@@ -254,6 +266,13 @@ def get_provider(user_id: str | None = None) -> LLMProvider:
 def get_fast_provider(user_id: str | None = None) -> LLMProvider:
     """Get a faster LLM provider for interactive tasks, enforcing tier model limits."""
     if not settings.anthropic_api_key:
+        global _warned_missing_key
+        if not _warned_missing_key:
+            logger.critical(
+                "KNOW_ANTHROPIC_API_KEY is not set — all LLM-backed endpoints "
+                "will return 503 until it is configured."
+            )
+            _warned_missing_key = True
         raise ValueError("No API key configured. Set KNOW_ANTHROPIC_API_KEY.")
     model = settings.fast_model
     if user_id:
