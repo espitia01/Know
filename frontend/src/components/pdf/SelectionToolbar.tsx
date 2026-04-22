@@ -81,19 +81,43 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
 
     const tw = toolbar.offsetWidth;
     const th = toolbar.offsetHeight;
+    const GAP = 12;
+    const EDGE = 8;
 
-    let top = rect.top - th - 10;
+    // Prefer above the selection. Flip below when it would clip the top,
+    // and finally pin to the bottom edge if neither fits (very rare, e.g.
+    // selection spans the full viewport).
+    let top = rect.top - th - GAP;
+    if (top < EDGE) {
+      top = rect.bottom + GAP;
+      if (top + th > window.innerHeight - EDGE) {
+        top = Math.max(EDGE, window.innerHeight - th - EDGE);
+      }
+    }
+
     let left = rect.left + rect.width / 2 - tw / 2;
-
-    if (top < 4) top = rect.bottom + 10;
-    if (left < 4) left = 4;
-    if (left + tw > window.innerWidth - 4) left = window.innerWidth - tw - 4;
+    if (left < EDGE) left = EDGE;
+    if (left + tw > window.innerWidth - EDGE) left = window.innerWidth - tw - EDGE;
 
     setPos({ top, left });
   }, [rect]);
 
   useEffect(() => {
     updatePosition();
+  }, [updatePosition]);
+
+  // Keep the toolbar anchored to the selection as the user scrolls, resizes,
+  // or zooms the PDF. Without this, the pill visibly drifts (or ends up
+  // floating over unrelated text) which was the root cause of the
+  // "overlaid words" complaint.
+  useEffect(() => {
+    const handler = () => updatePosition();
+    window.addEventListener("scroll", handler, true);
+    window.addEventListener("resize", handler);
+    return () => {
+      window.removeEventListener("scroll", handler, true);
+      window.removeEventListener("resize", handler);
+    };
   }, [updatePosition]);
 
   useEffect(() => {
@@ -119,33 +143,42 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
 
   const cleanText = text.replace(/\s+/g, " ").trim();
 
+  // Pointer-events must be suppressed on the wrapper so the initial
+  // "selection completed" event that spawned us doesn't also fire
+  // through the toolbar into the page, which could blur the selection
+  // immediately. The inner pill re-enables interactions for buttons.
   return (
     <div
       ref={toolbarRef}
-      className="fixed z-50 animate-fade-in"
+      className="fixed z-50 pointer-events-none animate-fade-in"
       style={{ top: pos.top, left: pos.left }}
+      onMouseDown={(e) => e.stopPropagation()}
     >
-      <div className="bg-card shadow-2xl rounded-2xl px-1.5 py-1.5 flex items-center gap-0.5 border border-border">
-        {visibleActions.map((a) => (
+      <div
+        role="toolbar"
+        aria-label="Selection actions"
+        className="pointer-events-auto flex items-center gap-0.5 rounded-2xl border border-border/80 bg-popover/95 backdrop-blur-md shadow-xl shadow-black/10 dark:shadow-black/40 px-1 py-1"
+      >
+        {visibleActions.map((a, i) => (
           <button
             key={a.id}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
               onAction(a.id, cleanText);
             }}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors whitespace-nowrap"
+            title={a.label}
+            aria-label={a.label}
+            className={`group flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/70 active:scale-[0.97] transition-all whitespace-nowrap ${
+              i === 0 ? "" : "ml-px"
+            }`}
           >
             <a.Icon />
-            {a.label}
+            <span className="leading-none">{a.label}</span>
           </button>
         ))}
       </div>
-      {cleanText.length > 40 && (
-        <div className="mt-1.5 mx-1 px-2.5 py-1.5 text-[10px] text-muted-foreground/80 bg-card border border-border rounded-xl max-w-sm leading-relaxed line-clamp-2 shadow-sm">
-          {cleanText.slice(0, 120)}{cleanText.length > 120 ? "..." : ""}
-        </div>
-      )}
     </div>
   );
 }

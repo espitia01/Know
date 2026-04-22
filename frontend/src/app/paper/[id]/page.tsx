@@ -496,68 +496,78 @@ function PaperContent() {
       if (JSON.stringify(store.selectionHistory) !== JSON.stringify(merged)) {
         useStore.setState({ selectionHistory: merged.slice(0, 50) });
       }
+      // On a fresh mount (e.g. after refresh), surface the most recent
+      // selection as the "current" result so the Selections tab isn't
+      // just an empty collapsed history list. We only do this when the
+      // store has no active result — mid-stream or fresh selections take
+      // precedence.
+      if (!store.selectionResult && !store.selectionLoading && merged.length > 0) {
+        useStore.setState({ selectionResult: merged[0] });
+      }
     }
 
     // Pre-reading: prefer the server cache; otherwise kick off a fresh
     // analysis for users with the "prepare" feature.
+    // Note: per-field hydration below deliberately avoids "else: setXxx(null)"
+    // branches. The effect re-runs whenever `paper` changes (e.g. a
+    // background refetch lands), and a blanket clear would race with
+    // in-flight analyses — we'd setPreReading(null) on re-entry while the
+    // api.analyze call was still running, then when it resolves the
+    // result can be invisible if another re-run happens between. Paper
+    // switches handle cross-paper bleed via resetAnalysisState() in
+    // handleSwitchPaper / URL-change effect.
     if (cache.pre_reading) {
       setPreReading(cache.pre_reading);
-    } else if (canAccess(tierUser?.tier || "free", "prepare") && !hasActiveRequest(pid, "preReading")) {
-      if (!autoAnalyzedPapers.has(`${pid}:preReading`)) {
-        autoAnalyzedPapers.add(`${pid}:preReading`);
-        markRequestStart(pid, "preReading");
-        setPreReadingLoading(true);
-        api.analyze(pid)
-          .then((r) => {
-            const s = useStore.getState();
-            if (s.paper?.id === pid) setPreReading(r);
-          })
-          .catch(() => {})
-          .finally(() => {
-            markRequestEnd(pid, "preReading");
-            clearProgressStart(pid, "preReading");
-            if (useStore.getState().paper?.id === pid) {
-              setPreReadingLoading(false);
-            }
-          });
-      }
-    } else {
-      // Server has nothing and user can't trigger one — clear the pane so
-      // we don't show another paper's pre-reading.
-      setPreReading(null);
+    } else if (
+      canAccess(tierUser?.tier || "free", "prepare") &&
+      !hasActiveRequest(pid, "preReading") &&
+      !autoAnalyzedPapers.has(`${pid}:preReading`)
+    ) {
+      autoAnalyzedPapers.add(`${pid}:preReading`);
+      markRequestStart(pid, "preReading");
+      setPreReadingLoading(true);
+      api.analyze(pid)
+        .then((r) => {
+          const s = useStore.getState();
+          if (s.paper?.id === pid) setPreReading(r);
+        })
+        .catch(() => {})
+        .finally(() => {
+          markRequestEnd(pid, "preReading");
+          clearProgressStart(pid, "preReading");
+          if (useStore.getState().paper?.id === pid) {
+            setPreReadingLoading(false);
+          }
+        });
     }
 
     if (cache.assumptions) {
       setAssumptions(cache.assumptions.assumptions || []);
-    } else if (canAccess(tierUser?.tier || "free", "assumptions") && !hasActiveRequest(pid, "assumptions")) {
-      if (!autoAnalyzedPapers.has(`${pid}:assumptions`)) {
-        autoAnalyzedPapers.add(`${pid}:assumptions`);
-        markRequestStart(pid, "assumptions");
-        setAssumptionsLoading(true);
-        api.getAssumptions(pid)
-          .then((r) => {
-            const s = useStore.getState();
-            if (s.paper?.id === pid) setAssumptions(r.assumptions);
-          })
-          .catch(() => {})
-          .finally(() => {
-            markRequestEnd(pid, "assumptions");
-            clearProgressStart(pid, "assumptions");
-            if (useStore.getState().paper?.id === pid) {
-              setAssumptionsLoading(false);
-            }
-          });
-      }
-    } else {
-      setAssumptions([]);
+    } else if (
+      canAccess(tierUser?.tier || "free", "assumptions") &&
+      !hasActiveRequest(pid, "assumptions") &&
+      !autoAnalyzedPapers.has(`${pid}:assumptions`)
+    ) {
+      autoAnalyzedPapers.add(`${pid}:assumptions`);
+      markRequestStart(pid, "assumptions");
+      setAssumptionsLoading(true);
+      api.getAssumptions(pid)
+        .then((r) => {
+          const s = useStore.getState();
+          if (s.paper?.id === pid) setAssumptions(r.assumptions);
+        })
+        .catch(() => {})
+        .finally(() => {
+          markRequestEnd(pid, "assumptions");
+          clearProgressStart(pid, "assumptions");
+          if (useStore.getState().paper?.id === pid) {
+            setAssumptionsLoading(false);
+          }
+        });
     }
 
     if (cache.summary) {
       setSummary(cache.summary);
-    } else {
-      // Summary is streamed lazily by SummaryPanel; clear so the new
-      // paper's panel starts in its own fetch-or-empty state.
-      setSummary(null);
     }
 
     if (cache.qa_sessions && cache.qa_sessions.length > 0) {
@@ -565,8 +575,6 @@ function PaperContent() {
         (session: { items?: { question: string; answer: string }[] }) => session.items || []
       );
       useStore.getState().setQAResults(allItems);
-    } else {
-      useStore.getState().setQAResults([]);
     }
   }, [paper, activePaperId, tierUser?.tier, tierLoading, setPreReading, setPreReadingLoading, setAssumptions, setAssumptionsLoading, setNotes, setSummary]);
 
@@ -1008,6 +1016,7 @@ function PaperContent() {
     <>
       <PdfViewer
         url={api.getPdfUrl(activePaperId)}
+        paperId={activePaperId}
         onTextSelected={handleTextSelected}
         onSelectionClear={handleSelectionClear}
       />
@@ -1100,7 +1109,7 @@ function PaperContent() {
             {paper.folder || "No folder"}
           </button>
           {showFolderPicker && (
-            <div className="absolute right-0 top-full mt-1 z-50 glass-strong rounded-2xl shadow-lg p-2 w-48 space-y-1 animate-fade-in">
+            <div className="absolute right-0 top-full mt-1 z-50 glass-strong rounded-2xl shadow-lg p-2 w-64 max-w-[calc(100vw-1rem)] space-y-1 animate-fade-in">
               <button
                 onClick={() => handleMoveToFolder("")}
                 className={`w-full text-left text-[11px] px-2 py-1.5 rounded-md transition-colors ${
@@ -1121,18 +1130,23 @@ function PaperContent() {
                 </button>
               ))}
               <div className="border-t border-border pt-1.5 mt-1.5">
-                <div className="flex gap-1">
+                {/* min-w-0 lets the flex child (<input>) shrink below its
+                    intrinsic placeholder width. Without it the input kept its
+                    ~100px "New folder..." default and pushed the Add button
+                    out of the 192px dropdown. */}
+                <div className="flex gap-1 items-center">
                   <input
                     value={folderInput}
                     onChange={(e) => setFolderInput(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleCreateAndMoveToFolder()}
                     placeholder="New folder..."
-                    className="flex-1 text-[11px] px-2 py-1 rounded border border-border bg-background focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                    className="flex-1 min-w-0 text-[11px] px-2 py-1 rounded-md border border-border bg-background focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
                     autoFocus
                   />
                   <button
                     onClick={handleCreateAndMoveToFolder}
-                    className="text-[10px] font-medium text-foreground px-1.5"
+                    disabled={!folderInput.trim()}
+                    className="shrink-0 text-[11px] font-medium px-2 py-1 rounded-md btn-primary-glass text-background transition-opacity disabled:opacity-40"
                   >
                     Add
                   </button>

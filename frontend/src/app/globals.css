@@ -382,13 +382,27 @@
 .paper-content figure { margin: 1.5em 0; }
 .paper-content img { max-width: 100%; border-radius: 6px; }
 
-/* PDF text layer selection highlighting — use the theme ring color so it
-   matches in dark mode instead of a hard-coded blue. */
+/* PDF text layer — pdfjs keeps the glyphs transparent for selection, but
+   some browsers/AT profiles can surface residual rendering which manifests
+   as the "overlaid words" users reported on top of the canvas. We force
+   the layer transparent and only reveal it through the native highlight
+   colors below. */
+.react-pdf__Page__textContent {
+  color: transparent !important;
+  caret-color: var(--foreground);
+  mix-blend-mode: normal !important;
+}
+.react-pdf__Page__textContent span,
+.react-pdf__Page__textContent br {
+  color: transparent !important;
+}
 .react-pdf__Page__textContent ::selection {
   background: color-mix(in oklab, var(--ring) 42%, transparent) !important;
+  color: transparent !important;
 }
 .react-pdf__Page__textContent ::-moz-selection {
   background: color-mix(in oklab, var(--ring) 42%, transparent) !important;
+  color: transparent !important;
 }
 
 /* ────────────────────────────────────────────────────────────────────────

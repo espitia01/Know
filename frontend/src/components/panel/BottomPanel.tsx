@@ -46,7 +46,15 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
   const { user } = useUserTier();
   const tier = user?.tier || "free";
 
-  const showSelectionTab = selectionLoading || selectionResult !== null;
+  // Keep the Selections tab pinned whenever the user has at least one
+  // past selection for this paper. Previously it only appeared while a
+  // result was actively displayed, which meant a hard refresh wiped the
+  // tab even though the server still had the full history — users had to
+  // make a fresh selection just to get back into their prior analyses.
+  // The tab hides again only when history is empty AND nothing is
+  // streaming.
+  const showSelectionTab =
+    selectionLoading || selectionResult !== null || selectionHistory.length > 0;
   const hasMultiplePapers = sessionPapers.length > 1;
 
   const effectiveTab = activeTab === "selection" && !showSelectionTab ? "summary" : activeTab;

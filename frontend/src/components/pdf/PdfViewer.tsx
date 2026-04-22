@@ -18,14 +18,16 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 
 interface PdfViewerProps {
   url: string;
+  paperId?: string;
   onTextSelected?: (text: string, rect: DOMRect) => void;
   onSelectionClear?: () => void;
 }
 
 const PAGE_GAP = 16;
 const BUFFER_PAGES = 2;
+const SCROLL_STORAGE_PREFIX = "know-pdf-scroll:";
 
-export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerProps) {
+export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: PdfViewerProps) {
   const [numPages, setNumPages] = useState(0);
   const [scale, setScale] = useState(1.0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -38,6 +40,10 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
   const retryCount = useRef(0);
 
   const [retryKey, setRetryKey] = useState(0);
+  // Whether we've already restored the persisted scroll for this paper. We
+  // restore exactly once per (paperId, retryKey) pair, on the first page
+  // that renders — before any user scrolling writes new values.
+  const scrollRestoredRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,6 +135,7 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
     if (!container) return;
 
     let ticking = false;
+    let saveTimer: ReturnType<typeof setTimeout> | null = null;
     const onScroll = () => {
       if (!ticking) {
         ticking = true;
@@ -137,10 +144,34 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
           ticking = false;
         });
       }
+      // Persist scroll position (debounced) so a refresh restores the
+      // reader to exactly where they left off. Keyed by paperId so each
+      // paper remembers its own position.
+      if (paperId && scrollRestoredRef.current) {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+          try {
+            localStorage.setItem(
+              `${SCROLL_STORAGE_PREFIX}${paperId}`,
+              String(container.scrollTop),
+            );
+          } catch { /* quota / private mode — non-fatal */ }
+        }, 250);
+      }
     };
     container.addEventListener("scroll", onScroll, { passive: true });
-    return () => container.removeEventListener("scroll", onScroll);
-  }, [updateVisibleRange]);
+    return () => {
+      container.removeEventListener("scroll", onScroll);
+      if (saveTimer) clearTimeout(saveTimer);
+    };
+  }, [updateVisibleRange, paperId]);
+
+  // Reset the restoration flag whenever we switch to a different paper or
+  // reload the same one — the next page render should re-apply the saved
+  // scroll for the new document.
+  useEffect(() => {
+    scrollRestoredRef.current = false;
+  }, [paperId, retryKey]);
 
   const handlePageRender = useCallback((pageNum: number) => {
     const el = containerRef.current?.querySelector(`[data-page-number="${pageNum}"]`);
@@ -151,7 +182,22 @@ export function PdfViewer({ url, onTextSelected, onSelectionClear }: PdfViewerPr
         updateVisibleRange();
       }
     }
-  }, [updateVisibleRange]);
+    // One-shot scroll restoration after the first real page paint. We wait
+    // until *a* page renders so we know the page dimensions are final
+    // (pageHeightRef is accurate); scrolling before that would overshoot
+    // because every page placeholder uses the initial 800px estimate.
+    if (!scrollRestoredRef.current && paperId && containerRef.current) {
+      const container = containerRef.current;
+      try {
+        const raw = localStorage.getItem(`${SCROLL_STORAGE_PREFIX}${paperId}`);
+        const saved = raw ? parseInt(raw, 10) : 0;
+        if (saved > 0 && Number.isFinite(saved)) {
+          container.scrollTop = saved;
+        }
+      } catch { /* ignore */ }
+      scrollRestoredRef.current = true;
+    }
+  }, [updateVisibleRange, paperId]);
 
   const handleMouseUp = useCallback(() => {
     const sel = window.getSelection();

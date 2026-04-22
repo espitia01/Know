@@ -121,12 +121,29 @@ export function useUserTier() {
 // cancellation card). Users previously only learned their subscription was
 // cancelled when they happened to visit Settings; now they're reminded
 // wherever they are.
+// Days-remaining threshold below which we surface the "subscription ending"
+// reminder. Above this, the cancellation is noted in Settings only — we
+// don't want to nag users who still have weeks or months of access.
+const CANCELLATION_WARNING_DAYS = 3;
+
 function CancellationBanner({ user }: { user: UserInfo | null }) {
   const [dismissed, setDismissed] = useState(true);
   const cancelAt = user?.cancel_at ?? null;
 
+  // How many whole days remain until access ends. Null when there's no
+  // pending cancellation (so the banner is hidden entirely).
+  const daysRemaining = useMemo(() => {
+    if (!user?.cancel_at_period_end || !cancelAt) return null;
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const diff = cancelAt * 1000 - Date.now();
+    return Math.ceil(diff / msPerDay);
+  }, [user?.cancel_at_period_end, cancelAt]);
+
+  const withinWarningWindow =
+    daysRemaining !== null && daysRemaining <= CANCELLATION_WARNING_DAYS;
+
   useEffect(() => {
-    if (!user?.cancel_at_period_end) { setDismissed(true); return; }
+    if (!withinWarningWindow) { setDismissed(true); return; }
     if (typeof window === "undefined") return;
     try {
       const stored = sessionStorage.getItem(CANCELLATION_DISMISS_KEY);
@@ -134,7 +151,7 @@ function CancellationBanner({ user }: { user: UserInfo | null }) {
     } catch {
       setDismissed(false);
     }
-  }, [user?.cancel_at_period_end, cancelAt]);
+  }, [withinWarningWindow, cancelAt]);
 
   const dateLabel = useMemo(() => {
     if (!cancelAt) return "";
@@ -145,7 +162,14 @@ function CancellationBanner({ user }: { user: UserInfo | null }) {
     } catch { return ""; }
   }, [cancelAt]);
 
-  if (!user?.cancel_at_period_end || dismissed) return null;
+  if (!withinWarningWindow || dismissed) return null;
+
+  const daysLabel = (() => {
+    if (daysRemaining === null) return "";
+    if (daysRemaining <= 0) return "today";
+    if (daysRemaining === 1) return "tomorrow";
+    return `in ${daysRemaining} days`;
+  })();
 
   return (
     <div
@@ -157,7 +181,7 @@ function CancellationBanner({ user }: { user: UserInfo | null }) {
       </svg>
       <div className="flex-1 min-w-0">
         <p className="text-[12px] font-semibold text-foreground">
-          Subscription ending{dateLabel ? ` on ${dateLabel}` : ""}
+          Subscription ending {daysLabel}{dateLabel ? ` (${dateLabel})` : ""}
         </p>
         <p className="text-[11px] text-muted-foreground mt-0.5">
           You&apos;ll keep access until then. Visit Settings to resume.

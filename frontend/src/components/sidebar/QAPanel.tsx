@@ -69,6 +69,30 @@ export function QAPanel({ paperId }: QAPanelProps) {
     };
   }, []);
 
+  // Keep the draft question for this paper so a refresh or accidental
+  // navigation doesn't lose what the user was in the middle of typing.
+  // Scoped per paper so switching between papers doesn't blend drafts.
+  const draftKey = `know-qa-draft:${paperId}`;
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(draftKey);
+      if (saved) setInput(saved);
+    } catch { /* ignore */ }
+    // Only restore on mount or paper switch — deliberate empty dep on
+    // setInput since the setter is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paperId]);
+
+  useEffect(() => {
+    try {
+      if (input.trim()) {
+        localStorage.setItem(draftKey, input);
+      } else {
+        localStorage.removeItem(draftKey);
+      }
+    } catch { /* ignore */ }
+  }, [input, draftKey]);
+
   const handleAdd = () => {
     const q = input.trim();
     if (q) {
