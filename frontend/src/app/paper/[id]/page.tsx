@@ -477,11 +477,17 @@ function PaperContent() {
   // re-entry.
   useEffect(() => {
     if (!paper || paper.id !== activePaperId) return;
-    if (tierLoading) return;
 
     const pid = activePaperId;
     const cache = paper.cached_analysis || {};
 
+    // Notes and selection history don't require a tier check and must
+    // hydrate even when `/api/user` is slow or transiently failing. We
+    // saw reports of the Selections tab "still wiping on refresh"
+    // that lined up with tierLoading being stuck true after a
+    // cold-start tier fetch: gating every hydration on the tier blocked
+    // purely display-side state that has nothing to do with feature
+    // entitlements.
     if (paper.notes) setNotes(paper.notes);
 
     // Selection history: always mirror the server list. Previously this
@@ -505,6 +511,31 @@ function PaperContent() {
         useStore.setState({ selectionResult: merged[0] });
       }
     }
+
+    // Summary and QA hydration don't depend on tier either — users can
+    // always view previously-computed results regardless of current plan.
+    if (cache.summary) {
+      setSummary(cache.summary);
+    }
+    // Q&A history: hydrate from server only when it has more items than
+    // whatever is currently on screen. This prevents a background refetch
+    // from wiping a just-answered question that hasn't been flushed to the
+    // server yet (the "previous questions randomly disappear" report).
+    if (cache.qa_sessions && cache.qa_sessions.length > 0) {
+      const allItems = cache.qa_sessions.flatMap(
+        (session: { items?: { question: string; answer: string }[] }) => session.items || []
+      );
+      const liveCount = useStore.getState().qaResults.length;
+      if (allItems.length >= liveCount) {
+        useStore.getState().setQAResults(allItems);
+      }
+    }
+
+    // Auto-triggered extractions DO need a tier check and the tier to
+    // finish loading — we can't know whether the user can run pre-reading
+    // or assumptions until then. Short-circuit the rest of the effect
+    // instead of re-entering every render.
+    if (tierLoading) return;
 
     // Pre-reading: prefer the server cache; otherwise kick off a fresh
     // analysis for users with the "prepare" feature.
@@ -541,9 +572,20 @@ function PaperContent() {
         });
     }
 
-    if (cache.assumptions) {
-      setAssumptions(cache.assumptions.assumptions || []);
+    // Only overwrite in-memory assumptions when the server has real data
+    // to offer. An empty `cache.assumptions.assumptions` can sneak in when
+    // a background paper refetch races with an in-flight extraction (or
+    // when an older deployment cached a parse-failure as `[]`), and
+    // clobbering live state causes the "assumptions disappear mid-session"
+    // regression users have been hitting.
+    const serverAssumptions = Array.isArray(cache.assumptions?.assumptions)
+      ? cache.assumptions.assumptions
+      : null;
+    if (serverAssumptions && serverAssumptions.length > 0) {
+      setAssumptions(serverAssumptions);
     } else if (
+      !serverAssumptions &&
+      useStore.getState().assumptions.length === 0 &&
       canAccess(tierUser?.tier || "free", "assumptions") &&
       !hasActiveRequest(pid, "assumptions") &&
       !autoAnalyzedPapers.has(`${pid}:assumptions`)
@@ -564,17 +606,6 @@ function PaperContent() {
             setAssumptionsLoading(false);
           }
         });
-    }
-
-    if (cache.summary) {
-      setSummary(cache.summary);
-    }
-
-    if (cache.qa_sessions && cache.qa_sessions.length > 0) {
-      const allItems = cache.qa_sessions.flatMap(
-        (session: { items?: { question: string; answer: string }[] }) => session.items || []
-      );
-      useStore.getState().setQAResults(allItems);
     }
   }, [paper, activePaperId, tierUser?.tier, tierLoading, setPreReading, setPreReadingLoading, setAssumptions, setAssumptionsLoading, setNotes, setSummary]);
 
@@ -602,9 +633,18 @@ function PaperContent() {
   }, [activePaperId, paperId, router, savePaperCache, restorePaperCache, resetAnalysisState, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
 
   const handleAddPaper = useCallback((id: string, title: string) => {
+    // Register the paper in the multi-paper session tab bar…
     addSessionPaper({ id, title });
     setShowAddPaper(false);
-  }, [addSessionPaper]);
+    // …and open it. Previously we silently added it to the session
+    // without navigating, which made uploads look like they had failed
+    // because the reader was still showing the old paper. Switch to the
+    // new paper explicitly unless the user is already looking at it
+    // (idempotent — `handleSwitchPaper` no-ops when id === activePaperId).
+    if (id !== activePaperId) {
+      handleSwitchPaper(id);
+    }
+  }, [addSessionPaper, activePaperId, handleSwitchPaper]);
 
   const handleRemoveSessionPaper = useCallback((id: string) => {
     if (sessionPapers.length <= 1) return;
