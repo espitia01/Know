@@ -2,7 +2,8 @@
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
-import { getAuthHeadersSync } from "@/lib/api";
+import { getAuthHeadersSync, SelectionAnalysisResult } from "@/lib/api";
+import { useStore } from "@/lib/store";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 
@@ -41,6 +42,14 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
   const [visibleRange, setVisibleRange] = useState({ start: 1, end: 5 });
   const containerRef = useRef<HTMLDivElement>(null);
   const pageHeightRef = useRef(800);
+
+  // Selection history provides the "Kindle-style" underlines we paint
+  // on top of each page. Reading the array directly would re-render the
+  // entire viewer every time a new analysis streams in; we only need a
+  // stable reference to `selectionHistory` when drawing, so we pull it
+  // from the store lazily inside the draw callback via `getState`.
+  const selectionHistory = useStore((s) => s.selectionHistory);
+  const openSelectionFromHistory = useStore((s) => s.openSelectionFromHistory);
 
   const [retryKey, setRetryKey] = useState(0);
   // Whether we've already restored the persisted scroll for this paper. We
@@ -166,14 +175,145 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
     scrollRestoredRef.current = false;
   }, [paperId, retryKey]);
 
+  // Paint Kindle-style underlines for every history entry found on a
+  // given page. We run this (a) after each page's onRenderSuccess and
+  // (b) whenever selectionHistory changes while pages are already
+  // mounted. Matching is tolerant of whitespace collapsing — the text
+  // layer inserts soft line breaks that a strict substring search would
+  // miss — so we convert the needle into a regex whose inter-word
+  // whitespace is flexible (`\s+`).
+  const drawUnderlinesForPage = useCallback((pageEl: HTMLElement, history: SelectionAnalysisResult[]) => {
+    const textLayer = pageEl.querySelector(".react-pdf__Page__textContent") as HTMLElement | null;
+    if (!textLayer) return;
+
+    pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
+    if (history.length === 0) return;
+
+    const pageStyle = getComputedStyle(pageEl);
+    if (pageStyle.position === "static") pageEl.style.position = "relative";
+
+    // Collect every text node under the layer and build a flat string
+    // along with (startOffset, node) pairs so we can cheaply translate
+    // a character index back into a (node, localOffset) pair for Range
+    // construction.
+    const walker = document.createTreeWalker(textLayer, NodeFilter.SHOW_TEXT);
+    const offsets: Array<{ start: number; node: Text }> = [];
+    let combined = "";
+    let n: Node | null;
+    while ((n = walker.nextNode())) {
+      const text = (n as Text).data;
+      offsets.push({ start: combined.length, node: n as Text });
+      combined += text;
+    }
+    if (!combined) return;
+
+    const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const locate = (flat: number) => {
+      for (let i = offsets.length - 1; i >= 0; i--) {
+        if (offsets[i].start <= flat) {
+          return { node: offsets[i].node, offset: Math.min(flat - offsets[i].start, offsets[i].node.data.length) };
+        }
+      }
+      return null;
+    };
+
+    const overlay = document.createElement("div");
+    overlay.className = "know-selection-overlay";
+    const pageRect = pageEl.getBoundingClientRect();
+
+    // Iterate newest-first so that the most recent underline wins when
+    // two selections overlap (they're stacked but newer-on-top reads
+    // clearest). Cap per-page matches at 12 to keep the DOM light on
+    // papers where the user analyzes dozens of selections.
+    const seenRanges: Array<[number, number]> = [];
+    let painted = 0;
+    for (let i = 0; i < history.length && painted < 12; i++) {
+      const entry = history[i];
+      const raw = entry.selected_text?.trim();
+      if (!raw || raw.length < 8) continue;
+      // Fuzzy match: split on whitespace, re-join with \s+ so line wraps
+      // in the text layer don't break the match.
+      const parts = raw.split(/\s+/).map(escapeRe);
+      if (parts.length === 0) continue;
+      let pattern: RegExp;
+      try {
+        pattern = new RegExp(parts.join("\\s+"), "i");
+      } catch {
+        continue;
+      }
+      const m = pattern.exec(combined);
+      if (!m || m.index == null) continue;
+      const start = m.index;
+      const end = start + m[0].length;
+
+      const overlaps = seenRanges.some(([s, e]) => !(end <= s || start >= e));
+      if (overlaps) continue;
+      seenRanges.push([start, end]);
+
+      const startLoc = locate(start);
+      const endLoc = locate(end);
+      if (!startLoc || !endLoc) continue;
+
+      const range = document.createRange();
+      try {
+        range.setStart(startLoc.node, startLoc.offset);
+        range.setEnd(endLoc.node, endLoc.offset);
+      } catch {
+        continue;
+      }
+      const rects = range.getClientRects();
+      for (const r of Array.from(rects)) {
+        if (r.width < 4 || r.height < 4) continue;
+        const div = document.createElement("div");
+        div.className = "know-selection-underline";
+        div.style.left = `${r.left - pageRect.left}px`;
+        div.style.top = `${r.top - pageRect.top}px`;
+        div.style.width = `${r.width}px`;
+        div.style.height = `${r.height}px`;
+        div.title = "Open past analysis for this selection";
+        // We intentionally *don't* stop mousedown propagation: the user
+        // must still be able to start a fresh text selection from an
+        // already-underlined region. A click (mousedown + mouseup at
+        // roughly the same spot) jumps to the stored analysis; a drag
+        // falls through to the native selection engine because no
+        // `click` event fires when the cursor moves far enough.
+        div.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          ev.preventDefault();
+          openSelectionFromHistory(entry);
+        });
+        overlay.appendChild(div);
+      }
+      painted++;
+    }
+
+    if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
+  }, [openSelectionFromHistory]);
+
+  // Re-paint every visible page when the selection history changes so
+  // newly added (or removed) underlines appear immediately, without
+  // waiting for the user to scroll off and back.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const pages = container.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]");
+    pages.forEach((pageEl) => drawUnderlinesForPage(pageEl, selectionHistory));
+  }, [selectionHistory, drawUnderlinesForPage, scale]);
+
   const handlePageRender = useCallback((pageNum: number) => {
-    const el = containerRef.current?.querySelector(`[data-page-number="${pageNum}"]`);
+    const el = containerRef.current?.querySelector(`[data-page-number="${pageNum}"]`) as HTMLElement | null;
     if (el) {
       const h = el.getBoundingClientRect().height;
       if (Math.abs(h - pageHeightRef.current) > 2) {
         pageHeightRef.current = h;
         updateVisibleRange();
       }
+      // Paint history underlines once the text layer is in the DOM. We
+      // defer a frame because react-pdf appends the text layer
+      // asynchronously *after* onRenderSuccess fires on some versions.
+      requestAnimationFrame(() => {
+        drawUnderlinesForPage(el, useStore.getState().selectionHistory);
+      });
     }
     // One-shot scroll restoration after the first real page paint. We wait
     // until *a* page renders so we know the page dimensions are final —
@@ -198,7 +338,7 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       } catch { /* ignore */ }
       scrollRestoredRef.current = true;
     }
-  }, [updateVisibleRange, paperId]);
+  }, [updateVisibleRange, paperId, drawUnderlinesForPage]);
 
   const handleMouseUp = useCallback(() => {
     const sel = window.getSelection();
