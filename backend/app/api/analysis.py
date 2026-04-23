@@ -323,7 +323,26 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
     )
     try:
         result = await extract_assumptions(paper.raw_text, user_id=user_id)
-        resp = AssumptionsResponse(assumptions=result.get("assumptions", []))
+        # If the LLM output was malformed and we fell through to the
+        # safe-parse fallback (`{}`), do NOT cache an empty assumptions
+        # list. Caching it creates the "disappearing assumptions" bug:
+        # the UI reads `{assumptions: []}` from the server, renders the
+        # "Extract Assumptions" empty state, and the user's re-extract
+        # clicks keep hitting the same failure mode. Surfacing an error
+        # here gives the panel a concrete "retry" target instead of a
+        # silent loop.
+        raw_items = result.get("assumptions") if isinstance(result, dict) else None
+        if not isinstance(raw_items, list) or len(raw_items) == 0:
+            release_usage(token)
+            logger.warning(
+                "Assumptions extraction returned no items for paper %s (raw=%s)",
+                paper_id, type(result).__name__,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail="The analysis model didn't return usable assumptions. Please try again.",
+            )
+        resp = AssumptionsResponse(assumptions=raw_items)
         def _apply(p):
             p.cached_analysis["assumptions"] = resp.model_dump()
         mutate_paper(paper_id, user_id, _apply)
