@@ -23,8 +23,13 @@ interface AnalysisPanelProps {
   onCyclePosition: () => void;
 }
 
+// Shared tab style — flat pill that rests flush with the tab bar, picks up
+// a clear selected state, and animates opacity rather than size so the
+// layout never reflows when the active tab changes. The previous slight
+// shadow on active tabs was causing a visible "pop" during rapid tab
+// switches that contributed to the UI feeling unpolished.
 const TAB_STYLE =
-  "text-[11px] h-7 px-3 rounded-lg font-medium transition-all data-active:bg-foreground data-active:text-background data-active:shadow-sm";
+  "text-[11px] h-7 px-3 rounded-md font-medium text-muted-foreground/80 hover:text-foreground hover:bg-accent/50 transition-colors data-active:bg-foreground data-active:text-background data-active:hover:bg-foreground";
 
 const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
   right: {
@@ -86,7 +91,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       onValueChange={setActiveTab}
       className="flex flex-col h-full"
     >
-      <div className="shrink-0 flex items-center gap-1 px-2 pt-2 pb-1.5 border-b border-border glass-subtle min-w-0">
+      <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-border glass-subtle min-w-0">
         <div className="overflow-x-auto scrollbar-hide min-w-0 flex-1">
           <TabsList className="h-8 gap-0.5 bg-transparent p-0 flex-nowrap inline-flex w-max">
             {showSelectionTab && (
@@ -150,7 +155,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0">
-        <div className="px-4 py-4">
+        <div className="px-4 py-5">
           {showSelectionTab && (
             <TabsContent value="selection" className="mt-0">
               <SelectionResultPanel

@@ -63,6 +63,27 @@ export function QAPanel({ paperId }: QAPanelProps) {
   const [justAdded, setJustAdded] = useState(false);
   const justAddedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Let power-users collapse the suggested-question pills so the queue and
+  // answers get more vertical room. Persisted globally (not per-paper) so
+  // the preference sticks across the whole session.
+  const SUGGESTIONS_HIDDEN_KEY = "know-qa-hide-suggestions";
+  const [hideSuggestions, setHideSuggestions] = useState(false);
+  useEffect(() => {
+    try {
+      setHideSuggestions(localStorage.getItem(SUGGESTIONS_HIDDEN_KEY) === "1");
+    } catch { /* ignore */ }
+  }, []);
+  const toggleSuggestions = () => {
+    setHideSuggestions((prev) => {
+      const next = !prev;
+      try {
+        if (next) localStorage.setItem(SUGGESTIONS_HIDDEN_KEY, "1");
+        else localStorage.removeItem(SUGGESTIONS_HIDDEN_KEY);
+      } catch { /* ignore */ }
+      return next;
+    });
+  };
+
   useEffect(() => {
     return () => {
       if (justAddedTimerRef.current) clearTimeout(justAddedTimerRef.current);
@@ -179,19 +200,35 @@ export function QAPanel({ paperId }: QAPanelProps) {
         )}
 
         {!qaLoading && (
-          <div className="flex flex-wrap gap-1.5">
-            {prompts.filter((p) => !usedPrompts.has(p)).map((prompt, i) => (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                {hideSuggestions ? "Suggestions hidden" : "Suggested questions"}
+              </p>
               <button
-                key={i}
-                onClick={() => {
-                  addQuestion(prompt);
-                  setUsedPrompts((prev) => new Set(prev).add(prompt));
-                }}
-                className="text-[11px] px-2.5 py-1 rounded-full glass-subtle text-muted-foreground hover:text-foreground hover:bg-accent transition-colors font-medium"
+                onClick={toggleSuggestions}
+                className="text-[10px] font-medium text-muted-foreground/60 hover:text-foreground transition-colors"
+                aria-pressed={hideSuggestions}
               >
-                {prompt}
+                {hideSuggestions ? "Show" : "Hide"}
               </button>
-            ))}
+            </div>
+            {!hideSuggestions && (
+              <div className="flex flex-wrap gap-1.5">
+                {prompts.filter((p) => !usedPrompts.has(p)).map((prompt, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      addQuestion(prompt);
+                      setUsedPrompts((prev) => new Set(prev).add(prompt));
+                    }}
+                    className="text-[11px] px-2.5 py-1 rounded-full glass-subtle text-muted-foreground hover:text-foreground hover:bg-accent transition-colors font-medium"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -243,10 +280,11 @@ export function QAPanel({ paperId }: QAPanelProps) {
       )}
 
       {questions.length > 0 && !qaLoading && (
-        <div className="space-y-1.5">
-          <p className="text-[12px] font-semibold text-muted-foreground/70 uppercase tracking-widest">
-            Queued <span className="text-muted-foreground/40">{questions.length}</span>
-          </p>
+        <div className="space-y-2">
+          <div className="flex items-baseline gap-2">
+            <h3 className="text-[13px] font-semibold text-foreground">Queued</h3>
+            <span className="text-[11px] text-muted-foreground/60 tabular-nums">{questions.length}</span>
+          </div>
           {questions.map((q, i) => (
             <div key={i} className="flex items-start gap-2.5 rounded-xl glass-subtle px-3.5 py-2">
               <span className="text-[11px] text-muted-foreground/50 font-medium shrink-0 mt-0.5 tabular-nums">
@@ -269,14 +307,13 @@ export function QAPanel({ paperId }: QAPanelProps) {
       {qaResults.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <p className="text-[12px] font-semibold text-muted-foreground/70 uppercase tracking-widest">
-              Answers
+            <div className="flex items-baseline gap-2">
+              <h3 className="text-[13px] font-semibold text-foreground">Answers</h3>
+              <span className="text-[11px] text-muted-foreground/60 tabular-nums">{qaResults.length}</span>
               {crossPaper && hasMultiplePapers && (
-                <span className="ml-1.5 text-[10px] text-muted-foreground/40 normal-case tracking-normal font-normal">
-                  (cross-paper)
-                </span>
+                <span className="text-[10px] text-muted-foreground/50">cross-paper</span>
               )}
-            </p>
+            </div>
             <button
               onClick={() => { setQAResults([]); clearQuestions(); setUsedPrompts(new Set()); setQAError(""); }}
               className="text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors font-medium"
@@ -284,13 +321,18 @@ export function QAPanel({ paperId }: QAPanelProps) {
               Clear
             </button>
           </div>
-          {qaResults.map((item, i) => (
-            <div key={i} className="space-y-1.5">
+          {/*
+            Newest answer first. Numeric ordinals were dropped at the user's
+            request — the visual order now carries the "which is newest"
+            affordance, and chronological numbers were misleading after the
+            list was inverted anyway.
+          */}
+          {[...qaResults].reverse().map((item, i) => (
+            <div key={qaResults.length - 1 - i} className="space-y-1.5">
               <div className="flex items-start gap-2 px-1">
-                <span className="text-[11px] font-bold text-muted-foreground/40 shrink-0 mt-0.5 tabular-nums">{i + 1}.</span>
                 <p className="text-[13px] font-semibold leading-snug">{item.question}</p>
               </div>
-              <div className="rounded-xl glass-subtle px-3.5 py-2.5 ml-4 border-l-2 border-foreground/10">
+              <div className="rounded-xl glass-subtle px-3.5 py-2.5 border-l-2 border-foreground/10">
                 <div className="text-[12px] text-muted-foreground"><Md>{item.answer}</Md></div>
               </div>
             </div>
