@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { api, PaperListEntry } from "@/lib/api";
 import { Input } from "@/components/ui/input";
@@ -382,19 +383,27 @@ function LibraryContent() {
             >
               Folders
             </button>
+            {/* Keep the Workspaces tab clickable for locked users so they
+                hit the upsell card on the right instead of a dead button.
+                The small lock icon signals the gate without burying it in
+                a tooltip-only affordance. */}
             <button
-              onClick={() => canMultiPaper && setSidebarTab("workspaces")}
-              disabled={!canMultiPaper}
-              className={`flex-1 text-[11px] font-semibold py-1.5 rounded-lg transition-all ${
-                !canMultiPaper
-                  ? "text-muted-foreground/60 cursor-not-allowed"
-                  : sidebarTab === "workspaces"
+              onClick={() => setSidebarTab("workspaces")}
+              className={`flex-1 inline-flex items-center justify-center gap-1 text-[11px] font-semibold py-1.5 rounded-lg transition-all ${
+                sidebarTab === "workspaces"
                   ? "glass-strong text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground/90"
+                  : canMultiPaper
+                  ? "text-muted-foreground hover:text-foreground/90"
+                  : "text-muted-foreground/70 hover:text-foreground/90"
               }`}
-              title={canMultiPaper ? undefined : "Workspaces require the Researcher plan"}
+              title={canMultiPaper ? undefined : "Workspaces are a Researcher feature — click to learn more"}
             >
-              Workspaces{canMultiPaper ? "" : " ⬆"}
+              Workspaces
+              {!canMultiPaper && (
+                <svg className="w-2.5 h-2.5 text-muted-foreground/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+              )}
             </button>
           </div>
 
@@ -533,7 +542,37 @@ function LibraryContent() {
             </>
           ) : (
             <div className="space-y-2">
-              {workspacesLoading ? (
+              {/* Upsell card: Scholar / free users land here when they
+                  click the gated Workspaces tab. Show what they get and a
+                  direct link to pricing so the CTA is one click away. */}
+              {!canMultiPaper && (
+                <div className="rounded-xl border border-border/70 bg-gradient-to-br from-violet-500/[0.07] to-purple-500/[0.07] p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-sm shadow-violet-500/20">
+                      <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6V4m0 16v-2M6 12H4m16 0h-2m-2.343-5.657l-1.414 1.414M7.757 16.243l-1.414 1.414m0-11.314l1.414 1.414m8.486 8.486l1.414 1.414" />
+                      </svg>
+                    </div>
+                    <p className="text-[12px] font-semibold text-foreground">Workspaces</p>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Compare and question multiple papers at once. Save
+                    cross-paper sessions and come back to them later.
+                  </p>
+                  <ul className="text-[10.5px] text-muted-foreground/90 space-y-1 pl-0.5">
+                    <li className="flex gap-1.5"><span className="text-foreground/60">·</span> Ask questions across all papers in a workspace</li>
+                    <li className="flex gap-1.5"><span className="text-foreground/60">·</span> Saved sessions survive browser restarts</li>
+                    <li className="flex gap-1.5"><span className="text-foreground/60">·</span> Bulk export BibTeX per workspace</li>
+                  </ul>
+                  <Link
+                    href="/#pricing"
+                    className="block text-center text-[11px] font-semibold bg-gradient-to-r from-violet-500 to-purple-600 text-white py-1.5 rounded-lg shadow-sm shadow-violet-500/20 hover:shadow-md hover:shadow-violet-500/30 transition-shadow"
+                  >
+                    Upgrade to Researcher
+                  </Link>
+                </div>
+              )}
+              {!canMultiPaper ? null : workspacesLoading ? (
                 <div className="flex items-center justify-center py-8">
                   <div className="w-4 h-4 border-2 border-border border-t-foreground rounded-full animate-spin" />
                 </div>
@@ -604,12 +643,14 @@ function LibraryContent() {
                   </div>
                 ))
               )}
-              <button
-                onClick={loadWorkspaces}
-                className="w-full text-[11px] text-muted-foreground/80 hover:text-muted-foreground transition-colors py-1.5 font-medium"
-              >
-                Refresh
-              </button>
+              {canMultiPaper && (
+                <button
+                  onClick={loadWorkspaces}
+                  className="w-full text-[11px] text-muted-foreground/80 hover:text-muted-foreground transition-colors py-1.5 font-medium"
+                >
+                  Refresh
+                </button>
+              )}
             </div>
           )}
         </aside>
