@@ -115,12 +115,12 @@ function DashboardContent() {
       <main className="flex-1 flex flex-col items-center px-6 pt-[15vh] pb-12 bg-mesh min-h-screen bg-background text-foreground">
         <div className="absolute top-5 right-5 flex items-center gap-3">
           {tierUser?.tier === "free" && (
-            <a
+            <Link
               href="/#pricing"
               className="text-[12px] font-medium bg-gradient-to-r from-violet-500 to-purple-600 text-white px-3.5 py-1.5 rounded-xl shadow-lg shadow-violet-500/20"
             >
               Upgrade
-            </a>
+            </Link>
           )}
           <ThemeToggle />
           <UserButton
