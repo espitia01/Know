@@ -26,18 +26,21 @@ interface PdfViewerProps {
 const PAGE_GAP = 16;
 const BUFFER_PAGES = 2;
 const SCROLL_STORAGE_PREFIX = "know-pdf-scroll:";
+// Baseline render scale used as the displayed "100%". The old 1.0 baseline
+// produced text that most readers found uncomfortably small on modern
+// retina displays; 1.4 matches what users were manually zooming to almost
+// every session. All displayed percentages are normalised against this.
+const BASELINE_SCALE = 1.4;
 
 export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: PdfViewerProps) {
   const [numPages, setNumPages] = useState(0);
-  const [scale, setScale] = useState(1.0);
+  const [scale, setScale] = useState(BASELINE_SCALE);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageInput, setPageInput] = useState("1");
-  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
   const [loadError, setLoadError] = useState("");
   const [visibleRange, setVisibleRange] = useState({ start: 1, end: 5 });
   const containerRef = useRef<HTMLDivElement>(null);
   const pageHeightRef = useRef(800);
-  const retryCount = useRef(0);
 
   const [retryKey, setRetryKey] = useState(0);
   // Whether we've already restored the persisted scroll for this paper. We
@@ -45,50 +48,33 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
   // that renders — before any user scrolling writes new values.
   const scrollRestoredRef = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoadError("");
-    setPdfData(null);
-    retryCount.current = 0;
-
-    const headers: Record<string, string> = getAuthHeadersSync();
-
-    function attemptFetch() {
-      fetch(url, { headers })
-        .then((r) => {
-          if (!r.ok) {
-            if (r.status === 404) throw new Error("PDF_NOT_FOUND");
-            throw new Error(`HTTP ${r.status}`);
-          }
-          return r.arrayBuffer();
-        })
-        .then((buf) => {
-          if (!cancelled) {
-            if (buf.byteLength < 100) {
-              throw new Error("PDF_NOT_FOUND");
-            }
-            setPdfData(buf);
-          }
-        })
-        .catch((e) => {
-          if (cancelled) return;
-          if (e.message === "PDF_NOT_FOUND" || retryCount.current >= 3) {
-            setLoadError(e.message || "Failed to load PDF");
-          } else {
-            retryCount.current++;
-            setTimeout(() => { if (!cancelled) attemptFetch(); }, 1000 * retryCount.current);
-          }
-        });
-    }
-
-    attemptFetch();
-    return () => { cancelled = true; };
+  // Hand the URL straight to PDF.js instead of fetching the entire binary
+  // ourselves first. PDF.js can issue HTTP range requests and start
+  // rendering page 1 before the rest of the document has downloaded,
+  // which makes large scientific papers feel noticeably snappier — the
+  // previous approach blocked the viewer on the full ArrayBuffer even
+  // though most users never scroll past the first handful of pages.
+  // Memoised so react-pdf doesn't see a new file prop on every render.
+  const fileData = useMemo(() => {
+    if (!url) return null;
+    return {
+      url,
+      httpHeaders: getAuthHeadersSync(),
+      withCredentials: false,
+    };
+    // `retryKey` is included so "Retry" reliably re-fetches from PDF.js.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, retryKey]);
 
-  const fileData = useMemo(() => {
-    if (!pdfData) return null;
-    return { data: new Uint8Array(pdfData) };
-  }, [pdfData]);
+  // Reset document-scoped state whenever the URL changes so we don't show
+  // stale num-pages from a previous paper while the new one is loading.
+  useEffect(() => {
+    setLoadError("");
+    setNumPages(0);
+    setCurrentPage(1);
+    setPageInput("1");
+    setVisibleRange({ start: 1, end: 5 });
+  }, [url, retryKey]);
 
   const onDocumentLoadSuccess = useCallback(({ numPages: n }: { numPages: number }) => {
     setNumPages(n);
@@ -105,7 +91,6 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
     } else {
       setLoadError(msg || "Failed to render PDF");
     }
-    setPdfData(null);
   }, []);
 
   const updateVisibleRange = useCallback(() => {
@@ -145,16 +130,24 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
         });
       }
       // Persist scroll position (debounced) so a refresh restores the
-      // reader to exactly where they left off. Keyed by paperId so each
-      // paper remembers its own position.
+      // reader to exactly where they left off. We store a *scale-invariant*
+      // page ratio rather than raw pixels — pixel scrollTop depends on both
+      // the current zoom and whichever page happens to have been measured
+      // first, so a value saved at 140% zoom would place the reader 40%
+      // further down after a refresh that starts at 100%. Page-ratio
+      // storage sidesteps both problems.
       if (paperId && scrollRestoredRef.current) {
         if (saveTimer) clearTimeout(saveTimer);
         saveTimer = setTimeout(() => {
           try {
-            localStorage.setItem(
-              `${SCROLL_STORAGE_PREFIX}${paperId}`,
-              String(container.scrollTop),
-            );
+            const pageStride = pageHeightRef.current + PAGE_GAP;
+            if (pageStride > 0) {
+              const pageRatio = container.scrollTop / pageStride;
+              localStorage.setItem(
+                `${SCROLL_STORAGE_PREFIX}${paperId}`,
+                pageRatio.toFixed(4),
+              );
+            }
           } catch { /* quota / private mode — non-fatal */ }
         }, 250);
       }
@@ -183,16 +176,24 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       }
     }
     // One-shot scroll restoration after the first real page paint. We wait
-    // until *a* page renders so we know the page dimensions are final
-    // (pageHeightRef is accurate); scrolling before that would overshoot
-    // because every page placeholder uses the initial 800px estimate.
+    // until *a* page renders so we know the page dimensions are final —
+    // scrolling before that would overshoot because every placeholder uses
+    // the initial 800px estimate. Converting the saved page-ratio through
+    // the now-accurate pageHeightRef lands us within a few pixels of the
+    // user's last viewport.
     if (!scrollRestoredRef.current && paperId && containerRef.current) {
       const container = containerRef.current;
       try {
         const raw = localStorage.getItem(`${SCROLL_STORAGE_PREFIX}${paperId}`);
-        const saved = raw ? parseInt(raw, 10) : 0;
-        if (saved > 0 && Number.isFinite(saved)) {
-          container.scrollTop = saved;
+        const savedRatio = raw ? parseFloat(raw) : 0;
+        if (savedRatio > 0 && Number.isFinite(savedRatio)) {
+          const pageStride = pageHeightRef.current + PAGE_GAP;
+          const target = Math.round(savedRatio * pageStride);
+          container.scrollTop = target;
+          // Nudge visibleRange so the target pages actually render —
+          // relying purely on the scroll event is flaky when React batches
+          // the update with the initial paint.
+          updateVisibleRange();
         }
       } catch { /* ignore */ }
       scrollRestoredRef.current = true;
@@ -235,7 +236,8 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
 
   const zoomIn = () => setScale((s) => Math.min(3, s + 0.2));
   const zoomOut = () => setScale((s) => Math.max(0.5, s - 0.2));
-  const zoomReset = () => setScale(1.0);
+  const zoomReset = () => setScale(BASELINE_SCALE);
+  const displayedPercent = Math.round((scale / BASELINE_SCALE) * 100);
 
   const scrollToPage = (page: number) => {
     const el = containerRef.current?.querySelector(`[data-page-number="${page}"]`);
@@ -270,9 +272,9 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
           <button
             onClick={zoomReset}
             className="h-7 px-2 flex items-center justify-center rounded-lg text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/70 transition-all font-mono"
-            aria-label={`Reset zoom (currently ${Math.round(scale * 100)}%)`}
+            aria-label={`Reset zoom (currently ${displayedPercent}%)`}
           >
-            {Math.round(scale * 100)}%
+            {displayedPercent}%
           </button>
           <button
             onClick={zoomIn}
@@ -324,7 +326,7 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
                 <>
                   <p className="text-[13px] text-destructive">Failed to load PDF</p>
                   <button
-                    onClick={() => { setLoadError(""); retryCount.current = 0; setRetryKey((k) => k + 1); }}
+                    onClick={() => { setLoadError(""); setRetryKey((k) => k + 1); }}
                     className="text-[12px] font-medium text-muted-foreground hover:text-foreground transition-all px-3 py-1.5 rounded-xl glass hover:bg-accent"
                   >
                     Retry
