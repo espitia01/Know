@@ -234,6 +234,72 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onSelectionClear]);
 
+  // Safari-style auto-scroll while dragging a selection. When the cursor
+  // enters an "edge zone" near the top or bottom of the viewport, we
+  // ease the container in that direction so the selection can keep
+  // growing without the user having to release and re-drag. The native
+  // selection engine picks up the new geometry each frame automatically.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let rafId: number | null = null;
+    let lastClientY = 0;
+    let isSelecting = false;
+
+    const EDGE = 48; // px from viewport edge that triggers auto-scroll
+    const MAX_SPEED = 24; // px per frame at the very edge
+
+    const tick = () => {
+      if (!isSelecting) { rafId = null; return; }
+      const rect = container.getBoundingClientRect();
+      const distTop = lastClientY - rect.top;
+      const distBottom = rect.bottom - lastClientY;
+      let delta = 0;
+      if (distTop < EDGE && distTop >= 0) {
+        // Closer to edge = faster scroll. Quadratic falloff feels more
+        // natural than linear because the acceleration only kicks in
+        // once the cursor is meaningfully close to the boundary.
+        const t = 1 - distTop / EDGE;
+        delta = -Math.round(MAX_SPEED * t * t);
+      } else if (distBottom < EDGE && distBottom >= 0) {
+        const t = 1 - distBottom / EDGE;
+        delta = Math.round(MAX_SPEED * t * t);
+      }
+      if (delta !== 0) container.scrollTop += delta;
+      rafId = requestAnimationFrame(tick);
+    };
+
+    const onDown = (e: MouseEvent) => {
+      // Only left-button drags initiate a selection; ignore middle/right
+      // buttons so we don't steal context-menu or middle-click-scroll.
+      if (e.button !== 0) return;
+      isSelecting = true;
+      lastClientY = e.clientY;
+      if (rafId === null) rafId = requestAnimationFrame(tick);
+    };
+    const onMove = (e: MouseEvent) => {
+      if (!isSelecting) return;
+      lastClientY = e.clientY;
+    };
+    const stop = () => {
+      isSelecting = false;
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+    };
+
+    container.addEventListener("mousedown", onDown);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", stop);
+    window.addEventListener("blur", stop);
+    return () => {
+      container.removeEventListener("mousedown", onDown);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", stop);
+      window.removeEventListener("blur", stop);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
+  }, []);
+
   const zoomIn = () => setScale((s) => Math.min(3, s + 0.2));
   const zoomOut = () => setScale((s) => Math.max(0.5, s - 0.2));
   const zoomReset = () => setScale(BASELINE_SCALE);

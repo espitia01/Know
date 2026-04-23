@@ -104,6 +104,13 @@
   --input: oklch(0.91 0.004 260 / 70%);
   --ring: oklch(0.55 0.08 260);
 
+  /* PDF text-selection tint — tuned to feel like Safari/Preview's native
+     highlight. Slightly crisper and more saturated than the generic --ring
+     so the selection stands out against the off-white page but still lets
+     the glyphs underneath read through. */
+  --pdf-selection: 38 132 255;        /* rgb triplet — macOS accent blue */
+  --pdf-selection-alpha: 0.28;
+
   --chart-1: oklch(0.70 0.15 260);
   --chart-2: oklch(0.65 0.16 320);
   --chart-3: oklch(0.72 0.14 190);
@@ -178,6 +185,13 @@
   --border-strong: oklch(1 0 0 / 14%);
   --input: oklch(1 0 0 / 12%);
   --ring: oklch(0.62 0.10 260);
+
+  /* PDF selection on dark pages needs more luminance to stay visible
+     against the muted grey sheet, so we brighten the blue and bump alpha
+     slightly. Kept in the same hue family as the light theme so selection
+     reads as a consistent system affordance. */
+  --pdf-selection: 96 165 250;        /* rgb triplet — lighter accent blue */
+  --pdf-selection-alpha: 0.36;
 
   --chart-1: oklch(0.76 0.16 260);
   --chart-2: oklch(0.72 0.17 320);
@@ -382,27 +396,88 @@
 .paper-content figure { margin: 1.5em 0; }
 .paper-content img { max-width: 100%; border-radius: 6px; }
 
-/* PDF text layer — pdfjs keeps the glyphs transparent for selection, but
-   some browsers/AT profiles can surface residual rendering which manifests
-   as the "overlaid words" users reported on top of the canvas. We force
-   the layer transparent and only reveal it through the native highlight
-   colors below. */
-.react-pdf__Page__textContent {
-  color: transparent !important;
+/* ────────────────────────────────────────────────────────────────────────
+   PDF text layer & selection — tuned to feel like Safari/Preview.
+
+   pdfjs stacks an invisible text layer on top of the canvas. We keep the
+   glyphs transparent so the canvas underneath shows through, but we
+   deliberately DO NOT style the spans themselves — we only style the
+   selection pseudo-element. This avoids the jittery "overlaid words"
+   regression while still letting the browser's native selection engine
+   do the heavy lifting, which is what gives Safari its buttery feel.
+
+   Key details:
+   • `cursor: text` on spans (already set upstream) makes the I-beam appear
+     only over real glyphs — margins keep the default cursor, just like
+     Safari's PDF viewer.
+   • `user-select: text` is explicit so no ancestor `user-select: none`
+     (e.g. from a draggable parent) can leak in and block selection.
+   • A hardware-accelerated text layer removes the lag that made
+     dragging across large pages feel "sticky".
+   • The selection color is a translucent accent blue so users can still
+     read the underlying glyphs through the highlight. Crisper than our
+     previous `--ring` tint, which washed out on bright page backgrounds.
+   ──────────────────────────────────────────────────────────────────── */
+.react-pdf__Page__textContent,
+.react-pdf__Page__textContent .textLayer {
+  color: transparent;
   caret-color: var(--foreground);
   mix-blend-mode: normal !important;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  /* Promote to its own compositor layer so selection redraws don't
+     re-paint the canvas beneath. Measurably smoother drag on large
+     multi-column papers. */
+  transform: translateZ(0);
+  will-change: transform;
 }
 .react-pdf__Page__textContent span,
 .react-pdf__Page__textContent br {
   color: transparent !important;
+  cursor: text;
 }
 .react-pdf__Page__textContent ::selection {
-  background: color-mix(in oklab, var(--ring) 42%, transparent) !important;
-  color: transparent !important;
+  background: rgb(var(--pdf-selection) / var(--pdf-selection-alpha));
+  color: transparent;
+  /* text-shadow reset suppresses the faint "ghost glyph" some browsers
+     paint on top of selected text when the underlying color is
+     transparent — Safari does this automatically; Chrome/Firefox need
+     the nudge. */
+  text-shadow: none;
 }
 .react-pdf__Page__textContent ::-moz-selection {
-  background: color-mix(in oklab, var(--ring) 42%, transparent) !important;
-  color: transparent !important;
+  background: rgb(var(--pdf-selection) / var(--pdf-selection-alpha));
+  color: transparent;
+  text-shadow: none;
+}
+
+/* The pdfjs highlight API (used for search hits and the final-selection
+   rectangle) reads two CSS custom properties. Re-point both at our
+   selection tint so programmatic highlights match the drag-selection
+   colour instead of the default pink/green debug palette. */
+.react-pdf__Page__textContent,
+.react-pdf__Page__textContent .textLayer {
+  --highlight-bg-color: rgb(var(--pdf-selection) / 0.40);
+  --highlight-selected-bg-color: rgb(var(--pdf-selection) / 0.60);
+}
+
+/* Keep the canvas itself unselectable — only the text layer should
+   participate in selection. Prevents weird "select all" gestures from
+   grabbing the rendered image. */
+.react-pdf__Page__canvas {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Show the I-beam across the entire page surface (including line gaps
+   and margins) so the "click-to-select" affordance matches Safari's
+   native PDF viewer. Without this, users see the default cursor between
+   lines and second-guess whether that region is selectable. The actual
+   selection hit-testing is still driven by the invisible text-layer
+   spans, so nothing changes functionally — just visual feedback. */
+.react-pdf__Page {
+  cursor: text;
 }
 
 /* ────────────────────────────────────────────────────────────────────────
