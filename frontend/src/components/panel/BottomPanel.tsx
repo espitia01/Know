@@ -47,7 +47,13 @@ const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
 };
 
 export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPanelProps) {
-  const { activeTab, setActiveTab, selectionResult, selectionLoading, selectionHistory, setSelectionResult, setSelectionLoading, addSelectionToHistory, sessionPapers, bumpUsageRefresh } = useStore();
+  const {
+    activeTab, setActiveTab,
+    selectionResult, selectionLoading, selectionHistory,
+    setSelectionResult, setSelectionLoading, addSelectionToHistory,
+    sessionPapers, bumpUsageRefresh,
+    analysisFontScale, bumpAnalysisFontScale, setAnalysisFontScale,
+  } = useStore();
   const { user } = useUserTier();
   const tier = user?.tier || "free";
 
@@ -143,6 +149,47 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
           </TabsList>
         </div>
 
+        {/* Reading-size controls. Tucked to the right next to the panel
+            position toggle so they don't compete with tabs for attention
+            but remain one click away. Scale range is 0.85–1.6, stepping
+            in 0.1 increments; A0 resets to system default. */}
+        <div
+          className="shrink-0 flex items-center gap-0.5 mr-0.5 pl-1 border-l border-border/60"
+          role="group"
+          aria-label="Analysis text size"
+        >
+          <button
+            type="button"
+            onClick={() => bumpAnalysisFontScale(-0.1)}
+            disabled={analysisFontScale <= 0.85 + 1e-6}
+            className="p-1 rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+            title="Decrease text size"
+            aria-label="Decrease text size"
+          >
+            <span className="text-[10px] font-semibold leading-none">A−</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setAnalysisFontScale(1)}
+            disabled={Math.abs(analysisFontScale - 1) < 1e-6}
+            className="px-1 py-0.5 rounded-md text-[9px] font-medium tabular-nums text-muted-foreground/60 hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-40 disabled:pointer-events-none min-w-[26px] text-center"
+            title="Reset text size"
+            aria-label="Reset text size"
+          >
+            {Math.round(analysisFontScale * 100)}%
+          </button>
+          <button
+            type="button"
+            onClick={() => bumpAnalysisFontScale(0.1)}
+            disabled={analysisFontScale >= 1.6 - 1e-6}
+            className="p-1 rounded-md text-muted-foreground/60 hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+            title="Increase text size"
+            aria-label="Increase text size"
+          >
+            <span className="text-[12px] font-semibold leading-none">A+</span>
+          </button>
+        </div>
+
         <button
           onClick={onCyclePosition}
           className="p-1 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-accent/60 transition-colors shrink-0"
@@ -155,7 +202,10 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0">
-        <div className="px-5 py-5 max-w-3xl mx-auto w-full">
+        <div
+          className="px-5 py-5 max-w-3xl mx-auto w-full"
+          style={{ ["--analysis-font-scale" as string]: analysisFontScale }}
+        >
           {showSelectionTab && (
             <TabsContent value="selection" className="mt-0">
               <SelectionResultPanel

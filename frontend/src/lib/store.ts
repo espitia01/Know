@@ -69,12 +69,23 @@ interface AppStore {
   setFocusMode: (v: boolean) => void;
   toggleFocusMode: () => void;
 
+  // Analysis-pane font scale. 1.0 == default (~14px). Persists so the
+  // user's preferred reading size survives refresh. Capped server-side
+  // to [0.85, 1.6] to avoid layout break.
+  analysisFontScale: number;
+  setAnalysisFontScale: (v: number) => void;
+  bumpAnalysisFontScale: (delta: number) => void;
+
   selectionResult: SelectionAnalysisResult | null;
   setSelectionResult: (r: SelectionAnalysisResult | null) => void;
   selectionLoading: boolean;
   setSelectionLoading: (l: boolean) => void;
   selectionHistory: SelectionAnalysisResult[];
   addSelectionToHistory: (r: SelectionAnalysisResult) => void;
+  // Surface a past selection in the analysis pane — used when the user
+  // clicks an existing underline in the PDF. Pins the pane open, jumps
+  // to the Selection tab, and sets the active result.
+  openSelectionFromHistory: (r: SelectionAnalysisResult) => void;
 
   preReading: PreReadingAnalysis | null;
   setPreReading: (p: PreReadingAnalysis | null) => void;
@@ -193,6 +204,14 @@ export const useStore = create<AppStore>()(
       setFocusMode: (v) => set({ focusMode: v }),
       toggleFocusMode: () => set((s) => ({ focusMode: !s.focusMode })),
 
+      analysisFontScale: 1,
+      setAnalysisFontScale: (v) =>
+        set({ analysisFontScale: Math.max(0.85, Math.min(1.6, v)) }),
+      bumpAnalysisFontScale: (delta) =>
+        set((s) => ({
+          analysisFontScale: Math.max(0.85, Math.min(1.6, +(s.analysisFontScale + delta).toFixed(2))),
+        })),
+
       selectionResult: null,
       setSelectionResult: (r) => set({ selectionResult: r }),
       selectionLoading: false,
@@ -200,6 +219,13 @@ export const useStore = create<AppStore>()(
       selectionHistory: [],
       addSelectionToHistory: (r) =>
         set((s) => ({ selectionHistory: [r, ...s.selectionHistory].slice(0, 50) })),
+      openSelectionFromHistory: (r) =>
+        set({
+          selectionResult: r,
+          selectionLoading: false,
+          activeTab: "selection",
+          panelVisible: true,
+        }),
 
       preReading: null,
       setPreReading: (p) => set({ preReading: p }),
@@ -364,6 +390,7 @@ export const useStore = create<AppStore>()(
         // `panelVisible` (already persisted elsewhere in this store).
         headerHidden: state.headerHidden,
         focusMode: state.focusMode,
+        analysisFontScale: state.analysisFontScale,
       }),
     }
   )
