@@ -128,12 +128,15 @@
   --sidebar-border: oklch(0.91 0.004 260 / 70%);
   --sidebar-ring: oklch(0.55 0.08 260);
 
-  /* Elevation — light mode uses soft neutral shadows */
-  --shadow-xs: 0 1px 1px oklch(0 0 0 / 0.04);
-  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.05), 0 1px 3px oklch(0 0 0 / 0.03);
-  --shadow-md: 0 4px 12px oklch(0 0 0 / 0.06), 0 1px 3px oklch(0 0 0 / 0.03);
-  --shadow-lg: 0 12px 32px oklch(0 0 0 / 0.08), 0 2px 6px oklch(0 0 0 / 0.04);
-  --shadow-xl: 0 24px 56px oklch(0 0 0 / 0.10), 0 4px 12px oklch(0 0 0 / 0.04);
+  /* Elevation — tuned for a "paper" feel. The shadows are close to
+     invisible on their own and only register at the edges, which keeps
+     nested surfaces (cards inside a panel inside the reader) from
+     stacking visual weight the way the previous heavier shadows did. */
+  --shadow-xs: 0 1px 1px oklch(0 0 0 / 0.03);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04);
+  --shadow-md: 0 2px 8px oklch(0 0 0 / 0.05), 0 1px 2px oklch(0 0 0 / 0.03);
+  --shadow-lg: 0 8px 24px oklch(0 0 0 / 0.06), 0 2px 4px oklch(0 0 0 / 0.03);
+  --shadow-xl: 0 20px 48px oklch(0 0 0 / 0.08), 0 3px 8px oklch(0 0 0 / 0.04);
 
   /* Tinted surfaces — used by glass/mesh utilities. Re-declared in .dark
      with different alphas so the same utility works in both themes. */
@@ -209,11 +212,14 @@
   --sidebar-ring: oklch(0.62 0.10 260);
 
   /* Dark mode uses ambient glow rather than projected shadows. */
-  --shadow-xs: 0 1px 1px oklch(0 0 0 / 0.35);
-  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.40), 0 1px 3px oklch(0 0 0 / 0.25);
-  --shadow-md: 0 4px 14px oklch(0 0 0 / 0.45), 0 1px 3px oklch(0 0 0 / 0.30);
-  --shadow-lg: 0 16px 40px oklch(0 0 0 / 0.55), 0 2px 8px oklch(0 0 0 / 0.35);
-  --shadow-xl: 0 32px 72px oklch(0 0 0 / 0.65), 0 6px 16px oklch(0 0 0 / 0.40);
+  /* Dark-mode shadows are necessarily heavier (no ambient light) but the
+     previous values were approaching "floating button" levels on flat
+     panels. Scaled back to match the softer light-mode treatment. */
+  --shadow-xs: 0 1px 1px oklch(0 0 0 / 0.28);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.32);
+  --shadow-md: 0 2px 10px oklch(0 0 0 / 0.38), 0 1px 2px oklch(0 0 0 / 0.24);
+  --shadow-lg: 0 10px 30px oklch(0 0 0 / 0.45), 0 2px 6px oklch(0 0 0 / 0.28);
+  --shadow-xl: 0 24px 56px oklch(0 0 0 / 0.55), 0 4px 12px oklch(0 0 0 / 0.32);
 
   --surface-tint: 30 32 40;
   --surface-line: 255 255 255;
@@ -617,28 +623,28 @@
 .glass {
   background: rgb(var(--surface-tint) / 0.62);
   backdrop-filter: blur(24px) saturate(1.4);
-  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.15);
   border: 1px solid rgb(var(--surface-line) / 0.07);
   box-shadow: var(--shadow-sm);
 }
 .glass-subtle {
-  background: rgb(var(--surface-tint) / 0.42);
-  backdrop-filter: blur(16px) saturate(1.3);
-  -webkit-backdrop-filter: blur(16px) saturate(1.3);
-  border: 1px solid rgb(var(--surface-line) / 0.06);
+  background: rgb(var(--surface-tint) / 0.44);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  border: 1px solid rgb(var(--surface-line) / 0.05);
 }
 .glass-strong {
-  background: rgb(var(--surface-tint) / 0.78);
-  backdrop-filter: blur(32px) saturate(1.5);
-  -webkit-backdrop-filter: blur(32px) saturate(1.5);
+  background: rgb(var(--surface-tint) / 0.82);
+  backdrop-filter: blur(28px) saturate(1.2);
+  -webkit-backdrop-filter: blur(28px) saturate(1.2);
   border: 1px solid rgb(var(--surface-line) / 0.08);
   box-shadow: var(--shadow-md);
 }
 .glass-nav {
-  background: rgb(var(--surface-tint) / 0.72);
-  backdrop-filter: blur(32px) saturate(1.6);
-  -webkit-backdrop-filter: blur(32px) saturate(1.6);
-  border-bottom: 1px solid rgb(var(--surface-line) / 0.07);
+  background: rgb(var(--surface-tint) / 0.78);
+  backdrop-filter: blur(24px) saturate(1.15);
+  -webkit-backdrop-filter: blur(24px) saturate(1.15);
+  border-bottom: 1px solid rgb(var(--surface-line) / 0.06);
 }
 
 /* ────────────────────────────────────────────────────────────────────────
