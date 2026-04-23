@@ -145,8 +145,13 @@ function CancellationBanner({ user }: { user: UserInfo | null }) {
   useEffect(() => {
     if (!withinWarningWindow) { setDismissed(true); return; }
     if (typeof window === "undefined") return;
+    // Dismissal must survive a full browser restart — the period end is
+    // keyed on the cancellation timestamp, so re-subscribing or changing
+    // the cancel date produces a new key and re-surfaces the banner.
+    // Previously we used sessionStorage, which wiped after every browser
+    // close and made the banner feel like a daily nag.
     try {
-      const stored = sessionStorage.getItem(CANCELLATION_DISMISS_KEY);
+      const stored = localStorage.getItem(CANCELLATION_DISMISS_KEY);
       setDismissed(stored === String(cancelAt));
     } catch {
       setDismissed(false);
@@ -191,7 +196,7 @@ function CancellationBanner({ user }: { user: UserInfo | null }) {
         onClick={() => {
           setDismissed(true);
           if (typeof window !== "undefined") {
-            try { sessionStorage.setItem(CANCELLATION_DISMISS_KEY, String(cancelAt ?? "")); } catch { /* ignore */ }
+            try { localStorage.setItem(CANCELLATION_DISMISS_KEY, String(cancelAt ?? "")); } catch { /* ignore */ }
           }
         }}
         aria-label="Dismiss"
