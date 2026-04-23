@@ -12,6 +12,7 @@ import { useUserTier } from "@/lib/UserTierContext";
 import { UpgradeModal } from "@/components/UpgradeModal";
 import { FeedbackModal } from "@/components/FeedbackModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { FullscreenToggle } from "@/components/FullscreenToggle";
 import { DISCORD_URL } from "@/lib/constants";
 
 function useIsMobile() {
@@ -122,6 +123,7 @@ function DashboardContent() {
               Upgrade
             </Link>
           )}
+          <FullscreenToggle />
           <ThemeToggle />
           <UserButton
             appearance={{ elements: { userButtonPopoverActionButton__manageAccount: { display: "none" } } }}
@@ -200,6 +202,7 @@ function DashboardContent() {
             Upgrade
           </Link>
         )}
+        <FullscreenToggle />
         <ThemeToggle />
         <UserButton
           appearance={{ elements: { userButtonPopoverActionButton__manageAccount: { display: "none" } } }}

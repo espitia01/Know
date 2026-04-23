@@ -52,8 +52,14 @@ export function FullscreenToggle({ className = "", onChange }: FullscreenToggleP
     <button
       onClick={toggle}
       className={
-        "text-muted-foreground/80 hover:text-foreground transition-colors " +
-        "rounded-md p-1.5 ring-focus " +
+        // Match ThemeToggle's visual weight: hairline-bordered glass pill
+        // so the button reads as a peer control instead of a muted
+        // afterthought. Previously it was nearly invisible over the mesh
+        // background on light mode.
+        "h-8 w-8 flex items-center justify-center rounded-lg " +
+        "border border-border/80 bg-background/60 backdrop-blur-md " +
+        "text-foreground/80 hover:text-foreground hover:bg-accent " +
+        "transition-colors ring-focus " +
         className
       }
       title={isFullscreen ? "Exit fullscreen (Esc)" : "Enter fullscreen"}
@@ -61,14 +67,12 @@ export function FullscreenToggle({ className = "", onChange }: FullscreenToggleP
       aria-pressed={isFullscreen}
     >
       {isFullscreen ? (
-        // Exit: arrows pointing inward
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9l-5.25-5.25M15 9V4.5M15 9h4.5M15 9l5.25-5.25M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 15v4.5M15 15h4.5M15 15l5.25 5.25" />
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M15 9V4.5M15 9h4.5M9 15v4.5M9 15H4.5M15 15v4.5M15 15h4.5" />
         </svg>
       ) : (
-        // Enter: arrows pointing outward
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0l5.25 5.25M20.25 3.75h-4.5m4.5 0v4.5m0-4.5l-5.25 5.25M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0l5.25-5.25m10.5 5.25h-4.5m4.5 0v-4.5m0 4.5l-5.25-5.25" />
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 8.25V4.5h3.75M19.5 8.25V4.5h-3.75M4.5 15.75v3.75h3.75M19.5 15.75v3.75h-3.75" />
         </svg>
       )}
     </button>
