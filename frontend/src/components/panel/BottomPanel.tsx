@@ -23,13 +23,13 @@ interface AnalysisPanelProps {
   onCyclePosition: () => void;
 }
 
-// Shared tab style — flat pill that rests flush with the tab bar, picks up
-// a clear selected state, and animates opacity rather than size so the
-// layout never reflows when the active tab changes. The previous slight
-// shadow on active tabs was causing a visible "pop" during rapid tab
-// switches that contributed to the UI feeling unpolished.
+// Shared tab style — underlined, in the spirit of Linear / Things /
+// Notion. We rely on the base TabsList `variant="line"` for the actual
+// underline geometry (it draws a hairline `::after` pseudo-element that
+// fades in on the active tab) and only override the text weight and
+// padding so the labels feel like section headings rather than pills.
 const TAB_STYLE =
-  "text-[11px] h-7 px-3 rounded-md font-medium text-muted-foreground/80 hover:text-foreground hover:bg-accent/50 transition-colors data-active:bg-foreground data-active:text-background data-active:hover:bg-foreground";
+  "text-[11.5px] h-7 px-2.5 font-medium text-muted-foreground/70 hover:text-foreground data-active:text-foreground [&::after]:h-[1.5px] [&::after]:rounded-full";
 
 const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
   right: {
@@ -91,9 +91,9 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       onValueChange={setActiveTab}
       className="flex flex-col h-full"
     >
-      <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-border glass-subtle min-w-0">
+      <div className="shrink-0 flex items-center gap-1 px-3 h-[38px] border-b border-border/70 bg-background/60 backdrop-blur-md min-w-0">
         <div className="overflow-x-auto scrollbar-hide min-w-0 flex-1">
-          <TabsList className="h-8 gap-0.5 bg-transparent p-0 flex-nowrap inline-flex w-max">
+          <TabsList variant="line" className="h-8 gap-1 p-0 flex-nowrap inline-flex w-max">
             {showSelectionTab && (
               <TabsTrigger value="selection" className={TAB_STYLE} title={FEATURE_TOOLTIPS["Selection"]}>
                 Selection
@@ -145,7 +145,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
 
         <button
           onClick={onCyclePosition}
-          className="p-1.5 rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-accent transition-colors shrink-0"
+          className="p-1 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-accent/60 transition-colors shrink-0"
           title={icon.next}
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -155,7 +155,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0">
-        <div className="px-4 py-5">
+        <div className="px-5 py-5 max-w-3xl mx-auto w-full">
           {showSelectionTab && (
             <TabsContent value="selection" className="mt-0">
               <SelectionResultPanel
