@@ -56,6 +56,19 @@ interface AppStore {
   setPanelVisible: (v: boolean) => void;
   togglePanel: () => void;
 
+  // Reader chrome state. `headerHidden` collapses the top navbar/session
+  // bar without entering browser fullscreen, so the user can reclaim
+  // vertical space while keeping window controls. `focusMode` is the
+  // stronger "disappear everything" toggle — it implies headerHidden
+  // and also requests the browser Fullscreen API when available.
+  // Both persist so the reader opens in the last-used chrome state.
+  headerHidden: boolean;
+  setHeaderHidden: (v: boolean) => void;
+  toggleHeader: () => void;
+  focusMode: boolean;
+  setFocusMode: (v: boolean) => void;
+  toggleFocusMode: () => void;
+
   selectionResult: SelectionAnalysisResult | null;
   setSelectionResult: (r: SelectionAnalysisResult | null) => void;
   selectionLoading: boolean;
@@ -172,6 +185,13 @@ export const useStore = create<AppStore>()(
       panelVisible: true,
       setPanelVisible: (v) => set({ panelVisible: v }),
       togglePanel: () => set((s) => ({ panelVisible: !s.panelVisible })),
+
+      headerHidden: false,
+      setHeaderHidden: (v) => set({ headerHidden: v }),
+      toggleHeader: () => set((s) => ({ headerHidden: !s.headerHidden })),
+      focusMode: false,
+      setFocusMode: (v) => set({ focusMode: v }),
+      toggleFocusMode: () => set((s) => ({ focusMode: !s.focusMode })),
 
       selectionResult: null,
       setSelectionResult: (r) => set({ selectionResult: r }),
@@ -338,6 +358,12 @@ export const useStore = create<AppStore>()(
       partialize: (state) => ({
         sessionPapers: state.sessionPapers,
         crossPaperResults: state.crossPaperResults,
+        // Chrome preferences survive reloads so the reader feels "sticky":
+        // if the user worked in focus mode last session, they return to it
+        // instead of re-picking it every time. Intentionally excludes
+        // `panelVisible` (already persisted elsewhere in this store).
+        headerHidden: state.headerHidden,
+        focusMode: state.focusMode,
       }),
     }
   )

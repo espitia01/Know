@@ -278,6 +278,8 @@ function PaperContent() {
   const {
     paper, setPaper, loading, setLoading,
     panelVisible, setPanelVisible, togglePanel,
+    headerHidden, toggleHeader, setHeaderHidden,
+    focusMode, toggleFocusMode, setFocusMode,
     setPreReading, setPreReadingLoading,
     setAssumptions, setAssumptionsLoading,
     setNotes,
@@ -291,6 +293,11 @@ function PaperContent() {
     crossPaperResults, addCrossPaperResults, clearCrossPaperResults,
     resetAnalysisState,
   } = useStore();
+
+  // Reader chrome logic: focus mode *implies* a hidden header + session
+  // bar, but we keep the two store flags separate so toggling focus
+  // mode off can restore whatever header state the user had before.
+  const chromeHidden = headerHidden || focusMode;
   const [error, setError] = useState("");
 
   const [activePaperId, setActivePaperId] = useState(paperId);
@@ -393,6 +400,58 @@ function PaperContent() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showAddPaper, showFolderPicker, showWorkspaceMenu]);
+
+  // Focus mode / fullscreen wiring. Two things happen here:
+  //   1. When focusMode flips on we request browser fullscreen so the OS
+  //      chrome (tabs, address bar, dock) also gets out of the way.
+  //      Fullscreen can't be entered passively — it requires an active
+  //      user gesture — so we only *attempt* it and ignore failures so
+  //      non-user-initiated toggles (e.g. rehydrated from storage) still
+  //      work as a soft focus state.
+  //   2. Escape is handled globally so the user can bail out of either
+  //      focus mode or hidden-header mode without hunting for a button.
+  //      The browser also fires `fullscreenchange` when the user hits
+  //      its own Esc — we listen for that too so our store stays in sync
+  //      with the actual fullscreen state.
+  useEffect(() => {
+    const el = document.documentElement;
+    if (focusMode) {
+      if (!document.fullscreenElement && el.requestFullscreen) {
+        el.requestFullscreen().catch(() => { /* best-effort */ });
+      }
+    } else if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => { /* ignore */ });
+    }
+  }, [focusMode]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Don't hijack Escape while the user is dismissing dropdowns,
+      // typing in inputs, or interacting with any open modal.
+      if (showAddPaper || showFolderPicker || showWorkspaceMenu) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      if (focusMode) {
+        e.preventDefault();
+        setFocusMode(false);
+      } else if (headerHidden) {
+        e.preventDefault();
+        setHeaderHidden(false);
+      }
+    };
+    const onFsChange = () => {
+      // Browser (or OS) yanked us out of fullscreen — reflect that in
+      // our store so the toggle button shows the correct state.
+      if (!document.fullscreenElement && focusMode) setFocusMode(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("fullscreenchange", onFsChange);
+    };
+  }, [focusMode, headerHidden, setFocusMode, setHeaderHidden, showAddPaper, showFolderPicker, showWorkspaceMenu]);
 
   // Save cache on unmount (navigating away from paper page entirely)
   useEffect(() => {
@@ -1076,7 +1135,11 @@ function PaperContent() {
   return (
     <>
     <div className="flex flex-col h-screen overflow-hidden">
-      {/* Header */}
+      {/* Header — hidden in focus mode or when the user explicitly
+          collapses the top bar. Keeping the element mounted would still
+          reserve its 48px, so we drop it from the tree entirely and rely
+          on the floating restore control below to bring it back. */}
+      {!chromeHidden && (
       <header className="shrink-0 flex items-center gap-3 px-4 h-[48px] border-b border-border glass-nav z-30 relative">
         <button
           onClick={() => { clearSession(); router.push("/dashboard"); }}
@@ -1318,6 +1381,33 @@ function PaperContent() {
         >
           {panelVisible ? "Hide Analysis" : "Show Analysis"}
         </button>
+
+        {/* Collapse the top bar without going fullscreen — gives the
+            reader more vertical space while keeping window chrome. */}
+        <button
+          onClick={toggleHeader}
+          className="shrink-0 text-muted-foreground/70 hover:text-foreground transition-colors ring-focus rounded-md p-1"
+          title="Hide top bar"
+          aria-label="Hide top bar"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+          </svg>
+        </button>
+
+        {/* Focus mode: drop all chrome and request browser fullscreen.
+            Escape exits. */}
+        <button
+          onClick={toggleFocusMode}
+          className="shrink-0 text-muted-foreground/70 hover:text-foreground transition-colors ring-focus rounded-md p-1"
+          title={focusMode ? "Exit focus mode (Esc)" : "Focus mode"}
+          aria-label={focusMode ? "Exit focus mode" : "Enter focus mode"}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0l5.25 5.25M20.25 3.75h-4.5m4.5 0v4.5m0-4.5l-5.25 5.25M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0l5.25-5.25m10.5 5.25h-4.5m4.5 0v-4.5m0 4.5l-5.25-5.25" />
+          </svg>
+        </button>
+
         <ThemeToggle />
         <button
           onClick={() => router.push("/settings")}
@@ -1337,9 +1427,10 @@ function PaperContent() {
           </UserButton.MenuItems>
         </UserButton>
       </header>
+      )}
 
       {/* Session paper tabs */}
-      {showSessionBar && (
+      {showSessionBar && !chromeHidden && (
         <div className="shrink-0 border-b border-border glass-subtle px-3 py-1.5">
           <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
             {sessionPapers.map((sp) => (
@@ -1422,6 +1513,33 @@ function PaperContent() {
           {panelInner}
         </div>
       </div>
+
+      {/* Floating restore affordance for when the top bar is hidden. We
+          intentionally keep it small, translucent, and tucked into the
+          top-right corner so it doesn't compete with the paper content,
+          but stays discoverable for users who forget the Escape hotkey.
+          Dedicated buttons (instead of a single "restore" action) let
+          people exit focus mode without losing the underlying
+          hide-navbar preference, and vice-versa. */}
+      {chromeHidden && (
+        <div className="fixed top-2 right-2 z-40 flex items-center gap-1 glass-strong rounded-full px-1.5 py-1 shadow-sm animate-fade-in">
+          {focusMode && (
+            <span className="hidden md:inline text-[10px] text-muted-foreground/70 px-1.5 tracking-wide">
+              Esc to exit
+            </span>
+          )}
+          <button
+            onClick={() => { setFocusMode(false); setHeaderHidden(false); }}
+            className="text-muted-foreground/80 hover:text-foreground transition-colors rounded-full p-1 ring-focus"
+            title="Show top bar"
+            aria-label="Show top bar"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
 
       <BibtexModal
