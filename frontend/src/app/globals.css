@@ -89,19 +89,23 @@
   --secondary: oklch(0.965 0.004 260);
   --secondary-foreground: oklch(0.22 0.012 260);
 
-  --muted: oklch(0.965 0.004 260);
-  --muted-foreground: oklch(0.49 0.012 260);
+  --muted: oklch(0.955 0.004 260);
+  /* Darker muted text in light mode — previously 0.49 read as a faded
+     pencil on white; 0.42 still keeps good contrast against body copy
+     but no longer disappears on secondary labels (counts, metadata,
+     timestamps, "No results" empty states, etc.). */
+  --muted-foreground: oklch(0.42 0.014 260);
 
-  --accent: oklch(0.955 0.006 260);
+  --accent: oklch(0.94 0.006 260);
   --accent-foreground: oklch(0.22 0.012 260);
 
   --destructive: oklch(0.577 0.200 25);
   --warning: oklch(0.76 0.15 70);
   --success: oklch(0.62 0.14 155);
 
-  --border: oklch(0.91 0.004 260 / 70%);
-  --border-strong: oklch(0.86 0.006 260 / 85%);
-  --input: oklch(0.91 0.004 260 / 70%);
+  --border: oklch(0.88 0.005 260 / 75%);
+  --border-strong: oklch(0.82 0.007 260 / 90%);
+  --input: oklch(0.88 0.005 260 / 75%);
   --ring: oklch(0.55 0.08 260);
 
   /* PDF text-selection tint — tuned to feel like Safari/Preview's native
@@ -123,9 +127,9 @@
   --sidebar-foreground: oklch(0.18 0.012 260);
   --sidebar-primary: oklch(0.22 0.012 260);
   --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.955 0.006 260);
+  --sidebar-accent: oklch(0.94 0.006 260);
   --sidebar-accent-foreground: oklch(0.22 0.012 260);
-  --sidebar-border: oklch(0.91 0.004 260 / 70%);
+  --sidebar-border: oklch(0.88 0.005 260 / 75%);
   --sidebar-ring: oklch(0.55 0.08 260);
 
   /* Elevation — tuned for a "paper" feel. The shadows are close to
@@ -486,22 +490,59 @@
   cursor: text;
 }
 
+/* Kindle-style underlines for previously analyzed selections. Sits on
+   its own layer above the text layer so clicks on a highlighted rect
+   jump back to the Selection tab without interfering with normal text
+   selection elsewhere on the page. */
+.know-selection-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+.know-selection-underline {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+  border-bottom: 1.5px solid rgb(var(--pdf-selection) / 0.72);
+  background: rgb(var(--pdf-selection) / 0.06);
+  border-radius: 2px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.know-selection-underline:hover {
+  background: rgb(var(--pdf-selection) / 0.18);
+  border-bottom-color: rgb(var(--pdf-selection) / 1);
+}
+
 /* ────────────────────────────────────────────────────────────────────────
    Analysis panel (markdown rendered by LLM output)
    ──────────────────────────────────────────────────────────────────── */
 .analysis-content {
   font-family: var(--font-inter), system-ui, sans-serif;
   color: var(--foreground);
+  /* Everything inside the pane — text, headings, math — scales from a
+     single CSS variable that the user controls via the A-/A+ buttons.
+     Defaulting to 1 means the current layout is unchanged until someone
+     opts in. We expose the knob via `--analysis-font-scale` on
+     `.analysis-content`, with `em`-based KaTeX sizing below so formulas
+     grow in lockstep with body text. */
+  font-size: calc(14px * var(--analysis-font-scale, 1));
+  line-height: 1.6;
 }
 .analysis-content .katex-display {
-  margin: 0.8em 0;
+  margin: 0.9em 0;
   overflow-x: auto;
   text-align: center;
   display: flex;
   justify-content: center;
 }
 .analysis-content .katex-display > .katex { text-align: center; }
-.analysis-content .katex { font-size: 0.95em; overflow-x: auto; overflow-y: hidden; }
+/* Math copy has historically been illegible because KaTeX fell below body
+   size — subscripts/superscripts become unreadable around 10px. Bump
+   inline math to 1.15em and display math to 1.2em so indices remain
+   legible even at the default font scale. */
+.analysis-content .katex { font-size: 1.15em; overflow-x: auto; overflow-y: hidden; }
+.analysis-content .katex-display > .katex { font-size: 1.2em; }
 .analysis-content p {
   margin-bottom: 0.4em;
   line-height: 1.6;
@@ -651,11 +692,62 @@
    Mesh gradient backgrounds — theme-aware via --mesh-* tokens.
    ──────────────────────────────────────────────────────────────────── */
 .bg-mesh {
+  position: relative;
   background:
     radial-gradient(ellipse 80% 50% at 20% 40%, rgb(var(--mesh-violet) / var(--mesh-a1)), transparent),
     radial-gradient(ellipse 60% 60% at 80% 20%, rgb(var(--mesh-blue)   / var(--mesh-a2)), transparent),
     radial-gradient(ellipse 50% 80% at 50% 80%, rgb(var(--mesh-pink)   / var(--mesh-a3)), transparent);
+  isolation: isolate;
 }
+
+/* Slow, generative "aurora" drift on top of the mesh gradient. Blurred
+   blobs wander across the viewport on 40/50/60s cycles so no two visits
+   look identical, but everything stays subtle enough that typography
+   reads clearly. The layer is pointer-events: none and pushed behind
+   content with z-index: -1, and it respects prefers-reduced-motion. */
+.bg-mesh::before {
+  content: "";
+  position: absolute;
+  inset: -10%;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.9;
+  background:
+    radial-gradient(circle at 15% 25%, rgb(var(--mesh-violet) / 0.22) 0, transparent 35%),
+    radial-gradient(circle at 85% 75%, rgb(var(--mesh-blue)   / 0.18) 0, transparent 40%),
+    radial-gradient(circle at 50% 100%, rgb(var(--mesh-pink)  / 0.15) 0, transparent 45%);
+  filter: blur(40px);
+  animation: aurora-drift 42s ease-in-out infinite alternate;
+  will-change: transform, opacity;
+}
+
+/* Fine-grain noise overlay — the paper-like texture that keeps big flat
+   areas from looking plastic in light mode. We generate it inline with a
+   data-URI SVG so we don't need to ship a raster asset and so the tint
+   respects `currentColor` via `mix-blend-mode: overlay`. */
+.bg-mesh::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.35;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-size: 160px 160px;
+}
+
+@keyframes aurora-drift {
+  0%   { transform: translate3d(-2%,  0%, 0) rotate(0deg);  opacity: 0.85; }
+  50%  { transform: translate3d( 3%,  2%, 0) rotate(2deg);  opacity: 1; }
+  100% { transform: translate3d(-1%, -2%, 0) rotate(-1deg); opacity: 0.9; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-mesh::before { animation: none; }
+}
+
+.dark .bg-mesh::after { opacity: 0.18; }
 .bg-mesh-hero {
   background:
     radial-gradient(ellipse 80% 60% at 50% -20%, rgb(var(--mesh-violet) / calc(var(--mesh-a1) * 1.6)), transparent),
