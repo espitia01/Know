@@ -56,7 +56,7 @@ export async function promptModelCap(
 export const MODEL_ORDER = [
   "claude-haiku-4-5",
   "claude-sonnet-4-6",
-  "claude-opus-4",
+  "claude-opus-4-7",
 ] as const;
 
 export function pickFallback(

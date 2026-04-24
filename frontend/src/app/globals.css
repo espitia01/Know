@@ -109,11 +109,13 @@
   --ring: oklch(0.55 0.08 260);
 
   /* PDF text-selection tint — tuned to feel like Safari/Preview's native
-     highlight. Slightly crisper and more saturated than the generic --ring
-     so the selection stands out against the off-white page but still lets
-     the glyphs underneath read through. */
-  --pdf-selection: 38 132 255;        /* rgb triplet — macOS accent blue */
-  --pdf-selection-alpha: 0.28;
+     highlight. We bumped alpha from 0.28 → 0.32 for a touch more
+     presence against bright page backgrounds (Safari 17 sits around
+     0.33), and swapped the hue to the current macOS system accent
+     blue (#007aff = 0 122 255) so the selection reads as a native
+     affordance instead of a web app accent. */
+  --pdf-selection: 0 122 255;         /* rgb triplet — macOS accent blue */
+  --pdf-selection-alpha: 0.32;
 
   --chart-1: oklch(0.70 0.15 260);
   --chart-2: oklch(0.65 0.16 320);
@@ -197,8 +199,8 @@
      against the muted grey sheet, so we brighten the blue and bump alpha
      slightly. Kept in the same hue family as the light theme so selection
      reads as a consistent system affordance. */
-  --pdf-selection: 96 165 250;        /* rgb triplet — lighter accent blue */
-  --pdf-selection-alpha: 0.36;
+  --pdf-selection: 64 156 255;        /* rgb triplet — brightened accent blue */
+  --pdf-selection-alpha: 0.38;
 
   --chart-1: oklch(0.76 0.16 260);
   --chart-2: oklch(0.72 0.17 320);
@@ -462,6 +464,24 @@
   text-shadow: none;
 }
 
+/* Safari-style caret: slim, subtly coloured, high contrast. The caret
+   is what tells users "you can drag from here" in native viewers; the
+   default browser caret is barely visible on a white PDF so we tint
+   it towards the selection blue for better affordance. */
+.react-pdf__Page__textContent {
+  caret-color: rgb(var(--pdf-selection));
+}
+
+/* Final-rectangle overlay rounding. pdfjs paints the post-selection
+   highlight as an un-styled rectangle; rounding it + letting it sit
+   just above the text layer gives it the same "painted" feel as
+   Safari's PDF selection after you release the mouse. */
+.textLayer > .highlight,
+.react-pdf__Page__textContent .highlight {
+  border-radius: 2px;
+  padding: 0 0.5px;
+}
+
 /* The pdfjs highlight API (used for search hits and the final-selection
    rectangle) reads two CSS custom properties. Re-point both at our
    selection tint so programmatic highlights match the drag-selection
@@ -699,17 +719,56 @@
    Dark mode: same structure but using neutral-white highlights at a
    few percent opacity, matching the quiet feel of the rest of the UI.
 */
+/* Dashboard / library background.
+ *
+ * Structure:
+ *   • `.bg-mesh` itself holds the base page color + the two quiet
+ *     radial gradients that give the page some depth.
+ *   • A `::before` pseudo-element renders the user's chosen
+ *     background (preset or uploaded image) at a variable opacity.
+ *     Isolating it in its own layer means the user's image can never
+ *     tint the foreground text, and the opacity knob in Settings
+ *     works without affecting the base gradients.
+ *
+ * Users on Scholar+ pick a preset or upload a custom image from
+ * Settings → Appearance; the selection is applied via JS writing
+ * the CSS custom properties below to `:root`. When nothing is
+ * chosen the `::before` element collapses to an invisible layer
+ * because `--bg-user-image` defaults to `none`.
+ */
 .bg-mesh {
+  position: relative;
+  isolation: isolate;
   background-color: var(--background);
   background-image:
     radial-gradient(ellipse 70% 55% at 15% 10%, rgb(0 0 0 / 0.035), transparent 65%),
     radial-gradient(ellipse 55% 45% at 95% 95%, rgb(0 0 0 / 0.025), transparent 65%);
 }
 
+.bg-mesh::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: var(--bg-user-image, none);
+  background-size: var(--bg-user-size, cover);
+  background-position: var(--bg-user-position, center);
+  background-repeat: var(--bg-user-repeat, no-repeat);
+  opacity: var(--bg-user-opacity, 0);
+  transition: opacity 200ms ease;
+}
+
 .dark .bg-mesh {
   background-image:
     radial-gradient(ellipse 70% 55% at 15% 10%, rgb(255 255 255 / 0.03), transparent 65%),
     radial-gradient(ellipse 55% 45% at 95% 95%, rgb(255 255 255 / 0.02), transparent 65%);
+}
+.dark .bg-mesh::before {
+  /* Dark theme sees the user's pick at ~60% of its light-mode
+     opacity — the colour pops too hard against the near-black
+     surface otherwise. */
+  opacity: calc(var(--bg-user-opacity, 0) * 0.6);
 }
 .bg-mesh-hero {
   background:

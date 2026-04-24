@@ -39,8 +39,36 @@ from .services.db import (
 ALL_MODELS = [
     "claude-haiku-4-5",
     "claude-sonnet-4-6",
-    "claude-opus-4",
+    "claude-opus-4-7",
 ]
+
+# Legacy/misnamed aliases that users may still have stored in their
+# saved settings. We silently rewrite these on the fly so the first
+# call after an app update doesn't 4xx against Anthropic. Extend this
+# map when we retire another model ID.
+MODEL_ALIASES = {
+    "claude-opus-4": "claude-opus-4-7",
+    "claude-opus-4-0": "claude-opus-4-7",
+    "claude-opus-4-1": "claude-opus-4-7",
+    "claude-opus-4-5": "claude-opus-4-7",
+    "claude-opus-4-6": "claude-opus-4-7",
+    "claude-sonnet-4-0": "claude-sonnet-4-6",
+    "claude-sonnet-4-5": "claude-sonnet-4-6",
+}
+
+
+def canonicalize_model(model: str | None) -> str | None:
+    """Normalize a possibly-stale model ID to a currently valid one.
+
+    Users whose settings were saved under an older model alias would
+    otherwise blow up on their next call because Anthropic rejects the
+    string with a 4xx. This runs at every resolution path so we fix the
+    user's choice at read time, and also heals stored rows next time
+    they hit ``update_settings``.
+    """
+    if not model:
+        return model
+    return MODEL_ALIASES.get(model, model)
 
 # Per-model daily caps (sub-budgets within `daily_api_calls`).
 # These exist to prevent a single user from burning the whole daily budget on
@@ -79,13 +107,13 @@ TIER_LIMITS: dict[str, dict] = {
         "qa_per_paper": -1,
         "selections_per_paper": -1,
         "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "multi-qa"},
-        "models": {"claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4"},
-        "best_model": "claude-opus-4",
+        "models": {"claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7"},
+        "best_model": "claude-opus-4-7",
         "daily_api_calls": 300,
         "per_model_daily": {
             "claude-haiku-4-5": 300,
             "claude-sonnet-4-6": 150,
-            "claude-opus-4": 30,
+            "claude-opus-4-7": 30,
         },
     },
 }
@@ -351,7 +379,14 @@ def get_allowed_models(user_id: str) -> list[str]:
 
 
 def enforce_model(user_id: str, requested_model: str) -> str:
-    """Return the model to actually use. Downgrades if tier doesn't allow it."""
+    """Return the model to actually use. Downgrades if tier doesn't allow it.
+
+    We canonicalize first so that settings rows holding a stale alias
+    (e.g. ``claude-opus-4`` after Anthropic retired it in favour of
+    ``claude-opus-4-7``) resolve to the current ID instead of falling
+    all the way through to the tier default.
+    """
+    requested_model = canonicalize_model(requested_model) or ""
     tier = get_user_tier(user_id)
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
     if requested_model in limits["models"]:

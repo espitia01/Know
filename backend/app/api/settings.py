@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..config import settings
 from ..models.schemas import SettingsResponse, SettingsUpdate
 from ..auth import require_auth
-from ..gating import get_allowed_models, enforce_model
+from ..gating import get_allowed_models, enforce_model, canonicalize_model
 from ..services.db import get_user, get_db
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -22,10 +22,17 @@ logger = logging.getLogger(__name__)
 
 
 def _get_user_model_prefs(user_id: str) -> tuple[str, str]:
-    """Return (analysis_model, fast_model) from the user's DB prefs, falling back to defaults."""
+    """Return (analysis_model, fast_model) from the user's DB prefs, falling back to defaults.
+
+    Each stored value is canonicalized so stale aliases that were written
+    before a model ID change (e.g. ``claude-opus-4``) don't leak down to
+    the LLM call and produce an Anthropic 4xx for "unknown model". The
+    rewrite is silent: ``update_settings`` opportunistically persists the
+    canonical form the next time the user saves.
+    """
     user = get_user(user_id) or {}
-    analysis = user.get("analysis_model") or settings.analysis_model
-    fast = user.get("fast_model") or settings.fast_model
+    analysis = canonicalize_model(user.get("analysis_model")) or settings.analysis_model
+    fast = canonicalize_model(user.get("fast_model")) or settings.fast_model
     return analysis, fast
 
 
@@ -86,24 +93,31 @@ async def update_settings(update: SettingsUpdate, user_id: str = Depends(require
     """
     allowed = get_allowed_models(user_id)
 
-    if update.analysis_model is not None and update.analysis_model not in allowed:
+    # Accept either the canonical ID or a known alias — this prevents a
+    # stale client (tab left open before an app deploy that renamed a
+    # model) from tripping a 403 on save. We canonicalize before
+    # comparing against the tier's allow-list.
+    requested_analysis = canonicalize_model(update.analysis_model)
+    requested_fast = canonicalize_model(update.fast_model)
+
+    if requested_analysis is not None and requested_analysis not in allowed:
         raise HTTPException(
             status_code=403,
             detail=f"Model '{update.analysis_model}' is not available on your plan. Allowed: {', '.join(allowed)}",
         )
 
-    if update.fast_model is not None and update.fast_model not in allowed:
+    if requested_fast is not None and requested_fast not in allowed:
         raise HTTPException(
             status_code=403,
             detail=f"Model '{update.fast_model}' is not available on your plan. Allowed: {', '.join(allowed)}",
         )
 
     ok = True
-    if update.analysis_model:
-        normalized = enforce_model(user_id, update.analysis_model)
+    if requested_analysis:
+        normalized = enforce_model(user_id, requested_analysis)
         ok = _save_user_model_prefs(user_id, analysis_model=normalized) and ok
-    if update.fast_model:
-        normalized = enforce_model(user_id, update.fast_model)
+    if requested_fast:
+        normalized = enforce_model(user_id, requested_fast)
         ok = _save_user_model_prefs(user_id, fast_model=normalized) and ok
 
     if not ok:

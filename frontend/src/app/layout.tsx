@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Source_Serif_4, JetBrains_Mono } from "next/font/google";
 import { ClerkTokenProvider } from "@/components/ClerkTokenProvider";
 import { ThemeProvider, THEME_INIT_SCRIPT } from "@/lib/ThemeProvider";
+import { BackgroundImageProvider } from "@/components/BackgroundImageProvider";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import "katex/dist/katex.min.css";
@@ -102,6 +103,7 @@ export default function RootLayout({
         </head>
         <body className="min-h-full flex flex-col antialiased">
           <ThemeProvider>
+            <BackgroundImageProvider />
             <ClerkTokenProvider>{children}</ClerkTokenProvider>
           </ThemeProvider>
           <Analytics />

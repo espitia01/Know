@@ -1548,6 +1548,27 @@ function PaperContent() {
           </button>
         </div>
       )}
+
+      {/* Focus-mode escape hatch for the analysis pane. When the user
+          enters focus mode with the pane closed (or closes it while
+          in focus mode) the header is gone, so there is no affordance
+          to bring the pane back. This small floating chip lives at
+          the bottom-right for exactly that case — positioned low so
+          it doesn't fight the document gutter, and only visible when
+          we're in focus mode AND the pane is hidden. */}
+      {focusMode && !panelVisible && (
+        <button
+          onClick={() => setPanelVisible(true)}
+          className="fixed bottom-4 right-4 z-40 glass-strong rounded-full pl-3 pr-3.5 py-2 flex items-center gap-2 text-[12px] font-medium text-foreground/90 hover:text-foreground shadow-md hover:shadow-lg transition-all animate-fade-in ring-focus"
+          title="Open analysis pane"
+          aria-label="Open analysis pane"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
+          </svg>
+          Show Analysis
+        </button>
+      )}
     </div>
 
       <BibtexModal

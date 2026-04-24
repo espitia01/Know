@@ -15,18 +15,19 @@ import { UpgradeModal } from "@/components/UpgradeModal";
 import { UpgradeConfirmModal } from "@/components/UpgradeConfirmModal";
 import { UpgradeScheduledModal } from "@/components/UpgradeScheduledModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { AppearanceSection } from "@/components/AppearanceSection";
 import { DISCORD_URL } from "@/lib/constants";
 
 const MODEL_LABELS: Record<string, string> = {
   "claude-haiku-4-5": "Fastest — great for quick explanations",
   "claude-sonnet-4-6": "Balanced — speed and quality",
-  "claude-opus-4": "Highest quality — deepest analysis",
+  "claude-opus-4-7": "Highest quality — deepest analysis",
 };
 
 const MODEL_SHORT: Record<string, string> = {
   "claude-haiku-4-5": "Haiku",
   "claude-sonnet-4-6": "Sonnet",
-  "claude-opus-4": "Opus",
+  "claude-opus-4-7": "Opus",
 };
 
 function UsageBar({ label, used, limit, hint }: { label: string; used: number; limit: number; hint?: string }) {
@@ -264,6 +265,10 @@ function SettingsContent() {
             )}
           </div>
         )}
+
+        {/* Appearance — background image picker (Scholar+ only; free
+            users see the upsell card inside the component). */}
+        <AppearanceSection tier={tier} />
 
         {/* Usage */}
         {usage && (

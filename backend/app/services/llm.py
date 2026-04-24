@@ -13,6 +13,7 @@ import logging
 import httpx
 import ssl
 import certifi
+from fastapi import HTTPException
 
 from ..config import settings
 
@@ -21,9 +22,15 @@ _warned_missing_key = False
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
+# Current Anthropic model aliases as of April 2026. The previous Opus
+# ID (``claude-opus-4``) was never valid on the Messages API — it's a
+# user-facing name. Anthropic's alias is ``claude-opus-4-7`` for the
+# current generation. Leaving the old string in place caused every
+# Opus call to 4xx with "unknown model" and surfaced to the user as
+# "I get errors after switching to opus/sonnet".
 HAIKU_MODEL = "claude-haiku-4-5"
 SONNET_MODEL = "claude-sonnet-4-6"
-OPUS_MODEL = "claude-opus-4"
+OPUS_MODEL = "claude-opus-4-7"
 
 MAX_IMAGE_DIMENSION = 1024
 
@@ -52,6 +59,75 @@ def _ssl_context():
 class LLMProvider(ABC):
     @abstractmethod
     async def complete(self, system: str, user: str, max_tokens: int = 4096) -> str: ...
+
+
+class LLMProviderError(HTTPException):
+    """Raised when the upstream model provider rejects a request.
+
+    We deliberately subclass ``HTTPException`` rather than a plain
+    ``RuntimeError`` so every route's existing ``except HTTPException:
+    release_usage(token); raise`` branch automatically surfaces the
+    real, structured error (e.g. "Model 'claude-opus-4' is not
+    available") instead of the broader ``except Exception`` branch
+    converting it into a generic 500. Before this change, typos in a
+    model alias looked like random outages to the user.
+    """
+
+    def __init__(self, status: int, message: str, *, model: str | None = None):
+        detail = {"code": "llm_provider", "message": message}
+        if model:
+            detail["model"] = model
+        super().__init__(status_code=int(status), detail=detail)
+        self.message = message
+        self.model = model
+
+
+def _raise_for_anthropic(response: httpx.Response, *, model: str) -> None:
+    """Translate a non-2xx Anthropic response into an ``LLMProviderError``.
+
+    We read a small, bounded chunk of the body to extract the
+    Anthropic-provided ``error.message`` without propagating huge
+    payloads through logs. The provider error message is the truth of
+    why the call failed, and burying it in "LLM call failed" is what
+    made model typos (``claude-opus-4``) look like random outages.
+    """
+    if response.is_success:
+        return
+    status = response.status_code
+    text = ""
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            err = data.get("error") or {}
+            if isinstance(err, dict):
+                text = str(err.get("message") or "") or str(err.get("type") or "")
+    except Exception:
+        pass
+    if not text:
+        try:
+            text = (response.text or "")[:500]
+        except Exception:
+            text = ""
+    # Map upstream statuses to a safe outbound status. 4xx from the
+    # provider usually means a client-ish problem (bad model id, cap,
+    # etc.) but we don't want to proxy a raw 401 back — that would let
+    # the frontend think the *user* isn't signed in. 502 is the right
+    # story: "the upstream got our request, and rejected it".
+    out_status = 502
+    if status == 429:
+        out_status = 429
+    if status == 400 and ("model" in text.lower() or not text):
+        msg = f"Selected model '{model}' is not available from Anthropic. Pick another model in Settings."
+    elif status in (401, 403):
+        msg = "Anthropic authentication failed — the API key in server config is invalid or revoked."
+    elif status == 429:
+        msg = "Anthropic rate limit hit — please wait a moment and try again."
+    elif status >= 500:
+        msg = "Anthropic service is having trouble right now. Please try again in a few moments."
+        out_status = 503
+    else:
+        msg = text or f"Anthropic returned HTTP {status}."
+    raise LLMProviderError(out_status, msg, model=model)
 
 
 _shared_http_client: httpx.AsyncClient | None = None
@@ -85,7 +161,7 @@ class AnthropicProvider(LLMProvider):
                 "messages": [{"role": "user", "content": user}],
             },
         )
-        response.raise_for_status()
+        _raise_for_anthropic(response, model=self.model)
         data = response.json()
         return data["content"][0]["text"]
 
@@ -107,7 +183,12 @@ class AnthropicProvider(LLMProvider):
                 "messages": [{"role": "user", "content": user}],
             },
         ) as response:
-            response.raise_for_status()
+            if not response.is_success:
+                # Read the full body before translating — it arrived as
+                # a streamed response but we don't have a JSON chunk yet
+                # for 4xx errors (Anthropic returns one small blob).
+                await response.aread()
+                _raise_for_anthropic(response, model=self.model)
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -156,7 +237,7 @@ class AnthropicProvider(LLMProvider):
                 ],
             },
         )
-        response.raise_for_status()
+        _raise_for_anthropic(response, model=self.model)
         data = response.json()
         return data["content"][0]["text"]
 
@@ -195,7 +276,9 @@ class AnthropicProvider(LLMProvider):
                 ],
             },
         ) as response:
-            response.raise_for_status()
+            if not response.is_success:
+                await response.aread()
+                _raise_for_anthropic(response, model=self.model)
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
                     continue

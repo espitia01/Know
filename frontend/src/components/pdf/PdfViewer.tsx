@@ -199,10 +199,15 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
   // step is to remove any existing overlay on the page so we never
   // stack duplicates.
   const drawUnderlinesForPage = useCallback((pageEl: HTMLElement, history: SelectionAnalysisResult[]) => {
-    const textLayer = pageEl.querySelector(".react-pdf__Page__textContent") as HTMLElement | null;
+    const textLayer = pageEl.querySelector(".react-pdf__Page__textContent, .textLayer") as HTMLElement | null;
 
     pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
     if (!textLayer || history.length === 0) return;
+    // Bail if pdfjs hasn't populated text spans yet. The container div
+    // gets inserted before the individual spans, so redrawing here
+    // would walk zero nodes, paint nothing, and then we'd wait until
+    // the next mutation to try again. Better to just no-op.
+    if (textLayer.childElementCount === 0) return;
 
     const pageStyle = getComputedStyle(pageEl);
     if (pageStyle.position === "static") pageEl.style.position = "relative";
@@ -271,29 +276,42 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
 
     const seenRanges: Array<[number, number]> = [];
     let painted = 0;
-    for (let i = 0; i < history.length && painted < 12; i++) {
+    for (let i = 0; i < history.length && painted < 16; i++) {
       const entry = history[i];
       const raw = entry.selected_text?.trim();
-      if (!raw || raw.length < 8) continue;
+      if (!raw || raw.length < 4) continue;
 
       // Needle is normalized the same way as the haystack so ligatures,
       // smart quotes, and em-dashes from the LLM-submitted text don't
       // silently miss the PDF's rendering of the same passage.
       const needleNorm = normalizeForSearch(raw).toLowerCase();
-      if (needleNorm.length < 8) continue;
+      if (needleNorm.length < 4) continue;
 
       // Build a tolerant pattern: any whitespace run in the needle can
-      // match a run in the haystack; hyphens optionally match
-      // line-break soft-hyphen remnants.
-      const words = needleNorm.split(" ").filter(Boolean).map(escapeRe);
-      if (words.length === 0) continue;
-      let pattern: RegExp;
-      try {
-        pattern = new RegExp(words.join("\\s+"), "i");
-      } catch {
-        continue;
+      // match a run in the haystack. We try progressively shorter
+      // prefixes if the full needle doesn't hit — PDF extraction
+      // sometimes drops the tail of a long selection (page breaks,
+      // footnote interruptions, column crossings), and a match on the
+      // first clause of the sentence is still better than nothing.
+      const fullWords = needleNorm.split(" ").filter(Boolean);
+      if (fullWords.length === 0) continue;
+
+      const candidateWindows: string[][] = [fullWords];
+      if (fullWords.length > 10) candidateWindows.push(fullWords.slice(0, 10));
+      if (fullWords.length > 6) candidateWindows.push(fullWords.slice(0, 6));
+      if (fullWords.length > 4) candidateWindows.push(fullWords.slice(0, 4));
+
+      let m: RegExpExecArray | null = null;
+      for (const w of candidateWindows) {
+        let pattern: RegExp;
+        try {
+          pattern = new RegExp(w.map(escapeRe).join("\\s+"), "i");
+        } catch {
+          continue;
+        }
+        const hit = pattern.exec(normalized);
+        if (hit) { m = hit; break; }
       }
-      const m = pattern.exec(normalized);
       if (!m || m.index == null) continue;
       const normStart = m.index;
       const normEnd = normStart + m[0].length;
@@ -349,42 +367,88 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
   // (e.g. text-layer nodes being appended *after* onRenderSuccess, or
   // react-pdf re-rendering a virtualized page) so new underlines
   // appear without waiting on the next explicit render cycle.
+  //
+  // Why both the container observer AND per-page observers:
+  //   • pdfjs inserts the ``.textLayer`` container first and then
+  //     streams spans into it over the next few animation frames.
+  //     Catching only the "text layer appeared" event means we'd
+  //     paint zero underlines (no spans yet) and not try again.
+  //   • A per-page observer lets us re-run the draw whenever the
+  //     *span count* inside the text layer changes, which is the
+  //     precise moment the draw can actually succeed.
+  //   • The container observer handles page re-mounts that happen
+  //     during scroll virtualisation; it arms a per-page observer as
+  //     soon as the text layer appears.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
+    const pageObservers = new Map<HTMLElement, MutationObserver>();
     let raf: number | null = null;
-    const redrawAll = () => {
-      raf = null;
-      const pages = container.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]");
-      pages.forEach((pageEl) => drawUnderlinesForPage(pageEl, selectionHistory));
-    };
-    const schedule = () => {
-      if (raf === null) raf = requestAnimationFrame(redrawAll);
-    };
-    schedule();
+    let pending = new Set<HTMLElement>();
 
-    // Watch for text-layer mutations — pdfjs populates spans
-    // asynchronously after the container is attached, and virtualized
-    // pages re-insert their text layers when scrolled back into view.
-    const mo = new MutationObserver((muts) => {
+    const drainPending = () => {
+      raf = null;
+      const items = Array.from(pending);
+      pending = new Set();
+      for (const el of items) {
+        drawUnderlinesForPage(el, selectionHistory);
+      }
+    };
+    const schedulePage = (pageEl: HTMLElement) => {
+      pending.add(pageEl);
+      if (raf === null) raf = requestAnimationFrame(drainPending);
+    };
+    const scheduleAll = () => {
+      container.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]").forEach(schedulePage);
+    };
+
+    const armPage = (pageEl: HTMLElement) => {
+      if (pageObservers.has(pageEl)) return;
+      const inner = () => schedulePage(pageEl);
+      // Observe the entire page element — text layer gets appended
+      // later, so a subtree-level observer is the only way to catch
+      // both the initial insertion and every subsequent span update.
+      const mo = new MutationObserver(() => inner());
+      mo.observe(pageEl, { subtree: true, childList: true });
+      pageObservers.set(pageEl, mo);
+      schedulePage(pageEl);
+    };
+
+    // Arm observers on every already-mounted page and schedule an
+    // initial draw so history that arrived before the pages did still
+    // gets painted as soon as the text layer fills in.
+    container.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]").forEach(armPage);
+    scheduleAll();
+
+    // Top-level observer: notice when React mounts a new Page element
+    // (scroll-back into a virtualised page) and arm a per-page
+    // observer for it.
+    const top = new MutationObserver((muts) => {
       for (const m of muts) {
-        if (m.type === "childList") {
-          const touched = Array.from(m.addedNodes).some((n) => {
-            if (!(n instanceof Element)) return false;
-            return (
-              n.classList?.contains("react-pdf__Page__textContent") ||
-              !!n.querySelector?.(".react-pdf__Page__textContent")
-            );
-          });
-          if (touched) { schedule(); return; }
+        if (m.type !== "childList") continue;
+        for (const n of Array.from(m.addedNodes)) {
+          if (!(n instanceof Element)) continue;
+          if (n.classList?.contains("react-pdf__Page")) {
+            armPage(n as HTMLElement);
+          } else {
+            n.querySelectorAll?.<HTMLElement>(".react-pdf__Page[data-page-number]").forEach(armPage);
+          }
+        }
+        for (const n of Array.from(m.removedNodes)) {
+          if (!(n instanceof Element)) continue;
+          const el = n as HTMLElement;
+          const obs = pageObservers.get(el);
+          if (obs) { obs.disconnect(); pageObservers.delete(el); }
         }
       }
     });
-    mo.observe(container, { subtree: true, childList: true });
+    top.observe(container, { subtree: true, childList: true });
 
     return () => {
-      mo.disconnect();
+      top.disconnect();
+      pageObservers.forEach((m) => m.disconnect());
+      pageObservers.clear();
       if (raf !== null) cancelAnimationFrame(raf);
     };
   }, [selectionHistory, drawUnderlinesForPage, scale]);

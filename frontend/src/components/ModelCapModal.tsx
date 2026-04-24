@@ -11,6 +11,7 @@ import {
 const MODEL_LABEL: Record<string, string> = {
   "claude-haiku-4-5": "Haiku",
   "claude-sonnet-4-6": "Sonnet",
+  "claude-opus-4-7": "Opus",
   "claude-opus-4": "Opus",
 };
 
