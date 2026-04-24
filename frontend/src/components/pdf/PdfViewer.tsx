@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
-import { getAuthHeadersSync, SelectionAnalysisResult } from "@/lib/api";
+import { api, getAuthHeadersSync, SelectionAnalysisResult } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -62,6 +62,7 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
   // from the store lazily inside the draw callback via `getState`.
   const selectionHistory = useStore((s) => s.selectionHistory);
   const openSelectionFromHistory = useStore((s) => s.openSelectionFromHistory);
+  const removeSelectionFromHistory = useStore((s) => s.removeSelectionFromHistory);
 
   const [retryKey, setRetryKey] = useState(0);
   // Whether we've already restored the persisted scroll for this paper. We
@@ -427,8 +428,14 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       const rawEndInclusive = normIdxToRawIdx[normEnd - 1];
       const rawEnd = rawEndInclusive + 1;
 
-      const overlaps = seenRanges.some(([s, e]) => !(rawEnd <= s || rawStart >= e));
-      if (overlaps) continue;
+      // We no longer skip overlapping ranges. Previously a second
+      // highlight covering even a single character of a prior one was
+      // silently dropped, which confused users who tried to stack
+      // selections ("I clicked analyse and nothing happened"). Letting
+      // them stack keeps the behaviour predictable — multiple
+      // underlines will lightly visually accumulate, which is an
+      // acceptable trade-off for the ability to re-analyse text the
+      // user already looked at once.
       seenRanges.push([rawStart, rawEnd]);
 
       const startLoc = locate(rawStart);
@@ -442,37 +449,79 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       } catch {
         continue;
       }
-      const rects = range.getClientRects();
-      for (const r of Array.from(rects)) {
-        if (r.width < 4 || r.height < 4) continue;
+      const rects = Array.from(range.getClientRects()).filter(
+        (r) => r.width >= 4 && r.height >= 4,
+      );
+      if (rects.length === 0) continue;
+
+      // Paint the underline bars themselves. These are intentionally
+      // `pointer-events: none` (see globals.css) so making a new text
+      // selection over an existing highlight works natively — no more
+      // "highlight on highlight is a nightmare". Opening / deleting
+      // the stored analysis is reached via the action pill rendered
+      // after the last rect.
+      for (const r of rects) {
         const div = document.createElement("div");
         div.className = "know-selection-underline";
         div.style.left = `${r.left - pageRect.left}px`;
         div.style.top = `${r.top - pageRect.top}px`;
         div.style.width = `${r.width}px`;
         div.style.height = `${r.height}px`;
-        div.title = "Open past analysis for this selection";
-        // Use `pointerdown` (capture phase) rather than `click`. The
-        // pdfjs text layer sits on top of the page canvas with its own
-        // selection handling: a native mousedown there starts a text
-        // selection drag, which prevents the subsequent click from
-        // firing on our overlay. Intercepting at pointerdown, in the
-        // capture phase, runs our handler before pdfjs starts a drag
-        // so clicks on underlines reliably open the stored analysis.
-        const fire = (ev: Event) => {
-          ev.stopPropagation();
-          ev.preventDefault();
-          openSelectionFromHistory(entry);
-        };
-        div.addEventListener("pointerdown", fire, { capture: true });
-        div.addEventListener("click", fire);
         overlay.appendChild(div);
       }
+
+      // Action pill anchored to the end of the last visual line of
+      // the selection. It's a small, always-clickable handle that
+      // opens the stored analysis on click and deletes on shift- or
+      // right-click — the only part of the overlay that captures
+      // pointer events, leaving the rest of the text underneath free
+      // for normal selection.
+      const lastRect = rects[rects.length - 1];
+      const pill = document.createElement("button");
+      pill.type = "button";
+      pill.className = "know-selection-action";
+      pill.title = "Open saved analysis · shift-click or right-click to delete";
+      pill.setAttribute("aria-label", "Open saved selection analysis");
+      pill.style.left = `${lastRect.right - pageRect.left + 2}px`;
+      pill.style.top = `${lastRect.top - pageRect.top}px`;
+      pill.style.height = `${lastRect.height}px`;
+      pill.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 6h16M4 12h12M4 18h8"/>
+        </svg>
+      `;
+      const del = async (ev: Event) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+        removeSelectionFromHistory(entry);
+        if (paperId) {
+          try {
+            await api.deleteSelection(
+              paperId,
+              entry.selected_text ?? "",
+              entry.action ?? "explain",
+            );
+          } catch {
+            // Swallow — local state is already updated; if the server
+            // delete fails the next fetch will resurface the entry
+            // which is the correct, visible fallback.
+          }
+        }
+      };
+      pill.addEventListener("click", (ev) => {
+        if (ev.shiftKey) { void del(ev); return; }
+        ev.stopPropagation();
+        ev.preventDefault();
+        openSelectionFromHistory(entry);
+      });
+      pill.addEventListener("contextmenu", (ev) => { void del(ev); });
+      overlay.appendChild(pill);
+
       painted++;
     }
 
     if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
-  }, [openSelectionFromHistory, normalizeForSearch]);
+  }, [openSelectionFromHistory, removeSelectionFromHistory, normalizeForSearch, paperId]);
 
   // Fallback repaint: when the selectionHistory array changes while
   // pages are already on screen, walk every mounted page and redraw.

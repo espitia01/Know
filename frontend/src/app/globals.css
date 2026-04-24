@@ -263,6 +263,13 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    /* Form a stacking context so `body::before` (which paints the
+       chosen background preset at z-index -1) sits *between* body's
+       own opaque fill and the in-flow app content. Without this the
+       negative-z-index pseudo escapes to the root stacking context
+       and is silently painted behind body's fill — which is exactly
+       the bug that made presets appear to do nothing. */
+    isolation: isolate;
   }
 
   ::selection {
@@ -517,25 +524,50 @@
 .know-selection-overlay {
   position: absolute;
   inset: 0;
+  /* Parent is transparent to events; only specific children (the
+     action pill below) opt back in with `pointer-events: auto`. */
   pointer-events: none;
-  /* Sits above the pdf.js text layer (z-index 2) and annotation layer
-     (z-index 3) so clicks on `.know-selection-underline` reach our
-     handler rather than getting swallowed by text-selection hit-tests
-     on the spans underneath. */
   z-index: 5;
 }
 .know-selection-underline {
   position: absolute;
-  pointer-events: auto;
-  cursor: pointer;
+  /* IMPORTANT: no pointer-events here. An earlier version trapped
+     clicks on the whole highlight body which made it impossible to
+     start a new text selection that overlapped an existing one
+     ("highlight on highlight is a nightmare"). We keep the visual
+     underline and move the interactive affordance onto a dedicated
+     pill anchored to the end of the last rect. */
+  pointer-events: none;
   border-bottom: 1.5px solid rgb(var(--pdf-selection) / 0.72);
   background: rgb(var(--pdf-selection) / 0.06);
   border-radius: 2px;
-  transition: background 120ms ease, border-color 120ms ease;
 }
-.know-selection-underline:hover {
-  background: rgb(var(--pdf-selection) / 0.18);
-  border-bottom-color: rgb(var(--pdf-selection) / 1);
+.know-selection-action {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid rgb(var(--pdf-selection) / 0.45);
+  background: rgb(var(--pdf-selection) / 0.12);
+  color: rgb(var(--pdf-selection) / 1);
+  border-radius: 3px;
+  opacity: 0.55;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+.know-selection-action:hover,
+.know-selection-action:focus-visible {
+  opacity: 1;
+  background: rgb(var(--pdf-selection) / 0.22);
+  outline: none;
+}
+.know-selection-action svg {
+  width: 10px;
+  height: 10px;
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -725,17 +757,15 @@
 */
 /* Dashboard / library background.
  *
- * `.bg-mesh` holds the base page color + the two quiet radial
- * gradients that give the page some depth. The *user's* chosen
- * background (preset or custom upload) is painted globally on
- * `body::before` further down, so it persists across every route
- * (dashboard, library, reader, settings, marketing) without each
- * route having to opt in.
+ * `.bg-mesh` layers two quiet radial gradients on top of whatever
+ * bg-color is already in place (body + body::before). We deliberately
+ * do NOT set `background-color` here: otherwise `main.bg-mesh` covers
+ * the user's chosen preset (painted on `body::before`) and the whole
+ * feature appears broken. `body` already has `bg-background` as the
+ * base fill, so these gradients sit on top with transparency.
  */
 .bg-mesh {
   position: relative;
-  isolation: isolate;
-  background-color: var(--background);
   background-image:
     radial-gradient(ellipse 70% 55% at 15% 10%, rgb(0 0 0 / 0.035), transparent 65%),
     radial-gradient(ellipse 55% 45% at 95% 95%, rgb(0 0 0 / 0.025), transparent 65%);

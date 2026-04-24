@@ -142,7 +142,7 @@ function SettingsContent() {
   };
 
   return (
-    <main className="flex-1 flex flex-col items-center px-6 pt-[8vh] pb-12 bg-mesh min-h-screen bg-background text-foreground">
+    <main className="flex-1 flex flex-col items-center px-6 pt-[8vh] pb-12 bg-mesh min-h-screen text-foreground">
       <div className="max-w-lg w-full space-y-8">
         {/* Header */}
         <div className="flex items-center gap-3">

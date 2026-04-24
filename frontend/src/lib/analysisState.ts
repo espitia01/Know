@@ -57,7 +57,11 @@ export function clearProgressStart(paperId: string, kind: AnalysisKind) {
 // doesn't swell unboundedly and so a paper that's re-added later triggers
 // a fresh auto-analyze instead of silently skipping it.
 export function forgetPaper(paperId: string) {
-  autoAnalyzedPapers.delete(paperId);
+  for (const key of Array.from(autoAnalyzedPapers)) {
+    if (key === paperId || key.startsWith(`${paperId}:`)) {
+      autoAnalyzedPapers.delete(key);
+    }
+  }
   activeRequests.delete(paperId);
   const stream = activeSummaryStreams.get(paperId);
   if (stream) {
@@ -67,4 +71,21 @@ export function forgetPaper(paperId: string) {
   for (const key of Array.from(progressStartTimes.keys())) {
     if (key.startsWith(`${paperId}:`)) progressStartTimes.delete(key);
   }
+}
+
+/**
+ * Allow the auto-analysis guards for a paper to fire again. Used when
+ * the user *re-enters* a paper: if the first pass didn't manage to
+ * persist pre-reading / assumptions (server cache still empty), the
+ * hydration effect should be free to retry instead of being held off
+ * by a stale "we already kicked this off once this session" flag.
+ *
+ * Concurrent duplicate requests are still prevented by
+ * `hasActiveRequest`, so clearing here is safe even if a request from
+ * the previous visit is still in flight — the hydration effect will
+ * skip on the `hasActiveRequest` check and re-try only if truly idle.
+ */
+export function allowAutoAnalyzeRetry(paperId: string) {
+  autoAnalyzedPapers.delete(`${paperId}:preReading`);
+  autoAnalyzedPapers.delete(`${paperId}:assumptions`);
 }

@@ -152,6 +152,46 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
         raise HTTPException(status_code=500, detail="Selection analysis failed. Please try again.")
 
 
+@router.delete("/{paper_id}/selection")
+async def delete_selection(
+    paper_id: str, body: dict, user_id: str = Depends(require_auth),
+):
+    """Remove a previously stored selection from a paper.
+
+    Selections live inside ``cached_analysis["selections"]`` and don't
+    carry server-side IDs (they're free-form LLM results). We match on
+    ``selected_text`` + ``action`` which is unique enough in practice
+    that the client can round-trip safely: the user picks a highlight,
+    we send both fields back, and we drop every matching entry. If no
+    match is found we simply no-op instead of 404'ing — the client's
+    view stays consistent without needing to retry.
+    """
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+
+    selected_text = (body.get("selected_text") or "").strip()
+    action = body.get("action") or "explain"
+    if not selected_text:
+        raise HTTPException(status_code=400, detail="selected_text is required")
+
+    def _apply(p):
+        items = p.cached_analysis.get("selections") or []
+        p.cached_analysis["selections"] = [
+            s for s in items
+            if not (
+                isinstance(s, dict)
+                and (s.get("selected_text") or "").strip() == selected_text
+                and (s.get("action") or "explain") == action
+            )
+        ]
+
+    try:
+        mutate_paper(paper_id, user_id, _apply)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return {"ok": True}
+
+
 @router.post("/{paper_id}/selection-stream")
 async def selection_analysis_stream(
     paper_id: str, body: dict, request: Request,

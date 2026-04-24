@@ -20,6 +20,7 @@ import {
   markRequestEnd,
   clearProgressStart,
   forgetPaper,
+  allowAutoAnalyzeRetry,
 } from "@/lib/analysisState";
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
@@ -131,6 +132,13 @@ function AddPaperPopover({
     setUploading(true);
     try {
       const paper = await api.uploadPaper(file);
+      // Seed the in-memory paper cache with the full upload response.
+      // The destination reader page then finds the paper instantly in
+      // `papersById` and can render title / figures / cached analysis
+      // *without* waiting for a second `api.getPaper` round-trip — the
+      // main source of the "significant lag between upload and
+      // something happening" complaint.
+      useStore.getState().cachePaper(paper);
       // Hand off to the parent *before* touching any local state — if
       // the parent navigates (router.replace to the new paper) this
       // component unmounts and any subsequent setState would be a
@@ -332,6 +340,12 @@ function PaperContent() {
       if (hasActiveRequest(paperId, "preReading")) setPreReadingLoading(true);
       if (hasActiveRequest(paperId, "assumptions")) setAssumptionsLoading(true);
       if (hasActiveRequest(paperId, "summary")) setSummaryLoading(true);
+      // Let the hydration effect retry auto-analysis on re-entry if
+      // the server cache is still empty. Without this, returning to a
+      // paper whose first-pass analyze quietly failed left the tabs
+      // permanently idle ("workflow doesn't proceed as usual" in the
+      // bug report).
+      allowAutoAnalyzeRetry(paperId);
       setActivePaperId(paperId);
     }
   }, [paperId]);
@@ -699,6 +713,12 @@ function PaperContent() {
     if (hasActiveRequest(id, "preReading")) setPreReadingLoading(true);
     if (hasActiveRequest(id, "assumptions")) setAssumptionsLoading(true);
     if (hasActiveRequest(id, "summary")) setSummaryLoading(true);
+    // Match the behaviour of the URL-driven effect: coming back to a
+    // paper whose first-pass analysis silently failed (server cache
+    // still missing pre_reading / assumptions) should be allowed to
+    // retry rather than being held off by the sticky
+    // `autoAnalyzedPapers` flag.
+    allowAutoAnalyzeRetry(id);
     setActivePaperId(id);
     // Keep the URL in sync with the active paper so deep links, browser
     // history, and copy-URL all reflect reality. `router.replace` (not push)

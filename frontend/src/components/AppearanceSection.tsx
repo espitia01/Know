@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   BACKGROUND_PRESETS,
@@ -9,7 +9,6 @@ import {
   DEFAULT_BACKGROUND_STATE,
   applyBackgroundState,
   loadBackgroundState,
-  prepareCustomImage,
   saveBackgroundState,
 } from "@/lib/backgroundImage";
 
@@ -21,19 +20,17 @@ type Props = {
 /**
  * Settings → Appearance section.
  *
- * Lets Scholar+ users pick a subtle background preset for the dashboard
- * and library, or upload a custom image. Free users see the picker
- * disabled with an upgrade CTA so the feature is discoverable but
- * clearly gated. The whole thing is client-side — preference is stored
- * in localStorage and applied via CSS custom properties on `:root`.
+ * Scholar+ picker for one of the curated background presets. Custom
+ * uploads are intentionally not offered: they were fragile across
+ * themes, blew past the localStorage quota with large photos, and got
+ * in the way more than they helped. Presets are small SVG/gradient
+ * data URLs that ship in the JS bundle, so switching is instant and
+ * the result always stays on-theme.
  */
 export function AppearanceSection({ tier }: Props) {
   const entitled = tier === "scholar" || tier === "researcher";
 
   const [state, setState] = useState<BackgroundState>(DEFAULT_BACKGROUND_STATE);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   // Hydrate from localStorage on mount so the preview reflects the
   // user's actual saved choice the moment the panel opens.
@@ -50,33 +47,12 @@ export function AppearanceSection({ tier }: Props) {
   const selectPreset = useCallback(
     (id: BackgroundPresetId) => {
       if (!entitled) return;
-      // Switching away from a custom upload wipes the cached data URL —
-      // otherwise it hangs around in localStorage wasting quota. The
-      // user can always upload again.
-      const next: BackgroundState =
-        id === "custom"
-          ? { ...state, presetId: "custom" }
-          : { ...state, presetId: id, customImage: null };
-      persist(next);
+      // Any lingering custom data URL from older builds is wiped when
+      // the user picks a preset — no reason to keep bytes we no longer
+      // let them use.
+      persist({ ...state, presetId: id, customImage: null });
     },
     [entitled, state, persist],
-  );
-
-  const onFilePicked = useCallback(
-    async (file: File) => {
-      setError(null);
-      setBusy(true);
-      try {
-        const dataUrl = await prepareCustomImage(file);
-        persist({ presetId: "custom", customImage: dataUrl, opacity: state.opacity });
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : "Could not read that image.";
-        setError(msg);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [persist, state.opacity],
   );
 
   const setOpacity = useCallback(
@@ -87,6 +63,11 @@ export function AppearanceSection({ tier }: Props) {
   const resetAll = useCallback(() => {
     persist(DEFAULT_BACKGROUND_STATE);
   }, [persist]);
+
+  // Custom uploads have been retired — surface-level presets were a
+  // more reliable experience. If a user has a stale "custom" value in
+  // localStorage we filter it out here so the UI never renders it.
+  const visiblePresets = BACKGROUND_PRESETS.filter((p) => p.id !== "custom");
 
   return (
     <div className="glass rounded-2xl p-6 space-y-5">
@@ -107,8 +88,7 @@ export function AppearanceSection({ tier }: Props) {
       {!entitled ? (
         <div className="rounded-xl glass-subtle px-4 py-4 space-y-2">
           <p className="text-[12.5px] text-foreground/90">
-            Customize the dashboard background with curated presets or your own
-            image.
+            Choose a curated background for your dashboard and library.
           </p>
           <p className="text-[11.5px] text-muted-foreground">
             Available on Scholar and Researcher plans.
@@ -124,9 +104,8 @@ export function AppearanceSection({ tier }: Props) {
         </div>
       ) : (
         <>
-          {/* Preset grid */}
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-            {BACKGROUND_PRESETS.map((p) => {
+            {visiblePresets.map((p) => {
               const active = state.presetId === p.id;
               const swatchStyle: React.CSSProperties =
                 p.id === "none"
@@ -167,60 +146,11 @@ export function AppearanceSection({ tier }: Props) {
                 </button>
               );
             })}
-
-            {/* Custom upload slot — sits beside the presets so it reads as
-                a peer option rather than a secondary concern. */}
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={busy}
-              className={`group relative aspect-[4/3] rounded-xl overflow-hidden border-2 border-dashed transition-all ring-focus ${
-                state.presetId === "custom" && state.customImage
-                  ? "border-foreground/50"
-                  : "border-border hover:border-border-strong"
-              } flex items-center justify-center disabled:opacity-60`}
-              aria-label="Upload custom background"
-            >
-              {state.presetId === "custom" && state.customImage ? (
-                <div
-                  className="absolute inset-0"
-                  style={{
-                    backgroundImage: `url("${state.customImage}")`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }}
-                />
-              ) : null}
-              <div className="relative flex flex-col items-center gap-1 text-[11px] text-muted-foreground group-hover:text-foreground transition-colors">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
-                <span className="px-1.5 py-0.5 rounded-md bg-background/80 backdrop-blur-sm">
-                  {busy ? "Processing…" : "Upload"}
-                </span>
-              </div>
-            </button>
           </div>
 
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/svg+xml"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void onFilePicked(f);
-              // Reset so picking the same file twice still triggers onChange.
-              e.target.value = "";
-            }}
-          />
-
-          {error && (
-            <p className="text-[12px] text-destructive">{error}</p>
-          )}
-
-          {/* Opacity slider — the image can feel overwhelming even at
-              low alpha, so the user gets a direct dial. */}
+          {/* Opacity slider — each preset already ships at a quiet
+              baseline, but the user gets a direct dial if even that
+              feels too busy. */}
           <div className="pt-1 space-y-1.5">
             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
               <label htmlFor="bg-opacity">Intensity</label>

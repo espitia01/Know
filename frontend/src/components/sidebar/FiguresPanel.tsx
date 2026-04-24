@@ -147,7 +147,16 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   const [selected, setSelected] = useState<FigureInfo | null>(null);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
-  const [reextracting, setReextracting] = useState(false);
+  // "Re-extracting" spinner state lives in the store so a paper
+  // switch doesn't hide the running indicator. If the user triggers
+  // re-extraction, switches papers, then comes back, the spinner
+  // reappears immediately and the result lands whenever the request
+  // completes — even if that happens while they're on a different
+  // paper (see `handleReextract` below).
+  const reextracting = useStore((s) =>
+    Boolean(s.figureReextractInFlight[paperId]),
+  );
+  const setFigureReextractInFlight = useStore((s) => s.setFigureReextractInFlight);
   const [lightboxFig, setLightboxFig] = useState<FigureInfo | null>(null);
 
   const [conversations, setConversations] = useState<Record<string, ChatMessage[]>>({});
@@ -175,21 +184,37 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   }, [conversations, selected, loading]);
 
   const handleReextract = useCallback(async () => {
-    if (!paper) return;
-    setReextracting(true);
+    // Capture the paper snapshot for *this* paperId at call time. We
+    // pull from the in-memory cache rather than the global `paper`
+    // slice so the re-extract works even if the user has already
+    // switched to a different paper before this callback runs.
+    const snapshot = useStore.getState().papersById[paperId] ?? paper;
+    if (!snapshot) return;
+    setFigureReextractInFlight(paperId, true);
     try {
       const result = await api.reextractFigures(paperId);
-      const next = { ...paper, figures: result.figures };
-      setPaper(next);
+      const next = { ...snapshot, figures: result.figures };
+      // Always refresh the cache — the user returning to this paper
+      // must see the freshly-extracted figures, whether or not they
+      // were watching when the request resolved.
       cachePaper(next);
+      // Only mutate the global `paper` when this paper is still the
+      // active one; otherwise we'd overwrite the paper the user is
+      // currently reading with a different paper's data. This is the
+      // "figures extraction stopped" bug reported after a mid-job
+      // paper switch — the job wasn't stopping, it was quietly
+      // clobbering the in-view paper on completion.
+      if (useStore.getState().paper?.id === paperId) {
+        setPaper(next);
+      }
       setSelected(null);
       setConversations({});
     } catch (e) {
       console.error("Re-extraction failed:", e);
     } finally {
-      setReextracting(false);
+      setFigureReextractInFlight(paperId, false);
     }
-  }, [paperId, paper, setPaper, cachePaper]);
+  }, [paperId, paper, setPaper, cachePaper, setFigureReextractInFlight]);
 
   const handleAnalyze = useCallback(
     async (fig: FigureInfo, q: string = "") => {

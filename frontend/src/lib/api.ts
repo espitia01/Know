@@ -424,6 +424,13 @@ export const api = {
       body: JSON.stringify({ selected_text: selectedText, action }),
     }),
 
+  deleteSelection: (id: string, selectedText: string, action: string) =>
+    request<{ ok: boolean }>(`/api/papers/${id}/selection`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selected_text: selectedText, action }),
+    }),
+
   analyzeSelectionStream: async (id: string, selectedText: string, action: string, signal?: AbortSignal) => {
     const headers = await authHeaders();
     return fetch(`${API_BASE}/api/papers/${id}/selection-stream`, {

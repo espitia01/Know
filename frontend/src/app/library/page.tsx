@@ -318,7 +318,7 @@ function LibraryContent() {
 
   return (
     <>
-    <main className="flex-1 flex flex-col h-screen overflow-hidden bg-mesh bg-background text-foreground">
+    <main className="flex-1 flex flex-col h-screen overflow-hidden bg-mesh text-foreground">
       {/* Header */}
       <header className="shrink-0 flex items-center gap-3 px-5 h-[52px] border-b border-border glass-nav z-30 relative">
         <button

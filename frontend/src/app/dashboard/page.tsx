@@ -113,7 +113,7 @@ function DashboardContent() {
 
   if (isMobile) {
     return (
-      <main className="flex-1 flex flex-col items-center px-6 pt-[15vh] pb-12 bg-mesh min-h-screen bg-background text-foreground">
+      <main className="flex-1 flex flex-col items-center px-6 pt-[15vh] pb-12 bg-mesh min-h-screen text-foreground">
         <div className="absolute top-5 right-5 flex items-center gap-3">
           {tierUser?.tier === "free" && (
             <Link
@@ -192,7 +192,7 @@ function DashboardContent() {
   }
 
   return (
-    <main className="flex-1 flex flex-col items-center px-6 pt-[10vh] pb-12 bg-mesh min-h-screen bg-background text-foreground">
+    <main className="flex-1 flex flex-col items-center px-6 pt-[10vh] pb-12 bg-mesh min-h-screen text-foreground">
       <div className="absolute top-5 right-5 flex items-center gap-2.5">
         {tierUser?.tier === "free" && (
           <Link

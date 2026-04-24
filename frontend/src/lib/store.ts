@@ -37,6 +37,13 @@ interface AppStore {
   cachePaper: (p: ParsedPaper) => void;
   getCachedPaper: (id: string) => ParsedPaper | undefined;
 
+  // Per-paper flag for "figure re-extraction in progress". Lives in
+  // the global store (not FiguresPanel local state) so switching
+  // papers mid-job and returning still shows the spinner instead of
+  // looking like the job silently died.
+  figureReextractInFlight: Record<string, boolean>;
+  setFigureReextractInFlight: (paperId: string, running: boolean) => void;
+
   sessionPapers: { id: string; title: string }[];
   addSessionPaper: (p: { id: string; title: string }) => void;
   removeSessionPaper: (id: string) => void;
@@ -86,6 +93,10 @@ interface AppStore {
   // clicks an existing underline in the PDF. Pins the pane open, jumps
   // to the Selection tab, and sets the active result.
   openSelectionFromHistory: (r: SelectionAnalysisResult) => void;
+  // Remove a highlight from the in-memory history. The backend
+  // persistence step is handled by callers (via `api.deleteSelection`)
+  // so this action stays synchronous and cheap.
+  removeSelectionFromHistory: (r: SelectionAnalysisResult) => void;
 
   preReading: PreReadingAnalysis | null;
   setPreReading: (p: PreReadingAnalysis | null) => void;
@@ -148,6 +159,15 @@ export const useStore = create<AppStore>()(
       cachePaper: (p) =>
         set((s) => ({ papersById: { ...s.papersById, [p.id]: p } })),
       getCachedPaper: (id) => get().papersById[id],
+
+      figureReextractInFlight: {},
+      setFigureReextractInFlight: (paperId, running) =>
+        set((s) => {
+          const next = { ...s.figureReextractInFlight };
+          if (running) next[paperId] = true;
+          else delete next[paperId];
+          return { figureReextractInFlight: next };
+        }),
 
       sessionPapers: [],
       addSessionPaper: (p) =>
@@ -225,6 +245,19 @@ export const useStore = create<AppStore>()(
           selectionLoading: false,
           activeTab: "selection",
           panelVisible: true,
+        }),
+      removeSelectionFromHistory: (r) =>
+        set((s) => {
+          const key = (x: SelectionAnalysisResult) =>
+            `${x.action ?? "explain"}::${(x.selected_text ?? "").trim()}`;
+          const target = key(r);
+          return {
+            selectionHistory: s.selectionHistory.filter((h) => key(h) !== target),
+            selectionResult:
+              s.selectionResult && key(s.selectionResult) === target
+                ? null
+                : s.selectionResult,
+          };
         }),
 
       preReading: null,
