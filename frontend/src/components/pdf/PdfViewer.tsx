@@ -331,6 +331,14 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
     overlay.className = "know-selection-overlay";
     const pageRect = pageEl.getBoundingClientRect();
 
+    // Per-highlight rect geometry, recorded in page-local coordinates
+    // so the delegated click handler below can hit-test a click
+    // against each saved selection without re-measuring the DOM.
+    const pageHits: Array<{
+      entry: SelectionAnalysisResult;
+      rects: Array<{ x: number; y: number; w: number; h: number }>;
+    }> = [];
+
     const seenRanges: Array<[number, number]> = [];
     let painted = 0;
     for (let i = 0; i < history.length && painted < 16; i++) {
@@ -454,81 +462,194 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       );
       if (rects.length === 0) continue;
 
-      // Paint the underline bars themselves. These are intentionally
-      // `pointer-events: none` (see globals.css) so making a new text
-      // selection over an existing highlight works natively — no more
-      // "highlight on highlight is a nightmare". Opening / deleting
-      // the stored analysis is reached via the action pill rendered
-      // after the last rect.
+      // Paint the underline bars themselves. These stay
+      // `pointer-events: none` (see globals.css) so starting a new
+      // text selection that overlaps an existing highlight still
+      // works natively. The whole underline is nonetheless made
+      // *clickable* via a delegated handler on `pageEl` further down:
+      // we record each highlight's page-local rect geometry on
+      // `pageHits` and resolve a click back to its entry by point
+      // testing. This is the pattern that finally fixes "nothing
+      // happens when I click my highlights" — the old pill was too
+      // small for users to find.
+      const localRects: Array<{ x: number; y: number; w: number; h: number }> = [];
       for (const r of rects) {
         const div = document.createElement("div");
         div.className = "know-selection-underline";
-        div.style.left = `${r.left - pageRect.left}px`;
-        div.style.top = `${r.top - pageRect.top}px`;
+        const x = r.left - pageRect.left;
+        const y = r.top - pageRect.top;
+        div.style.left = `${x}px`;
+        div.style.top = `${y}px`;
         div.style.width = `${r.width}px`;
         div.style.height = `${r.height}px`;
         overlay.appendChild(div);
+        localRects.push({ x, y, w: r.width, h: r.height });
       }
+      pageHits.push({ entry, rects: localRects });
 
-      // Action pill anchored to the end of the last visual line of
-      // the selection. It's a small, always-clickable handle that
-      // opens the stored analysis on click and deletes on shift- or
-      // right-click — the only part of the overlay that captures
-      // pointer events, leaving the rest of the text underneath free
-      // for normal selection.
+      // Small "open" hint anchored to the end of the last rect.
+      // Keeps the behaviour visually discoverable — users can see
+      // there's *something* actionable — and carries the rich hover
+      // tooltip. The indicator itself doesn't need to intercept
+      // clicks (the delegated handler does), but we keep
+      // `pointer-events: auto` on it so the CSS tooltip fires on
+      // hover and screen readers hit a real button for keyboard
+      // access.
       const lastRect = rects[rects.length - 1];
       const pill = document.createElement("button");
       pill.type = "button";
       pill.className = "know-selection-action";
-      // `data-tooltip` powers the rich on-hover tooltip (see
-      // `.know-selection-action::after` in globals.css) so the click
-      // vs. shift-click semantics are obvious without the user having
-      // to discover them by accident. The native `title` is kept as a
-      // fallback for screen readers and long-press on touch devices.
-      const tip = "Click to open saved analysis\nShift-click or right-click to delete";
+      const tip = "Click the highlight to open saved analysis\nShift-click or right-click to delete";
       pill.setAttribute("data-tooltip", tip);
       pill.title = tip;
       pill.setAttribute("aria-label", "Open saved selection analysis — shift-click to delete");
       pill.style.left = `${lastRect.right - pageRect.left + 2}px`;
       pill.style.top = `${lastRect.top - pageRect.top}px`;
       pill.style.height = `${lastRect.height}px`;
-      // Arrow icon reads as "open / jump to" — clearer than the
-      // earlier hamburger lines, which read as "menu" and made users
-      // hesitate to click. The delete path stays on shift-click and
-      // is spelled out in the hover tooltip above.
       pill.innerHTML = `
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M7 17L17 7M9 7h8v8"/>
         </svg>
       `;
-      const del = async (ev: Event) => {
-        ev.stopPropagation();
-        ev.preventDefault();
-        removeSelectionFromHistory(entry);
-        if (paperId) {
-          try {
-            await api.deleteSelection(
-              paperId,
-              entry.selected_text ?? "",
-              entry.action ?? "explain",
-            );
-          } catch {
-            // Swallow — local state is already updated; if the server
-            // delete fails the next fetch will resurface the entry
-            // which is the correct, visible fallback.
-          }
-        }
-      };
-      pill.addEventListener("click", (ev) => {
-        if (ev.shiftKey) { void del(ev); return; }
-        ev.stopPropagation();
-        ev.preventDefault();
-        openSelectionFromHistory(entry);
-      });
-      pill.addEventListener("contextmenu", (ev) => { void del(ev); });
+      // Track the entry this pill belongs to so the delegated
+      // handler can treat a click on the pill the same as a click on
+      // the underline without any per-pill listeners.
+      (pill as HTMLElement & { __knowEntry?: SelectionAnalysisResult }).__knowEntry = entry;
       overlay.appendChild(pill);
 
       painted++;
+    }
+
+    // Delegated click + contextmenu on pageEl — the whole highlight
+    // region and the end-of-line pill all route through this one
+    // handler. Crucially, we bind on `pageEl` (not on the overlay or
+    // the underline div) so pdf.js's own mousedown-based text
+    // selection on the .textLayer is never intercepted: `click`
+    // naturally doesn't fire when the user is drag-selecting text,
+    // which is exactly what we want. Without delegation, the per-pill
+    // listeners were "not doing anything" because users were
+    // clicking on the underline body rather than the 16px pill.
+    const hostEl = pageEl as HTMLElement & {
+      __knowClickAttached?: boolean;
+      __knowHighlights?: Array<{
+        entry: SelectionAnalysisResult;
+        rects: Array<{ x: number; y: number; w: number; h: number }>;
+      }>;
+      __knowDispatch?: (
+        ev: MouseEvent,
+        mode: "open" | "delete",
+      ) => boolean;
+    };
+    hostEl.__knowHighlights = pageHits;
+    if (!hostEl.__knowClickAttached) {
+      hostEl.__knowClickAttached = true;
+      hostEl.__knowDispatch = (ev, mode) => {
+        // Path 1: the click landed directly on a pill (which has
+        // pointer-events: auto and a `__knowEntry` property attached
+        // at draw time). Resolving the entry from the target DOM node
+        // is more reliable than coordinate math, since the pill is
+        // painted *past* the underline's right edge.
+        let entry: SelectionAnalysisResult | null = null;
+        const tgt = ev.target as (Element & { __knowEntry?: SelectionAnalysisResult }) | null;
+        if (tgt) {
+          const actionEl = tgt.closest?.(".know-selection-action") as
+            | (HTMLElement & { __knowEntry?: SelectionAnalysisResult })
+            | null;
+          if (actionEl && actionEl.__knowEntry) entry = actionEl.__knowEntry;
+        }
+
+        // Path 2: geometric hit test against the stored underline
+        // rects. This is what makes the *whole highlighted passage*
+        // clickable, not just the end-of-line pill — the main reason
+        // users reported "nothing happens when I click".
+        if (!entry) {
+          const hits = hostEl.__knowHighlights;
+          if (hits && hits.length > 0) {
+            const r = hostEl.getBoundingClientRect();
+            // A little padding (particularly vertical) so a click
+            // that lands a pixel off the underline still registers.
+            const pad = 3;
+            const x = ev.clientX - r.left;
+            const y = ev.clientY - r.top;
+            outer: for (const h of hits) {
+              for (const rr of h.rects) {
+                if (
+                  x >= rr.x - pad &&
+                  x <= rr.x + rr.w + pad &&
+                  y >= rr.y - pad &&
+                  y <= rr.y + rr.h + pad
+                ) {
+                  entry = h.entry;
+                  break outer;
+                }
+              }
+            }
+          }
+        }
+
+        if (!entry) return false;
+        ev.stopPropagation();
+        ev.preventDefault();
+        if (mode === "delete") {
+          removeSelectionFromHistory(entry);
+          if (paperId) {
+            void api
+              .deleteSelection(
+                paperId,
+                entry.selected_text ?? "",
+                entry.action ?? "explain",
+              )
+              .catch(() => {});
+          }
+        } else {
+          openSelectionFromHistory(entry);
+        }
+        return true;
+      };
+      hostEl.addEventListener("click", (ev) => {
+        const dispatch = hostEl.__knowDispatch;
+        if (!dispatch) return;
+        dispatch(ev, ev.shiftKey ? "delete" : "open");
+      });
+      hostEl.addEventListener("contextmenu", (ev) => {
+        const dispatch = hostEl.__knowDispatch;
+        if (!dispatch) return;
+        dispatch(ev, "delete");
+      });
+
+      // Visual cursor affordance: swap to `pointer` while the
+      // cursor is over any known highlight rect so users get
+      // immediate feedback that the underline is interactive.
+      // Restoring the cursor to `auto` as soon as they leave is
+      // what differentiates "text selection region" from "click to
+      // open" in reader UIs.
+      hostEl.addEventListener("mousemove", (ev) => {
+        const hits = hostEl.__knowHighlights;
+        if (!hits || hits.length === 0) {
+          if (hostEl.style.cursor === "pointer") hostEl.style.cursor = "";
+          return;
+        }
+        const r = hostEl.getBoundingClientRect();
+        const pad = 3;
+        const x = ev.clientX - r.left;
+        const y = ev.clientY - r.top;
+        let over = false;
+        outer: for (const h of hits) {
+          for (const rr of h.rects) {
+            if (
+              x >= rr.x - pad &&
+              x <= rr.x + rr.w + pad &&
+              y >= rr.y - pad &&
+              y <= rr.y + rr.h + pad
+            ) {
+              over = true;
+              break outer;
+            }
+          }
+        }
+        const desired = over ? "pointer" : "";
+        if (hostEl.style.cursor !== desired) hostEl.style.cursor = desired;
+      });
     }
 
     if (overlay.childElementCount > 0) pageEl.appendChild(overlay);

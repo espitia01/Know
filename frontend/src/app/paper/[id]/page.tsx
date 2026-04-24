@@ -115,40 +115,70 @@ function AddPaperPopover({
     };
   }, [onClose, uploading]);
 
-  const handleUpload = useCallback(async (file: File) => {
+  // `uploading` is a count so multi-file uploads show the right
+  // "Uploading 3..." label and only hide the spinner once they've
+  // all resolved. Previously a single boolean meant the UI flicked
+  // off the moment any one upload landed.
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+
+  const handleUploadFiles = useCallback(async (files: File[]) => {
     setUploadError(null);
-    // Client-side guardrail: the backend also enforces this, but checking
-    // here avoids a doomed upload of a 100MB PDF over slow connections.
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setUploadError(
-        `PDF is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max ${(MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0)} MB.`
-      );
-      return;
+    if (files.length === 0) return;
+
+    // Client-side validation pass. Reject the entire batch if any
+    // one file is bad — cleaner UX than silently dropping some
+    // files from a multi-select.
+    for (const f of files) {
+      if (f.size > MAX_UPLOAD_BYTES) {
+        setUploadError(
+          `"${f.name}" is too large (${(f.size / 1024 / 1024).toFixed(1)} MB). Max ${(MAX_UPLOAD_BYTES / 1024 / 1024).toFixed(0)} MB.`
+        );
+        return;
+      }
+      if (!f.name.toLowerCase().endsWith(".pdf")) {
+        setUploadError(`"${f.name}" is not a PDF.`);
+        return;
+      }
     }
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
-      setUploadError("Only PDF files are supported.");
-      return;
-    }
+
     setUploading(true);
-    try {
-      const paper = await api.uploadPaper(file);
-      // Seed the in-memory paper cache with the full upload response.
-      // The destination reader page then finds the paper instantly in
-      // `papersById` and can render title / figures / cached analysis
-      // *without* waiting for a second `api.getPaper` round-trip — the
-      // main source of the "significant lag between upload and
-      // something happening" complaint.
-      useStore.getState().cachePaper(paper);
-      // Hand off to the parent *before* touching any local state — if
-      // the parent navigates (router.replace to the new paper) this
-      // component unmounts and any subsequent setState would be a
-      // no-op warning in the console. The parent also owns navigation
-      // so the user always lands on the paper they just uploaded.
-      onAdd(paper.id, paper.title);
-    } catch (e) {
-      setUploadError(e instanceof Error ? e.message : "Upload failed.");
-      setUploading(false);
-    }
+    setUploadProgress({ done: 0, total: files.length });
+
+    // Upload in parallel — the server accepts concurrent requests
+    // and this parallelises I/O (networking + PDF parsing) so the
+    // user isn't waiting serially through a large batch. We also
+    // hand off the first completion to `onAdd` *as soon as it's
+    // ready*, which unmounts the popover and lets the user start
+    // reading while the rest finish in the background.
+    let firstHandled = false;
+    let firstError: string | null = null;
+    const { cachePaper, addSessionPaper } = useStore.getState();
+
+    const tasks = files.map(async (file) => {
+      try {
+        const paper = await api.uploadPaper(file);
+        // Always register with the global store so the tab appears
+        // in the session bar regardless of which one finishes first
+        // and even if this component has already unmounted.
+        cachePaper(paper);
+        addSessionPaper({ id: paper.id, title: paper.title });
+        if (!firstHandled) {
+          firstHandled = true;
+          onAdd(paper.id, paper.title);
+        }
+      } catch (e) {
+        if (!firstError) {
+          firstError = e instanceof Error ? e.message : "Upload failed.";
+        }
+      } finally {
+        setUploadProgress((p) => ({ done: p.done + 1, total: p.total }));
+      }
+    });
+
+    await Promise.allSettled(tasks);
+    if (firstError && !firstHandled) setUploadError(firstError);
+    setUploading(false);
+    setUploadProgress({ done: 0, total: 0 });
   }, [onAdd]);
 
   const folders = useMemo(() => {
@@ -174,14 +204,15 @@ function AddPaperPopover({
           ref={fileInputRef}
           type="file"
           accept=".pdf"
+          multiple
           className="hidden"
           onChange={(e) => {
-            const file = e.target.files?.[0];
+            const files = Array.from(e.target.files ?? []);
             // Reset the value so selecting the *same* file again still
             // fires `change`. Without this, re-picking a PDF the user
             // already tried once would appear to do nothing at all.
             e.target.value = "";
-            if (file) handleUpload(file);
+            if (files.length > 0) handleUploadFiles(files);
           }}
         />
         <button
@@ -192,17 +223,23 @@ function AddPaperPopover({
           {uploading ? (
             <>
               <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Uploading...
+              {uploadProgress.total > 1
+                ? `Uploading ${uploadProgress.done}/${uploadProgress.total}…`
+                : "Uploading…"}
             </>
           ) : (
             <>
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
               </svg>
-              Upload New Paper
+              Upload Papers
             </>
           )}
         </button>
+        {/* Small hint so users know they can batch-upload. */}
+        <p className="text-[10.5px] text-muted-foreground/70 text-center leading-snug px-1">
+          Tip: you can select multiple PDFs at once.
+        </p>
         {uploadError && (
           <p role="alert" className="text-[11px] text-destructive leading-snug px-1">
             {uploadError}
@@ -1643,6 +1680,58 @@ function PaperContent() {
           )}
           {panelVisible ? "Hide Analysis" : "Show Analysis"}
         </button>
+      )}
+
+      {/* Floating session paper switcher in focus mode. Hiding all
+          chrome was great for reading a single paper, but left users
+          unable to jump between multi-paper workspaces without
+          exiting focus mode first. This reproduces the session tab
+          UI as a compact, auto-fading top-center pill so it stays
+          accessible without competing with the PDF content. */}
+      {focusMode && showSessionBar && (
+        <div className="fixed top-2 left-1/2 -translate-x-1/2 z-40 max-w-[min(90vw,720px)] animate-fade-in">
+          <div className="flex items-center gap-1 glass-strong rounded-full shadow-md px-1.5 py-1 overflow-x-auto scrollbar-hide">
+            {sessionPapers.map((sp) => (
+              <div
+                key={sp.id}
+                role="group"
+                aria-label={sp.title}
+                className={`group flex items-center rounded-full text-[11px] font-medium transition-all shrink-0 ${
+                  sp.id === activePaperId
+                    ? "btn-primary-glass"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => handleSwitchPaper(sp.id)}
+                  className="pl-3 pr-1.5 py-1 flex items-center rounded-l-full"
+                  aria-current={sp.id === activePaperId ? "page" : undefined}
+                >
+                  <span className="max-w-[180px] truncate">
+                    {sp.title.length > 35 ? sp.title.slice(0, 35) + "..." : sp.title}
+                  </span>
+                </button>
+                {sessionPapers.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveSessionPaper(sp.id)}
+                    aria-label={`Remove ${sp.title} from session`}
+                    className={`mr-1.5 w-3.5 h-3.5 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                      sp.id === activePaperId
+                        ? "hover:bg-background/20 text-background/60 hover:text-background"
+                        : "hover:bg-foreground/10 text-muted-foreground/30 hover:text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100"
+                    }`}
+                  >
+                    <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
 
