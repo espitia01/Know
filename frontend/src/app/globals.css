@@ -549,26 +549,65 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
+  width: 16px;
   padding: 0;
   margin: 0;
-  border: 1px solid rgb(var(--pdf-selection) / 0.45);
-  background: rgb(var(--pdf-selection) / 0.12);
+  border: 1px solid rgb(var(--pdf-selection) / 0.5);
+  background: rgb(var(--pdf-selection) / 0.14);
   color: rgb(var(--pdf-selection) / 1);
-  border-radius: 3px;
-  opacity: 0.55;
-  transition: opacity 120ms ease, background 120ms ease;
+  border-radius: 4px;
+  opacity: 0.7;
+  transition: opacity 120ms ease, background 120ms ease, transform 120ms ease;
 }
 .know-selection-action:hover,
 .know-selection-action:focus-visible {
   opacity: 1;
-  background: rgb(var(--pdf-selection) / 0.22);
+  background: rgb(var(--pdf-selection) / 0.26);
+  transform: translateY(-0.5px);
   outline: none;
 }
 .know-selection-action svg {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
 }
+
+/* Rich hover tooltip that makes the pill's behaviour obvious —
+   native `title=` only shows after a ~1s delay and reads as flat
+   system text. This one fades in instantly with a clear two-line
+   explanation of the click / shift-click actions so users don't
+   have to guess. */
+.know-selection-action::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  white-space: pre;
+  font-size: 10.5px;
+  line-height: 1.35;
+  font-weight: 500;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgb(var(--popover-rgb, 24 24 27) / 0.96);
+  color: rgb(var(--popover-fg-rgb, 244 244 245) / 1);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.15);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(2px);
+  transition: opacity 120ms ease 30ms, transform 120ms ease 30ms;
+  z-index: 10;
+}
+.know-selection-action:hover::after,
+.know-selection-action:focus-visible::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+/* Light-mode tooltip variant — `--popover-rgb` isn't defined in the
+   theme, so we fall back to a neutral dark surface that reads as a
+   tooltip in both modes. Dark mode inherits the same colors which
+   still look correct against the page. */
+:root { --popover-rgb: 24 24 27; --popover-fg-rgb: 244 244 245; }
+.dark { --popover-rgb: 39 39 42; --popover-fg-rgb: 244 244 245; }
 
 /* ────────────────────────────────────────────────────────────────────────
    Analysis panel (markdown rendered by LLM output)

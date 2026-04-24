@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
@@ -82,12 +83,26 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
   // pane-position cycle live behind a single kebab to keep the tab
   // strip visually quiet. Click-outside + Escape close the menu so it
   // behaves like the native menus elsewhere in the app.
+  //
+  // The menu is portaled to document.body so it always lands on the
+  // topmost stacking context. An earlier version rendered it as a
+  // child of the pane header and used `z-50`, which was fine in
+  // isolation but got *visually* covered in focus mode: the pane
+  // column itself sits inside a stacking context (z-20 in page.tsx)
+  // and some TabsContent children (math, figures, lightbox backdrops)
+  // can create their own higher contexts. A body-portal sidesteps
+  // every one of those ancestor clipping / stacking traps.
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [menuCoords, setMenuCoords] = useState<{ top: number; right: number } | null>(null);
   useEffect(() => {
     if (!menuOpen) return;
     const onDown = (e: MouseEvent) => {
-      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+      const target = e.target as Node;
+      if (menuRef.current?.contains(target)) return;
+      if (menuButtonRef.current?.contains(target)) return;
+      setMenuOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setMenuOpen(false);
@@ -97,6 +112,30 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+  // Re-compute the popover position whenever the menu opens *or* the
+  // viewport changes (scroll / resize). Anchored to the kebab
+  // button's current rect so the menu tracks its trigger even if the
+  // user scrolls with the menu open. Uses useLayoutEffect so the
+  // first paint never shows the menu at (0, 0).
+  useLayoutEffect(() => {
+    if (!menuOpen) { setMenuCoords(null); return; }
+    const updateCoords = () => {
+      const btn = menuButtonRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setMenuCoords({
+        top: r.bottom + 6,
+        right: Math.max(8, window.innerWidth - r.right),
+      });
+    };
+    updateCoords();
+    window.addEventListener("resize", updateCoords);
+    window.addEventListener("scroll", updateCoords, true);
+    return () => {
+      window.removeEventListener("resize", updateCoords);
+      window.removeEventListener("scroll", updateCoords, true);
     };
   }, [menuOpen]);
 
@@ -177,17 +216,17 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
           </TabsList>
         </div>
 
-        {/* Overflow menu — hides the secondary pane controls behind a
-            single kebab so the tab bar reads cleanly at a glance. Both
-            clusters (text-size and pane position) live here because
-            they're "settings" rather than primary navigation. */}
-        <div ref={menuRef} className="relative shrink-0">
+        {/* Overflow menu trigger. The actual popover is portaled to
+            document.body (see below) so it can never be clipped or
+            occluded by anything inside the analysis pane. */}
+        <div className="relative shrink-0">
           <button
+            ref={menuButtonRef}
             type="button"
             onClick={() => setMenuOpen((v) => !v)}
             className="p-1 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-accent/60 transition-colors data-open:bg-accent/60"
             data-open={menuOpen ? "" : undefined}
-            title="Panel options"
+            title="Panel options — text size, pane position"
             aria-label="Panel options"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
@@ -198,68 +237,77 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
               <circle cx="19" cy="12" r="1.6" />
             </svg>
           </button>
-
-          {menuOpen && (
-            <div
-              role="menu"
-              className="absolute right-0 top-full mt-1.5 w-56 rounded-xl border border-border bg-popover text-popover-foreground shadow-lg p-2 z-50 animate-fade-in"
-            >
-              <div className="px-2 pt-1 pb-1 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/70">
-                Text size
-              </div>
-              <div className="flex items-center gap-1 px-1 pb-2">
-                <button
-                  type="button"
-                  onClick={() => bumpAnalysisFontScale(-0.1)}
-                  disabled={analysisFontScale <= 0.85 + 1e-6}
-                  className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
-                  aria-label="Decrease text size"
-                >
-                  <span className="text-[11px] font-semibold leading-none">A−</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAnalysisFontScale(1)}
-                  disabled={Math.abs(analysisFontScale - 1) < 1e-6}
-                  className="flex-1 h-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none text-[11px] font-medium tabular-nums"
-                  aria-label="Reset text size"
-                >
-                  {Math.round(analysisFontScale * 100)}%
-                </button>
-                <button
-                  type="button"
-                  onClick={() => bumpAnalysisFontScale(0.1)}
-                  disabled={analysisFontScale >= 1.6 - 1e-6}
-                  className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
-                  aria-label="Increase text size"
-                >
-                  <span className="text-[13px] font-semibold leading-none">A+</span>
-                </button>
-              </div>
-
-              <div className="h-px bg-border/70 mx-1 my-1" />
-
-              <div className="px-2 pt-1 pb-1 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/70">
-                Pane position
-              </div>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => { onCyclePosition(); setMenuOpen(false); }}
-                className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-[12px] hover:bg-accent transition-colors"
-              >
-                <span className="flex items-center gap-2 text-foreground/90">
-                  <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d={icon.path} />
-                  </svg>
-                  {POSITION_LABEL[position]}
-                </span>
-                <span className="text-[10px] text-muted-foreground/80">{icon.next}</span>
-              </button>
-            </div>
-          )}
         </div>
       </div>
+
+      {menuOpen && menuCoords && typeof document !== "undefined" && createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          style={{ position: "fixed", top: menuCoords.top, right: menuCoords.right, zIndex: 1000 }}
+          className="w-56 rounded-xl border border-border bg-popover text-popover-foreground shadow-xl p-2 animate-fade-in"
+        >
+          <div className="px-2 pt-1 pb-1 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/70">
+            Text size
+          </div>
+          <div className="flex items-center gap-1 px-1 pb-2">
+            <button
+              type="button"
+              onClick={() => bumpAnalysisFontScale(-0.1)}
+              disabled={analysisFontScale <= 0.85 + 1e-6}
+              className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
+              aria-label="Decrease text size"
+            >
+              <span className="text-[11px] font-semibold leading-none">A−</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setAnalysisFontScale(1)}
+              disabled={Math.abs(analysisFontScale - 1) < 1e-6}
+              className="flex-1 h-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none text-[11px] font-medium tabular-nums"
+              aria-label="Reset text size"
+            >
+              {Math.round(analysisFontScale * 100)}%
+            </button>
+            <button
+              type="button"
+              onClick={() => bumpAnalysisFontScale(0.1)}
+              disabled={analysisFontScale >= 1.6 - 1e-6}
+              className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
+              aria-label="Increase text size"
+            >
+              <span className="text-[13px] font-semibold leading-none">A+</span>
+            </button>
+          </div>
+          <div className="px-2 pb-2 text-[10px] text-muted-foreground/70 leading-snug">
+            Saved across every paper and reload.
+          </div>
+
+          <div className="h-px bg-border/70 mx-1 my-1" />
+
+          <div className="px-2 pt-1 pb-1 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/70">
+            Pane position
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => { onCyclePosition(); setMenuOpen(false); }}
+            className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-[12px] hover:bg-accent transition-colors"
+          >
+            <span className="flex items-center gap-2 text-foreground/90">
+              <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d={icon.path} />
+              </svg>
+              {POSITION_LABEL[position]}
+            </span>
+            <span className="text-[10px] text-muted-foreground/80">{icon.next}</span>
+          </button>
+          <div className="px-2 pt-1 text-[10px] text-muted-foreground/70 leading-snug">
+            Saved across every paper and reload.
+          </div>
+        </div>,
+        document.body,
+      )}
 
       <div className="flex-1 overflow-y-auto min-h-0">
         <div

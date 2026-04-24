@@ -480,14 +480,25 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       const pill = document.createElement("button");
       pill.type = "button";
       pill.className = "know-selection-action";
-      pill.title = "Open saved analysis · shift-click or right-click to delete";
-      pill.setAttribute("aria-label", "Open saved selection analysis");
+      // `data-tooltip` powers the rich on-hover tooltip (see
+      // `.know-selection-action::after` in globals.css) so the click
+      // vs. shift-click semantics are obvious without the user having
+      // to discover them by accident. The native `title` is kept as a
+      // fallback for screen readers and long-press on touch devices.
+      const tip = "Click to open saved analysis\nShift-click or right-click to delete";
+      pill.setAttribute("data-tooltip", tip);
+      pill.title = tip;
+      pill.setAttribute("aria-label", "Open saved selection analysis — shift-click to delete");
       pill.style.left = `${lastRect.right - pageRect.left + 2}px`;
       pill.style.top = `${lastRect.top - pageRect.top}px`;
       pill.style.height = `${lastRect.height}px`;
+      // Arrow icon reads as "open / jump to" — clearer than the
+      // earlier hamburger lines, which read as "menu" and made users
+      // hesitate to click. The delete path stays on shift-click and
+      // is spelled out in the hover tooltip above.
       pill.innerHTML = `
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M4 6h16M4 12h12M4 18h8"/>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M7 17L17 7M9 7h8v8"/>
         </svg>
       `;
       const del = async (ev: Event) => {
