@@ -691,63 +691,26 @@
 /* ────────────────────────────────────────────────────────────────────────
    Mesh gradient backgrounds — theme-aware via --mesh-* tokens.
    ──────────────────────────────────────────────────────────────────── */
+/* Clean, mostly-white dashboard background.
+   Light mode: pure page background with a single very faint neutral-gray
+   wash from the top-left so the page has some depth without any color
+   tint. No animation, no noise — the prior "aurora + grain" version
+   read as busy / plastic and is explicitly reverted here.
+   Dark mode: same structure but using neutral-white highlights at a
+   few percent opacity, matching the quiet feel of the rest of the UI.
+*/
 .bg-mesh {
-  position: relative;
-  background:
-    radial-gradient(ellipse 80% 50% at 20% 40%, rgb(var(--mesh-violet) / var(--mesh-a1)), transparent),
-    radial-gradient(ellipse 60% 60% at 80% 20%, rgb(var(--mesh-blue)   / var(--mesh-a2)), transparent),
-    radial-gradient(ellipse 50% 80% at 50% 80%, rgb(var(--mesh-pink)   / var(--mesh-a3)), transparent);
-  isolation: isolate;
+  background-color: var(--background);
+  background-image:
+    radial-gradient(ellipse 70% 55% at 15% 10%, rgb(0 0 0 / 0.035), transparent 65%),
+    radial-gradient(ellipse 55% 45% at 95% 95%, rgb(0 0 0 / 0.025), transparent 65%);
 }
 
-/* Slow, generative "aurora" drift on top of the mesh gradient. Blurred
-   blobs wander across the viewport on 40/50/60s cycles so no two visits
-   look identical, but everything stays subtle enough that typography
-   reads clearly. The layer is pointer-events: none and pushed behind
-   content with z-index: -1, and it respects prefers-reduced-motion. */
-.bg-mesh::before {
-  content: "";
-  position: absolute;
-  inset: -10%;
-  pointer-events: none;
-  z-index: -1;
-  opacity: 0.9;
-  background:
-    radial-gradient(circle at 15% 25%, rgb(var(--mesh-violet) / 0.22) 0, transparent 35%),
-    radial-gradient(circle at 85% 75%, rgb(var(--mesh-blue)   / 0.18) 0, transparent 40%),
-    radial-gradient(circle at 50% 100%, rgb(var(--mesh-pink)  / 0.15) 0, transparent 45%);
-  filter: blur(40px);
-  animation: aurora-drift 42s ease-in-out infinite alternate;
-  will-change: transform, opacity;
+.dark .bg-mesh {
+  background-image:
+    radial-gradient(ellipse 70% 55% at 15% 10%, rgb(255 255 255 / 0.03), transparent 65%),
+    radial-gradient(ellipse 55% 45% at 95% 95%, rgb(255 255 255 / 0.02), transparent 65%);
 }
-
-/* Fine-grain noise overlay — the paper-like texture that keeps big flat
-   areas from looking plastic in light mode. We generate it inline with a
-   data-URI SVG so we don't need to ship a raster asset and so the tint
-   respects `currentColor` via `mix-blend-mode: overlay`. */
-.bg-mesh::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: -1;
-  opacity: 0.35;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-  background-size: 160px 160px;
-}
-
-@keyframes aurora-drift {
-  0%   { transform: translate3d(-2%,  0%, 0) rotate(0deg);  opacity: 0.85; }
-  50%  { transform: translate3d( 3%,  2%, 0) rotate(2deg);  opacity: 1; }
-  100% { transform: translate3d(-1%, -2%, 0) rotate(-1deg); opacity: 0.9; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .bg-mesh::before { animation: none; }
-}
-
-.dark .bg-mesh::after { opacity: 0.18; }
 .bg-mesh-hero {
   background:
     radial-gradient(ellipse 80% 60% at 50% -20%, rgb(var(--mesh-violet) / calc(var(--mesh-a1) * 1.6)), transparent),

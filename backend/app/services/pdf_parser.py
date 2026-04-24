@@ -118,6 +118,132 @@ def _image_rects_on_page(page: fitz.Page) -> list[fitz.Rect]:
     return rects
 
 
+def _detect_columns(page: fitz.Page) -> list[tuple[float, float]]:
+    """Infer the horizontal extents of the text columns on this page.
+
+    Many scientific papers use a two-column layout where figures are
+    either confined to a single column or span both. The figure
+    extractor previously took the full page width as the horizontal
+    clip, which — for a single-column figure — pulled in the adjacent
+    column's body text instead of just the figure.
+
+    The heuristic here clusters the left edges (``x0``) of every text
+    block on the page. If we see two well-separated clusters with a
+    clear horizontal gap between them we report two column extents; in
+    every other case we fall through to a single-column page, so
+    narrow-column figures stay narrow and full-page figures stay
+    full-width.
+
+    Returns a list of ``(x0, x1)`` pairs in left-to-right order.
+    """
+    page_rect = page.rect
+    fallback = [(page_rect.x0, page_rect.x1)]
+    try:
+        blocks = page.get_text("dict").get("blocks", [])
+    except Exception:
+        return fallback
+
+    text_blocks = [b for b in blocks if b.get("type") == 0 and b.get("bbox")]
+    # Require a few blocks to draw any meaningful conclusion — header /
+    # cover pages shouldn't be treated as two-column by accident.
+    if len(text_blocks) < 6:
+        return fallback
+
+    x0s = sorted(float(b["bbox"][0]) for b in text_blocks)
+    # Column gutters in scientific layouts tend to be at least ~8% of
+    # the page width. Anything smaller is much more likely to be a
+    # paragraph indent or an inline float.
+    gap_threshold = max(20.0, page_rect.width * 0.08)
+
+    clusters: list[list[float]] = []
+    current = [x0s[0]]
+    for x in x0s[1:]:
+        if x - current[-1] > gap_threshold:
+            clusters.append(current)
+            current = [x]
+        else:
+            current.append(x)
+    clusters.append(current)
+
+    if len(clusters) != 2:
+        return fallback
+    left_cluster, right_cluster = clusters
+
+    # Each cluster must carry enough blocks to pass as a real column;
+    # otherwise we're probably looking at an accidental split caused by
+    # a caption or figure label that happens to sit far to the left.
+    if len(left_cluster) < 3 or len(right_cluster) < 3:
+        return fallback
+
+    left_min = min(left_cluster)
+    right_min = min(right_cluster)
+    # Widen each column to the right edge of the widest block that
+    # *starts* in it. This correctly bounds a column even when blocks
+    # are ragged-right.
+    def col_x1(cluster: list[float]) -> float:
+        member = set(cluster)
+        return max(
+            (float(b["bbox"][2]) for b in text_blocks if float(b["bbox"][0]) in member),
+            default=page_rect.x1,
+        )
+
+    left_x1 = col_x1(left_cluster)
+    right_x1 = col_x1(right_cluster)
+
+    # Reject degenerate layouts — the left column should actually be
+    # left of the right one, with a positive gutter.
+    if right_min <= left_x1 or right_min - left_x1 < 8:
+        return fallback
+
+    return [(left_min, left_x1), (right_min, right_x1)]
+
+
+def _horizontal_extent_for_figure(
+    cap_rect: fitz.Rect,
+    relevant_imgs: list[fitz.Rect],
+    cols: list[tuple[float, float]],
+    page_rect: fitz.Rect,
+) -> tuple[float, float]:
+    """Decide the left/right edges of the clip for a single figure.
+
+    - If the page is a single column, always return the full page width.
+    - If the caption or any of the figure's images clearly span both
+      columns (>= 70% of the page width or crossing the gutter), treat
+      the figure as full-width.
+    - Otherwise snap the clip to whichever column contains the caption
+      (and the image rects, when present), so a column-confined figure
+      doesn't drag its neighbour's body text into the crop.
+    """
+    if len(cols) < 2:
+        return page_rect.x0, page_rect.x1
+
+    (l_x0, l_x1), (r_x0, r_x1) = cols
+    gutter = (l_x1 + r_x0) / 2
+
+    def straddles_both_cols(rect: fitz.Rect) -> bool:
+        return rect.x0 < l_x1 - 4 and rect.x1 > r_x0 + 4
+
+    def width_ratio(rect: fitz.Rect) -> float:
+        return rect.width / max(page_rect.width, 1.0)
+
+    for r in [cap_rect, *relevant_imgs]:
+        if straddles_both_cols(r) or width_ratio(r) >= 0.70:
+            return page_rect.x0, page_rect.x1
+
+    # Column-confined. Pick by caption centre first (captions sit under
+    # their figure) and fall back to the image rects' centre of mass
+    # if the caption is oddly placed.
+    cap_mid = (cap_rect.x0 + cap_rect.x1) / 2
+    if cap_mid <= gutter:
+        col_x0, col_x1 = l_x0, l_x1
+    else:
+        col_x0, col_x1 = r_x0, r_x1
+
+    # Pad a few points so we don't shave antialiased glyph edges off
+    # the figure or the caption.
+    return max(page_rect.x0, col_x0 - 4), min(page_rect.x1, col_x1 + 4)
+
+
 def _safe_pixmap(page: fitz.Page, mat: fitz.Matrix, clip: fitz.Rect) -> fitz.Pixmap | None:
     """Render a clip, downscaling the matrix if the result would exceed the
     pixel cap. Prevents adversarial pages from allocating huge buffers."""
@@ -159,6 +285,7 @@ def extract_figures(doc: fitz.Document, paper_dir: Path) -> list[FigureInfo]:
 
         img_rects = _image_rects_on_page(page)
         page_rect = page.rect
+        cols = _detect_columns(page)
 
         for i, cap in enumerate(captions):
             if len(figures) >= MAX_FIGURES_PER_PAPER:
@@ -176,10 +303,23 @@ def extract_figures(doc: fitz.Document, paper_dir: Path) -> list[FigureInfo]:
             else:
                 boundary_top = page_rect.y0
 
-            relevant = [
+            # Determine the horizontal extent of the figure first so we
+            # can also filter `relevant` image rects to just the ones
+            # that actually belong to this column. Otherwise a
+            # neighbouring column's image above this caption would drag
+            # `top` too high and pollute the crop.
+            relevant_all = [
                 r for r in img_rects
                 if r.y0 >= boundary_top - 10 and r.y1 <= cap_rect.y0 + 10
             ]
+            x0, x1 = _horizontal_extent_for_figure(cap_rect, relevant_all, cols, page_rect)
+
+            relevant = [r for r in relevant_all if r.x0 >= x0 - 4 and r.x1 <= x1 + 4]
+            if not relevant:
+                # Fall back to the original (unrestricted) set so we
+                # still have *something* to anchor the top edge to when
+                # column restriction eliminated every candidate image.
+                relevant = relevant_all
 
             if relevant:
                 top = min(r.y0 for r in relevant) - 4
@@ -189,7 +329,7 @@ def extract_figures(doc: fitz.Document, paper_dir: Path) -> list[FigureInfo]:
             top = max(page_rect.y0, top)
             bottom = max(top + 20, bottom)
 
-            clip = fitz.Rect(page_rect.x0, top, page_rect.x1, bottom)
+            clip = fitz.Rect(x0, top, x1, bottom)
             clip = clip & page_rect
             if clip.is_empty or clip.width < 10 or clip.height < 10:
                 seen_nums.discard(fig_num)

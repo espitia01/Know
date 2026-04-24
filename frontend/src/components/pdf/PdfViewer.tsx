@@ -175,43 +175,91 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
     scrollRestoredRef.current = false;
   }, [paperId, retryKey]);
 
+  // Normalize text from the PDF text layer before substring matching.
+  // pdfjs glues glyphs back together with a mix of regular spaces,
+  // non-breaking spaces, zero-width joiners, and soft hyphens; smart
+  // quotes and ligatures also break naive matches against the raw
+  // `selected_text`. Collapsing all whitespace to a single ASCII
+  // space + unicode-normalizing + lowercasing gives us a haystack that
+  // tolerates those cosmetic differences while still preserving the
+  // original character offsets enough to locate the match.
+  const normalizeForSearch = useCallback((s: string) => {
+    return s
+      .normalize("NFKC")
+      .replace(/[\u00AD\u200B-\u200D\uFEFF]/g, "") // soft hyphen, ZWJs, BOM
+      .replace(/["\u201C\u201D\u2018\u2019`]/g, "'") // curly → straight quotes
+      .replace(/[\u2013\u2014\u2212]/g, "-") // en/em/minus → hyphen
+      .replace(/\s+/g, " ");
+  }, []);
+
   // Paint Kindle-style underlines for every history entry found on a
-  // given page. We run this (a) after each page's onRenderSuccess and
-  // (b) whenever selectionHistory changes while pages are already
-  // mounted. Matching is tolerant of whitespace collapsing — the text
-  // layer inserts soft line breaks that a strict substring search would
-  // miss — so we convert the needle into a regex whose inter-word
-  // whitespace is flexible (`\s+`).
+  // given page. Called whenever react-pdf reports that the text layer
+  // has finished rendering (via onRenderTextLayerSuccess), plus any
+  // time the selectionHistory array changes. Idempotent — the first
+  // step is to remove any existing overlay on the page so we never
+  // stack duplicates.
   const drawUnderlinesForPage = useCallback((pageEl: HTMLElement, history: SelectionAnalysisResult[]) => {
     const textLayer = pageEl.querySelector(".react-pdf__Page__textContent") as HTMLElement | null;
-    if (!textLayer) return;
 
     pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
-    if (history.length === 0) return;
+    if (!textLayer || history.length === 0) return;
 
     const pageStyle = getComputedStyle(pageEl);
     if (pageStyle.position === "static") pageEl.style.position = "relative";
 
-    // Collect every text node under the layer and build a flat string
-    // along with (startOffset, node) pairs so we can cheaply translate
-    // a character index back into a (node, localOffset) pair for Range
-    // construction.
+    // Build a flat string of all text-node contents under the layer
+    // plus a parallel mapping from (raw index in `combined`) → the
+    // text node that contains it. We search against a *normalized*
+    // view of this string, but each normalized character comes from a
+    // specific raw offset, which is what we actually need to feed back
+    // into a DOM Range. The `normIdxToRawIdx` array records that
+    // mapping 1-to-1.
     const walker = document.createTreeWalker(textLayer, NodeFilter.SHOW_TEXT);
-    const offsets: Array<{ start: number; node: Text }> = [];
+    type NodeSlice = { start: number; node: Text };
+    const slices: NodeSlice[] = [];
     let combined = "";
     let n: Node | null;
     while ((n = walker.nextNode())) {
       const text = (n as Text).data;
-      offsets.push({ start: combined.length, node: n as Text });
+      if (!text) continue;
+      slices.push({ start: combined.length, node: n as Text });
       combined += text;
     }
-    if (!combined) return;
+    if (!combined || slices.length === 0) return;
+
+    // Produce the normalized view + the index mapping back to the raw
+    // string. We walk char-by-char so normalization never shifts offset
+    // alignment (apart from characters we intentionally strip, whose
+    // raw offsets simply don't appear in the map).
+    const zapRe = /[\u00AD\u200B-\u200D\uFEFF]/;
+    const quoteMap: Record<string, string> = { "\u201C": "'", "\u201D": "'", "\u2018": "'", "\u2019": "'", "`": "'", "\"": "'" };
+    const dashMap: Record<string, string> = { "\u2013": "-", "\u2014": "-", "\u2212": "-" };
+    let normalized = "";
+    const normIdxToRawIdx: number[] = [];
+    for (let i = 0; i < combined.length; i++) {
+      const ch = combined[i];
+      if (zapRe.test(ch)) continue;
+      let out = ch;
+      if (quoteMap[ch]) out = quoteMap[ch];
+      else if (dashMap[ch]) out = dashMap[ch];
+      else if (/\s/.test(ch)) {
+        // Collapse runs of whitespace in the normalized view so a
+        // single " " in the needle matches any whitespace run in the
+        // haystack. We still record the mapping back to the *first*
+        // whitespace char's raw offset so ranges start/end cleanly.
+        if (normalized.endsWith(" ")) continue;
+        out = " ";
+      }
+      normalized += out.toLowerCase();
+      normIdxToRawIdx.push(i);
+    }
+    if (!normalized) return;
 
     const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const locate = (flat: number) => {
-      for (let i = offsets.length - 1; i >= 0; i--) {
-        if (offsets[i].start <= flat) {
-          return { node: offsets[i].node, offset: Math.min(flat - offsets[i].start, offsets[i].node.data.length) };
+    const locate = (rawFlat: number) => {
+      for (let i = slices.length - 1; i >= 0; i--) {
+        if (slices[i].start <= rawFlat) {
+          return { node: slices[i].node, offset: Math.min(rawFlat - slices[i].start, slices[i].node.data.length) };
         }
       }
       return null;
@@ -221,37 +269,48 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
     overlay.className = "know-selection-overlay";
     const pageRect = pageEl.getBoundingClientRect();
 
-    // Iterate newest-first so that the most recent underline wins when
-    // two selections overlap (they're stacked but newer-on-top reads
-    // clearest). Cap per-page matches at 12 to keep the DOM light on
-    // papers where the user analyzes dozens of selections.
     const seenRanges: Array<[number, number]> = [];
     let painted = 0;
     for (let i = 0; i < history.length && painted < 12; i++) {
       const entry = history[i];
       const raw = entry.selected_text?.trim();
       if (!raw || raw.length < 8) continue;
-      // Fuzzy match: split on whitespace, re-join with \s+ so line wraps
-      // in the text layer don't break the match.
-      const parts = raw.split(/\s+/).map(escapeRe);
-      if (parts.length === 0) continue;
+
+      // Needle is normalized the same way as the haystack so ligatures,
+      // smart quotes, and em-dashes from the LLM-submitted text don't
+      // silently miss the PDF's rendering of the same passage.
+      const needleNorm = normalizeForSearch(raw).toLowerCase();
+      if (needleNorm.length < 8) continue;
+
+      // Build a tolerant pattern: any whitespace run in the needle can
+      // match a run in the haystack; hyphens optionally match
+      // line-break soft-hyphen remnants.
+      const words = needleNorm.split(" ").filter(Boolean).map(escapeRe);
+      if (words.length === 0) continue;
       let pattern: RegExp;
       try {
-        pattern = new RegExp(parts.join("\\s+"), "i");
+        pattern = new RegExp(words.join("\\s+"), "i");
       } catch {
         continue;
       }
-      const m = pattern.exec(combined);
+      const m = pattern.exec(normalized);
       if (!m || m.index == null) continue;
-      const start = m.index;
-      const end = start + m[0].length;
+      const normStart = m.index;
+      const normEnd = normStart + m[0].length;
+      if (normEnd > normIdxToRawIdx.length) continue;
 
-      const overlaps = seenRanges.some(([s, e]) => !(end <= s || start >= e));
+      const rawStart = normIdxToRawIdx[normStart];
+      // End is exclusive — grab the raw offset after the last matched
+      // normalized char.
+      const rawEndInclusive = normIdxToRawIdx[normEnd - 1];
+      const rawEnd = rawEndInclusive + 1;
+
+      const overlaps = seenRanges.some(([s, e]) => !(rawEnd <= s || rawStart >= e));
       if (overlaps) continue;
-      seenRanges.push([start, end]);
+      seenRanges.push([rawStart, rawEnd]);
 
-      const startLoc = locate(start);
-      const endLoc = locate(end);
+      const startLoc = locate(rawStart);
+      const endLoc = locate(rawEnd);
       if (!startLoc || !endLoc) continue;
 
       const range = document.createRange();
@@ -271,12 +330,6 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
         div.style.width = `${r.width}px`;
         div.style.height = `${r.height}px`;
         div.title = "Open past analysis for this selection";
-        // We intentionally *don't* stop mousedown propagation: the user
-        // must still be able to start a fresh text selection from an
-        // already-underlined region. A click (mousedown + mouseup at
-        // roughly the same spot) jumps to the stored analysis; a drag
-        // falls through to the native selection engine because no
-        // `click` event fires when the cursor moves far enough.
         div.addEventListener("click", (ev) => {
           ev.stopPropagation();
           ev.preventDefault();
@@ -288,16 +341,52 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
     }
 
     if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
-  }, [openSelectionFromHistory]);
+  }, [openSelectionFromHistory, normalizeForSearch]);
 
-  // Re-paint every visible page when the selection history changes so
-  // newly added (or removed) underlines appear immediately, without
-  // waiting for the user to scroll off and back.
+  // Fallback repaint: when the selectionHistory array changes while
+  // pages are already on screen, walk every mounted page and redraw.
+  // We also listen for MutationObserver-level changes to the container
+  // (e.g. text-layer nodes being appended *after* onRenderSuccess, or
+  // react-pdf re-rendering a virtualized page) so new underlines
+  // appear without waiting on the next explicit render cycle.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const pages = container.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]");
-    pages.forEach((pageEl) => drawUnderlinesForPage(pageEl, selectionHistory));
+
+    let raf: number | null = null;
+    const redrawAll = () => {
+      raf = null;
+      const pages = container.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]");
+      pages.forEach((pageEl) => drawUnderlinesForPage(pageEl, selectionHistory));
+    };
+    const schedule = () => {
+      if (raf === null) raf = requestAnimationFrame(redrawAll);
+    };
+    schedule();
+
+    // Watch for text-layer mutations — pdfjs populates spans
+    // asynchronously after the container is attached, and virtualized
+    // pages re-insert their text layers when scrolled back into view.
+    const mo = new MutationObserver((muts) => {
+      for (const m of muts) {
+        if (m.type === "childList") {
+          const touched = Array.from(m.addedNodes).some((n) => {
+            if (!(n instanceof Element)) return false;
+            return (
+              n.classList?.contains("react-pdf__Page__textContent") ||
+              !!n.querySelector?.(".react-pdf__Page__textContent")
+            );
+          });
+          if (touched) { schedule(); return; }
+        }
+      }
+    });
+    mo.observe(container, { subtree: true, childList: true });
+
+    return () => {
+      mo.disconnect();
+      if (raf !== null) cancelAnimationFrame(raf);
+    };
   }, [selectionHistory, drawUnderlinesForPage, scale]);
 
   const handlePageRender = useCallback((pageNum: number) => {
@@ -308,12 +397,6 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
         pageHeightRef.current = h;
         updateVisibleRange();
       }
-      // Paint history underlines once the text layer is in the DOM. We
-      // defer a frame because react-pdf appends the text layer
-      // asynchronously *after* onRenderSuccess fires on some versions.
-      requestAnimationFrame(() => {
-        drawUnderlinesForPage(el, useStore.getState().selectionHistory);
-      });
     }
     // One-shot scroll restoration after the first real page paint. We wait
     // until *a* page renders so we know the page dimensions are final —
@@ -338,7 +421,18 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       } catch { /* ignore */ }
       scrollRestoredRef.current = true;
     }
-  }, [updateVisibleRange, paperId, drawUnderlinesForPage]);
+  }, [updateVisibleRange, paperId]);
+
+  // Called by react-pdf when the *text layer* finishes rendering (as
+  // opposed to onRenderSuccess, which fires after the canvas but
+  // sometimes *before* spans have been appended to the text layer).
+  // Drawing underlines here is the most reliable point — the text
+  // nodes we search over are guaranteed to be present.
+  const handleTextLayerRendered = useCallback((pageNum: number) => {
+    const el = containerRef.current?.querySelector(`.react-pdf__Page[data-page-number="${pageNum}"]`) as HTMLElement | null;
+    if (!el) return;
+    drawUnderlinesForPage(el, useStore.getState().selectionHistory);
+  }, [drawUnderlinesForPage]);
 
   const handleMouseUp = useCallback(() => {
     const sel = window.getSelection();
@@ -594,6 +688,7 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
                     renderTextLayer={true}
                     renderAnnotationLayer={true}
                     onRenderSuccess={() => handlePageRender(pageNum)}
+                    onRenderTextLayerSuccess={() => handleTextLayerRendered(pageNum)}
                   />
                 );
               })}
