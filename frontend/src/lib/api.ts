@@ -398,6 +398,16 @@ export const api = {
       body: JSON.stringify({ folder }),
     }),
 
+  updateTitle: (id: string, title: string) =>
+    request<{ status: string; id: string; title: string }>(
+      `/api/papers/${id}/title`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      },
+    ),
+
   addNote: (id: string, text: string, section: string = "") =>
     request<Note>(`/api/papers/${id}/notes`, {
       method: "POST",

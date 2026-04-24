@@ -48,6 +48,11 @@ interface AppStore {
   addSessionPaper: (p: { id: string; title: string }) => void;
   removeSessionPaper: (id: string) => void;
   clearSession: () => void;
+  // Rename a paper in every in-memory representation at once: the
+  // active `paper`, the per-id cache, and the session tab bar. The
+  // server write is handled by the caller (via `api.updateTitle`) so
+  // this action stays synchronous and optimistic.
+  updatePaperTitle: (id: string, title: string) => void;
 
   crossPaperResults: CrossPaperQA[];
   addCrossPaperResults: (items: CrossPaperQA[]) => void;
@@ -181,6 +186,28 @@ export const useStore = create<AppStore>()(
           return {
             sessionPapers: s.sessionPapers.filter((sp) => sp.id !== id),
             paperCaches: rest,
+          };
+        }),
+
+      // Fan out a title change to every place a paper appears in the
+      // store so an inline rename in the nav bar updates the session
+      // tab, the cached copy, and the active paper simultaneously —
+      // without waiting for a round-trip refetch.
+      updatePaperTitle: (id, title) =>
+        set((s) => {
+          const cached = s.papersById[id];
+          const nextPapersById = cached
+            ? { ...s.papersById, [id]: { ...cached, title } }
+            : s.papersById;
+          const nextSessionPapers = s.sessionPapers.map((sp) =>
+            sp.id === id ? { ...sp, title } : sp,
+          );
+          const nextPaper =
+            s.paper && s.paper.id === id ? { ...s.paper, title } : s.paper;
+          return {
+            papersById: nextPapersById,
+            sessionPapers: nextSessionPapers,
+            paper: nextPaper,
           };
         }),
       clearSession: () => {

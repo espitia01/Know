@@ -71,6 +71,128 @@ function readStoredSize(pos: PanelPosition): number {
   return pos === "bottom" ? DEFAULT_BOTTOM : DEFAULT_SIDE;
 }
 
+/**
+ * Inline, Google-Docs-style paper rename control.
+ *
+ * Renders the current title as text you can click to edit. Enter saves
+ * (fires `onCommit`), Escape cancels and restores the original text, and
+ * blur also saves. We deliberately render the editable surface as a
+ * `contenteditable` span rather than swapping in an <input> so the
+ * element keeps its exact typography, no layout shift, and no flash of
+ * the wrong baseline between modes.
+ *
+ * The caller is responsible for the actual server write — the component
+ * just emits sanitized, whitespace-collapsed output.
+ */
+function EditableTitle({
+  value,
+  className = "",
+  placeholder = "Untitled paper",
+  onCommit,
+}: {
+  value: string;
+  className?: string;
+  placeholder?: string;
+  onCommit: (next: string) => void;
+}) {
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const [editing, setEditing] = useState(false);
+
+  // Keep the DOM text in sync with the incoming prop whenever we're
+  // *not* in editing mode. While the user is typing, the DOM is the
+  // source of truth — we don't want to clobber their in-flight edit
+  // just because an unrelated state update re-rendered the tree.
+  useEffect(() => {
+    if (!ref.current) return;
+    if (!editing && ref.current.textContent !== value) {
+      ref.current.textContent = value;
+    }
+  }, [value, editing]);
+
+  const startEditing = () => {
+    if (editing || !ref.current) return;
+    setEditing(true);
+    // Defer selection until the contenteditable is live, otherwise
+    // focus() + selectAll can race and leave the cursor at position 0
+    // with no visible selection (looks like the click did nothing).
+    requestAnimationFrame(() => {
+      const el = ref.current;
+      if (!el) return;
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    });
+  };
+
+  const commit = () => {
+    const el = ref.current;
+    if (!el) return;
+    // Collapse all whitespace so a pasted title with embedded newlines
+    // lands as a clean single-line string — same sanitation the server
+    // applies, but avoids a round-trip jitter.
+    const next = (el.textContent ?? "").replace(/\s+/g, " ").trim();
+    setEditing(false);
+    if (!next) {
+      // Restore original value instead of saving an empty title; the
+      // backend rejects empty strings and the UI would flash blank.
+      el.textContent = value;
+      return;
+    }
+    if (next !== value) onCommit(next);
+    else el.textContent = value;
+  };
+
+  const cancel = () => {
+    if (!ref.current) return;
+    ref.current.textContent = value;
+    setEditing(false);
+    ref.current.blur();
+  };
+
+  return (
+    <span
+      ref={ref}
+      role="textbox"
+      aria-label="Paper title — click to rename"
+      title={editing ? undefined : "Click to rename"}
+      contentEditable={editing}
+      suppressContentEditableWarning
+      spellCheck={false}
+      onClick={startEditing}
+      onFocus={() => { if (!editing) startEditing(); }}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          (e.currentTarget as HTMLSpanElement).blur();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          cancel();
+        }
+      }}
+      onPaste={(e) => {
+        // Plain-text paste only — pasting a selection from e.g. a PDF
+        // can otherwise drop styled HTML into the title.
+        e.preventDefault();
+        const text = e.clipboardData.getData("text/plain");
+        document.execCommand("insertText", false, text);
+      }}
+      data-placeholder={placeholder}
+      className={`outline-none rounded-md px-1.5 py-0.5 -mx-1.5 cursor-text transition-colors ${
+        editing
+          ? "bg-accent/60 ring-1 ring-border"
+          : "hover:bg-accent/40"
+      } ${className}`}
+      tabIndex={0}
+    >
+      {value || placeholder}
+    </span>
+  );
+}
+
 function AddPaperPopover({
   sessionIds,
   onAdd,
@@ -350,7 +472,7 @@ function PaperContent() {
     setActiveTab,
     setSummary, setSummaryLoading,
     cachePaper,
-    sessionPapers, addSessionPaper, removeSessionPaper, clearSession,
+    sessionPapers, addSessionPaper, removeSessionPaper, clearSession, updatePaperTitle,
     savePaperCache, restorePaperCache,
     crossPaperResults, addCrossPaperResults, clearCrossPaperResults,
     resetAnalysisState,
@@ -790,6 +912,28 @@ function PaperContent() {
       }
     }
   }, [sessionPapers, activePaperId, removeSessionPaper, handleSwitchPaper]);
+
+  const handleRenameActivePaper = useCallback(async (next: string) => {
+    if (!paper) return;
+    const prev = paper.title;
+    // Optimistic: flip the title across every in-memory surface
+    // immediately so the nav bar, session tabs, and cached listings
+    // all reflect the rename without waiting on the server.
+    updatePaperTitle(paper.id, next);
+    try {
+      const res = await api.updateTitle(paper.id, next);
+      // The server may have sanitized the title (whitespace collapse,
+      // length cap). Reconcile so what the user sees matches what
+      // persists across reloads.
+      if (res?.title && res.title !== next) {
+        updatePaperTitle(paper.id, res.title);
+      }
+    } catch {
+      // Roll back on failure so the UI doesn't show a rename the
+      // server never accepted.
+      updatePaperTitle(paper.id, prev);
+    }
+  }, [paper, updatePaperTitle]);
 
   const handleSaveWorkspace = useCallback(async () => {
     const name = workspaceNameInput.trim() || `Session · ${sessionPapers.length} papers`;
@@ -1241,39 +1385,48 @@ function PaperContent() {
           reserve its 48px, so we drop it from the tree entirely and rely
           on the floating restore control below to bring it back. */}
       {!chromeHidden && (
-      <header className="shrink-0 flex items-center gap-3 px-4 h-[48px] border-b border-border glass-nav z-30 relative">
+      <header className="shrink-0 flex items-center gap-2.5 px-4 h-[48px] border-b border-border/80 glass-nav z-30 relative">
         <button
           onClick={() => { clearSession(); router.push("/dashboard"); }}
-          className="text-muted-foreground hover:text-foreground transition-colors text-[13px] font-medium shrink-0 ring-focus rounded-md px-1"
+          className="text-muted-foreground/80 hover:text-foreground transition-colors shrink-0 ring-focus rounded-md p-1 -ml-1"
           aria-label="Back to dashboard"
+          title="Back to dashboard"
         >
-          &larr;
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+          </svg>
         </button>
-        <div className="h-4 w-px bg-border shrink-0" />
-        <Image src="/logo.png" alt="Know" width={20} height={20} className="shrink-0 rounded-md" />
+        <Image src="/logo.png" alt="Know" width={18} height={18} className="shrink-0 rounded-md opacity-90" />
+        <div className="h-3.5 w-px bg-border/70 shrink-0 mx-0.5" />
 
         {!showSessionBar && (
-          <span className="text-[13px] text-muted-foreground truncate flex-1 font-medium">
-            {paper.title}
-          </span>
+          <div className="flex-1 min-w-0 flex items-center">
+            <EditableTitle
+              value={paper.title}
+              onCommit={handleRenameActivePaper}
+              className="text-[13px] text-foreground font-medium tracking-[-0.005em] truncate max-w-full"
+            />
+          </div>
         )}
 
         {showSessionBar && (
-          <span className="text-[11px] text-muted-foreground truncate flex-1 font-medium uppercase tracking-wider">
+          <span className="text-[10.5px] text-muted-foreground/70 truncate flex-1 font-semibold uppercase tracking-[0.14em]">
             Session · {sessionPapers.length} papers
           </span>
         )}
 
-        {/* Usage indicator */}
+        {/* Usage indicator — tightened visual treatment so it reads as
+            a quiet status pill rather than a pair of floating labels.
+            Tabular numerals keep the count from shifting horizontally
+            as it ticks up. */}
         {paperUsage && paperUsage.qa_limit > 0 && (
-          <div className="hidden sm:flex items-center gap-2 shrink-0 text-[10px] text-muted-foreground">
-            <span title={`${paperUsage.qa_used} of ${paperUsage.qa_limit} Q&A used on this paper`}>
-              Q&A {paperUsage.qa_used}/{paperUsage.qa_limit}
-            </span>
-            <span className="text-muted-foreground/50">|</span>
-            <span title={`${paperUsage.selections_used} of ${paperUsage.selections_limit} selections used on this paper`}>
-              Selections {paperUsage.selections_used}/{paperUsage.selections_limit}
-            </span>
+          <div
+            className="hidden sm:flex items-center gap-2 shrink-0 text-[10.5px] font-medium text-muted-foreground/80 tabular-nums rounded-full border border-border/70 bg-background/40 px-2.5 py-0.5"
+            title={`Q&A ${paperUsage.qa_used}/${paperUsage.qa_limit} · Selections ${paperUsage.selections_used}/${paperUsage.selections_limit} on this paper`}
+          >
+            <span>Q&A {paperUsage.qa_used}/{paperUsage.qa_limit}</span>
+            <span className="w-px h-2.5 bg-border/80" aria-hidden />
+            <span>Sel {paperUsage.selections_used}/{paperUsage.selections_limit}</span>
           </div>
         )}
 

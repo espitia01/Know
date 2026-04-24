@@ -247,6 +247,37 @@ async def update_folder(paper_id: str, body: dict, user_id: str = Depends(requir
     return {"status": "ok", "id": paper_id, "folder": paper.folder}
 
 
+@router.patch("/{paper_id}/title")
+async def update_title(paper_id: str, body: dict, user_id: str = Depends(require_auth)):
+    """Rename a paper.
+
+    Mirrors Google Docs' inline rename behaviour: the client sends the
+    full new title, we sanitize it, persist it, and echo it back so the
+    caller can reconcile any trimming we performed. A blank title is
+    rejected to keep the UI from rendering an unclickable empty row in
+    library/session listings.
+    """
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    paper = get_paper(paper_id, user_id=user_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    raw = body.get("title", "")
+    if not isinstance(raw, str):
+        raise HTTPException(status_code=400, detail="title must be a string")
+    # Collapse all whitespace (including stray newlines from paste) and
+    # trim. Cap at a reasonable length — long enough for real paper
+    # titles, short enough that it still fits in a one-line tab.
+    cleaned = " ".join(raw.split()).strip()[:300]
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="title cannot be empty")
+
+    paper.title = cleaned
+    save_paper(paper, user_id=user_id)
+    return {"status": "ok", "id": paper_id, "title": paper.title}
+
+
 @router.post("/{paper_id}/notes")
 async def add_note(paper_id: str, body: dict, user_id: str = Depends(require_auth)):
     check_feature_access(user_id, "notes")
