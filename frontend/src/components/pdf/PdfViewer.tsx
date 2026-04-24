@@ -343,34 +343,82 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       const needleNorm = normalizeForSearch(raw).toLowerCase();
       if (needleNorm.length < 4) continue;
 
-      // Build a tolerant pattern: any whitespace run in the needle can
-      // match a run in the haystack. We try progressively shorter
-      // prefixes if the full needle doesn't hit — PDF extraction
-      // sometimes drops the tail of a long selection (page breaks,
-      // footnote interruptions, column crossings), and a match on the
-      // first clause of the sentence is still better than nothing.
+      // Match strategy:
+      //
+      //   1. Try the full needle. PDF extraction is rarely *that*
+      //      well-behaved — ligatures, column breaks, and embedded
+      //      footnotes routinely fragment the middle of a sentence.
+      //   2. If that fails, find an anchor at the *start* (first
+      //      5-ish words) AND at the *end* (last 5-ish words), then
+      //      highlight the range between them. This covers what the
+      //      user actually selected even if the middle text doesn't
+      //      line up, which was the root cause of selections being
+      //      under-highlighted (only the first few words showed up).
+      //   3. As a final fallback, highlight just the start anchor so
+      //      something is always visible for every history entry.
+      //
+      // Whitespace is matched as `\s*` (zero-or-more) rather than the
+      // stricter `\s+` so "intelligence(AI)" in the PDF matches
+      // "intelligence AI" in the needle — parentheses and other
+      // punctuation often sit flush against neighbouring words in
+      // extracted text.
       const fullWords = needleNorm.split(" ").filter(Boolean);
       if (fullWords.length === 0) continue;
 
-      const candidateWindows: string[][] = [fullWords];
-      if (fullWords.length > 10) candidateWindows.push(fullWords.slice(0, 10));
-      if (fullWords.length > 6) candidateWindows.push(fullWords.slice(0, 6));
-      if (fullWords.length > 4) candidateWindows.push(fullWords.slice(0, 4));
-
-      let m: RegExpExecArray | null = null;
-      for (const w of candidateWindows) {
-        let pattern: RegExp;
+      const buildPattern = (words: string[]): RegExp | null => {
         try {
-          pattern = new RegExp(w.map(escapeRe).join("\\s+"), "i");
+          return new RegExp(words.map(escapeRe).join("\\W*"), "i");
         } catch {
-          continue;
+          return null;
         }
-        const hit = pattern.exec(normalized);
-        if (hit) { m = hit; break; }
+      };
+
+      let normStart = -1;
+      let normEnd = -1;
+
+      // 1. Full-needle match.
+      const fullPattern = buildPattern(fullWords);
+      const fullHit = fullPattern ? fullPattern.exec(normalized) : null;
+      if (fullHit && fullHit.index != null) {
+        normStart = fullHit.index;
+        normEnd = normStart + fullHit[0].length;
+      } else if (fullWords.length >= 4) {
+        // 2. Anchor-based bracket match. Take enough words on each
+        //    side that the match is unlikely to hit the wrong place,
+        //    but not so many that the PDF's own fragmentation
+        //    disqualifies them.
+        const anchorLen = Math.min(5, Math.max(3, Math.floor(fullWords.length / 3)));
+        const startAnchor = fullWords.slice(0, anchorLen);
+        const endAnchor = fullWords.slice(-anchorLen);
+        const startPattern = buildPattern(startAnchor);
+        const startHit = startPattern ? startPattern.exec(normalized) : null;
+        if (startHit && startHit.index != null) {
+          const anchorStartIdx = startHit.index;
+          const anchorStartEnd = anchorStartIdx + startHit[0].length;
+
+          // Find the end anchor *after* the start anchor so a
+          // repeated phrase doesn't wrap the match back on itself.
+          const endPattern = buildPattern(endAnchor);
+          if (endPattern) {
+            endPattern.lastIndex = anchorStartEnd;
+            // Exec from the remaining substring; use a fresh regex
+            // instance so lastIndex semantics are predictable.
+            const tail = normalized.slice(anchorStartEnd);
+            const endHit = endPattern.exec(tail);
+            if (endHit && endHit.index != null) {
+              normStart = anchorStartIdx;
+              normEnd = anchorStartEnd + endHit.index + endHit[0].length;
+            }
+          }
+          // 3. Fallback: start-anchor only.
+          if (normStart < 0) {
+            normStart = anchorStartIdx;
+            normEnd = anchorStartEnd;
+          }
+        }
       }
-      if (!m || m.index == null) continue;
-      const normStart = m.index;
-      const normEnd = normStart + m[0].length;
+
+      if (normStart < 0 || normEnd <= normStart) continue;
       if (normEnd > normIdxToRawIdx.length) continue;
 
       const rawStart = normIdxToRawIdx[normStart];
@@ -404,11 +452,20 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
         div.style.width = `${r.width}px`;
         div.style.height = `${r.height}px`;
         div.title = "Open past analysis for this selection";
-        div.addEventListener("click", (ev) => {
+        // Use `pointerdown` (capture phase) rather than `click`. The
+        // pdfjs text layer sits on top of the page canvas with its own
+        // selection handling: a native mousedown there starts a text
+        // selection drag, which prevents the subsequent click from
+        // firing on our overlay. Intercepting at pointerdown, in the
+        // capture phase, runs our handler before pdfjs starts a drag
+        // so clicks on underlines reliably open the stored analysis.
+        const fire = (ev: Event) => {
           ev.stopPropagation();
           ev.preventDefault();
           openSelectionFromHistory(entry);
-        });
+        };
+        div.addEventListener("pointerdown", fire, { capture: true });
+        div.addEventListener("click", fire);
         overlay.appendChild(div);
       }
       painted++;

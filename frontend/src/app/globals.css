@@ -518,7 +518,11 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 3;
+  /* Sits above the pdf.js text layer (z-index 2) and annotation layer
+     (z-index 3) so clicks on `.know-selection-underline` reach our
+     handler rather than getting swallowed by text-selection hit-tests
+     on the spans underneath. */
+  z-index: 5;
 }
 .know-selection-underline {
   position: absolute;

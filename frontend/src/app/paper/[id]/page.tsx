@@ -10,6 +10,7 @@ import { useStore } from "@/lib/store";
 import { SelectionToolbar, type SelectionAction } from "@/components/pdf/SelectionToolbar";
 import { AnalysisPanel, type PanelPosition } from "@/components/panel/BottomPanel";
 import { BibtexModal } from "@/components/BibtexModal";
+import { CitationScopeModal } from "@/components/CitationScopeModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import {
@@ -848,6 +849,22 @@ function PaperContent() {
     });
   }, []);
 
+  // Multi-paper citation flow: when the user hits the header Citations
+  // button in a workspace (i.e. 2+ papers loaded), we pop a picker so
+  // they can scope the export. Single-paper sessions skip the picker
+  // and export directly for the paper they're reading.
+  const [citationScopeOpen, setCitationScopeOpen] = useState(false);
+  const handleCitationButton = useCallback(() => {
+    if (sessionPapers.length <= 1) {
+      handleExportBibtex(
+        { paper_ids: [activePaperId] },
+        (paper?.title ? paper.title : "Current paper"),
+      );
+      return;
+    }
+    setCitationScopeOpen(true);
+  }, [sessionPapers, activePaperId, paper, handleExportBibtex]);
+
   const [paperUsage, setPaperUsage] = useState<{
     qa_used: number; qa_limit: number; selections_used: number; selections_limit: number;
   } | null>(null);
@@ -1122,7 +1139,12 @@ function PaperContent() {
         // the pane look like a white square stapled onto the rounded
         // border. Clipping the child to the wrapper's shape makes the
         // curved corners actually show.
-        isBottom ? "mx-auto max-w-3xl border-l border-r border-t border-border rounded-t-xl overflow-hidden bg-background/80" : ""
+        //
+        // `bg-background` (solid, not the previous /80) means PDF page
+        // content can never bleed through when the pane floats above
+        // the reader column in focus mode — images especially were
+        // showing through the translucent tint, which read as a bug.
+        isBottom ? "mx-auto max-w-3xl border-l border-r border-t border-border rounded-t-xl overflow-hidden bg-background" : ""
       }`}
     >
       <AnalysisPanel
@@ -1281,17 +1303,22 @@ function PaperContent() {
           )}
         </div>
 
-        {/* Export citations for current paper */}
+        {/* Export citations. Singular label for a one-paper session,
+            plural (with a scope picker) once the user has loaded a
+            workspace so it's obvious the action covers more than just
+            the paper currently in focus. */}
         {!isFree && (
         <button
-          onClick={() => handleExportBibtex({ paper_ids: [activePaperId] }, "Current paper")}
+          onClick={handleCitationButton}
           className="shrink-0 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground/90 px-2 py-1 rounded-md hover:bg-accent/60 transition-colors"
-          title="Export citations for current paper"
+          title={sessionPapers.length > 1 ? "Export citations for session" : "Export citation for current paper"}
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
           </svg>
-          <span className="hidden sm:inline">Citations</span>
+          <span className="hidden sm:inline">
+            {sessionPapers.length > 1 ? "Citations" : "Citation"}
+          </span>
         </button>
         )}
 
@@ -1525,7 +1552,13 @@ function PaperContent() {
           {dragHandle}
         </div>
         <div
-          className={`shrink-0 overflow-hidden bg-background ${isBottom ? "" : "border-l border-r border-t border-border"}`}
+          // `relative z-20` + solid `bg-background` keeps the analysis
+          // pane above the reader column's own stacking context, which
+          // can be pushed forward by the PDF canvas (transforms) and
+          // its overlays. Without this, figures and equations in the
+          // reader column could be painted *over* the pane in focus
+          // mode, which looked like a rendering bug.
+          className={`shrink-0 relative z-20 overflow-hidden bg-background ${isBottom ? "" : "border-l border-r border-t border-border"}`}
           style={{
             ...(isBottom ? { height: panelSize } : { width: panelSize }),
             order: panelPos === "left" ? 1 : 3,
@@ -1565,27 +1598,45 @@ function PaperContent() {
         </div>
       )}
 
-      {/* Focus-mode escape hatch for the analysis pane. When the user
-          enters focus mode with the pane closed (or closes it while
-          in focus mode) the header is gone, so there is no affordance
-          to bring the pane back. This small floating chip lives at
-          the bottom-right for exactly that case — positioned low so
-          it doesn't fight the document gutter, and only visible when
-          we're in focus mode AND the pane is hidden. */}
-      {focusMode && !panelVisible && (
+      {/* Focus-mode analysis-pane toggle. Both directions live on the
+          same chip so the user can bring the pane back *and* hide it
+          again without needing to leave focus mode — previously we
+          only rendered the "Show" variant, which left people stuck
+          once they'd opened the pane because the header with its
+          regular controls is gone in focus mode. */}
+      {focusMode && (
         <button
-          onClick={() => setPanelVisible(true)}
-          className="fixed bottom-4 right-4 z-40 glass-strong rounded-full pl-3 pr-3.5 py-2 flex items-center gap-2 text-[12px] font-medium text-foreground/90 hover:text-foreground shadow-md hover:shadow-lg transition-all animate-fade-in ring-focus"
-          title="Open analysis pane"
-          aria-label="Open analysis pane"
+          onClick={() => setPanelVisible(!panelVisible)}
+          className="fixed bottom-4 right-4 z-50 glass-strong rounded-full pl-3 pr-3.5 py-2 flex items-center gap-2 text-[12px] font-medium text-foreground/90 hover:text-foreground shadow-md hover:shadow-lg transition-all animate-fade-in ring-focus"
+          title={panelVisible ? "Hide analysis pane" : "Open analysis pane"}
+          aria-label={panelVisible ? "Hide analysis pane" : "Open analysis pane"}
+          aria-pressed={panelVisible}
         >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
-          </svg>
-          Show Analysis
+          {panelVisible ? (
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          ) : (
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
+            </svg>
+          )}
+          {panelVisible ? "Hide Analysis" : "Show Analysis"}
         </button>
       )}
     </div>
+
+      <CitationScopeModal
+        open={citationScopeOpen}
+        onClose={() => setCitationScopeOpen(false)}
+        papers={sessionPapers.map((p) => ({ id: p.id, title: p.title }))}
+        activePaperId={activePaperId}
+        workspaceName={activeWorkspaceName ?? null}
+        onExport={(ids, label) => {
+          setCitationScopeOpen(false);
+          handleExportBibtex({ paper_ids: ids }, label);
+        }}
+      />
 
       <BibtexModal
         open={bibtexModal.open}
