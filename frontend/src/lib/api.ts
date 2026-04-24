@@ -572,12 +572,31 @@ export const api = {
       headers: { "Content-Type": "application/json" },
     }),
 
-  upgradeSubscription: (tier: string) =>
-    request<{ status: string; tier: string }>("/api/billing/upgrade", {
+  previewUpgrade: (tier: string) =>
+    request<{
+      currency: string;
+      immediate_charge_cents: number;
+      next_cycle_charge_cents: number;
+      period_end: number | null;
+      current_tier: string;
+      target_tier: string;
+      current_price_id: string;
+      new_price_id: string;
+    }>("/api/billing/upgrade-preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tier }),
     }),
+
+  upgradeSubscription: (tier: string, when: "now" | "next_cycle" = "now") =>
+    request<{ status: string; tier: string; effective_at: string | number; scheduled_for?: number }>(
+      "/api/billing/upgrade",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier, when }),
+      },
+    ),
 
   submitFeedback: (message: string) =>
     request<{ status: string }>("/api/feedback", {

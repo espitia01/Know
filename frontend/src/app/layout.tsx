@@ -30,16 +30,36 @@ export const metadata: Metadata = {
   title: "Know",
   description: "Transform academic papers into interactive learning experiences",
   metadataBase: new URL("https://knowpaper.com"),
+  // Spelling this out (rather than relying purely on Next.js' app-router
+  // file-based icon conventions) is what makes Safari find the icon. Safari
+  // specifically honours the `apple-touch-icon` link tag and ignores a
+  // bare transparent `icon` file; pointing it at a sized PNG from /public
+  // fixes the blank-tab rendering.
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/icon.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+    shortcut: ["/favicon.ico"],
+  },
+  manifest: "/site.webmanifest",
   openGraph: {
     title: "Know",
     description: "Transform academic papers into interactive learning experiences",
     type: "website",
     siteName: "Know",
+    images: [{ url: "/apple-touch-icon.png", width: 180, height: 180 }],
   },
   twitter: {
     card: "summary",
     title: "Know",
     description: "Transform academic papers into interactive learning experiences",
+    images: ["/apple-touch-icon.png"],
   },
 };
 

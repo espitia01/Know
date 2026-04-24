@@ -12,6 +12,8 @@ import { useStore } from "@/lib/store";
 import { CancelModal } from "@/components/CancelModal";
 import { FeedbackModal } from "@/components/FeedbackModal";
 import { UpgradeModal } from "@/components/UpgradeModal";
+import { UpgradeConfirmModal } from "@/components/UpgradeConfirmModal";
+import { UpgradeScheduledModal } from "@/components/UpgradeScheduledModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { DISCORD_URL } from "@/lib/constants";
 
@@ -75,8 +77,10 @@ function SettingsContent() {
   const [billingError, setBillingError] = useState("");
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
-  const [upgradeLoading, setUpgradeLoading] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showUpgradeConfirm, setShowUpgradeConfirm] = useState(false);
+  const [scheduledUpgradeAt, setScheduledUpgradeAt] = useState<number | null>(null);
+  const [showScheduledModal, setShowScheduledModal] = useState(false);
   const [usage, setUsage] = useState<{
     tier: string;
     papers_used: number;
@@ -91,16 +95,21 @@ function SettingsContent() {
   const tier = tierUser?.tier || "free";
   const showModels = tier !== "free";
 
+  // Re-fetch the user's settings + the allow-listed models any time the
+  // tier changes — not just when `showModels` flips from false → true.
+  // Without the `tier` dependency, upgrading from Scholar to Researcher
+  // in-session left the Opus radio hidden until the user manually
+  // refreshed the page, because `showModels` was already true and React
+  // never re-ran this effect.
   useEffect(() => {
-    if (showModels) {
-      api.getSettings().then((s) => {
-        setSettings(s);
-        setAnalysisModel(s.analysis_model);
-        setFastModel(s.fast_model);
-      }).catch(() => setLoadError("Failed to load settings."));
-      api.getModels().then((r) => setModels(r.models)).catch(() => {});
-    }
-  }, [showModels]);
+    if (!showModels) return;
+    api.getSettings().then((s) => {
+      setSettings(s);
+      setAnalysisModel(s.analysis_model);
+      setFastModel(s.fast_model);
+    }).catch(() => setLoadError("Failed to load settings."));
+    api.getModels().then((r) => setModels(r.models)).catch(() => {});
+  }, [showModels, tier]);
 
   // `usageRefreshKey` is bumped every time a panel records a new LLM call,
   // so the Usage card here stays in sync with the rest of the app without
@@ -344,24 +353,10 @@ function SettingsContent() {
               )}
               {tierUser.tier === "scholar" && (
                 <button
-                  onClick={async () => {
-                    setUpgradeLoading(true);
-                    setBillingError("");
-                    try {
-                      await api.upgradeSubscription("researcher");
-                      await refreshTier();
-                      setShowUpgradeModal(true);
-                    } catch (e: unknown) {
-                      const msg = e instanceof Error ? e.message : "Upgrade failed";
-                      setBillingError(msg);
-                    } finally {
-                      setUpgradeLoading(false);
-                    }
-                  }}
-                  disabled={upgradeLoading}
-                  className="text-[12px] font-semibold bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2 rounded-xl hover:opacity-90 transition-all shadow-sm disabled:opacity-50"
+                  onClick={() => { setBillingError(""); setShowUpgradeConfirm(true); }}
+                  className="text-[12px] font-semibold bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2 rounded-xl hover:opacity-90 transition-all shadow-sm"
                 >
-                  {upgradeLoading ? "Upgrading..." : "Upgrade to Researcher"}
+                  Upgrade to Researcher
                 </button>
               )}
             </div>
@@ -488,10 +483,35 @@ function SettingsContent() {
         }}
       />
       <FeedbackModal open={showFeedback} onClose={() => setShowFeedback(false)} />
+      <UpgradeConfirmModal
+        tier="researcher"
+        tierLabel="Researcher"
+        open={showUpgradeConfirm}
+        onClose={() => setShowUpgradeConfirm(false)}
+        onUpgraded={async (mode, preview) => {
+          setShowUpgradeConfirm(false);
+          // Pull the new tier so the settings UI (models list, tier pill,
+          // Upgrade button state) reflects the change right away instead
+          // of waiting for the next focus/visibility event.
+          await refreshTier();
+          if (mode === "now") {
+            setShowUpgradeModal(true);
+          } else {
+            setScheduledUpgradeAt(preview?.period_end ?? null);
+            setShowScheduledModal(true);
+          }
+        }}
+      />
       <UpgradeModal
         tier="researcher"
         open={showUpgradeModal}
         onClose={() => setShowUpgradeModal(false)}
+      />
+      <UpgradeScheduledModal
+        tierLabel="Researcher"
+        effectiveAt={scheduledUpgradeAt}
+        open={showScheduledModal}
+        onClose={() => setShowScheduledModal(false)}
       />
     </main>
   );

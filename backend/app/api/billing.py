@@ -223,18 +223,53 @@ async def resubscribe(user_id: str = Depends(require_auth)):
 TIER_ORDER = {"free": 0, "scholar": 1, "researcher": 2}
 
 
-@router.post("/api/billing/upgrade")
-async def upgrade_subscription(body: dict, user_id: str = Depends(require_auth)):
-    """Upgrade an existing subscription using Stripe proration."""
+def _resolve_tier_price(tier: str) -> str | None:
+    return {
+        "scholar": settings.stripe_price_scholar,
+        "researcher": settings.stripe_price_researcher,
+    }.get(tier)
+
+
+def _load_active_subscription(customer_id: str):
+    """Fetch the customer's active subscription or raise HTTPException."""
+    subs = stripe.Subscription.list(customer=customer_id, status="active", limit=1)
+    if not subs.data:
+        raise HTTPException(status_code=400, detail="No active subscription found")
+    return subs.data[0]
+
+
+def _stripe_period_end(sub) -> int | None:
+    """Extract current_period_end from either a subscription object or the
+    first subscription item (Stripe moved the field in 2023 API versions)."""
+    try:
+        val = getattr(sub, "current_period_end", None)
+        if val:
+            return int(val)
+    except Exception:
+        pass
+    try:
+        item = sub["items"]["data"][0]
+        val = getattr(item, "current_period_end", None) or item.get("current_period_end")
+        return int(val) if val else None
+    except Exception:
+        return None
+
+
+@router.post("/api/billing/upgrade-preview")
+async def upgrade_preview(body: dict, user_id: str = Depends(require_auth)):
+    """Return the prorated immediate charge and the next-cycle charge for
+    a tier change, so the client can ask the user to choose between
+    "upgrade now" and "upgrade at next renewal".
+
+    The preview does **not** modify the subscription — we call
+    ``Invoice.create_preview`` with the proposed item change and read back
+    ``amount_due``. The next-cycle amount is just the new price.
+    """
     if not settings.stripe_secret_key:
         raise HTTPException(status_code=503, detail="Stripe not configured")
 
     target_tier = body.get("tier", "researcher")
-    new_price_id = {
-        "scholar": settings.stripe_price_scholar,
-        "researcher": settings.stripe_price_researcher,
-    }.get(target_tier)
-
+    new_price_id = _resolve_tier_price(target_tier)
     if not new_price_id:
         raise HTTPException(status_code=400, detail=f"Unknown tier: {target_tier}")
 
@@ -244,30 +279,163 @@ async def upgrade_subscription(body: dict, user_id: str = Depends(require_auth))
 
     if TIER_ORDER.get(target_tier, 0) <= TIER_ORDER.get(current_tier, 0):
         raise HTTPException(status_code=400, detail="Already on this tier or higher")
-
     if not customer_id:
         raise HTTPException(status_code=400, detail="No active subscription. Please subscribe first.")
 
     try:
-        subs = stripe.Subscription.list(customer=customer_id, status="active", limit=1)
-        if not subs.data:
-            raise HTTPException(status_code=400, detail="No active subscription found")
-
-        sub = subs.data[0]
+        sub = _load_active_subscription(customer_id)
         item_id = sub["items"]["data"][0].id
+        current_price_id = sub["items"]["data"][0]["price"]["id"]
+
+        # Ask Stripe to *simulate* the invoice that would be generated if
+        # we swapped to the new price right now. We don't commit the
+        # change — this call is side-effect free. Older Stripe SDKs
+        # expose this as `Invoice.upcoming`; newer ones as
+        # `Invoice.create_preview`. Try both so deploys on either API
+        # version keep working.
+        params = dict(
+            customer=customer_id,
+            subscription=sub.id,
+            subscription_items=[{"id": item_id, "price": new_price_id}],
+            subscription_proration_behavior="create_prorations",
+        )
+        try:
+            preview = stripe.Invoice.create_preview(**params)  # type: ignore[attr-defined]
+        except (AttributeError, stripe.InvalidRequestError):
+            preview = stripe.Invoice.upcoming(**params)  # type: ignore[attr-defined]
+
+        amount_due = int(getattr(preview, "amount_due", 0) or 0)
+        currency = (getattr(preview, "currency", "usd") or "usd").lower()
+
+        # Monthly price for the target tier — read from Stripe so we
+        # don't hardcode prices anywhere in the app.
+        new_price = stripe.Price.retrieve(new_price_id)
+        unit_amount = int(getattr(new_price, "unit_amount", 0) or 0)
+
+        period_end = _stripe_period_end(sub)
+
+        return {
+            "currency": currency,
+            "immediate_charge_cents": max(0, amount_due),
+            "next_cycle_charge_cents": unit_amount,
+            "period_end": period_end,
+            "current_tier": current_tier,
+            "target_tier": target_tier,
+            "current_price_id": current_price_id,
+            "new_price_id": new_price_id,
+        }
+    except stripe.StripeError as e:
+        logger.error("Upgrade preview failed: %s", e)
+        raise HTTPException(status_code=502, detail="Could not preview the upgrade. Please try again.")
+
+
+@router.post("/api/billing/upgrade")
+async def upgrade_subscription(body: dict, user_id: str = Depends(require_auth)):
+    """Apply a tier upgrade.
+
+    ``when`` controls timing:
+      - ``"now"`` (default): switch immediately with Stripe proration.
+        The user is charged the prorated difference today and tier flips
+        in the app right away.
+      - ``"next_cycle"``: keep the current price through the end of the
+        existing billing period and swap to the new price at renewal.
+        No charge today, and the app tier does **not** change until the
+        webhook fires on the next renewal. Implemented with a
+        ``SubscriptionSchedule`` so Stripe owns the transition.
+    """
+    if not settings.stripe_secret_key:
+        raise HTTPException(status_code=503, detail="Stripe not configured")
+
+    target_tier = body.get("tier", "researcher")
+    when = (body.get("when") or "now").lower()
+    if when not in {"now", "next_cycle"}:
+        raise HTTPException(status_code=400, detail="Invalid 'when' (must be 'now' or 'next_cycle')")
+
+    new_price_id = _resolve_tier_price(target_tier)
+    if not new_price_id:
+        raise HTTPException(status_code=400, detail=f"Unknown tier: {target_tier}")
+
+    user = get_user(user_id)
+    current_tier = (user or {}).get("tier", "free")
+    customer_id = (user or {}).get("stripe_customer_id")
+
+    if TIER_ORDER.get(target_tier, 0) <= TIER_ORDER.get(current_tier, 0):
+        raise HTTPException(status_code=400, detail="Already on this tier or higher")
+    if not customer_id:
+        raise HTTPException(status_code=400, detail="No active subscription. Please subscribe first.")
+
+    try:
+        sub = _load_active_subscription(customer_id)
+        item_id = sub["items"]["data"][0].id
+        current_price_id = sub["items"]["data"][0]["price"]["id"]
+        period_end = _stripe_period_end(sub)
 
         if sub.cancel_at_period_end:
             stripe.Subscription.modify(sub.id, cancel_at_period_end=False)
 
-        stripe.Subscription.modify(
-            sub.id,
-            items=[{"id": item_id, "price": new_price_id}],
-            proration_behavior="create_prorations",
+        if when == "now":
+            stripe.Subscription.modify(
+                sub.id,
+                items=[{"id": item_id, "price": new_price_id}],
+                proration_behavior="create_prorations",
+            )
+            update_user_tier(user_id, target_tier)
+            logger.info(
+                "User %s upgraded from %s to %s (prorated, immediate)",
+                user_id, current_tier, target_tier,
+            )
+            return {
+                "status": "upgraded",
+                "tier": target_tier,
+                "effective_at": "now",
+            }
+
+        # when == "next_cycle"
+        # We promote the live subscription into a schedule and append a
+        # second phase that starts at period end with the new price.
+        # Stripe handles the transition without any further action from
+        # us; the `customer.subscription.updated` webhook will fire on
+        # renewal and our handler will flip the user's tier then.
+        if not period_end:
+            raise HTTPException(
+                status_code=502,
+                detail="Could not determine current billing period end.",
+            )
+
+        schedule = stripe.SubscriptionSchedule.create(from_subscription=sub.id)
+        stripe.SubscriptionSchedule.modify(
+            schedule.id,
+            end_behavior="release",
+            phases=[
+                {
+                    "items": [{"price": current_price_id, "quantity": 1}],
+                    "start_date": (
+                        getattr(schedule, "current_phase", {}).get("start_date")
+                        if hasattr(schedule, "current_phase") and schedule.current_phase
+                        else None
+                    ) or int(getattr(sub, "start_date", 0) or 0) or None,
+                    "end_date": period_end,
+                    "proration_behavior": "none",
+                },
+                {
+                    "items": [{"price": new_price_id, "quantity": 1}],
+                    "iterations": 1,
+                },
+            ],
         )
 
-        update_user_tier(user_id, target_tier)
-        logger.info("User %s upgraded from %s to %s (prorated)", user_id, current_tier, target_tier)
-        return {"status": "upgraded", "tier": target_tier}
+        logger.info(
+            "User %s scheduled upgrade %s → %s at %s",
+            user_id, current_tier, target_tier, period_end,
+        )
+        return {
+            "status": "scheduled",
+            "tier": target_tier,
+            "effective_at": period_end,
+            "scheduled_for": period_end,
+        }
+    except HTTPException:
+        raise
     except stripe.StripeError as e:
         logger.error("Upgrade subscription failed: %s", e)
         raise HTTPException(status_code=502, detail="Failed to upgrade subscription. Please try again.")
