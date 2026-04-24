@@ -1100,7 +1100,13 @@ function PaperContent() {
   const panelInner = (
     <div
       className={`h-full ${
-        isBottom ? "mx-auto max-w-3xl border-l border-r border-t border-border rounded-t-xl" : ""
+        // `overflow-hidden` is load-bearing here: without it the child
+        // tab bar's opaque background paints a full rectangle that pokes
+        // through the rounded corners of the wrapper, making the top of
+        // the pane look like a white square stapled onto the rounded
+        // border. Clipping the child to the wrapper's shape makes the
+        // curved corners actually show.
+        isBottom ? "mx-auto max-w-3xl border-l border-r border-t border-border rounded-t-xl overflow-hidden bg-background/80" : ""
       }`}
     >
       <AnalysisPanel
@@ -1521,15 +1527,17 @@ function PaperContent() {
           Dedicated buttons (instead of a single "restore" action) let
           people exit focus mode without losing the underlying
           hide-navbar preference, and vice-versa. */}
-      {chromeHidden && (
+      {/* Only surface the floating restore chip when the user has
+          collapsed the top bar outside of focus mode. In focus mode
+          itself the chip becomes visual noise — Escape is the natural
+          exit and is already hinted to users when they toggle focus
+          mode on. Showing a competing button there fights against the
+          whole point of the mode, which is to get chrome out of the
+          way. */}
+      {headerHidden && !focusMode && (
         <div className="fixed top-2 right-2 z-40 flex items-center gap-1 glass-strong rounded-full px-1.5 py-1 shadow-sm animate-fade-in">
-          {focusMode && (
-            <span className="hidden md:inline text-[10px] text-muted-foreground/70 px-1.5 tracking-wide">
-              Esc to exit
-            </span>
-          )}
           <button
-            onClick={() => { setFocusMode(false); setHeaderHidden(false); }}
+            onClick={() => { setHeaderHidden(false); }}
             className="text-muted-foreground/80 hover:text-foreground transition-colors rounded-full p-1 ring-focus"
             title="Show top bar"
             aria-label="Show top bar"
