@@ -193,12 +193,15 @@ function DashboardContent() {
 
   return (
     <main className="flex-1 flex flex-col items-center px-6 pt-[10vh] pb-12 bg-mesh min-h-screen bg-background text-foreground">
-      <div className="absolute top-5 right-5 flex items-center gap-3">
+      <div className="absolute top-5 right-5 flex items-center gap-2.5">
         {tierUser?.tier === "free" && (
           <Link
             href="/#pricing"
-            className="text-[12px] font-medium bg-gradient-to-r from-violet-500 to-purple-600 text-white px-3.5 py-1.5 rounded-xl hover:shadow-lg hover:shadow-violet-500/20 transition-all"
+            className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-foreground/90 hover:text-foreground px-3 py-1.5 rounded-full glass-subtle hover:shadow-sm transition-all ring-focus"
           >
+            <svg className="w-3 h-3 text-foreground/70" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z" />
+            </svg>
             Upgrade
           </Link>
         )}

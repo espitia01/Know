@@ -121,14 +121,29 @@ function ProgressBar({ running }: { running: boolean }) {
 
 export function FiguresPanel({ paperId }: FiguresPanelProps) {
   const { paper, setPaper } = useStore();
+  // Keep the in-memory "instant switch" cache (`papersById`) in sync
+  // whenever we mutate figures on the current paper. Without this,
+  // switching to another paper and back would briefly show stale
+  // (pre-reextract) figures from cache before the background
+  // `getPaper` call refreshes them.
+  const cachePaper = useStore((s) => s.cachePaper);
   // `paper` is driven by a global store: it may be stale (another paper)
   // or `null` on a fresh mount before the API call resolves. Only trust
   // it when it actually matches the panel's paperId. Tracking the
   // matched/unmatched states separately lets us show a spinner during
   // hydration instead of immediately flashing "No figures detected."
+  //
+  // If the store is momentarily stale (very common during a paper
+  // switch), fall back to the in-memory `papersById` cache so the
+  // panel does not wipe its figures grid while waiting for the next
+  // setPaper() tick. The grid can always refine once `paper` updates.
+  const cachedForPanel = useStore(
+    useCallback((s) => s.papersById[paperId], [paperId]),
+  );
   const paperMatches = paper?.id === paperId;
-  const figures = paperMatches ? paper?.figures ?? [] : [];
-  const paperReady = paperMatches && Array.isArray(paper?.figures);
+  const effectivePaper = paperMatches ? paper : cachedForPanel;
+  const figures = effectivePaper?.figures ?? [];
+  const paperReady = Array.isArray(effectivePaper?.figures);
   const [selected, setSelected] = useState<FigureInfo | null>(null);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
@@ -164,7 +179,9 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     setReextracting(true);
     try {
       const result = await api.reextractFigures(paperId);
-      setPaper({ ...paper, figures: result.figures });
+      const next = { ...paper, figures: result.figures };
+      setPaper(next);
+      cachePaper(next);
       setSelected(null);
       setConversations({});
     } catch (e) {
@@ -172,7 +189,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     } finally {
       setReextracting(false);
     }
-  }, [paperId, paper, setPaper]);
+  }, [paperId, paper, setPaper, cachePaper]);
 
   const handleAnalyze = useCallback(
     async (fig: FigureInfo, q: string = "") => {
@@ -451,51 +468,55 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   }
 
   return (
-    <div className="space-y-3">
-      <p className="text-[12px] text-muted-foreground/60">
-        Click a figure to analyze it and ask questions. Click the image to expand.
+    <div className="space-y-3.5">
+      <p className="text-[11.5px] text-muted-foreground/70">
+        Tap a figure to analyse &amp; ask questions.
       </p>
 
-      <div className="grid grid-cols-2 gap-2">
-        {figures.map((fig) => (
-          <button
-            key={fig.id}
-            onClick={() => setSelected(fig)}
-            className="group rounded-xl glass-subtle overflow-hidden hover:bg-accent transition-colors"
-          >
-            <div className="aspect-[4/3] overflow-hidden relative">
-              <AuthImage
-                src={api.getFigureUrl(paperId, fig.id)}
-                alt={fig.caption || fig.id}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-              />
-              {conversations[fig.id]?.length > 0 && (
-                <div className="absolute top-1 right-1 bg-foreground text-background text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
-                  {Math.floor(conversations[fig.id].length / 2)}
-                </div>
-              )}
-            </div>
-            <div className="px-2 py-1.5 text-left">
-              <p className="text-[11px] font-medium truncate">
-                {fig.caption
-                  ? fig.caption.slice(0, 40) + (fig.caption.length > 40 ? "..." : "")
-                  : `Page ${fig.page + 1}`}
-              </p>
-            </div>
-          </button>
-        ))}
+      <div className="grid grid-cols-2 gap-2.5">
+        {figures.map((fig) => {
+          const convoCount = conversations[fig.id]?.length ?? 0;
+          const captionShort = fig.caption
+            ? fig.caption.slice(0, 48) + (fig.caption.length > 48 ? "…" : "")
+            : `Page ${fig.page + 1}`;
+          return (
+            <button
+              key={fig.id}
+              onClick={() => setSelected(fig)}
+              className="group relative rounded-xl overflow-hidden bg-background border border-border hover:border-border-strong hover:shadow-sm transition-all ring-focus text-left"
+            >
+              <div className="aspect-[4/3] overflow-hidden bg-muted/30 relative">
+                <AuthImage
+                  src={api.getFigureUrl(paperId, fig.id)}
+                  alt={fig.caption || fig.id}
+                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                />
+                {convoCount > 0 && (
+                  <div className="absolute top-1.5 right-1.5 bg-foreground text-background text-[9px] font-semibold leading-none min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center shadow-sm">
+                    {Math.floor(convoCount / 2)}
+                  </div>
+                )}
+              </div>
+              <div className="px-2.5 py-1.5">
+                <p className="text-[11px] font-medium text-foreground/90 truncate">
+                  {captionShort}
+                </p>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
-      <div className="pt-3 mt-1 border-t border-border/40 flex items-center justify-between gap-3">
+      <div className="pt-2 flex items-center justify-between gap-3 border-t border-border/60">
         <p className="text-[11px] text-muted-foreground/60">
-          Missing something? Run extraction again.
+          Missing a figure?
         </p>
         <button
           onClick={handleReextract}
           disabled={reextracting}
-          className="text-[11px] font-medium px-3 py-1.5 rounded-lg border border-border hover:bg-accent transition-colors disabled:opacity-40 shrink-0"
+          className="text-[11px] font-medium px-2.5 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-40 shrink-0"
         >
-          {reextracting ? "Re-extracting..." : "Re-extract"}
+          {reextracting ? "Re-extracting…" : "Re-extract"}
         </button>
       </div>
     </div>

@@ -4,10 +4,10 @@
  *
  * The feature is deliberately client-only: the chosen preset or uploaded
  * image is small, per-device UX, and has no value on the server. We
- * persist to localStorage, apply via a CSS variable (`--bg-user-image`)
- * that the `.bg-mesh` utility layers behind its existing radial gradients,
- * and downscale uploads so we never blow the localStorage quota (~5 MB
- * in most browsers) with a single 4K photo.
+ * persist to localStorage, apply via CSS variables (`--bg-user-image`,
+ * `--bg-user-opacity`, …) that a `body::before` pseudo-element paints
+ * behind the app, and downscale uploads so we never blow the
+ * localStorage quota (~5 MB in most browsers) with a single 4K photo.
  *
  * Presets are inline SVG data URLs so they ship with the JS bundle and
  * never require a network round-trip to render. They are intentionally
@@ -159,11 +159,53 @@ export type BackgroundState = {
   opacity: number;
 };
 
+/**
+ * Resolved CSS for a state — used by both `applyBackgroundState` at
+ * runtime and the inline pre-paint init script, which can't import
+ * from this module but *can* read JSON out of localStorage.
+ */
+type ResolvedBackgroundCss = {
+  image: string; // "none" | "url(...)" | gradient string
+  size: string;
+  position: string;
+  repeat: string;
+  opacity: number;
+};
+
 const DEFAULT_STATE: BackgroundState = {
   presetId: "none",
   customImage: null,
   opacity: 0.5,
 };
+
+function resolveCss(state: BackgroundState): ResolvedBackgroundCss {
+  if (state.presetId === "custom" && state.customImage) {
+    return {
+      image: `url("${state.customImage}")`,
+      size: "cover",
+      position: "center",
+      repeat: "no-repeat",
+      opacity: state.opacity,
+    };
+  }
+  const preset = BACKGROUND_PRESETS.find((p) => p.id === state.presetId);
+  if (preset && preset.id !== "none") {
+    return {
+      image: preset.image,
+      size: preset.size ?? "cover",
+      position: preset.position ?? "center",
+      repeat: preset.repeat ?? "no-repeat",
+      opacity: state.opacity,
+    };
+  }
+  return {
+    image: "none",
+    size: "cover",
+    position: "center",
+    repeat: "no-repeat",
+    opacity: 0,
+  };
+}
 
 export function loadBackgroundState(): BackgroundState {
   if (typeof window === "undefined") return DEFAULT_STATE;
@@ -189,7 +231,15 @@ export function loadBackgroundState(): BackgroundState {
 export function saveBackgroundState(state: BackgroundState): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    // Persist the resolved CSS alongside the symbolic state so the
+    // synchronous init script (which can't import anything) can
+    // hydrate the page before first paint — no matter whether the
+    // user picked a preset or uploaded a custom image.
+    const resolved = resolveCss(state);
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...state, resolved }),
+    );
   } catch {
     // Quota exceeded (very large custom image). We silently fail so
     // the user's choice simply doesn't persist across reloads.
@@ -250,11 +300,13 @@ export async function prepareCustomImage(file: File): Promise<string> {
 
 /**
  * Apply the given state to the document by writing the CSS custom
- * properties that `.bg-mesh` consumes. Returns a cleanup function
- * that reverts the document to its default look.
+ * properties that `body::before` (and any other `bg-user-layer`
+ * consumers) read.
  *
- * We attach to `document.documentElement` so every route with
- * `.bg-mesh` picks it up immediately without needing to re-render.
+ * We attach to `document.documentElement` so every route picks it up
+ * immediately — the picker lives in Settings but the user expects the
+ * choice to follow them into the reader, library, and landing page
+ * with no re-render dance.
  */
 export function applyBackgroundState(state: BackgroundState): void {
   if (typeof document === "undefined") return;
@@ -277,8 +329,8 @@ export function applyBackgroundState(state: BackgroundState): void {
     root.style.setProperty("--bg-user-position", preset.position ?? "center");
     root.style.setProperty("--bg-user-opacity", String(state.opacity));
   } else {
-    // No preset chosen — collapse the layer so the default
-    // dashboard look (base gradients only) is visible.
+    // No preset chosen — collapse the layer so the default look
+    // (base gradients only) is visible.
     root.style.removeProperty("--bg-user-image");
     root.style.removeProperty("--bg-user-size");
     root.style.removeProperty("--bg-user-repeat");
@@ -288,3 +340,33 @@ export function applyBackgroundState(state: BackgroundState): void {
 }
 
 export const DEFAULT_BACKGROUND_STATE = DEFAULT_STATE;
+
+/**
+ * Inline script string that runs synchronously before first paint to
+ * hydrate the background CSS variables from localStorage. Without this
+ * the user would see a brief flash of the default (plain) background
+ * on every reload while React mounts the `BackgroundImageProvider`.
+ *
+ * Kept tiny and defensive — any throw here would stall the initial
+ * paint, so we silently no-op on failure and let the React provider
+ * re-apply the state as a safety net.
+ */
+export const BG_INIT_SCRIPT = `
+(function () {
+  try {
+    var raw = localStorage.getItem(${JSON.stringify(STORAGE_KEY)});
+    if (!raw) return;
+    var s = JSON.parse(raw);
+    if (!s || typeof s !== "object") return;
+    var r = s.resolved;
+    if (!r || typeof r !== "object" || !r.image || r.image === "none") return;
+    var op = typeof r.opacity === "number" ? Math.max(0, Math.min(1, r.opacity)) : 0.5;
+    var root = document.documentElement;
+    root.style.setProperty("--bg-user-image", r.image);
+    root.style.setProperty("--bg-user-size", r.size || "cover");
+    root.style.setProperty("--bg-user-repeat", r.repeat || "no-repeat");
+    root.style.setProperty("--bg-user-position", r.position || "center");
+    root.style.setProperty("--bg-user-opacity", String(op));
+  } catch (e) { /* no-op */ }
+})();
+`.trim();

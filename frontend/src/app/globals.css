@@ -721,20 +721,12 @@
 */
 /* Dashboard / library background.
  *
- * Structure:
- *   • `.bg-mesh` itself holds the base page color + the two quiet
- *     radial gradients that give the page some depth.
- *   • A `::before` pseudo-element renders the user's chosen
- *     background (preset or uploaded image) at a variable opacity.
- *     Isolating it in its own layer means the user's image can never
- *     tint the foreground text, and the opacity knob in Settings
- *     works without affecting the base gradients.
- *
- * Users on Scholar+ pick a preset or upload a custom image from
- * Settings → Appearance; the selection is applied via JS writing
- * the CSS custom properties below to `:root`. When nothing is
- * chosen the `::before` element collapses to an invisible layer
- * because `--bg-user-image` defaults to `none`.
+ * `.bg-mesh` holds the base page color + the two quiet radial
+ * gradients that give the page some depth. The *user's* chosen
+ * background (preset or custom upload) is painted globally on
+ * `body::before` further down, so it persists across every route
+ * (dashboard, library, reader, settings, marketing) without each
+ * route having to opt in.
  */
 .bg-mesh {
   position: relative;
@@ -745,9 +737,26 @@
     radial-gradient(ellipse 55% 45% at 95% 95%, rgb(0 0 0 / 0.025), transparent 65%);
 }
 
-.bg-mesh::before {
+.dark .bg-mesh {
+  background-image:
+    radial-gradient(ellipse 70% 55% at 15% 10%, rgb(255 255 255 / 0.03), transparent 65%),
+    radial-gradient(ellipse 55% 45% at 95% 95%, rgb(255 255 255 / 0.02), transparent 65%);
+}
+
+/* Global user-background layer.
+ *
+ * Applies to every route because it is attached to <body>, not to an
+ * opt-in utility class. `.bg-user-hide` can be added to a container
+ * that *must* stay on the base surface (rare — e.g. fullscreen media).
+ *
+ * The image is painted on a fixed-position pseudo-element so scrolling
+ * doesn't drag the pattern along with the content, which would feel
+ * cheap. Opacity is user-tunable via a CSS variable so the dial in
+ * Settings adjusts intensity without re-encoding the image.
+ */
+body::before {
   content: "";
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: -1;
   pointer-events: none;
@@ -758,17 +767,14 @@
   opacity: var(--bg-user-opacity, 0);
   transition: opacity 200ms ease;
 }
-
-.dark .bg-mesh {
-  background-image:
-    radial-gradient(ellipse 70% 55% at 15% 10%, rgb(255 255 255 / 0.03), transparent 65%),
-    radial-gradient(ellipse 55% 45% at 95% 95%, rgb(255 255 255 / 0.02), transparent 65%);
+.dark body::before {
+  /* In dark mode the same image reads a bit hotter against the
+     near-black surface, so nudge it down slightly. Enough to still
+     see the colour the user picked without overwhelming the UI. */
+  opacity: calc(var(--bg-user-opacity, 0) * 0.75);
 }
-.dark .bg-mesh::before {
-  /* Dark theme sees the user's pick at ~60% of its light-mode
-     opacity — the colour pops too hard against the near-black
-     surface otherwise. */
-  opacity: calc(var(--bg-user-opacity, 0) * 0.6);
+.bg-user-hide::before {
+  opacity: 0 !important;
 }
 .bg-mesh-hero {
   background:

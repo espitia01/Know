@@ -27,6 +27,18 @@ interface PdfViewerProps {
 const PAGE_GAP = 16;
 const BUFFER_PAGES = 2;
 const SCROLL_STORAGE_PREFIX = "know-pdf-scroll:";
+
+/**
+ * Module-scoped cache of object URLs pointing at fully-downloaded PDF
+ * blobs. Using a `Map` here (instead of a Zustand slice) keeps the
+ * blob URLs out of React state — they're side-effecty handles that
+ * don't play nicely with serialisation, and we don't want them to
+ * trigger re-renders across the tree. Bounded by `PDF_BLOB_CACHE_SIZE`
+ * so we don't hold onto megabytes of PDF indefinitely for users who
+ * open many papers in a session.
+ */
+const pdfBlobCache = new Map<string, string>();
+const PDF_BLOB_CACHE_SIZE = 8;
 // Baseline render scale used as the displayed "100%". The old 1.0 baseline
 // produced text that most readers found uncomfortably small on modern
 // retina displays; 1.4 matches what users were manually zooming to almost
@@ -57,15 +69,19 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
   // that renders — before any user scrolling writes new values.
   const scrollRestoredRef = useRef(false);
 
-  // Hand the URL straight to PDF.js instead of fetching the entire binary
-  // ourselves first. PDF.js can issue HTTP range requests and start
-  // rendering page 1 before the rest of the document has downloaded,
-  // which makes large scientific papers feel noticeably snappier — the
-  // previous approach blocked the viewer on the full ArrayBuffer even
-  // though most users never scroll past the first handful of pages.
-  // Memoised so react-pdf doesn't see a new file prop on every render.
+  // Hand the URL straight to PDF.js for the *first* load so HTTP range
+  // requests can start rendering page 1 before the full document has
+  // downloaded. In parallel, we stash a full-file Blob in a module
+  // cache keyed by `url`, so returning to the same paper later skips
+  // the network round-trip entirely and feels instantaneous — which
+  // matters a lot for multi-paper sessions where users flip between
+  // tabs dozens of times.
+  const cachedBlobUrl = pdfBlobCache.get(url);
   const fileData = useMemo(() => {
     if (!url) return null;
+    if (cachedBlobUrl) {
+      return { url: cachedBlobUrl };
+    }
     return {
       url,
       httpHeaders: getAuthHeadersSync(),
@@ -73,7 +89,47 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
     };
     // `retryKey` is included so "Retry" reliably re-fetches from PDF.js.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, retryKey]);
+  }, [url, retryKey, cachedBlobUrl]);
+
+  // Background-download the full PDF after the first paint so the next
+  // time the user opens this paper it loads from the in-memory cache.
+  // We don't block on this — the visible render is already using the
+  // range-request URL above.
+  useEffect(() => {
+    if (!url || cachedBlobUrl) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    // Small delay so we don't compete with PDF.js' own range requests
+    // for the first render — just priming the cache for next time.
+    const timer = setTimeout(() => {
+      fetch(url, {
+        headers: getAuthHeadersSync(),
+        signal: controller.signal,
+      })
+        .then((r) => (r.ok ? r.blob() : null))
+        .then((blob) => {
+          if (!blob || cancelled) return;
+          const objUrl = URL.createObjectURL(blob);
+          pdfBlobCache.set(url, objUrl);
+          // Evict the oldest entry if we're holding too many papers
+          // in memory — each blob can be a few MB.
+          if (pdfBlobCache.size > PDF_BLOB_CACHE_SIZE) {
+            const firstKey = pdfBlobCache.keys().next().value;
+            if (firstKey && firstKey !== url) {
+              const old = pdfBlobCache.get(firstKey);
+              if (old) URL.revokeObjectURL(old);
+              pdfBlobCache.delete(firstKey);
+            }
+          }
+        })
+        .catch(() => { /* background prefetch — non-fatal */ });
+    }, 800);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [url, cachedBlobUrl]);
 
   // Reset document-scoped state whenever the URL changes so we don't show
   // stale num-pages from a previous paper while the new one is loading.

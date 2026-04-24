@@ -90,11 +90,19 @@ function AddPaperPopover({
     api.listPapers().then((p) => { setPapers(p); setLoadingPapers(false); }).catch(() => setLoadingPapers(false));
   }, []);
 
+  // Close on outside click / Escape — but never while an upload is in
+  // flight. Previously the native file picker could trigger a stray
+  // pointer event on return (varies by OS/browser) that closed the
+  // popover mid-upload and unmounted the progress UI, making the user
+  // think "nothing happened" even though the request was still
+  // running in the background.
   useEffect(() => {
     function handleClick(e: MouseEvent) {
+      if (uploading) return;
       if (ref.current && !ref.current.contains(e.target as Node)) onClose();
     }
     function handleKey(e: KeyboardEvent) {
+      if (uploading) return;
       if (e.key === "Escape") onClose();
     }
     document.addEventListener("mousedown", handleClick);
@@ -103,7 +111,7 @@ function AddPaperPopover({
       document.removeEventListener("mousedown", handleClick);
       document.removeEventListener("keydown", handleKey);
     };
-  }, [onClose]);
+  }, [onClose, uploading]);
 
   const handleUpload = useCallback(async (file: File) => {
     setUploadError(null);
@@ -122,10 +130,14 @@ function AddPaperPopover({
     setUploading(true);
     try {
       const paper = await api.uploadPaper(file);
+      // Hand off to the parent *before* touching any local state — if
+      // the parent navigates (router.replace to the new paper) this
+      // component unmounts and any subsequent setState would be a
+      // no-op warning in the console. The parent also owns navigation
+      // so the user always lands on the paper they just uploaded.
       onAdd(paper.id, paper.title);
     } catch (e) {
       setUploadError(e instanceof Error ? e.message : "Upload failed.");
-    } finally {
       setUploading(false);
     }
   }, [onAdd]);
@@ -156,6 +168,10 @@ function AddPaperPopover({
           className="hidden"
           onChange={(e) => {
             const file = e.target.files?.[0];
+            // Reset the value so selecting the *same* file again still
+            // fires `change`. Without this, re-picking a PDF the user
+            // already tried once would appear to do nothing at all.
+            e.target.value = "";
             if (file) handleUpload(file);
           }}
         />
