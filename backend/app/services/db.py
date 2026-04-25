@@ -159,6 +159,9 @@ def save_paper_meta(paper_dict: dict, user_id: str) -> None:
         "folder": paper_dict.get("folder", ""),
         "tags": paper_dict.get("tags", []),
         "notes": paper_dict.get("notes", []),
+        # Per F-FIGURES: Railway disk is ephemeral, so FigureInfo metadata
+        # must persist with the paper row instead of only in paper.json.
+        "figures": paper_dict.get("figures", []),
         "cached_analysis": paper_dict.get("cached_analysis", {}),
         "raw_text": paper_dict.get("raw_text", ""),
     }

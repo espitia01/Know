@@ -585,11 +585,21 @@ def _load_paper_locked(paper_id: str, user_id: str | None) -> ParsedPaper | None
     if meta_path.exists():
         data = json.loads(meta_path.read_text())
         paper = ParsedPaper(**data)
-        if user_id and not paper.cached_analysis:
-            from .db import get_cached_analysis
-            supabase_cache = get_cached_analysis(paper_id, user_id)
-            if supabase_cache:
-                paper.cached_analysis = supabase_cache
+        if user_id and (not paper.cached_analysis or not paper.figures):
+            from .db import get_paper_meta
+            row = get_paper_meta(paper_id, user_id)
+            changed = False
+            if row and not paper.cached_analysis and row.get("cached_analysis"):
+                paper.cached_analysis = row.get("cached_analysis") or {}
+                changed = True
+            if row and not paper.figures and row.get("figures"):
+                # Per F-FIGURES: backfill legacy local paper.json files whose
+                # metadata predates the persistent figures column.
+                paper.figures = [
+                    FigureInfo(**f) for f in (row.get("figures") or []) if isinstance(f, dict)
+                ]
+                changed = True
+            if changed:
                 meta_path.write_text(paper.model_dump_json(indent=2))
         return paper
 
@@ -597,12 +607,15 @@ def _load_paper_locked(paper_id: str, user_id: str | None) -> ParsedPaper | None
         from .db import get_paper_meta
         row = get_paper_meta(paper_id, user_id)
         if row:
+            figures_raw = row.get("figures") or []
             paper = ParsedPaper(
                 id=row["id"],
                 title=row.get("title", ""),
                 authors=row.get("authors", []),
                 raw_text=row.get("raw_text", ""),
-                figures=[],
+                # Per F-FIGURES: rebuild figure metadata from Supabase when
+                # the ephemeral Railway paper.json file is missing.
+                figures=[FigureInfo(**f) for f in figures_raw if isinstance(f, dict)],
                 folder=row.get("folder", ""),
                 tags=row.get("tags", []),
                 notes=row.get("notes", []),
