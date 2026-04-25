@@ -122,6 +122,7 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
         raise HTTPException(status_code=404, detail="Paper not found")
 
     selected_text = body.get("selected_text", "").strip()[:10000]
+    question = (body.get("question") or "").strip()[:2000]
     action = body.get("action", "explain")
     # Legacy "question" is folded into Explain; the standalone Ask
     # button was removed (its UX was a near-duplicate of Explain).
@@ -141,6 +142,11 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
     )
     try:
         result = await analyze_selection(paper.raw_text, selected_text, action, user_id=user_id)
+        if question:
+            # Per audit §11.3: keep selected_text identical to what the
+            # server analyzed, and persist the user's short follow-up prompt
+            # separately so hydration does not rewrite threaded entries.
+            result["question"] = question
         def _apply(p):
             append_capped(p.cached_analysis, "selections", result)
         mutate_paper(paper_id, user_id, _apply)
@@ -221,6 +227,7 @@ async def selection_analysis_stream(
         raise HTTPException(status_code=404, detail="Paper not found")
 
     selected_text = body.get("selected_text", "").strip()[:10000]
+    question = (body.get("question") or "").strip()[:2000]
     action = body.get("action", "explain")
     if action == "question":
         action = "explain"
@@ -267,6 +274,8 @@ async def selection_analysis_stream(
                 "selected_text": selected_text,
                 "explanation": full_text,
             }
+            if question:
+                result["question"] = question
 
             def _apply(p):
                 append_capped(p.cached_analysis, "selections", result)

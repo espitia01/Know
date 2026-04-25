@@ -166,8 +166,12 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
         paperId,
         `${context}\n\nFollow-up question: ${question}`,
         "followup",
+        { question },
       );
-      const followUpResult = { ...result, action: "followup" as const, selected_text: question };
+      // Per audit §11.3: keep server `selected_text` intact so hydration
+      // doesn't rewrite the entry; surface the user's short prompt via
+      // a separate `question` field for the threaded UI.
+      const followUpResult = { ...result, action: "followup" as const, question };
       addSelectionToHistory(followUpResult);
       setSelectionResult(followUpResult);
       bumpUsageRefresh();

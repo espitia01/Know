@@ -319,6 +319,7 @@ export interface SearchResult {
 export interface SelectionAnalysisResult {
   action: string;
   selected_text: string;
+  question?: string;
   explanation?: string;
   elaboration?: string;
   answer?: string;
@@ -433,11 +434,16 @@ export const api = {
       method: "DELETE",
     }),
 
-  analyzeSelection: (id: string, selectedText: string, action: string) =>
+  analyzeSelection: (
+    id: string,
+    selectedText: string,
+    action: string,
+    extra?: { question?: string },
+  ) =>
     request<SelectionAnalysisResult>(`/api/papers/${id}/selection`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ selected_text: selectedText, action }),
+      body: JSON.stringify({ selected_text: selectedText, action, ...extra }),
     }),
 
   deleteSelection: (id: string, selectedText: string, action: string) =>

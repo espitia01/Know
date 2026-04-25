@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { api, getAuthHeadersSync, SelectionAnalysisResult } from "@/lib/api";
 import { useStore } from "@/lib/store";
+import { normalizeSelectionAction } from "@/lib/selectionActions";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 
@@ -48,7 +49,7 @@ const BASELINE_SCALE = 1.4;
 export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: PdfViewerProps) {
   const [numPages, setNumPages] = useState(0);
   const [scale, setScale] = useState(BASELINE_SCALE);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [, setCurrentPage] = useState(1);
   const [pageInput, setPageInput] = useState("1");
   const [loadError, setLoadError] = useState("");
   const [visibleRange, setVisibleRange] = useState({ start: 1, end: 5 });
@@ -508,7 +509,7 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       // testing. This is the pattern that finally fixes "nothing
       // happens when I click my highlights" — the old pill was too
       // small for users to find.
-      const action = entry.action || "explain";
+      const action = normalizeSelectionAction(entry.action);
       const localRects: Array<{ x: number; y: number; w: number; h: number }> = [];
       for (const r of rects) {
         const div = document.createElement("div");

@@ -158,39 +158,10 @@ export const useStore = create<AppStore>()(
   persist(
     (set, get) => ({
       paper: null,
-      // setPaper is also our cross-paper "clean slate" hook: any time
-      // the active paper id changes (or is cleared), we wipe per-paper
-      // analysis slices so a freshly opened paper can't render the
-      // *previous* paper's summary / pre-reading / assumptions while
-      // its own data is still loading. Per-paper caches in
-      // `paperCaches` are untouched — switching back via the session
-      // tabs still rehydrates instantly.
-      setPaper: (p) =>
-        set((s) => {
-          const prevId = s.paper?.id ?? null;
-          const nextId = p?.id ?? null;
-          if (prevId === nextId) return { paper: p };
-          return {
-            paper: p,
-            preReading: null,
-            assumptions: [],
-            summary: null,
-            notes: p?.notes ?? [],
-            selectionResult: null,
-            selectionHistory: [],
-            qaResults: [],
-            questions: [],
-            exercise: null,
-            searchResults: [],
-            preReadingLoading: false,
-            assumptionsLoading: false,
-            summaryLoading: false,
-            selectionLoading: false,
-            qaLoading: false,
-            exerciseLoading: false,
-            searchLoading: false,
-          };
-        }),
+      // Per audit §2.2: keep setPaper pure. Paper-switch clearing belongs
+      // in the route/session transition path so hydration does not double-
+      // clear and briefly show empty states before cached_analysis lands.
+      setPaper: (p) => set({ paper: p }),
 
       papersById: {},
       cachePaper: (p) =>
@@ -214,7 +185,8 @@ export const useStore = create<AppStore>()(
         }),
       removeSessionPaper: (id) =>
         set((s) => {
-          const { [id]: _, ...rest } = s.paperCaches;
+          const rest = { ...s.paperCaches };
+          delete rest[id];
           return {
             sessionPapers: s.sessionPapers.filter((sp) => sp.id !== id),
             paperCaches: rest,
@@ -412,7 +384,8 @@ export const useStore = create<AppStore>()(
         return true;
       },
       clearPaperCache: (paperId: string) => {
-        const { [paperId]: _, ...rest } = get().paperCaches;
+        const rest = { ...get().paperCaches };
+        delete rest[paperId];
         set({ paperCaches: rest });
       },
       updatePaperCache: (paperId: string, partial: Partial<PaperCache>) => {

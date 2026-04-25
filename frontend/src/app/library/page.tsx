@@ -11,6 +11,7 @@ import { useStore } from "@/lib/store";
 import { BibtexModal } from "@/components/BibtexModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
+import { forgetPaper } from "@/lib/analysisState";
 
 function FolderIcon({ className = "w-4 h-4", filled = false }: { className?: string; filled?: boolean }) {
   return filled ? (
@@ -166,6 +167,9 @@ function LibraryContent() {
         }
       }
       await api.deletePaper(id);
+      // Per audit §2.4: deleted papers must release retry/request guards
+      // so re-uploading the same file can auto-analyze normally.
+      forgetPaper(id);
       setPapers((prev) => prev.filter((p) => p.id !== id));
     } catch (e) { console.error(e); }
     setDeleteConfirm(null);
@@ -254,7 +258,7 @@ function LibraryContent() {
       }
     } catch { /* continue with deletion */ }
     for (const id of ids) {
-      try { await api.deletePaper(id); } catch { /* continue */ }
+      try { await api.deletePaper(id); forgetPaper(id); } catch { /* continue */ }
     }
     setPapers((prev) => prev.filter((p) => !selectedPapers.has(p.id)));
     setSelectedPapers(new Set());

@@ -3,6 +3,7 @@
 import { useState, useEffect, memo } from "react";
 import { Md } from "@/components/ui/Md";
 import type { SelectionAnalysisResult } from "@/lib/api";
+import { ACTION_LABELS, normalizeSelectionAction, selectionKey } from "@/lib/selectionActions";
 
 function AnalysisProgressBar() {
   const [width, setWidth] = useState(0);
@@ -29,29 +30,6 @@ interface SelectionResultPanelProps {
   loading: boolean;
   history: SelectionAnalysisResult[];
   onFollowUp: (question: string, context: string) => Promise<void>;
-}
-
-const actionLabels: Record<string, string> = {
-  explain: "Explanation",
-  derive: "Derivation",
-  assumptions: "Assumptions",
-  // Legacy "question" entries from before the Ask button was folded
-  // into Explain still live in older users' caches. Label them as
-  // explanations so the Selections tab reads consistently.
-  question: "Explanation",
-  followup: "Follow-up",
-};
-
-// A stable identity for a selection result. Reference equality breaks
-// the moment any in-memory copy goes through Zustand's set() (every
-// hydration tick spreads the array), so we key on the content instead.
-// `action + selected_text + first chunk of body` is unique enough in
-// practice — the server's own dedupe in `delete_selection` uses the
-// same shape.
-function selectionKey(r: SelectionAnalysisResult): string {
-  const head =
-    (r.explanation || r.elaboration || r.answer || "").slice(0, 64);
-  return `${r.action ?? "explain"}::${(r.selected_text ?? "").trim()}::${head}`;
 }
 
 export function SelectionResultPanel({ result, loading, history, onFollowUp }: SelectionResultPanelProps) {
@@ -122,7 +100,7 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
                 You asked
               </p>
-              <p className="text-[12.5px] font-medium leading-snug">{f.selected_text}</p>
+              <p className="text-[12.5px] font-medium leading-snug">{f.question || f.selected_text}</p>
               <ResultCard result={f} hideHeader hideQuote />
             </div>
           ))}
@@ -162,7 +140,7 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
             .filter((t) => t !== activeThread)
             .map((t) => {
               const isExpanded = expandedHistory === t.rootKey;
-              const action = t.root.action ?? "explain";
+              const action = normalizeSelectionAction(t.root.action);
               return (
                 <div
                   key={t.rootKey}
@@ -187,7 +165,7 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
                           "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)) / 0.12)",
                       }}
                     >
-                      {actionLabels[action] || action}
+                      {ACTION_LABELS[action] || action}
                     </span>
                     <span className="text-[11px] text-muted-foreground/60 truncate flex-1">
                       {t.root.selected_text.length > 80
@@ -268,7 +246,7 @@ function ResultCard({
 }) {
   const isStreaming = result.streaming;
   const hasContent = !!(result.explanation || result.elaboration || result.answer || result.assumptions?.length || result.steps?.length);
-  const action = result.action ?? "explain";
+  const action = normalizeSelectionAction(result.action);
 
   return (
     <div className="space-y-3">
@@ -283,7 +261,7 @@ function ResultCard({
                 "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)) / 0.12)",
             }}
           >
-            {actionLabels[action] || action}
+            {ACTION_LABELS[action] || action}
           </span>
           {isStreaming && (
             <span className="text-[10px] text-muted-foreground/40 animate-pulse">streaming...</span>

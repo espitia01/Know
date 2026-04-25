@@ -5,8 +5,10 @@ import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { UserButton } from "@clerk/nextjs";
+import { useShallow } from "zustand/react/shallow";
 import { api, type SelectionAnalysisResult, type PaperListEntry } from "@/lib/api";
 import { useStore } from "@/lib/store";
+import { selectionKey } from "@/lib/selectionActions";
 import { SelectionToolbar, type SelectionAction } from "@/components/pdf/SelectionToolbar";
 import { AnalysisPanel, type PanelPosition } from "@/components/panel/BottomPanel";
 import { BibtexModal } from "@/components/BibtexModal";
@@ -459,24 +461,74 @@ function PaperContent() {
   // open a session they can't meaningfully use.
   const canMultiPaper = !tierLoading && !!tierUser && canAccess(tierUser.tier, "multi-qa");
   const paperId = params.id as string;
+  const { paper, setPaper, loading, setLoading, cachePaper } = useStore(
+    useShallow((s) => ({
+      paper: s.paper,
+      setPaper: s.setPaper,
+      loading: s.loading,
+      setLoading: s.setLoading,
+      cachePaper: s.cachePaper,
+    })),
+  );
+  const { panelVisible, setPanelVisible, togglePanel } = useStore(
+    useShallow((s) => ({
+      panelVisible: s.panelVisible,
+      setPanelVisible: s.setPanelVisible,
+      togglePanel: s.togglePanel,
+    })),
+  );
+  const { headerHidden, toggleHeader, setHeaderHidden, focusMode, toggleFocusMode, setFocusMode } = useStore(
+    useShallow((s) => ({
+      headerHidden: s.headerHidden,
+      toggleHeader: s.toggleHeader,
+      setHeaderHidden: s.setHeaderHidden,
+      focusMode: s.focusMode,
+      toggleFocusMode: s.toggleFocusMode,
+      setFocusMode: s.setFocusMode,
+    })),
+  );
   const {
-    paper, setPaper, loading, setLoading,
-    panelVisible, setPanelVisible, togglePanel,
-    headerHidden, toggleHeader, setHeaderHidden,
-    focusMode, toggleFocusMode, setFocusMode,
     setPreReading, setPreReadingLoading,
     setAssumptions, setAssumptionsLoading,
-    setNotes,
-    selectionResult,
-    setSelectionResult, setSelectionLoading, addSelectionToHistory,
-    setActiveTab,
-    setSummary, setSummaryLoading,
-    cachePaper,
+    setNotes, setSummary, setSummaryLoading,
+  } = useStore(
+    useShallow((s) => ({
+      setPreReading: s.setPreReading,
+      setPreReadingLoading: s.setPreReadingLoading,
+      setAssumptions: s.setAssumptions,
+      setAssumptionsLoading: s.setAssumptionsLoading,
+      setNotes: s.setNotes,
+      setSummary: s.setSummary,
+      setSummaryLoading: s.setSummaryLoading,
+    })),
+  );
+  const { setSelectionResult, setSelectionLoading, addSelectionToHistory, setActiveTab } = useStore(
+    useShallow((s) => ({
+      setSelectionResult: s.setSelectionResult,
+      setSelectionLoading: s.setSelectionLoading,
+      addSelectionToHistory: s.addSelectionToHistory,
+      setActiveTab: s.setActiveTab,
+    })),
+  );
+  const {
     sessionPapers, addSessionPaper, removeSessionPaper, clearSession, updatePaperTitle,
-    savePaperCache, restorePaperCache,
+    savePaperCache, restorePaperCache, resetAnalysisState,
     crossPaperResults, addCrossPaperResults, clearCrossPaperResults,
-    resetAnalysisState,
-  } = useStore();
+  } = useStore(
+    useShallow((s) => ({
+      sessionPapers: s.sessionPapers,
+      addSessionPaper: s.addSessionPaper,
+      removeSessionPaper: s.removeSessionPaper,
+      clearSession: s.clearSession,
+      updatePaperTitle: s.updatePaperTitle,
+      savePaperCache: s.savePaperCache,
+      restorePaperCache: s.restorePaperCache,
+      resetAnalysisState: s.resetAnalysisState,
+      crossPaperResults: s.crossPaperResults,
+      addCrossPaperResults: s.addCrossPaperResults,
+      clearCrossPaperResults: s.clearCrossPaperResults,
+    })),
+  );
 
   // Reader chrome logic: focus mode *implies* a hidden header + session
   // bar, but we keep the two store flags separate so toggling focus
@@ -507,7 +559,16 @@ function PaperContent() {
       allowAutoAnalyzeRetry(paperId);
       setActivePaperId(paperId);
     }
-  }, [paperId]);
+  }, [
+    paperId,
+    activePaperId,
+    savePaperCache,
+    restorePaperCache,
+    resetAnalysisState,
+    setPreReadingLoading,
+    setAssumptionsLoading,
+    setSummaryLoading,
+  ]);
   const [panelPos, setPanelPos] = useState<PanelPosition>(() => readStoredPos());
   const [panelSize, setPanelSize] = useState(() => readStoredSize(readStoredPos()));
   const dragging = useRef(false);
@@ -675,8 +736,13 @@ function PaperContent() {
         if (hasActiveRequest(activePaperId, "assumptions")) setAssumptionsLoading(true);
         if (hasActiveRequest(activePaperId, "summary")) setSummaryLoading(true);
       }
+    } else if (store.paper?.id !== activePaperId) {
+      // Per audit §2.2: clear on cache miss in the transition path, not
+      // inside setPaper. This covers direct route entry / dashboard upload
+      // where there was no URL-change effect to reset the old paper's pane.
+      resetAnalysisState();
     }
-  }, [activePaperId, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
+  }, [activePaperId, resetAnalysisState, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
 
   useEffect(() => {
     let stale = false;
@@ -711,65 +777,36 @@ function PaperContent() {
     return () => { stale = true; };
   }, [activePaperId, setPaper, setLoading, cachePaper]);
 
-  // Hydrate the analysis pane from the freshly loaded paper.
-  //
-  // The server (`paper.cached_analysis`) is the source of truth for every
-  // artifact — pre-reading, assumptions, summary, selection history, QA
-  // history. The frontend local cache is a fast-switch hint only, never a
-  // replacement for server data.
-  //
-  // We re-run this effect every time `paper.id` becomes `activePaperId`
-  // (i.e. on mount and on paper switch). Previously we short-circuited
-  // when a "local cache was restored" signal was set, which left the pane
-  // stuck showing a partial snapshot (e.g. selection history empty) and
-  // gave the user no way to retry because `autoAnalyzedPapers` blocked
-  // re-entry.
-  useEffect(() => {
-    if (!paper || paper.id !== activePaperId) return;
+  const loadedPaperId = paper?.id;
+  const loadedPaperCache = paper?.cached_analysis;
+  const loadedPaperNotes = paper?.notes;
 
-    const pid = activePaperId;
-    const cache = paper.cached_analysis || {};
+  const hydratedForRef = useRef<string | null>(null);
+  const hydrateFromCachedAnalysis = useCallback((cache: NonNullable<typeof paper>["cached_analysis"], notes: NonNullable<typeof paper>["notes"]) => {
+    // Per audit §11.3: server hydration must be additive for selections.
+    // Replacing the live list can erase in-flight follow-ups that have not
+    // been flushed to cached_analysis yet.
+    if (notes) setNotes(notes);
 
-    // Notes and selection history don't require a tier check and must
-    // hydrate even when `/api/user` is slow or transiently failing. We
-    // saw reports of the Selections tab "still wiping on refresh"
-    // that lined up with tierLoading being stuck true after a
-    // cold-start tier fetch: gating every hydration on the tier blocked
-    // purely display-side state that has nothing to do with feature
-    // entitlements.
-    if (paper.notes) setNotes(paper.notes);
-
-    // Selection history: always mirror the server list. Previously this
-    // only ran once per session and only if the store was empty, so a
-    // "Derive" performed before the last reload was invisible on return.
     if (Array.isArray(cache.selections)) {
       const store = useStore.getState();
       const serverSelections = cache.selections as SelectionAnalysisResult[];
-      const merged = [...serverSelections].reverse();
-      // Reverse so the newest-first ordering matches what addSelectionToHistory
-      // produces at runtime. Replace wholesale — server has every selection.
-      if (JSON.stringify(store.selectionHistory) !== JSON.stringify(merged)) {
-        useStore.setState({ selectionHistory: merged.slice(0, 50) });
+      const serverNewestFirst = [...serverSelections].reverse();
+      const liveKeys = new Set(store.selectionHistory.map(selectionKey));
+      const additions = serverNewestFirst.filter((s) => !liveKeys.has(selectionKey(s)));
+      const merged = additions.length > 0
+        ? [...store.selectionHistory, ...additions].slice(0, 50)
+        : store.selectionHistory;
+      if (additions.length > 0) {
+        useStore.setState({ selectionHistory: merged });
       }
-      // On a fresh mount (e.g. after refresh), surface the most recent
-      // selection as the "current" result so the Selections tab isn't
-      // just an empty collapsed history list. We only do this when the
-      // store has no active result — mid-stream or fresh selections take
-      // precedence.
       if (!store.selectionResult && !store.selectionLoading && merged.length > 0) {
         useStore.setState({ selectionResult: merged[0] });
       }
     }
 
-    // Summary and QA hydration don't depend on tier either — users can
-    // always view previously-computed results regardless of current plan.
-    if (cache.summary) {
-      setSummary(cache.summary);
-    }
-    // Q&A history: hydrate from server only when it has more items than
-    // whatever is currently on screen. This prevents a background refetch
-    // from wiping a just-answered question that hasn't been flushed to the
-    // server yet (the "previous questions randomly disappear" report).
+    if (cache.summary) setSummary(cache.summary);
+
     if (cache.qa_sessions && cache.qa_sessions.length > 0) {
       const allItems = cache.qa_sessions.flatMap(
         (session: { items?: { question: string; answer: string }[] }) => session.items || []
@@ -780,25 +817,34 @@ function PaperContent() {
       }
     }
 
-    // Auto-triggered extractions DO need a tier check and the tier to
-    // finish loading — we can't know whether the user can run pre-reading
-    // or assumptions until then. Short-circuit the rest of the effect
-    // instead of re-entering every render.
-    if (tierLoading) return;
+    if (cache.pre_reading) setPreReading(cache.pre_reading);
 
-    // Pre-reading: prefer the server cache; otherwise kick off a fresh
-    // analysis for users with the "prepare" feature.
-    // Note: per-field hydration below deliberately avoids "else: setXxx(null)"
-    // branches. The effect re-runs whenever `paper` changes (e.g. a
-    // background refetch lands), and a blanket clear would race with
-    // in-flight analyses — we'd setPreReading(null) on re-entry while the
-    // api.analyze call was still running, then when it resolves the
-    // result can be invisible if another re-run happens between. Paper
-    // switches handle cross-paper bleed via resetAnalysisState() in
-    // handleSwitchPaper / URL-change effect.
-    if (cache.pre_reading) {
-      setPreReading(cache.pre_reading);
-    } else if (
+    const serverAssumptions = Array.isArray(cache.assumptions?.assumptions)
+      ? cache.assumptions.assumptions
+      : null;
+    if (serverAssumptions && serverAssumptions.length > 0) {
+      setAssumptions(serverAssumptions);
+    }
+  }, [setAssumptions, setNotes, setPreReading, setSummary]);
+
+  // Hydrate display-only artifacts once per paper id. Auto-analysis lives
+  // in the separate tier-aware effect below so usage/tier refreshes no longer
+  // re-run the full hydration pass and clobber live selection threads.
+  useEffect(() => {
+    if (!loadedPaperId || loadedPaperId !== activePaperId) return;
+    if (hydratedForRef.current === loadedPaperId) return;
+    hydratedForRef.current = loadedPaperId;
+    hydrateFromCachedAnalysis(loadedPaperCache || {}, loadedPaperNotes || []);
+  }, [loadedPaperId, activePaperId, loadedPaperCache, loadedPaperNotes, hydrateFromCachedAnalysis]);
+
+  useEffect(() => {
+    if (!loadedPaperId || loadedPaperId !== activePaperId || tierLoading) return;
+
+    const pid = activePaperId;
+    const cache = loadedPaperCache || {};
+
+    if (
+      !cache.pre_reading &&
       canAccess(tierUser?.tier || "free", "prepare") &&
       !hasActiveRequest(pid, "preReading") &&
       !autoAnalyzedPapers.has(`${pid}:preReading`)
@@ -821,19 +867,12 @@ function PaperContent() {
         });
     }
 
-    // Only overwrite in-memory assumptions when the server has real data
-    // to offer. An empty `cache.assumptions.assumptions` can sneak in when
-    // a background paper refetch races with an in-flight extraction (or
-    // when an older deployment cached a parse-failure as `[]`), and
-    // clobbering live state causes the "assumptions disappear mid-session"
-    // regression users have been hitting.
     const serverAssumptions = Array.isArray(cache.assumptions?.assumptions)
       ? cache.assumptions.assumptions
       : null;
-    if (serverAssumptions && serverAssumptions.length > 0) {
-      setAssumptions(serverAssumptions);
-    } else if (
-      !serverAssumptions &&
+    const hasUsableAssumptions = !!(serverAssumptions && serverAssumptions.length > 0);
+    if (
+      !hasUsableAssumptions &&
       useStore.getState().assumptions.length === 0 &&
       canAccess(tierUser?.tier || "free", "assumptions") &&
       !hasActiveRequest(pid, "assumptions") &&
@@ -856,7 +895,7 @@ function PaperContent() {
           }
         });
     }
-  }, [paper, activePaperId, tierUser?.tier, tierLoading, setPreReading, setPreReadingLoading, setAssumptions, setAssumptionsLoading, setNotes, setSummary]);
+  }, [loadedPaperId, activePaperId, loadedPaperCache, tierLoading, tierUser?.tier, setPreReading, setPreReadingLoading, setAssumptions, setAssumptionsLoading]);
 
   const handleSwitchPaper = useCallback((id: string) => {
     if (id === activePaperId) return;
@@ -885,7 +924,7 @@ function PaperContent() {
     if (typeof window !== "undefined" && id !== paperId) {
       router.replace(`/paper/${id}`);
     }
-  }, [activePaperId, paperId, router, savePaperCache, restorePaperCache, resetAnalysisState, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
+  }, [activePaperId, paperId, router, savePaperCache, restorePaperCache, resetAnalysisState, setSelectionResult, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
 
   const handleAddPaper = useCallback((id: string, title: string) => {
     // Register the paper in the multi-paper session tab bar…
