@@ -14,6 +14,7 @@ import { AnalysisPanel, type PanelPosition } from "@/components/panel/BottomPane
 import { BibtexModal } from "@/components/BibtexModal";
 import { CitationScopeModal } from "@/components/CitationScopeModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import {
   autoAnalyzedPapers,
@@ -315,7 +316,7 @@ function AddPaperPopover({
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          className="w-full flex items-center justify-center gap-2 text-[12px] font-semibold px-3 py-2.5 rounded-xl btn-primary-glass text-white transition-all disabled:opacity-50"
+          className="w-full flex items-center justify-center gap-2 text-[12px] font-semibold px-3 py-2.5 rounded-xl btn-primary-glass text-white transition-opacity disabled:opacity-50"
         >
           {uploading ? (
             <>
@@ -1337,6 +1338,7 @@ function PaperContent() {
 
   return (
     <>
+    <KeyboardShortcuts />
     <div className="flex flex-col h-screen overflow-hidden">
       {/* Header — hidden in focus mode or when the user explicitly
           collapses the top bar. Keeping the element mounted would still
@@ -1518,7 +1520,7 @@ function PaperContent() {
                   <button
                     onClick={handleSaveWorkspace}
                     disabled={workspaceSaving}
-                    className="text-[11px] font-semibold px-3 py-1.5 rounded-xl btn-primary-glass text-white transition-all disabled:opacity-50 shrink-0"
+                    className="text-[11px] font-semibold px-3 py-1.5 rounded-xl btn-primary-glass text-white transition-opacity disabled:opacity-50 shrink-0"
                   >
                     {workspaceSaving ? "..." : workspaceSaved ? "Saved!" : "Save"}
                   </button>
@@ -1555,7 +1557,7 @@ function PaperContent() {
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleExportBibtex({ workspace_id: ws.id }, `Workspace: ${ws.name}`); }}
-                          className="opacity-0 group-hover:opacity-100 text-muted-foreground/60 hover:text-muted-foreground transition-all shrink-0"
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground/60 hover:text-muted-foreground transition-colors shrink-0"
                           title="Export BibTeX"
                         >
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -1564,7 +1566,7 @@ function PaperContent() {
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleDeleteWorkspace(ws.id); }}
-                          className="opacity-0 group-hover:opacity-100 text-muted-foreground/60 hover:text-destructive transition-all shrink-0"
+                          className="opacity-0 group-hover:opacity-100 text-muted-foreground/60 hover:text-destructive transition-colors shrink-0"
                           title="Delete workspace"
                         >
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1660,7 +1662,7 @@ function PaperContent() {
                 key={sp.id}
                 role="group"
                 aria-label={sp.title}
-                className={`group flex items-center rounded-full text-[11px] font-medium transition-all shrink-0 ${
+                className={`group flex items-center rounded-full text-[11px] font-medium transition-colors shrink-0 ${
                   sp.id === activePaperId
                     ? "btn-primary-glass"
                     : "glass-subtle text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -1775,7 +1777,7 @@ function PaperContent() {
       {focusMode && (
         <button
           onClick={() => setPanelVisible(!panelVisible)}
-          className="fixed bottom-4 right-4 z-50 glass-strong rounded-full pl-3 pr-3.5 py-2 flex items-center gap-2 text-[12px] font-medium text-foreground/90 hover:text-foreground shadow-md hover:shadow-lg transition-all animate-fade-in ring-focus"
+          className="fixed bottom-4 right-4 z-50 glass-strong rounded-full pl-3 pr-3.5 py-2 flex items-center gap-2 text-[12px] font-medium text-foreground/90 hover:text-foreground shadow-md hover:shadow-lg transition-shadow animate-fade-in ring-focus"
           title={panelVisible ? "Hide analysis pane" : "Open analysis pane"}
           aria-label={panelVisible ? "Hide analysis pane" : "Open analysis pane"}
           aria-pressed={panelVisible}
@@ -1807,7 +1809,7 @@ function PaperContent() {
                 key={sp.id}
                 role="group"
                 aria-label={sp.title}
-                className={`group flex items-center rounded-full text-[11px] font-medium transition-all shrink-0 ${
+                className={`group flex items-center rounded-full text-[11px] font-medium transition-colors shrink-0 ${
                   sp.id === activePaperId
                     ? "btn-primary-glass"
                     : "text-muted-foreground hover:bg-accent hover:text-foreground"

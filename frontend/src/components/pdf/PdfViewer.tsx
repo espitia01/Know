@@ -1010,6 +1010,7 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       {/* PDF Pages */}
       <div
         ref={containerRef}
+        data-know-pdf-scroll
         className="flex-1 overflow-auto bg-neutral-100 dark:bg-neutral-900"
         onMouseUp={handleMouseUp}
       >
