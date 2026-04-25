@@ -158,7 +158,39 @@ export const useStore = create<AppStore>()(
   persist(
     (set, get) => ({
       paper: null,
-      setPaper: (p) => set({ paper: p }),
+      // setPaper is also our cross-paper "clean slate" hook: any time
+      // the active paper id changes (or is cleared), we wipe per-paper
+      // analysis slices so a freshly opened paper can't render the
+      // *previous* paper's summary / pre-reading / assumptions while
+      // its own data is still loading. Per-paper caches in
+      // `paperCaches` are untouched — switching back via the session
+      // tabs still rehydrates instantly.
+      setPaper: (p) =>
+        set((s) => {
+          const prevId = s.paper?.id ?? null;
+          const nextId = p?.id ?? null;
+          if (prevId === nextId) return { paper: p };
+          return {
+            paper: p,
+            preReading: null,
+            assumptions: [],
+            summary: null,
+            notes: p?.notes ?? [],
+            selectionResult: null,
+            selectionHistory: [],
+            qaResults: [],
+            questions: [],
+            exercise: null,
+            searchResults: [],
+            preReadingLoading: false,
+            assumptionsLoading: false,
+            summaryLoading: false,
+            selectionLoading: false,
+            qaLoading: false,
+            exerciseLoading: false,
+            searchLoading: false,
+          };
+        }),
 
       papersById: {},
       cachePaper: (p) =>

@@ -340,8 +340,26 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
     }> = [];
 
     const seenRanges: Array<[number, number]> = [];
+    // Helper: would the candidate range collide with one we already
+    // painted on this page? Two highlights for *different* selections
+    // routinely re-resolve to the same first hit when their starting
+    // anchors share words ("the quick brown fox" and "the quick red
+    // fox" both hit "the quick" first). Letting that happen meant the
+    // 2nd, 3rd, ... selections quietly stacked on top of the 1st and
+    // never appeared on the actual passage the user highlighted, which
+    // is the "subsequent highlights aren't properly highlighted" bug.
+    // We now treat any range that is fully covered (or near-covered) by
+    // a prior range as a duplicate and re-search from past it.
+    const coveredByPrior = (s: number, e: number) => {
+      for (const [ps, pe] of seenRanges) {
+        const overlap = Math.min(e, pe) - Math.max(s, ps);
+        if (overlap > 0 && overlap >= (e - s) * 0.6) return true;
+      }
+      return false;
+    };
+
     let painted = 0;
-    for (let i = 0; i < history.length && painted < 16; i++) {
+    for (let i = 0; i < history.length && painted < 32; i++) {
       const entry = history[i];
       const raw = entry.selected_text?.trim();
       if (!raw || raw.length < 4) continue;
@@ -385,13 +403,33 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       let normStart = -1;
       let normEnd = -1;
 
-      // 1. Full-needle match.
-      const fullPattern = buildPattern(fullWords);
-      const fullHit = fullPattern ? fullPattern.exec(normalized) : null;
-      if (fullHit && fullHit.index != null) {
-        normStart = fullHit.index;
-        normEnd = normStart + fullHit[0].length;
-      } else if (fullWords.length >= 4) {
+      // 1. Full-needle match. Iterate matches and pick the first one
+      // that doesn't collide with what we've already painted —
+      // necessary when the same phrase appears multiple times on a
+      // page (common in introductions / abstracts where the LLM
+      // sometimes echoes a phrase verbatim).
+      const fullPatternG = (() => {
+        try { return new RegExp(fullWords.map(escapeRe).join("\\W*"), "gi"); }
+        catch { return null; }
+      })();
+      if (fullPatternG) {
+        let m: RegExpExecArray | null;
+        while ((m = fullPatternG.exec(normalized)) !== null) {
+          const ns = m.index;
+          const ne = ns + m[0].length;
+          // Translate to raw offsets so the dedupe check uses the same
+          // coordinate space as `seenRanges`.
+          const rs = normIdxToRawIdx[ns];
+          const reEnd = normIdxToRawIdx[Math.min(ne - 1, normIdxToRawIdx.length - 1)] + 1;
+          if (!coveredByPrior(rs, reEnd)) {
+            normStart = ns;
+            normEnd = ne;
+            break;
+          }
+          if (m.index === fullPatternG.lastIndex) fullPatternG.lastIndex++;
+        }
+      }
+      if (normStart < 0 && fullWords.length >= 4) {
         // 2. Anchor-based bracket match. Take enough words on each
         //    side that the match is unlikely to hit the wrong place,
         //    but not so many that the PDF's own fragmentation
@@ -436,14 +474,12 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       const rawEndInclusive = normIdxToRawIdx[normEnd - 1];
       const rawEnd = rawEndInclusive + 1;
 
-      // We no longer skip overlapping ranges. Previously a second
-      // highlight covering even a single character of a prior one was
-      // silently dropped, which confused users who tried to stack
-      // selections ("I clicked analyse and nothing happened"). Letting
-      // them stack keeps the behaviour predictable — multiple
-      // underlines will lightly visually accumulate, which is an
-      // acceptable trade-off for the ability to re-analyse text the
-      // user already looked at once.
+      // Skip *only* near-duplicate ranges (≥60% overlap with a prior
+      // one for the same passage). Two genuinely different selections
+      // that happen to brush each other are still both painted —
+      // letting them stack keeps the "Selections" tab a faithful map
+      // of what the user has analysed, which is the core promise.
+      if (coveredByPrior(rawStart, rawEnd)) continue;
       seenRanges.push([rawStart, rawEnd]);
 
       const startLoc = locate(rawStart);
@@ -472,10 +508,16 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       // testing. This is the pattern that finally fixes "nothing
       // happens when I click my highlights" — the old pill was too
       // small for users to find.
+      const action = entry.action || "explain";
       const localRects: Array<{ x: number; y: number; w: number; h: number }> = [];
       for (const r of rects) {
         const div = document.createElement("div");
         div.className = "know-selection-underline";
+        // `data-action` drives the per-action highlight tint declared
+        // in globals.css. Falling back to "explain" preserves the
+        // original blue for any legacy cached entries that pre-date
+        // the action field.
+        div.setAttribute("data-action", action);
         const x = r.left - pageRect.left;
         const y = r.top - pageRect.top;
         div.style.left = `${x}px`;
@@ -499,6 +541,7 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       const pill = document.createElement("button");
       pill.type = "button";
       pill.className = "know-selection-action";
+      pill.setAttribute("data-action", action);
       const tip = "Click the highlight to open saved analysis\nShift-click or right-click to delete";
       pill.setAttribute("data-tooltip", tip);
       pill.title = tip;

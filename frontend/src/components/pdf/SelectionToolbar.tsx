@@ -3,7 +3,12 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 
-export type SelectionAction = "explain" | "derive" | "assumptions" | "question" | "note";
+// `question` is intentionally absent: it used to surface as a separate
+// "Ask" button but produced near-identical results to "Explain" because
+// the underlying prompt was the same shape. It's now folded into
+// Explain — users who want a question-first framing just type it
+// directly into the follow-up box on the resulting card.
+export type SelectionAction = "explain" | "derive" | "assumptions" | "note";
 
 interface SelectionToolbarProps {
   text: string;
@@ -36,14 +41,6 @@ function AssumptionsIcon() {
   );
 }
 
-function AskIcon() {
-  return (
-    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
-    </svg>
-  );
-}
-
 function NoteIcon() {
   return (
     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -52,12 +49,39 @@ function NoteIcon() {
   );
 }
 
-const actions: { id: SelectionAction; label: string; Icon: () => React.JSX.Element }[] = [
-  { id: "explain", label: "Explain", Icon: ExplainIcon },
-  { id: "derive", label: "Derive", Icon: DeriveIcon },
-  { id: "assumptions", label: "Assumptions", Icon: AssumptionsIcon },
-  { id: "question", label: "Ask", Icon: AskIcon },
-  { id: "note", label: "Save Note", Icon: NoteIcon },
+// Concise, action-oriented tooltips. Each one names the *outcome* (what
+// the analysis pane will show) rather than a verb, which is what users
+// were repeatedly asking for: "what does this button actually do?".
+const actions: {
+  id: SelectionAction;
+  label: string;
+  hint: string;
+  Icon: () => React.JSX.Element;
+}[] = [
+  {
+    id: "explain",
+    label: "Explain",
+    hint: "Plain-English breakdown of this passage — jargon, logic, and why it matters. Ask follow-ups inline.",
+    Icon: ExplainIcon,
+  },
+  {
+    id: "derive",
+    label: "Derive",
+    hint: "Step-by-step reconstruction of the math (or argument, for non-technical papers).",
+    Icon: DeriveIcon,
+  },
+  {
+    id: "assumptions",
+    label: "Assumptions",
+    hint: "Surface the explicit and hidden assumptions this passage relies on.",
+    Icon: AssumptionsIcon,
+  },
+  {
+    id: "note",
+    label: "Save Note",
+    hint: "Bookmark this passage to your Notes tab — no LLM call.",
+    Icon: NoteIcon,
+  },
 ];
 
 export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionToolbarProps) {
@@ -71,7 +95,6 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
     if (a.id === "note") return canAccess(tier, "notes");
     if (a.id === "explain" || a.id === "derive") return canAccess(tier, "selection");
     if (a.id === "assumptions") return canAccess(tier, "assumptions");
-    if (a.id === "question") return canAccess(tier, "qa");
     return true;
   });
 
@@ -168,9 +191,13 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
               e.stopPropagation();
               onAction(a.id, cleanText);
             }}
-            title={a.label}
-            aria-label={a.label}
-            className={`group flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/70 active:scale-[0.97] transition-all whitespace-nowrap ${
+            // `data-tooltip` powers the rich CSS tooltip declared in
+            // globals.css; the native `title` is kept as a fallback for
+            // assistive tech and long-press on touch devices.
+            data-tooltip={a.hint}
+            title={a.hint}
+            aria-label={`${a.label} — ${a.hint}`}
+            className={`know-toolbar-btn group flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/70 active:scale-[0.97] transition-all whitespace-nowrap ${
               i === 0 ? "" : "ml-px"
             }`}
           >

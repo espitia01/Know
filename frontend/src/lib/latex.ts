@@ -32,11 +32,49 @@ const DISPLAY_COMMANDS = new Set([
   'left', 'right',
 ]);
 
+// KaTeX accepts a fixed set of alignment environments. Several flavours
+// LLMs love (`align`, `align*`, `eqnarray`, `multline`) either don't
+// render at all inside `$$ ... $$` or only render under a tolerant mode.
+// We rewrite them to KaTeX-native equivalents (`aligned`, `gathered`)
+// before handing the string to remark-math/rehype-katex. The result is
+// idempotent and visually identical to the input.
+const ENV_ALIASES: Record<string, string> = {
+  align: "aligned",
+  "align*": "aligned",
+  alignat: "aligned",
+  "alignat*": "aligned",
+  multline: "aligned",
+  "multline*": "aligned",
+  eqnarray: "aligned",
+  "eqnarray*": "aligned",
+  gather: "gathered",
+  "gather*": "gathered",
+  equation: "aligned",
+  "equation*": "aligned",
+};
+
+function rewriteEnv(envName: string, body: string): { open: string; close: string } {
+  const target = ENV_ALIASES[envName] ?? envName;
+  // Some `aligned`-family environments require at least one `&` to
+  // parse cleanly. Adding a leading "&" if none is present is a safe
+  // no-op for already-aligned bodies and rescues the bare cases like
+  // `\begin{align} (x+y)^4 = ... \end{align}` that were rendering as
+  // raw text under our previous rules.
+  if (target === "aligned" && !body.includes("&") && !body.includes("\\\\")) {
+    return { open: `\\begin{aligned}&`, close: `\\end{aligned}` };
+  }
+  return { open: `\\begin{${target}}`, close: `\\end{${target}}` };
+}
+
 function tryConsumeEnvironment(segment: string, pos: number): { end: number; match: string } | null {
   const rest = segment.slice(pos);
-  const m = rest.match(/^\\begin\{(\w+)\}([\s\S]*?)\\end\{\1\}/);
+  // Match the env name including a trailing `*` so `align*`, `equation*`
+  // etc. are caught.
+  const m = rest.match(/^\\begin\{([A-Za-z]+\*?)\}([\s\S]*?)\\end\{\1\}/);
   if (!m) return null;
-  return { end: pos + m[0].length, match: m[0] };
+  const [, name, body] = m;
+  const { open, close } = rewriteEnv(name, body);
+  return { end: pos + m[0].length, match: `${open}${body}${close}` };
 }
 
 function isDisplayMath(expr: string): boolean {
@@ -201,6 +239,19 @@ export function preprocessLatex(text: string): string {
 
   s = s.replace(/\\\(/g, "$").replace(/\\\)/g, "$");
   s = s.replace(/\\\[/g, "\n$$\n").replace(/\\\]/g, "\n$$\n");
+
+  // Rewrite KaTeX-incompatible environments inside *any* math region —
+  // including the ones the LLM already wrapped in $$..$$ itself. We
+  // can't do this inside `wrapBareLatex` alone because that path only
+  // sees text *outside* existing math regions.
+  s = s.replace(
+    /\\begin\{([A-Za-z]+\*?)\}([\s\S]*?)\\end\{\1\}/g,
+    (full, name: string, body: string) => {
+      if (!ENV_ALIASES[name]) return full;
+      const { open, close } = rewriteEnv(name, body);
+      return `${open}${body}${close}`;
+    },
+  );
 
   s = s.replace(/(?<!\n)\$\$(?!\$)/g, '\n$$');
   s = s.replace(/\$\$(?!\n)/g, '$$\n');

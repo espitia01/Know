@@ -142,7 +142,17 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
   const handleFollowUp = useCallback(async (question: string, context: string) => {
     setSelectionLoading(true);
     try {
-      const result = await api.analyzeSelection(paperId, `${context}\n\nFollow-up question: ${question}`, "question");
+      // Server now accepts `followup` as a first-class action so the
+      // result persists with the right label across reloads. Earlier
+      // versions sent `"question"` and overrode the action client-side
+      // — that worked in-session but the server stored
+      // `action: "question"` so on refresh the follow-up showed up
+      // as "Answer" in history (which is what users were reporting).
+      const result = await api.analyzeSelection(
+        paperId,
+        `${context}\n\nFollow-up question: ${question}`,
+        "followup",
+      );
       const followUpResult = { ...result, action: "followup" as const, selected_text: question };
       addSelectionToHistory(followUpResult);
       setSelectionResult(followUpResult);

@@ -440,6 +440,79 @@ Text (first 3000 chars):
 
 
 # ---------------------------------------------------------------------------
+# Suggested-question generator (Q&A panel "more like these")
+# ---------------------------------------------------------------------------
+
+async def suggest_questions(
+    paper_text: str,
+    *,
+    already_seen: list[str] | None = None,
+    user_id: str | None = None,
+    n: int = 6,
+) -> list[str]:
+    """Generate ``n`` paper-specific Q&A starter prompts.
+
+    The Q&A tab seeds with a small static list of generic prompts so
+    the panel isn't empty on first paint. Once the user has clicked
+    through those, this generator takes over: it pulls fresh,
+    paper-aware questions from the fast model and avoids repeating
+    anything the user has already seen (``already_seen``).
+
+    Returns plain strings — short, action-oriented, one per line — and
+    falls back to a small generic list on parse failure so the UI
+    never shows an empty suggestion strip.
+    """
+    provider = get_fast_provider(user_id)
+    paper_text = _sanitize_user_text(paper_text, max_chars=8000)
+    seen_block = ""
+    if already_seen:
+        # Bound the exclusion list so a runaway client can't blow out
+        # the prompt budget.
+        seen = "\n".join(f"- {s}" for s in already_seen[:30])
+        seen_block = f"\n\nAlready shown to the user (do NOT repeat these or paraphrase):\n{seen}\n"
+
+    system = (
+        "You generate paper-specific questions a curious reader would "
+        "ask while studying an academic paper. Output ONLY a JSON "
+        "array of strings."
+    )
+    user = f"""Read the paper excerpt below and produce {n} concise,
+specific questions worth asking about it. Each question:
+- Is one sentence, ≤ 90 characters.
+- Is grounded in something the paper actually says or claims.
+- Avoids generic prompts like "what's the main contribution" — the
+  user already saw those.
+- Reads naturally to a researcher (no LLM-style hedging).
+{seen_block}
+Paper:
+{paper_text[:8000]}
+
+Return JSON: ["question 1", "question 2", ...]
+"""
+    raw = await provider.complete(system, user, max_tokens=512)
+    parsed = _safe_parse_json(raw)
+    items: list[str] = []
+    if isinstance(parsed, list):
+        items = [str(x).strip() for x in parsed if isinstance(x, str)]
+    elif isinstance(parsed, dict):
+        # Be permissive: some models wrap arrays in an object.
+        for v in parsed.values():
+            if isinstance(v, list):
+                items = [str(x).strip() for x in v if isinstance(x, str)]
+                break
+    items = [q for q in items if 8 <= len(q) <= 200]
+    if not items:
+        items = [
+            "Which assumption in the paper feels most fragile?",
+            "What does the methodology miss?",
+            "How would the result change at scale?",
+            "What does this paper not say?",
+            "What would a skeptical reviewer ask?",
+        ]
+    return items[:n]
+
+
+# ---------------------------------------------------------------------------
 # Selection-based analysis (triggered by highlighting text in the PDF)
 # ---------------------------------------------------------------------------
 
@@ -450,10 +523,21 @@ async def analyze_selection(paper_text: str, selected_text: str, action: str, us
     paper_text = _sanitize_user_text(paper_text, max_chars=6000)
 
     action_prompts = {
+        # Explain now absorbs the old "question/ask" intent: if the
+        # passage *is* a question, treat it as one and answer it; if
+        # it's a statement, explain it. Either way the output shape is
+        # the same — one rich `explanation` field — which lets the
+        # frontend collapse what used to be two separate buttons into
+        # one.
         "explain": f"""Explain the following passage from an academic paper clearly and thoroughly.
-Break down every piece of jargon, clarify the logic step by step, and provide broader context
-including implications, connections to other concepts, and why this matters.
-Use LaTeX for math ($...$).
+
+If the selection looks like a question (ends with a question mark or
+otherwise asks something), ANSWER it directly using the paper as
+context. If it's a statement, EXPLAIN it: break down every piece of
+jargon, clarify the logic step by step, and provide broader context
+including implications, connections to other concepts, and why this
+matters. Use LaTeX only for actual math ($...$ inline, $$...$$
+display).
 
 Selected text:
 \"\"\"{selected_text}\"\"\"
@@ -462,7 +546,7 @@ Full paper context:
 {paper_text[:6000]}
 
 Return JSON:
-{{"explanation": "thorough, clear explanation that covers jargon, logic, context, implications, and connections. Use LaTeX math where relevant."}}""",
+{{"explanation": "thorough, clear explanation OR direct answer. Use LaTeX math only where relevant."}}""",
 
         "assumptions": f"""Identify the explicit and implicit assumptions underlying this passage.
 For each assumption, explain why it matters and what would change if it didn't hold.
@@ -476,9 +560,28 @@ Full paper context:
 Return JSON:
 {{"assumptions": [{{"statement": "...", "type": "explicit|implicit", "significance": "..."}}]}}""",
 
-        "derive": f"""The user wants to understand the derivation in this passage step-by-step.
-Break it down into atomic steps, filling in any gaps. Each step should have a clear prompt,
-the resulting expression (LaTeX), and an explanation.
+        # "Derive" used to assume the paper was mathematical. For
+        # humanities / literature / qualitative papers that meant
+        # forcing equations onto an argument that didn't have any,
+        # which read as nonsense. The prompt now explicitly branches:
+        # if there's no math, reconstruct the *argumentative*
+        # derivation (premise → inference → conclusion) and return
+        # natural-language steps — no fabricated equations.
+        "derive": f"""Reconstruct the derivation of the result in this passage step-by-step.
+
+DECISION:
+- If the passage contains an equation or a quantitative result, derive
+  it mathematically: each step has a LaTeX expression and an
+  explanation.
+- If the paper / passage is non-mathematical (humanities, literature,
+  philosophy, history, qualitative social science, etc.), derive the
+  ARGUMENT instead: each step is a premise or inference written in
+  plain English, leading to the conclusion. Do NOT invent equations.
+  Leave LaTeX out of `answer`/`explanation` for these steps unless
+  the paper itself uses it.
+
+Either way, fill in any gaps with atomic steps a careful student
+would take.
 
 Selected text:
 \"\"\"{selected_text}\"\"\"
@@ -488,31 +591,19 @@ Full paper context:
 
 Return JSON:
 {{
-  "title": "Derivation of [specific result]",
-  "starting_point": "initial expression (LaTeX)",
-  "final_result": "target expression (LaTeX)",
+  "title": "Derivation of [specific result or argument]",
+  "starting_point": "initial expression OR initial premise",
+  "final_result": "target expression OR conclusion",
   "steps": [
     {{
       "step_number": 1,
-      "prompt": "what to do in this step",
-      "answer": "resulting expression (LaTeX)",
-      "explanation": "why this works",
+      "prompt": "what to do or consider in this step",
+      "answer": "resulting expression (LaTeX) or stated inference",
+      "explanation": "why this step follows",
       "hint": "a helpful nudge"
     }}
   ]
 }}""",
-
-        "question": f"""Answer the following question about the paper, using the selected passage as focus.
-Be thorough, educational, and use LaTeX for math.
-
-Selected text / question context:
-\"\"\"{selected_text}\"\"\"
-
-Full paper context:
-{paper_text[:6000]}
-
-Return JSON:
-{{"answer": "thorough educational answer with LaTeX math where relevant"}}""",
     }
 
     prompt = action_prompts.get(action, action_prompts["explain"])
@@ -581,10 +672,15 @@ def _get_selection_prompt(paper_text: str, selected_text: str, action: str) -> t
     )
 
     prompts = {
+        # Explain folds in the old "Ask" button: if the selected text
+        # ends like a question, answer it directly; otherwise explain
+        # the passage. Same prompt shape either way.
         "explain": f"""Explain the following passage from an academic paper clearly and thoroughly.
-Break down every piece of jargon, clarify the logic step by step, and provide broader context
-including implications, connections to other concepts, and why this matters.
-Use LaTeX for math ($...$). Use markdown formatting.
+
+If the selection looks like a question, ANSWER it directly. If it's a
+statement, EXPLAIN it — break down jargon, clarify logic, give context,
+implications, and why it matters. Use LaTeX only for real math.
+Use markdown formatting.
 Note: The selected text is extracted from a PDF text layer and mathematical symbols may be garbled or missing. Interpret them using context.
 
 Selected text:
@@ -604,10 +700,17 @@ Selected text:
 Paper context:
 {paper_text[:6000]}""",
 
-        "derive": f"""Break down the derivation in this passage step-by-step.
-Fill in any gaps with atomic steps. For each step provide the expression (LaTeX) and explanation.
+        "derive": f"""Reconstruct the derivation in this passage step-by-step.
+
+If the paper / passage is mathematical, derive it mathematically with
+LaTeX expressions per step. If the paper is non-mathematical
+(humanities, literature, philosophy, history, qualitative
+social science, etc.), derive the *argument* instead: each step a
+premise or inference in plain English, leading to the conclusion.
+Do NOT fabricate equations for non-mathematical content.
+
 Use markdown formatting with numbered steps.
-Note: Mathematical symbols in the selection may be garbled from PDF extraction. Reconstruct the correct equations using paper context.
+Note: Math in the selection may be garbled from PDF extraction. Reconstruct equations using paper context when applicable.
 
 Selected text:
 \"\"\"{selected_text}\"\"\"
@@ -615,11 +718,19 @@ Selected text:
 Paper context:
 {paper_text[:6000]}""",
 
-        "question": f"""Answer the following question about the paper, using the selected passage as focus.
-Be thorough, educational, and use LaTeX for math. Use markdown formatting.
-Note: If the selection contains garbled math from PDF extraction, interpret it using paper context.
+        # `followup` is reached when the user types into the inline
+        # follow-up box on a previous selection card. The "selection"
+        # field is the user's question; the original analysed passage
+        # plus its result is included in the body of the prompt by the
+        # caller.
+        "followup": f"""You are continuing a conversation about an academic paper.
 
-Selected text / question:
+Below is the user's earlier-analysed passage and what was said about
+it, followed by their follow-up question. Answer the follow-up clearly
+and concretely, citing the passage where useful. Use markdown and
+LaTeX (only when actual math is involved).
+
+Earlier passage + analysis (verbatim):
 \"\"\"{selected_text}\"\"\"
 
 Paper context:

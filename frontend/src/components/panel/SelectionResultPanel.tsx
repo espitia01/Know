@@ -35,16 +35,27 @@ const actionLabels: Record<string, string> = {
   explain: "Explanation",
   derive: "Derivation",
   assumptions: "Assumptions",
-  question: "Answer",
+  // Legacy "question" entries from before the Ask button was folded
+  // into Explain still live in older users' caches. Label them as
+  // explanations so the Selections tab reads consistently.
+  question: "Explanation",
   followup: "Follow-up",
 };
 
-export function SelectionResultPanel({ result, loading, history, onFollowUp }: SelectionResultPanelProps) {
-  const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
+// A stable identity for a selection result. Reference equality breaks
+// the moment any in-memory copy goes through Zustand's set() (every
+// hydration tick spreads the array), so we key on the content instead.
+// `action + selected_text + first chunk of body` is unique enough in
+// practice — the server's own dedupe in `delete_selection` uses the
+// same shape.
+function selectionKey(r: SelectionAnalysisResult): string {
+  const head =
+    (r.explanation || r.elaboration || r.answer || "").slice(0, 64);
+  return `${r.action ?? "explain"}::${(r.selected_text ?? "").trim()}::${head}`;
+}
 
-  const conversationThread = result
-    ? history.filter((h) => h === result || (h.action === "followup" && history.indexOf(h) < history.indexOf(result)))
-    : [];
+export function SelectionResultPanel({ result, loading, history, onFollowUp }: SelectionResultPanelProps) {
+  const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
 
   if (loading && !result) {
     return (
@@ -57,11 +68,74 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
     );
   }
 
+  // Build a "conversation thread" that groups follow-ups under their
+  // most recent root selection. Selections list is newest-first so we
+  // walk from the *back* (oldest) and accumulate follow-ups against
+  // the latest non-followup we've seen. This means a refreshed page
+  // reliably shows the original passage with its follow-ups stacked
+  // under it instead of as separate top-level history rows — the
+  // "follow-ups should thread under the original" request.
+  type ThreadNode = {
+    root: SelectionAnalysisResult;
+    followups: SelectionAnalysisResult[];
+    rootKey: string;
+  };
+  const threads: ThreadNode[] = [];
+  const isFollowup = (r: SelectionAnalysisResult) => (r.action ?? "") === "followup";
+  // Walk oldest → newest so follow-ups attach to the most recent
+  // non-followup that *preceded* them in time. We then reverse the
+  // result so the newest thread renders first (matching the rest of
+  // the analysis pane's "newest at top" convention).
+  for (let i = history.length - 1; i >= 0; i--) {
+    const item = history[i];
+    if (isFollowup(item) && threads.length > 0) {
+      threads[threads.length - 1].followups.push(item);
+    } else {
+      threads.push({
+        root: item,
+        followups: [],
+        rootKey: selectionKey(item),
+      });
+    }
+  }
+  threads.reverse();
+
+  // The "active" thread is the one whose root or follow-ups contain
+  // the currently displayed `result`. It renders in the main pane
+  // (with the follow-up input). Everything else lives under "History".
+  const activeKey = result ? selectionKey(result) : null;
+  const activeThread = activeKey
+    ? threads.find(
+        (t) =>
+          t.rootKey === activeKey ||
+          t.followups.some((f) => selectionKey(f) === activeKey),
+      )
+    : null;
+
+  const renderThreadCard = (t: ThreadNode) => (
+    <div className="space-y-3">
+      <ResultCard result={t.root} />
+      {t.followups.length > 0 && (
+        <div className="ml-4 pl-3 border-l-2 border-border/60 space-y-3">
+          {t.followups.map((f) => (
+            <div key={selectionKey(f)} className="space-y-1.5">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+                You asked
+              </p>
+              <p className="text-[12.5px] font-medium leading-snug">{f.selected_text}</p>
+              <ResultCard result={f} hideHeader hideQuote />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="space-y-5">
-      {result && (
+      {result && activeThread && (
         <>
-          <ResultCard result={result} />
+          {renderThreadCard(activeThread)}
           {loading && (
             <div className="flex flex-col items-center gap-2 py-3">
               <div className="w-full max-w-xs"><AnalysisProgressBar /></div>
@@ -69,43 +143,77 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
             </div>
           )}
           <FollowUpInput
-            context={result.selected_text}
+            context={activeThread.root.selected_text}
             onSubmit={onFollowUp}
           />
         </>
       )}
 
-      {history.length > (result ? 1 : 0) && (
+      {/* History: every thread except the active one. Sorting + key
+          stability are deliberate — the previous implementation
+          re-keyed by index, which made the panel "shuffle" entries on
+          every store update because React mistook them for moves. */}
+      {threads.filter((t) => t !== activeThread).length > 0 && (
         <div className="space-y-2 pt-2 border-t border-border/50">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
             History
           </p>
-          {history.slice(result ? 1 : 0).map((item, i) => (
-            <div key={i} className="rounded-xl border border-border glass-subtle overflow-hidden">
-              <button
-                onClick={() => setExpandedHistory(expandedHistory === i ? null : i)}
-                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors"
-              >
-                <span className="text-[10px] font-semibold uppercase text-muted-foreground/50 shrink-0">
-                  {actionLabels[item.action] || item.action}
-                </span>
-                <span className="text-[11px] text-muted-foreground/60 truncate flex-1">
-                  {item.selected_text.length > 80 ? item.selected_text.slice(0, 80) + "..." : item.selected_text}
-                </span>
-                <svg
-                  className={`w-3 h-3 text-muted-foreground/30 shrink-0 transition-transform ${expandedHistory === i ? "rotate-180" : ""}`}
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+          {threads
+            .filter((t) => t !== activeThread)
+            .map((t) => {
+              const isExpanded = expandedHistory === t.rootKey;
+              const action = t.root.action ?? "explain";
+              return (
+                <div
+                  key={t.rootKey}
+                  className="rounded-xl border border-border glass-subtle overflow-hidden"
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {expandedHistory === i && (
-                <div className="px-3 pb-3 animate-fade-in">
-                  <ResultCard result={item} />
+                  <button
+                    onClick={() =>
+                      setExpandedHistory(isExpanded ? null : t.rootKey)
+                    }
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors"
+                  >
+                    <span
+                      className="text-[10px] font-semibold uppercase shrink-0 px-1.5 py-0.5 rounded"
+                      data-action={action}
+                      style={{
+                        // Inline so the badge color tracks the same
+                        // per-action palette as the PDF underlines.
+                        // Fallback to the muted text token if the
+                        // action isn't one we know.
+                        color: "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)))",
+                        background:
+                          "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)) / 0.12)",
+                      }}
+                    >
+                      {actionLabels[action] || action}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground/60 truncate flex-1">
+                      {t.root.selected_text.length > 80
+                        ? t.root.selected_text.slice(0, 80) + "..."
+                        : t.root.selected_text}
+                    </span>
+                    {t.followups.length > 0 && (
+                      <span className="text-[10px] text-muted-foreground/40 tabular-nums shrink-0">
+                        +{t.followups.length}
+                      </span>
+                    )}
+                    <svg
+                      className={`w-3 h-3 text-muted-foreground/30 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {isExpanded && (
+                    <div className="px-3 pb-3 animate-fade-in">
+                      {renderThreadCard(t)}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
+              );
+            })}
         </div>
       )}
     </div>
@@ -149,24 +257,45 @@ function FollowUpInput({ context, onSubmit }: { context: string; onSubmit: (q: s
   );
 }
 
-function ResultCard({ result }: { result: SelectionAnalysisResult }) {
+function ResultCard({
+  result,
+  hideHeader = false,
+  hideQuote = false,
+}: {
+  result: SelectionAnalysisResult;
+  hideHeader?: boolean;
+  hideQuote?: boolean;
+}) {
   const isStreaming = result.streaming;
   const hasContent = !!(result.explanation || result.elaboration || result.answer || result.assumptions?.length || result.steps?.length);
+  const action = result.action ?? "explain";
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-          {actionLabels[result.action] || result.action}
-        </span>
-        {isStreaming && (
-          <span className="text-[10px] text-muted-foreground/40 animate-pulse">streaming...</span>
-        )}
-      </div>
+      {!hideHeader && (
+        <div className="flex items-center gap-2">
+          <span
+            className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded"
+            data-action={action}
+            style={{
+              color: "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)))",
+              background:
+                "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)) / 0.12)",
+            }}
+          >
+            {actionLabels[action] || action}
+          </span>
+          {isStreaming && (
+            <span className="text-[10px] text-muted-foreground/40 animate-pulse">streaming...</span>
+          )}
+        </div>
+      )}
 
-      <div className="text-[11px] text-muted-foreground/50 glass-subtle px-3 py-2 rounded-xl italic leading-relaxed">
-        &ldquo;{result.selected_text.length > 200 ? result.selected_text.slice(0, 200) + "..." : result.selected_text}&rdquo;
-      </div>
+      {!hideQuote && (
+        <div className="text-[11px] text-muted-foreground/50 glass-subtle px-3 py-2 rounded-xl italic leading-relaxed">
+          &ldquo;{result.selected_text.length > 200 ? result.selected_text.slice(0, 200) + "..." : result.selected_text}&rdquo;
+        </div>
+      )}
 
       {result.explanation && (
         <div className="prose prose-sm dark:prose-invert max-w-none text-[13px] leading-relaxed">

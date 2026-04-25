@@ -532,6 +532,13 @@ export const api = {
       body: JSON.stringify({ questions }),
     }),
 
+  suggestQuestions: (id: string, exclude: string[] = []) =>
+    request<{ questions: string[] }>(`/api/papers/${id}/qa/suggest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ exclude }),
+    }),
+
   askQuestionsMulti: (paperIds: string[], questions: string[]) =>
     request<{ items: QAItem[] }>(`/api/papers/multi-qa`, {
       method: "POST",

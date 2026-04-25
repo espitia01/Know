@@ -538,9 +538,33 @@
      underline and move the interactive affordance onto a dedicated
      pill anchored to the end of the last rect. */
   pointer-events: none;
-  border-bottom: 1.5px solid rgb(var(--pdf-selection) / 0.72);
-  background: rgb(var(--pdf-selection) / 0.06);
+  /* Defaults — overridden by the per-action variants below. The
+     underline color and the soft fill use the same accent so the
+     highlight reads as one coherent ink, not a drawn line plus a
+     separate panel. Each action ships its own hue so users can tell
+     at a glance which kind of analysis is attached to a passage
+     ("explain" vs "derive" vs "assumptions" vs a follow-up thread). */
+  --highlight-rgb: var(--pdf-selection);
+  border-bottom: 1.5px solid rgb(var(--highlight-rgb) / 0.72);
+  background: rgb(var(--highlight-rgb) / 0.06);
   border-radius: 2px;
+}
+
+/* Per-action tints. Hand-picked so each passes WCAG-AA contrast on
+   both dark and light page backgrounds, with enough separation
+   between hues that color-blind readers can still tell them apart
+   (we also keep the action label on the pill / history card as a
+   non-color cue). The variable is consumed by the underline, the
+   action pill, *and* any history badge that opts in via
+   `data-action="..."` — keeping the color story unified across the
+   PDF and the analysis pane. */
+[data-action="explain"]     { --highlight-rgb: 56 132 244;  /* blue   */ }
+[data-action="derive"]      { --highlight-rgb: 168 85  247; /* violet */ }
+[data-action="assumptions"] { --highlight-rgb: 234 158 25;  /* amber  */ }
+[data-action="followup"]    { --highlight-rgb: 16  185 129; /* teal   */ }
+[data-action="question"]    { --highlight-rgb: 16  185 129; /* legacy alias of followup */ }
+.know-selection-action {
+  --highlight-rgb: var(--pdf-selection);
 }
 .know-selection-action {
   position: absolute;
@@ -552,9 +576,9 @@
   width: 16px;
   padding: 0;
   margin: 0;
-  border: 1px solid rgb(var(--pdf-selection) / 0.5);
-  background: rgb(var(--pdf-selection) / 0.14);
-  color: rgb(var(--pdf-selection) / 1);
+  border: 1px solid rgb(var(--highlight-rgb) / 0.5);
+  background: rgb(var(--highlight-rgb) / 0.14);
+  color: rgb(var(--highlight-rgb) / 1);
   border-radius: 4px;
   opacity: 0.7;
   transition: opacity 120ms ease, background 120ms ease, transform 120ms ease;
@@ -562,7 +586,7 @@
 .know-selection-action:hover,
 .know-selection-action:focus-visible {
   opacity: 1;
-  background: rgb(var(--pdf-selection) / 0.26);
+  background: rgb(var(--highlight-rgb) / 0.26);
   transform: translateY(-0.5px);
   outline: none;
 }
@@ -602,6 +626,40 @@
   opacity: 1;
   transform: translateY(0);
 }
+/* Selection toolbar tooltips — same visual language as the highlight
+   pill above, but anchored *below* the action button so the floating
+   pill never collides with the user's selection above it. */
+.know-toolbar-btn { position: relative; }
+.know-toolbar-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translate(-50%, 2px);
+  white-space: normal;
+  width: max-content;
+  max-width: 220px;
+  text-align: center;
+  font-size: 10.5px;
+  line-height: 1.35;
+  font-weight: 500;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: rgb(var(--popover-rgb, 24 24 27) / 0.96);
+  color: rgb(var(--popover-fg-rgb, 244 244 245) / 1);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.15);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease 30ms, transform 120ms ease 30ms;
+  z-index: 10;
+}
+.know-toolbar-btn:hover::after,
+.know-toolbar-btn:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 /* Light-mode tooltip variant — `--popover-rgb` isn't defined in the
    theme, so we fall back to a neutral dark surface that reads as a
    tooltip in both modes. Dark mode inherits the same colors which

@@ -123,7 +123,13 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
 
     selected_text = body.get("selected_text", "").strip()[:10000]
     action = body.get("action", "explain")
-    if action not in ("explain", "assumptions", "derive", "question"):
+    # Legacy "question" is folded into Explain; the standalone Ask
+    # button was removed (its UX was a near-duplicate of Explain).
+    # Anything else unknown also collapses to Explain so old clients
+    # don't 4xx.
+    if action == "question":
+        action = "explain"
+    if action not in ("explain", "assumptions", "derive", "followup"):
         action = "explain"
     if action == "assumptions":
         check_feature_access(user_id, "assumptions")
@@ -216,7 +222,9 @@ async def selection_analysis_stream(
 
     selected_text = body.get("selected_text", "").strip()[:10000]
     action = body.get("action", "explain")
-    if action not in ("explain", "assumptions", "derive", "question"):
+    if action == "question":
+        action = "explain"
+    if action not in ("explain", "assumptions", "derive", "followup"):
         action = "explain"
     if action == "assumptions":
         check_feature_access(user_id, "assumptions")
@@ -438,6 +446,56 @@ async def derivation_exercise(paper_id: str, body: dict, user_id: str = Depends(
         release_usage(token)
         logger.exception("Exercise generation failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Exercise generation failed. Please try again.")
+
+
+@router.post("/{paper_id}/qa/suggest")
+async def qa_suggest(paper_id: str, body: dict, user_id: str = Depends(require_auth)):
+    """Generate fresh suggested questions for a paper.
+
+    The frontend ships a small static list of seed prompts so the Q&A
+    tab is never empty on first paint, but those run out fast on a
+    real reading session. This endpoint asks the fast model for N
+    paper-specific follow-on questions, given a list of `exclude`
+    items the user already saw, so the suggestions stay novel as the
+    user clicks through them. Counts against the regular `qa`
+    budget, atomically reserved like every other LLM call.
+    """
+    check_feature_access(user_id, "qa")
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    paper = get_paper(paper_id, user_id=user_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    raw_excl = body.get("exclude") or []
+    exclude: list[str] = [
+        s.strip() for s in raw_excl if isinstance(s, str) and s.strip()
+    ][:50]
+
+    # Suggestions are cheap relative to a full Q&A so we charge a
+    # single unit regardless of how many we generate.
+    token = reserve_usage(
+        user_id, paper_id, "qa", model=resolve_fast_model(user_id), count=1,
+    )
+    try:
+        from ..services.llm import suggest_questions
+        questions = await suggest_questions(
+            paper.raw_text,
+            already_seen=exclude,
+            user_id=user_id,
+        )
+        return {"questions": questions}
+    except ValueError as exc:
+        release_usage(token)
+        logger.warning("QA suggest 503 for paper %s: %s", paper_id, exc)
+        raise HTTPException(status_code=503, detail="Suggestion service temporarily unavailable.")
+    except HTTPException:
+        release_usage(token)
+        raise
+    except Exception:
+        release_usage(token)
+        logger.exception("QA suggest failed for paper %s", paper_id)
+        raise HTTPException(status_code=500, detail="Suggestion failed. Please try again.")
 
 
 @router.post("/{paper_id}/qa", response_model=QAResponse)

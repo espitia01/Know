@@ -40,7 +40,7 @@ export default function DashboardPage() {
 function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { setPaper, loading, setLoading } = useStore();
+  const { setPaper, loading, setLoading, cachePaper, addSessionPaper } = useStore();
   const { user: tierUser, refresh: refreshTier } = useUserTier();
   const { user: clerkUser } = useUser();
   const [papers, setPapers] = useState<PaperListEntry[]>([]);
@@ -79,6 +79,13 @@ function DashboardContent() {
       setLoading(true);
       try {
         const paper = await api.uploadPaper(file);
+        // Mirror the in-paper upload flow: seed the in-memory cache
+        // and the session tab list before navigating, so the reader
+        // page can render instantly without a second `getPaper`
+        // round-trip and (if a workspace is already in session) the
+        // new paper slots straight into the tab bar.
+        cachePaper(paper);
+        addSessionPaper({ id: paper.id, title: paper.title });
         setPaper(paper);
         router.push(`/paper/${paper.id}`);
       } catch (e: unknown) {
@@ -87,7 +94,7 @@ function DashboardContent() {
         setLoading(false);
       }
     },
-    [setPaper, setLoading, router]
+    [setPaper, setLoading, router, cachePaper, addSessionPaper]
   );
 
   // Fail fast with a friendly message when the file is too large or not a

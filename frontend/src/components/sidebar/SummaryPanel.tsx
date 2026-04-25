@@ -133,7 +133,17 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   const fetchAttempted = useRef<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  const effectiveSummary = summary ?? (paper?.id === paperId ? paper?.cached_analysis?.summary : null) ?? null;
+  // Guard against cross-paper bleed of the global `summary` slice:
+  // surface a summary only when the global `paper` *is* the paper
+  // this panel was mounted for. The store-level `setPaper` clears
+  // `summary` whenever the id changes, but this clamp covers the
+  // brief frame between mount and that effect running on a fresh
+  // upload (which is what produced the "new paper showing previous
+  // paper's summary" report).
+  const effectiveSummary =
+    paper?.id === paperId
+      ? (summary ?? paper?.cached_analysis?.summary ?? null)
+      : null;
 
   const startFetch = useCallback((targetId: string) => {
     setFetchError(null);

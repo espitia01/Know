@@ -28,7 +28,12 @@ function ProgressBar() {
   );
 }
 
-const GUIDED_PROMPTS = [
+// Static seeds shown on first paint. Once the user has clicked
+// through these we ask the model for fresh, paper-specific
+// suggestions via `api.suggestQuestions` so the panel never runs
+// dry — that's the "regenerate suggestions when the original ones
+// run out" request.
+const SEED_PROMPTS = [
   "What is the main contribution?",
   "Key limitations?",
   "How does this compare to prior work?",
@@ -56,6 +61,22 @@ export function QAPanel({ paperId }: QAPanelProps) {
   const [crossPaper, setCrossPaper] = useState(false);
   const [qaError, setQAError] = useState("");
   const [usedPrompts, setUsedPrompts] = useState<Set<string>>(new Set());
+  // Fresh, paper-specific suggestions returned by
+  // `api.suggestQuestions`. We append to (rather than replace) the
+  // seed list so users keep seeing a growing pool of prompts as they
+  // dig deeper into a paper. Stored per-paperId so switching papers
+  // shows the right pool immediately.
+  const [extraPrompts, setExtraPrompts] = useState<string[]>([]);
+  const [extraLoading, setExtraLoading] = useState(false);
+  const [extraError, setExtraError] = useState<string | null>(null);
+  // Reset suggestion state when the active paper changes — otherwise
+  // a paper switch would carry the previous paper's generated
+  // prompts (which would be irrelevant and look like a caching bug).
+  useEffect(() => {
+    setExtraPrompts([]);
+    setUsedPrompts(new Set());
+    setExtraError(null);
+  }, [paperId]);
 
   const canMultiQA = canAccess(tier, "multi-qa");
   const hasMultiplePapers = sessionPapers.length > 1 && canMultiQA;
@@ -162,7 +183,40 @@ export function QAPanel({ paperId }: QAPanelProps) {
     }
   };
 
-  const prompts = crossPaper && hasMultiplePapers ? CROSS_PAPER_PROMPTS : GUIDED_PROMPTS;
+  // Single-paper Q&A pulls from the seed list + any LLM-generated
+  // extras. Cross-paper mode keeps its own static list because the
+  // generator is tuned per single-paper.
+  const prompts = crossPaper && hasMultiplePapers
+    ? CROSS_PAPER_PROMPTS
+    : [...SEED_PROMPTS, ...extraPrompts];
+
+  const visiblePrompts = prompts.filter((p) => !usedPrompts.has(p));
+
+  const handleGenerateMore = async () => {
+    if (extraLoading) return;
+    setExtraError(null);
+    setExtraLoading(true);
+    try {
+      // Exclude everything the user has already seen — prompts
+      // currently visible AND prompts they've already added — so the
+      // generator never serves a duplicate.
+      const seen = Array.from(new Set([...prompts, ...questions]));
+      const { questions: more } = await api.suggestQuestions(paperId, seen);
+      setExtraPrompts((prev) => {
+        const merged = [...prev];
+        for (const q of more) {
+          if (!merged.includes(q) && !SEED_PROMPTS.includes(q)) {
+            merged.push(q);
+          }
+        }
+        return merged;
+      });
+    } catch (e) {
+      setExtraError(e instanceof Error ? e.message : "Couldn't fetch more suggestions.");
+    } finally {
+      setExtraLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -215,9 +269,13 @@ export function QAPanel({ paperId }: QAPanelProps) {
             </div>
             {!hideSuggestions && (
               <div className="flex flex-wrap gap-1.5">
-                {prompts.filter((p) => !usedPrompts.has(p)).map((prompt, i) => (
+                {visiblePrompts.map((prompt) => (
                   <button
-                    key={i}
+                    // Keying by the prompt text (not the index) keeps
+                    // existing pills stable when we append new
+                    // suggestions, which prevents React from briefly
+                    // flashing a wrong label during the transition.
+                    key={prompt}
                     onClick={() => {
                       addQuestion(prompt);
                       setUsedPrompts((prev) => new Set(prev).add(prompt));
@@ -227,7 +285,43 @@ export function QAPanel({ paperId }: QAPanelProps) {
                     {prompt}
                   </button>
                 ))}
+                {/* "Suggest more" appears as a quiet pill alongside
+                    the prompts. We surface it always (not just when
+                    the seed list is empty) because users sometimes
+                    want fresher options before exhausting the seeds —
+                    they just stay collapsed visually with a + glyph. */}
+                {!crossPaper && (
+                  <button
+                    onClick={handleGenerateMore}
+                    disabled={extraLoading}
+                    className="text-[11px] px-2.5 py-1 rounded-full border border-dashed border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-colors font-medium disabled:opacity-50 inline-flex items-center gap-1"
+                    title={
+                      visiblePrompts.length === 0
+                        ? "Generate paper-specific question suggestions"
+                        : "Add more paper-specific suggestions"
+                    }
+                  >
+                    {extraLoading ? (
+                      <>
+                        <span className="inline-block w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
+                        Thinking…
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                        </svg>
+                        {visiblePrompts.length === 0 ? "Suggest questions" : "More like these"}
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
+            )}
+            {extraError && (
+              <p role="alert" className="text-[10.5px] text-destructive/80 leading-snug">
+                {extraError}
+              </p>
             )}
           </div>
         )}

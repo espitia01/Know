@@ -244,6 +244,79 @@ def _horizontal_extent_for_figure(
     return max(page_rect.x0, col_x0 - 4), min(page_rect.x1, col_x1 + 4)
 
 
+def _find_figure_top_via_whitespace(
+    page: fitz.Page,
+    *,
+    cap_rect: fitz.Rect,
+    boundary_top: float,
+    x0: float,
+    x1: float,
+) -> float | None:
+    """Locate the top edge of a vector / unindexed figure by
+    looking for the *first sufficiently tall vertical whitespace gap*
+    above the caption, restricted to the column the figure sits in.
+
+    Two-column papers are where this matters most: when no embedded
+    image rects are present (TikZ, matplotlib output), the caller's
+    fallback used to grab a flat 300-pt slab above the caption,
+    which dragged the column's body text into the crop. Walking the
+    text blocks in column-bounded order and stopping at the first
+    big gap gives a much tighter top edge.
+
+    Returns ``None`` when the heuristic can't find a clean break,
+    leaving the caller to use its own fallback.
+    """
+    try:
+        blocks = page.get_text("dict").get("blocks", [])
+    except Exception:
+        return None
+
+    # Only consider text blocks that *overlap* the figure's column
+    # horizontally. Caption-row blocks and items strictly above the
+    # caption qualify; everything below the caption is irrelevant.
+    column_blocks: list[fitz.Rect] = []
+    for b in blocks:
+        if b.get("type") != 0:
+            continue
+        bbox = b.get("bbox")
+        if not bbox:
+            continue
+        rect = fitz.Rect(bbox)
+        if rect.y1 >= cap_rect.y0 - 1:
+            continue
+        if rect.x1 < x0 - 2 or rect.x0 > x1 + 2:
+            continue
+        column_blocks.append(rect)
+
+    if not column_blocks:
+        # Nothing above the caption in this column — the figure
+        # probably starts at `boundary_top` (top of the page or just
+        # below the previous caption).
+        return max(boundary_top, cap_rect.y0 - 240)
+
+    # Walk top-to-bottom and find the largest vertical gap between
+    # consecutive blocks; if that gap is "big" relative to the
+    # caption's own height (figures consistently sit in a gap larger
+    # than a paragraph break), the bottom of the gap is the figure's
+    # top edge.
+    column_blocks.sort(key=lambda r: r.y0)
+    cap_h = max(8.0, cap_rect.height)
+    min_gap = max(cap_h * 1.4, 18.0)
+
+    figure_top = boundary_top
+    for prev, nxt in zip(column_blocks, column_blocks[1:]):
+        gap = nxt.y0 - prev.y1
+        if gap >= min_gap and prev.y1 > figure_top:
+            figure_top = prev.y1
+    # Pad a few points above so we don't shave the first line of
+    # vector graphics off (some figures start *exactly* on the first
+    # white pixel).
+    figure_top = max(boundary_top, figure_top - 4)
+    if figure_top >= cap_rect.y0:
+        return None
+    return figure_top
+
+
 def _safe_pixmap(page: fitz.Page, mat: fitz.Matrix, clip: fitz.Rect) -> fitz.Pixmap | None:
     """Render a clip, downscaling the matrix if the result would exceed the
     pixel cap. Prevents adversarial pages from allocating huge buffers."""
@@ -324,7 +397,24 @@ def extract_figures(doc: fitz.Document, paper_dir: Path) -> list[FigureInfo]:
             if relevant:
                 top = min(r.y0 for r in relevant) - 4
             else:
-                top = max(boundary_top, cap_rect.y0 - 300)
+                # No embedded image rects in this column above the
+                # caption — the figure is likely vector graphics
+                # (PDFs generated from TikZ / matplotlib often hit
+                # this path) or a collection of glyphs we can't index
+                # by `get_images`. Fall back to a *whitespace* probe:
+                # walk up from the caption looking for the first
+                # vertical gap that's tall enough to bound a figure.
+                # Two-column papers were the failure mode here —
+                # using a flat 300-pt fallback dragged the column's
+                # body text into the crop. Detecting whitespace
+                # corrects that without ever exceeding `boundary_top`.
+                top = _find_figure_top_via_whitespace(
+                    page,
+                    cap_rect=cap_rect,
+                    boundary_top=boundary_top,
+                    x0=x0,
+                    x1=x1,
+                ) or max(boundary_top, cap_rect.y0 - 300)
 
             top = max(page_rect.y0, top)
             bottom = max(top + 20, bottom)
