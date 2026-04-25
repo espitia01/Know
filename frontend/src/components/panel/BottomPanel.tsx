@@ -76,6 +76,20 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
   const hasMultiplePapers = sessionPapers.length > 1;
 
   const effectiveTab = activeTab === "selection" && !showSelectionTab ? "summary" : activeTab;
+  const [mountedTabs, setMountedTabs] = useState<Set<string>>(
+    () => new Set([effectiveTab]),
+  );
+  useEffect(() => {
+    // Per audit §4.1/§6.3: inactive Radix tabs stay mounted by default,
+    // which lets hidden panels hydrate and fetch data before the user
+    // opens them. Mount each tab on first visit, then keep it hot.
+    setMountedTabs((tabs) => {
+      if (tabs.has(effectiveTab)) return tabs;
+      const next = new Set(tabs);
+      next.add(effectiveTab);
+      return next;
+    });
+  }, [effectiveTab]);
 
   const icon = positionIcons[position] || positionIcons.right;
 
@@ -324,7 +338,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
           className="px-5 py-5 max-w-3xl mx-auto w-full"
           style={{ ["--analysis-font-scale" as string]: analysisFontScale }}
         >
-          {showSelectionTab && (
+          {showSelectionTab && mountedTabs.has("selection") && (
             <TabsContent value="selection" className="mt-0">
               <SelectionResultPanel
                 result={selectionResult}
@@ -334,13 +348,25 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
               />
             </TabsContent>
           )}
-          <TabsContent value="summary" className="mt-0"><SummaryPanel paperId={paperId} /></TabsContent>
-          <TabsContent value="preread" className="mt-0"><PreReadingPanel paperId={paperId} /></TabsContent>
-          <TabsContent value="assume" className="mt-0"><AssumptionsPanel paperId={paperId} /></TabsContent>
-          <TabsContent value="qa" className="mt-0"><QAPanel paperId={paperId} /></TabsContent>
-          <TabsContent value="figures" className="mt-0"><FiguresPanel paperId={paperId} /></TabsContent>
-          <TabsContent value="notes" className="mt-0"><NotesPanel paperId={paperId} /></TabsContent>
-          {hasMultiplePapers && canAccess(tier, "multi-qa") && (
+          {mountedTabs.has("summary") && (
+            <TabsContent value="summary" className="mt-0"><SummaryPanel paperId={paperId} /></TabsContent>
+          )}
+          {mountedTabs.has("preread") && (
+            <TabsContent value="preread" className="mt-0"><PreReadingPanel paperId={paperId} /></TabsContent>
+          )}
+          {mountedTabs.has("assume") && (
+            <TabsContent value="assume" className="mt-0"><AssumptionsPanel paperId={paperId} /></TabsContent>
+          )}
+          {mountedTabs.has("qa") && (
+            <TabsContent value="qa" className="mt-0"><QAPanel paperId={paperId} /></TabsContent>
+          )}
+          {mountedTabs.has("figures") && (
+            <TabsContent value="figures" className="mt-0"><FiguresPanel paperId={paperId} /></TabsContent>
+          )}
+          {mountedTabs.has("notes") && (
+            <TabsContent value="notes" className="mt-0"><NotesPanel paperId={paperId} /></TabsContent>
+          )}
+          {hasMultiplePapers && canAccess(tier, "multi-qa") && mountedTabs.has("compare") && (
             <TabsContent value="compare" className="mt-0"><CrossPaperPanel /></TabsContent>
           )}
         </div>

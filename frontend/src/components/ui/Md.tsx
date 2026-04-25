@@ -1,5 +1,6 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
@@ -35,7 +36,12 @@ function sanitizeHref(raw: string | undefined): string {
   return "#";
 }
 
-export function Md({ children, className }: MdProps) {
+export const Md = memo(function Md({ children, className }: MdProps) {
+  // Per audit §6.2: preprocessing was running on every parent
+  // re-render (notably every streamed summary chunk). Memoizing on
+  // `children` avoids thousands of repeated regex passes.
+  const processed = useMemo(() => preprocessLatex(children), [children]);
+
   return (
     <div className={className ?? "analysis-content"}>
       <ReactMarkdown
@@ -53,8 +59,8 @@ export function Md({ children, className }: MdProps) {
           ),
         }}
       >
-        {preprocessLatex(children)}
+        {processed}
       </ReactMarkdown>
     </div>
   );
-}
+});

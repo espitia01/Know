@@ -27,7 +27,7 @@ export function setClerkTokenGetter(fn: () => Promise<string | null>) {
   void refreshToken();
   _tokenRefreshInterval = setInterval(() => {
     void refreshToken();
-  }, 45_000);
+  }, 50 * 60 * 1000);
 }
 
 export function clearTokenRefreshInterval() {
@@ -106,6 +106,12 @@ async function request<T>(
         ...options?.headers,
       },
     });
+    if (res.status === 401 && retryCount === 0 && _getToken) {
+      // Per audit §8.2: Clerk tokens are long-lived; refresh on the
+      // rare 401 and retry once instead of polling every 45 seconds.
+      await refreshToken();
+      return request<T>(path, options, retryCount + 1);
+    }
     if (res.status === 401) {
       if (typeof window !== "undefined") {
         window.location.href = "/sign-in";

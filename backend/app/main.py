@@ -7,6 +7,7 @@ import collections
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 
 from .config import settings
@@ -107,6 +108,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
+)
+app.add_middleware(
+    GZipMiddleware,
+    # Per audit §7.5: long streamed analyses and JSON responses compress well.
+    minimum_size=1024,
 )
 
 

@@ -144,7 +144,12 @@ async def get_papers(user_id: str = Depends(require_auth)):
         raise HTTPException(status_code=503, detail="Database unavailable")
 
 
-@router.get("/{paper_id}", response_model=ParsedPaper)
+@router.get(
+    "/{paper_id}",
+    response_model=ParsedPaper,
+    # Per audit §6.1: raw_text is large and only used server-side for prompts.
+    response_model_exclude={"raw_text"},
+)
 async def get_paper_by_id(paper_id: str, user_id: str = Depends(require_auth)):
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
