@@ -12,14 +12,15 @@ import type {
   PaperSummary,
 } from "./api";
 
-interface PaperCache {
-  preReading: PreReadingAnalysis | null;
-  assumptions: Assumption[];
-  summary: PaperSummary | null;
-  notes: Note[];
-  selectionHistory: SelectionAnalysisResult[];
-  qaResults: QAItem[];
-  questions: string[];
+type ReaderPanelPosition = "right" | "left" | "bottom";
+
+interface UiPrefs {
+  panelPos: ReaderPanelPosition;
+  panelSizeSide: number;
+  panelSizeBottom: number;
+  hideQaSuggestions: boolean;
+  scrollByPaper: Record<string, number>;
+  qaDraftByPaper: Record<string, string>;
 }
 
 interface CrossPaperQA {
@@ -35,7 +36,17 @@ interface AppStore {
   // instantly while a background refresh runs.
   papersById: Record<string, ParsedPaper>;
   cachePaper: (p: ParsedPaper) => void;
+  updateCachedAnalysis: (paperId: string, partial: Record<string, unknown>) => void;
+  forgetCachedPaper: (paperId: string) => void;
   getCachedPaper: (id: string) => ParsedPaper | undefined;
+
+  uiPrefs: UiPrefs;
+  setPanelPosition: (pos: ReaderPanelPosition) => void;
+  setPanelSize: (pos: ReaderPanelPosition, size: number) => void;
+  setHideQaSuggestions: (hidden: boolean) => void;
+  setPdfScroll: (paperId: string, ratio: number) => void;
+  setQADraft: (paperId: string, draft: string) => void;
+  clearPaperUiPrefs: (paperId: string) => void;
 
   // Per-paper flag for "figure re-extraction in progress". Lives in
   // the global store (not FiguresPanel local state) so switching
@@ -143,11 +154,6 @@ interface AppStore {
   summaryLoading: boolean;
   setSummaryLoading: (l: boolean) => void;
 
-  paperCaches: Record<string, PaperCache>;
-  savePaperCache: (paperId: string) => void;
-  restorePaperCache: (paperId: string) => boolean;
-  clearPaperCache: (paperId: string) => void;
-  updatePaperCache: (paperId: string, partial: Partial<PaperCache>) => void;
   resetAnalysisState: () => void;
 
   usageRefreshKey: number;
@@ -166,7 +172,82 @@ export const useStore = create<AppStore>()(
       papersById: {},
       cachePaper: (p) =>
         set((s) => ({ papersById: { ...s.papersById, [p.id]: p } })),
+      updateCachedAnalysis: (paperId, partial) =>
+        set((s) => {
+          const existing = s.papersById[paperId];
+          if (!existing) return s;
+          return {
+            papersById: {
+              ...s.papersById,
+              [paperId]: {
+                ...existing,
+                cached_analysis: {
+                  ...(existing.cached_analysis || {}),
+                  ...partial,
+                },
+              },
+            },
+            paper:
+              s.paper?.id === paperId
+                ? {
+                    ...s.paper,
+                    cached_analysis: {
+                      ...(s.paper.cached_analysis || {}),
+                      ...partial,
+                    },
+                  }
+                : s.paper,
+          };
+        }),
+      forgetCachedPaper: (paperId) =>
+        set((s) => {
+          const rest = { ...s.papersById };
+          delete rest[paperId];
+          return { papersById: rest };
+        }),
       getCachedPaper: (id) => get().papersById[id],
+
+      uiPrefs: {
+        panelPos: "right",
+        panelSizeSide: 400,
+        panelSizeBottom: 300,
+        hideQaSuggestions: false,
+        scrollByPaper: {},
+        qaDraftByPaper: {},
+      },
+      setPanelPosition: (pos) =>
+        set((s) => ({ uiPrefs: { ...s.uiPrefs, panelPos: pos } })),
+      setPanelSize: (pos, size) =>
+        set((s) => ({
+          uiPrefs: {
+            ...s.uiPrefs,
+            ...(pos === "bottom" ? { panelSizeBottom: size } : { panelSizeSide: size }),
+          },
+        })),
+      setHideQaSuggestions: (hidden) =>
+        set((s) => ({ uiPrefs: { ...s.uiPrefs, hideQaSuggestions: hidden } })),
+      setPdfScroll: (paperId, ratio) =>
+        set((s) => ({
+          uiPrefs: {
+            ...s.uiPrefs,
+            scrollByPaper: { ...s.uiPrefs.scrollByPaper, [paperId]: ratio },
+          },
+        })),
+      setQADraft: (paperId, draft) =>
+        set((s) => {
+          const drafts = { ...s.uiPrefs.qaDraftByPaper };
+          if (draft.trim()) drafts[paperId] = draft;
+          else delete drafts[paperId];
+          return { uiPrefs: { ...s.uiPrefs, qaDraftByPaper: drafts } };
+        }),
+      clearPaperUiPrefs: (paperId) =>
+        set((s) => {
+          const scrollByPaper = { ...s.uiPrefs.scrollByPaper };
+          const qaDraftByPaper = { ...s.uiPrefs.qaDraftByPaper };
+          delete scrollByPaper[paperId];
+          delete qaDraftByPaper[paperId];
+          return { uiPrefs: { ...s.uiPrefs, scrollByPaper, qaDraftByPaper } };
+        }),
 
       figureReextractInFlight: {},
       setFigureReextractInFlight: (paperId, running) =>
@@ -185,11 +266,16 @@ export const useStore = create<AppStore>()(
         }),
       removeSessionPaper: (id) =>
         set((s) => {
-          const rest = { ...s.paperCaches };
-          delete rest[id];
+          const papersById = { ...s.papersById };
+          const scrollByPaper = { ...s.uiPrefs.scrollByPaper };
+          const qaDraftByPaper = { ...s.uiPrefs.qaDraftByPaper };
+          delete papersById[id];
+          delete scrollByPaper[id];
+          delete qaDraftByPaper[id];
           return {
             sessionPapers: s.sessionPapers.filter((sp) => sp.id !== id),
-            paperCaches: rest,
+            papersById,
+            uiPrefs: { ...s.uiPrefs, scrollByPaper, qaDraftByPaper },
           };
         }),
 
@@ -216,7 +302,7 @@ export const useStore = create<AppStore>()(
         }),
       clearSession: () => {
         set({
-          sessionPapers: [], paperCaches: {}, crossPaperResults: [],
+          sessionPapers: [], crossPaperResults: [],
           papersById: {},
           preReading: null, assumptions: [], summary: null, notes: [],
           selectionHistory: [], selectionResult: null, qaResults: [], questions: [],
@@ -339,68 +425,6 @@ export const useStore = create<AppStore>()(
       summaryLoading: false,
       setSummaryLoading: (l) => set({ summaryLoading: l }),
 
-      paperCaches: {},
-      savePaperCache: (paperId: string) => {
-        const s = get();
-        const caches = { ...s.paperCaches };
-        caches[paperId] = {
-          preReading: s.preReading,
-          assumptions: s.assumptions,
-          summary: s.summary,
-          notes: s.notes,
-          selectionHistory: s.selectionHistory,
-          qaResults: s.qaResults,
-          questions: s.questions,
-        };
-        const keys = Object.keys(caches);
-        if (keys.length > 20) {
-          const oldest = keys.filter((k) => k !== paperId).slice(0, keys.length - 20);
-          for (const k of oldest) delete caches[k];
-        }
-        set({ paperCaches: caches });
-      },
-      restorePaperCache: (paperId: string) => {
-        const cached = get().paperCaches[paperId];
-        if (!cached) return false;
-        set({
-          preReading: cached.preReading,
-          assumptions: cached.assumptions,
-          summary: cached.summary,
-          notes: cached.notes,
-          selectionHistory: cached.selectionHistory,
-          qaResults: cached.qaResults,
-          questions: cached.questions,
-          selectionResult: null,
-          exercise: null,
-          searchResults: [],
-          preReadingLoading: false,
-          assumptionsLoading: false,
-          summaryLoading: false,
-          selectionLoading: false,
-          qaLoading: false,
-          exerciseLoading: false,
-          searchLoading: false,
-        });
-        return true;
-      },
-      clearPaperCache: (paperId: string) => {
-        const rest = { ...get().paperCaches };
-        delete rest[paperId];
-        set({ paperCaches: rest });
-      },
-      updatePaperCache: (paperId: string, partial: Partial<PaperCache>) => {
-        const s = get();
-        const existing = s.paperCaches[paperId] || {
-          preReading: null, assumptions: [], summary: null,
-          notes: [], selectionHistory: [], qaResults: [], questions: [],
-        };
-        set({
-          paperCaches: {
-            ...s.paperCaches,
-            [paperId]: { ...existing, ...partial },
-          },
-        });
-      },
       resetAnalysisState: () => set({
         preReading: null, assumptions: [], summary: null, notes: [],
         selectionHistory: [], selectionResult: null, qaResults: [], questions: [],
@@ -440,12 +464,9 @@ export const useStore = create<AppStore>()(
           try { localStorage.removeItem(name); } catch { /* ignore */ }
         },
       },
-      // The server is the source of truth for every analysis artifact:
-      // `paper.cached_analysis` is re-hydrated on each mount, so we do NOT
-      // persist `paperCaches` (previously did — caused stale/ghost data
-      // when a user returned hours later or the browser swapped sessions).
-      // We only persist lightweight UX state: the multi-paper session list
-      // and cross-paper QA results, which have no server mirror.
+      // Per audit §3.3: keep only lightweight session/UI state in
+      // localStorage. Analysis artifacts live in server cached_analysis and
+      // in the in-memory papersById read-through cache.
       partialize: (state) => ({
         sessionPapers: state.sessionPapers,
         crossPaperResults: state.crossPaperResults,
@@ -456,6 +477,7 @@ export const useStore = create<AppStore>()(
         headerHidden: state.headerHidden,
         focusMode: state.focusMode,
         analysisFontScale: state.analysisFontScale,
+        uiPrefs: state.uiPrefs,
       }),
     }
   )

@@ -199,6 +199,21 @@ async function request<T>(
   }
 }
 
+const _inflightGetRequests = new Map<string, Promise<unknown>>();
+
+function getRequest<T>(path: string): Promise<T> {
+  const existing = _inflightGetRequests.get(path) as Promise<T> | undefined;
+  if (existing) return existing;
+  // Per audit §8.3: rapid paper/session switches can request the same GET
+  // multiple times before the first response lands. Share one promise for
+  // idempotent reads and drop it as soon as it settles.
+  const p = request<T>(path).finally(() => {
+    _inflightGetRequests.delete(path);
+  });
+  _inflightGetRequests.set(path, p);
+  return p;
+}
+
 export interface FigureInfo {
   id: string;
   url: string;
@@ -382,9 +397,9 @@ export const api = {
     return res.json();
   },
 
-  listPapers: () => request<PaperListEntry[]>("/api/papers/"),
+  listPapers: () => getRequest<PaperListEntry[]>("/api/papers/"),
 
-  getPaper: (id: string) => request<ParsedPaper>(`/api/papers/${id}`),
+  getPaper: (id: string) => getRequest<ParsedPaper>(`/api/papers/${id}`),
 
   getPdfUrl: (id: string) => `${API_BASE}/api/papers/${id}/pdf`,
 
@@ -559,11 +574,11 @@ export const api = {
     }),
 
   search: (id: string, query: string) =>
-    request<{ query: string; results: SearchResult[] }>(
+    getRequest<{ query: string; results: SearchResult[] }>(
       `/api/papers/${id}/search?q=${encodeURIComponent(query)}`
     ),
 
-  getSettings: () => request<SettingsResponse>("/api/settings"),
+  getSettings: () => getRequest<SettingsResponse>("/api/settings"),
 
   updateSettings: (data: {
     anthropic_api_key?: string;
@@ -576,10 +591,10 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
-  getModels: () => request<{ models: string[] }>("/api/settings/models"),
+  getModels: () => getRequest<{ models: string[] }>("/api/settings/models"),
 
   getCurrentUser: () =>
-    request<{ user_id: string; tier: string; paper_count: number; has_billing: boolean; cancel_at_period_end: boolean; cancel_at: number | null }>("/api/user/me"),
+    getRequest<{ user_id: string; tier: string; paper_count: number; has_billing: boolean; cancel_at_period_end: boolean; cancel_at: number | null }>("/api/user/me"),
 
   createCheckoutSession: (tier: string, successUrl?: string, cancelUrl?: string) =>
     request<{ url: string; session_id: string }>("/api/billing/checkout-session", {
@@ -642,7 +657,7 @@ export const api = {
     }),
 
   listWorkspaces: () =>
-    request<{ id: string; name: string; paper_ids: string[]; cross_paper_results: { question: string; answer: string }[]; updated_at: string }[]>("/api/workspaces"),
+    getRequest<{ id: string; name: string; paper_ids: string[]; cross_paper_results: { question: string; answer: string }[]; updated_at: string }[]>("/api/workspaces"),
 
   saveWorkspace: (data: {
     id?: string;
@@ -667,7 +682,7 @@ export const api = {
     }),
 
   getPaperUsage: (paperId: string) =>
-    request<{
+    getRequest<{
       qa_used: number;
       qa_limit: number;
       selections_used: number;
@@ -676,7 +691,7 @@ export const api = {
     }>(`/api/usage/${paperId}`),
 
   getAccountUsage: () =>
-    request<{
+    getRequest<{
       tier: string;
       papers_used: number;
       papers_limit: number;

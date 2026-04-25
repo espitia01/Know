@@ -51,7 +51,7 @@ function LibraryContent() {
   const [workspacesLoading, setWorkspacesLoading] = useState(false);
   const [workspacesFetched, setWorkspacesFetched] = useState(false);
   const [deleteWsConfirm, setDeleteWsConfirm] = useState<string | null>(null);
-  const { addSessionPaper, clearSession, addCrossPaperResults, clearCrossPaperResults } = useStore();
+  const { addSessionPaper, clearSession, addCrossPaperResults, clearCrossPaperResults, forgetCachedPaper, clearPaperUiPrefs } = useStore();
   const [selectedPapers, setSelectedPapers] = useState<Set<string>>(new Set());
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -170,12 +170,14 @@ function LibraryContent() {
       // Per audit §2.4: deleted papers must release retry/request guards
       // so re-uploading the same file can auto-analyze normally.
       forgetPaper(id);
+      forgetCachedPaper(id);
+      clearPaperUiPrefs(id);
       setPapers((prev) => prev.filter((p) => p.id !== id));
     } catch (e) { console.error(e); }
     setDeleteConfirm(null);
     setDeleteAffectedWs([]);
     setDeleteLoading(false);
-  }, [deleteAffectedWs]);
+  }, [deleteAffectedWs, forgetCachedPaper, clearPaperUiPrefs]);
 
   const handleMoveToFolder = useCallback(async (paperId: string, folder: string) => {
     try {
@@ -258,13 +260,18 @@ function LibraryContent() {
       }
     } catch { /* continue with deletion */ }
     for (const id of ids) {
-      try { await api.deletePaper(id); forgetPaper(id); } catch { /* continue */ }
+      try {
+        await api.deletePaper(id);
+        forgetPaper(id);
+        forgetCachedPaper(id);
+        clearPaperUiPrefs(id);
+      } catch { /* continue */ }
     }
     setPapers((prev) => prev.filter((p) => !selectedPapers.has(p.id)));
     setSelectedPapers(new Set());
     setBulkDeleteConfirm(false);
     setBulkDeleting(false);
-  }, [selectedPapers]);
+  }, [selectedPapers, forgetCachedPaper, clearPaperUiPrefs]);
 
   const [bibtexModal, setBibtexModal] = useState<{
     open: boolean;

@@ -41,37 +41,10 @@ const PdfViewer = dynamic(
 
 const MIN_SIDE = 280;
 const MAX_SIDE = 700;
-const DEFAULT_SIDE = 400;
 const MIN_BOTTOM = 180;
 const MAX_BOTTOM = 500;
-const DEFAULT_BOTTOM = 300;
 
 const POSITIONS: PanelPosition[] = ["right", "bottom", "left"];
-
-const PANEL_POS_KEY = "know-panel-pos";
-const PANEL_SIZE_SIDE_KEY = "know-panel-size-side";
-const PANEL_SIZE_BOTTOM_KEY = "know-panel-size-bottom";
-
-function readStoredPos(): PanelPosition {
-  if (typeof window === "undefined") return "right";
-  const v = window.localStorage.getItem(PANEL_POS_KEY);
-  if (v === "right" || v === "left" || v === "bottom") return v;
-  return "right";
-}
-
-function readStoredSize(pos: PanelPosition): number {
-  if (typeof window === "undefined") return pos === "bottom" ? DEFAULT_BOTTOM : DEFAULT_SIDE;
-  const key = pos === "bottom" ? PANEL_SIZE_BOTTOM_KEY : PANEL_SIZE_SIDE_KEY;
-  const v = window.localStorage.getItem(key);
-  if (v) {
-    const n = parseInt(v, 10);
-    if (!isNaN(n)) {
-      if (pos === "bottom") return Math.min(MAX_BOTTOM, Math.max(MIN_BOTTOM, n));
-      return Math.min(MAX_SIDE, Math.max(MIN_SIDE, n));
-    }
-  }
-  return pos === "bottom" ? DEFAULT_BOTTOM : DEFAULT_SIDE;
-}
 
 /**
  * Inline, Google-Docs-style paper rename control.
@@ -470,11 +443,14 @@ function PaperContent() {
       cachePaper: s.cachePaper,
     })),
   );
-  const { panelVisible, setPanelVisible, togglePanel } = useStore(
+  const { panelVisible, setPanelVisible, togglePanel, uiPrefs, setPanelPosition, setPanelSize: setStoredPanelSize } = useStore(
     useShallow((s) => ({
       panelVisible: s.panelVisible,
       setPanelVisible: s.setPanelVisible,
       togglePanel: s.togglePanel,
+      uiPrefs: s.uiPrefs,
+      setPanelPosition: s.setPanelPosition,
+      setPanelSize: s.setPanelSize,
     })),
   );
   const { headerHidden, toggleHeader, setHeaderHidden, focusMode, toggleFocusMode, setFocusMode } = useStore(
@@ -512,7 +488,7 @@ function PaperContent() {
   );
   const {
     sessionPapers, addSessionPaper, removeSessionPaper, clearSession, updatePaperTitle,
-    savePaperCache, restorePaperCache, resetAnalysisState,
+    resetAnalysisState,
     crossPaperResults, addCrossPaperResults, clearCrossPaperResults,
   } = useStore(
     useShallow((s) => ({
@@ -521,8 +497,6 @@ function PaperContent() {
       removeSessionPaper: s.removeSessionPaper,
       clearSession: s.clearSession,
       updatePaperTitle: s.updatePaperTitle,
-      savePaperCache: s.savePaperCache,
-      restorePaperCache: s.restorePaperCache,
       resetAnalysisState: s.resetAnalysisState,
       crossPaperResults: s.crossPaperResults,
       addCrossPaperResults: s.addCrossPaperResults,
@@ -543,9 +517,7 @@ function PaperContent() {
   useEffect(() => {
     if (paperId !== activePaperId) {
       sseAbortRef.current?.abort();
-      savePaperCache(activePaperId);
-      const restored = restorePaperCache(paperId);
-      if (!restored) resetAnalysisState();
+      resetAnalysisState();
       // If a background fetch for the incoming paper is still in flight,
       // re-show its loading state so the UI doesn't flash "Analyze Paper".
       if (hasActiveRequest(paperId, "preReading")) setPreReadingLoading(true);
@@ -562,29 +534,23 @@ function PaperContent() {
   }, [
     paperId,
     activePaperId,
-    savePaperCache,
-    restorePaperCache,
     resetAnalysisState,
     setPreReadingLoading,
     setAssumptionsLoading,
     setSummaryLoading,
   ]);
-  const [panelPos, setPanelPos] = useState<PanelPosition>(() => readStoredPos());
-  const [panelSize, setPanelSize] = useState(() => readStoredSize(readStoredPos()));
+  const panelPos = uiPrefs.panelPos as PanelPosition;
+  const panelSize = panelPos === "bottom" ? uiPrefs.panelSizeBottom : uiPrefs.panelSizeSide;
+  const setPanelPos = setPanelPosition;
+  const setPanelSize = useCallback((size: number) => {
+    const bounded = panelPos === "bottom"
+      ? Math.min(MAX_BOTTOM, Math.max(MIN_BOTTOM, size))
+      : Math.min(MAX_SIDE, Math.max(MIN_SIDE, size));
+    setStoredPanelSize(panelPos, bounded);
+  }, [panelPos, setStoredPanelSize]);
   const dragging = useRef(false);
   const startCoord = useRef(0);
   const startSize = useRef(0);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(PANEL_POS_KEY, panelPos);
-  }, [panelPos]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const key = panelPos === "bottom" ? PANEL_SIZE_BOTTOM_KEY : PANEL_SIZE_SIDE_KEY;
-    window.localStorage.setItem(key, String(panelSize));
-  }, [panelPos, panelSize]);
 
   const [selection, setSelection] = useState<{ text: string; rect: DOMRect } | null>(null);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
@@ -703,46 +669,6 @@ function PaperContent() {
       document.removeEventListener("fullscreenchange", onFsChange);
     };
   }, [focusMode, headerHidden, setFocusMode, setHeaderHidden, showAddPaper, showFolderPicker, showWorkspaceMenu]);
-
-  // Save cache on unmount (navigating away from paper page entirely)
-  useEffect(() => {
-    const saveOnUnload = () => {
-      const s = useStore.getState();
-      s.savePaperCache(activePaperId);
-    };
-    window.addEventListener("beforeunload", saveOnUnload);
-    return () => {
-      window.removeEventListener("beforeunload", saveOnUnload);
-      saveOnUnload();
-    };
-  }, [activePaperId]);
-
-  // `paperCaches` is an in-memory-only fast-switch cache. It is NOT
-  // persisted (see the store's `partialize`), so on a full-page reload
-  // every analysis field starts empty and must be re-hydrated from the
-  // server via `paper.cached_analysis` in the effect below. We keep the
-  // in-session cache so flipping between open papers stays snappy.
-  const initialRestoreDoneRef = useRef(false);
-  useEffect(() => {
-    if (initialRestoreDoneRef.current) return;
-    initialRestoreDoneRef.current = true;
-    const store = useStore.getState();
-    if (store.paperCaches[activePaperId]) {
-      const ok = store.restorePaperCache(activePaperId);
-      if (ok) {
-        // Re-apply loading flags for any in-flight background requests
-        // for this paper (restorePaperCache resets them to false).
-        if (hasActiveRequest(activePaperId, "preReading")) setPreReadingLoading(true);
-        if (hasActiveRequest(activePaperId, "assumptions")) setAssumptionsLoading(true);
-        if (hasActiveRequest(activePaperId, "summary")) setSummaryLoading(true);
-      }
-    } else if (store.paper?.id !== activePaperId) {
-      // Per audit §2.2: clear on cache miss in the transition path, not
-      // inside setPaper. This covers direct route entry / dashboard upload
-      // where there was no URL-change effect to reset the old paper's pane.
-      resetAnalysisState();
-    }
-  }, [activePaperId, resetAnalysisState, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
 
   useEffect(() => {
     let stale = false;
@@ -900,14 +826,10 @@ function PaperContent() {
   const handleSwitchPaper = useCallback((id: string) => {
     if (id === activePaperId) return;
     sseAbortRef.current?.abort();
-    savePaperCache(activePaperId);
     setSelection(null);
     setSelectionResult(null);
 
-    const restored = restorePaperCache(id);
-    if (!restored) {
-      resetAnalysisState();
-    }
+    resetAnalysisState();
     if (hasActiveRequest(id, "preReading")) setPreReadingLoading(true);
     if (hasActiveRequest(id, "assumptions")) setAssumptionsLoading(true);
     if (hasActiveRequest(id, "summary")) setSummaryLoading(true);
@@ -924,7 +846,7 @@ function PaperContent() {
     if (typeof window !== "undefined" && id !== paperId) {
       router.replace(`/paper/${id}`);
     }
-  }, [activePaperId, paperId, router, savePaperCache, restorePaperCache, resetAnalysisState, setSelectionResult, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
+  }, [activePaperId, paperId, router, resetAnalysisState, setSelectionResult, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
 
   const handleAddPaper = useCallback((id: string, title: string) => {
     // Register the paper in the multi-paper session tab bar…
@@ -979,7 +901,6 @@ function PaperContent() {
     setWorkspaceSaving(true);
     setWorkspaceSaved(false);
     try {
-      savePaperCache(activePaperId);
       await api.saveWorkspace({
         name,
         paper_ids: sessionPapers.map((p) => p.id),
@@ -999,7 +920,7 @@ function PaperContent() {
     } finally {
       setWorkspaceSaving(false);
     }
-  }, [workspaceNameInput, sessionPapers, crossPaperResults, activePaperId, savePaperCache]);
+  }, [workspaceNameInput, sessionPapers, crossPaperResults]);
 
   const handleLoadWorkspace = useCallback(async (ws: typeof savedWorkspaces[0]) => {
     // Fetch papers BEFORE mutating state so we don't leave the user on a
@@ -1292,7 +1213,7 @@ function PaperContent() {
       else delta = startCoord.current - e.clientY;
       setPanelSize(Math.min(max, Math.max(min, startSize.current + delta)));
     },
-    [panelPos]
+    [panelPos, setPanelSize]
   );
 
   const onDragEnd = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
@@ -1304,13 +1225,11 @@ function PaperContent() {
   }, []);
 
   const cyclePosition = useCallback(() => {
-    setPanelPos((cur) => {
-      const idx = POSITIONS.indexOf(cur);
-      const next = POSITIONS[(idx + 1) % POSITIONS.length];
-      setPanelSize(readStoredSize(next));
-      return next;
-    });
-  }, []);
+    const idx = POSITIONS.indexOf(panelPos);
+    const next = POSITIONS[(idx + 1) % POSITIONS.length];
+    setPanelPos(next);
+    setPanelSize(next === "bottom" ? uiPrefs.panelSizeBottom : uiPrefs.panelSizeSide);
+  }, [panelPos, setPanelPos, setPanelSize, uiPrefs.panelSizeBottom, uiPrefs.panelSizeSide]);
 
   if (loading) {
     return (

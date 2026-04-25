@@ -54,6 +54,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
     questions, addQuestion, removeQuestion, clearQuestions,
     qaResults, setQAResults, qaLoading, setQALoading,
     sessionPapers, bumpUsageRefresh,
+    uiPrefs, setHideQaSuggestions, setQADraft,
   } = useStore();
   const { user } = useUserTier();
   const tier = user?.tier || "free";
@@ -84,25 +85,11 @@ export function QAPanel({ paperId }: QAPanelProps) {
   const [justAdded, setJustAdded] = useState(false);
   const justAddedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Let power-users collapse the suggested-question pills so the queue and
-  // answers get more vertical room. Persisted globally (not per-paper) so
-  // the preference sticks across the whole session.
-  const SUGGESTIONS_HIDDEN_KEY = "know-qa-hide-suggestions";
-  const [hideSuggestions, setHideSuggestions] = useState(false);
-  useEffect(() => {
-    try {
-      setHideSuggestions(localStorage.getItem(SUGGESTIONS_HIDDEN_KEY) === "1");
-    } catch { /* ignore */ }
-  }, []);
+  const hideSuggestions = uiPrefs.hideQaSuggestions;
   const toggleSuggestions = () => {
-    setHideSuggestions((prev) => {
-      const next = !prev;
-      try {
-        if (next) localStorage.setItem(SUGGESTIONS_HIDDEN_KEY, "1");
-        else localStorage.removeItem(SUGGESTIONS_HIDDEN_KEY);
-      } catch { /* ignore */ }
-      return next;
-    });
+    // Per audit §3.3: route loose localStorage flags through the
+    // persisted uiPrefs slice so UI state has one owner.
+    setHideQaSuggestions(!hideSuggestions);
   };
 
   useEffect(() => {
@@ -111,29 +98,13 @@ export function QAPanel({ paperId }: QAPanelProps) {
     };
   }, []);
 
-  // Keep the draft question for this paper so a refresh or accidental
-  // navigation doesn't lose what the user was in the middle of typing.
-  // Scoped per paper so switching between papers doesn't blend drafts.
-  const draftKey = `know-qa-draft:${paperId}`;
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(draftKey);
-      if (saved) setInput(saved);
-    } catch { /* ignore */ }
-    // Only restore on mount or paper switch — deliberate empty dep on
-    // setInput since the setter is stable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paperId]);
+    setInput(uiPrefs.qaDraftByPaper[paperId] || "");
+  }, [paperId, uiPrefs.qaDraftByPaper]);
 
   useEffect(() => {
-    try {
-      if (input.trim()) {
-        localStorage.setItem(draftKey, input);
-      } else {
-        localStorage.removeItem(draftKey);
-      }
-    } catch { /* ignore */ }
-  }, [input, draftKey]);
+    setQADraft(paperId, input);
+  }, [input, paperId, setQADraft]);
 
   const handleAdd = () => {
     const q = input.trim();

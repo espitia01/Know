@@ -75,7 +75,6 @@ async function fetchSummaryInBackground(
 
     const decoder = new TextDecoder();
     let buffer = "";
-    let accumulated = "";
 
     while (true) {
       if (controller.signal.aborted) { reader.cancel(); break; }
@@ -89,13 +88,12 @@ async function fetchSummaryInBackground(
         if (!line.startsWith("data: ")) continue;
         try {
           const event = JSON.parse(line.slice(6));
-          if (event.type === "chunk") {
-            accumulated += event.text;
-          } else if (event.type === "done") {
+          if (event.type === "done") {
             if (event.summary) {
-              // Always persist the finished summary to the per-paper cache so
-              // switching back shows it without regenerating.
-              useStore.getState().updatePaperCache(paperId, { summary: event.summary });
+              // Per audit §3.3: papersById is now the only in-memory paper
+              // artifact cache; keep cached_analysis hot without a parallel
+              // paperCaches slot that can drift.
+              useStore.getState().updateCachedAnalysis(paperId, { summary: event.summary });
               // If the user is still viewing this paper, also push it to the
               // top-level store for immediate render.
               if (useStore.getState().paper?.id === paperId) {

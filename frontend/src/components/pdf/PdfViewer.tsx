@@ -27,7 +27,6 @@ interface PdfViewerProps {
 
 const PAGE_GAP = 16;
 const BUFFER_PAGES = 2;
-const SCROLL_STORAGE_PREFIX = "know-pdf-scroll:";
 
 /**
  * Module-scoped cache of object URLs pointing at fully-downloaded PDF
@@ -64,6 +63,8 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
   const selectionHistory = useStore((s) => s.selectionHistory);
   const openSelectionFromHistory = useStore((s) => s.openSelectionFromHistory);
   const removeSelectionFromHistory = useStore((s) => s.removeSelectionFromHistory);
+  const savedScrollByPaper = useStore((s) => s.uiPrefs.scrollByPaper);
+  const setPdfScroll = useStore((s) => s.setPdfScroll);
 
   const [retryKey, setRetryKey] = useState(0);
   // Whether we've already restored the persisted scroll for this paper. We
@@ -210,10 +211,9 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
             const pageStride = pageHeightRef.current + PAGE_GAP;
             if (pageStride > 0) {
               const pageRatio = container.scrollTop / pageStride;
-              localStorage.setItem(
-                `${SCROLL_STORAGE_PREFIX}${paperId}`,
-                pageRatio.toFixed(4),
-              );
+              // Per audit §3.3: keep paper-scoped UI prefs in the
+              // persisted store so they can be GC'd with the paper.
+              setPdfScroll(paperId, +pageRatio.toFixed(4));
             }
           } catch { /* quota / private mode — non-fatal */ }
         }, 250);
@@ -224,7 +224,7 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       container.removeEventListener("scroll", onScroll);
       if (saveTimer) clearTimeout(saveTimer);
     };
-  }, [updateVisibleRange, paperId]);
+  }, [updateVisibleRange, paperId, setPdfScroll]);
 
   // Reset the restoration flag whenever we switch to a different paper or
   // reload the same one — the next page render should re-apply the saved
@@ -808,22 +808,19 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
     // user's last viewport.
     if (!scrollRestoredRef.current && paperId && containerRef.current) {
       const container = containerRef.current;
-      try {
-        const raw = localStorage.getItem(`${SCROLL_STORAGE_PREFIX}${paperId}`);
-        const savedRatio = raw ? parseFloat(raw) : 0;
-        if (savedRatio > 0 && Number.isFinite(savedRatio)) {
-          const pageStride = pageHeightRef.current + PAGE_GAP;
-          const target = Math.round(savedRatio * pageStride);
-          container.scrollTop = target;
-          // Nudge visibleRange so the target pages actually render —
-          // relying purely on the scroll event is flaky when React batches
-          // the update with the initial paint.
-          updateVisibleRange();
-        }
-      } catch { /* ignore */ }
+      const savedRatio = savedScrollByPaper[paperId] || 0;
+      if (savedRatio > 0 && Number.isFinite(savedRatio)) {
+        const pageStride = pageHeightRef.current + PAGE_GAP;
+        const target = Math.round(savedRatio * pageStride);
+        container.scrollTop = target;
+        // Nudge visibleRange so the target pages actually render —
+        // relying purely on the scroll event is flaky when React batches
+        // the update with the initial paint.
+        updateVisibleRange();
+      }
       scrollRestoredRef.current = true;
     }
-  }, [updateVisibleRange, paperId]);
+  }, [updateVisibleRange, paperId, savedScrollByPaper]);
 
   // Called by react-pdf when the *text layer* finishes rendering (as
   // opposed to onRenderSuccess, which fires after the canvas but
