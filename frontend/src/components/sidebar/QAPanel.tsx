@@ -7,6 +7,8 @@ import { Md } from "@/components/ui/Md";
 import { Textarea } from "@/components/ui/textarea";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
+import { SectionHeader } from "@/components/panel/SectionHeader";
+import { SwitchField } from "@/components/ui/switch";
 
 interface QAPanelProps {
   paperId: string;
@@ -176,52 +178,54 @@ export function QAPanel({ paperId }: QAPanelProps) {
   return (
     <div className="space-y-3">
       <div className="space-y-2">
-        <p className="text-[var(--text-md)] text-muted-foreground">
+        <p className="text-[var(--text-sm)] text-muted-foreground">
           Queue questions as you read, then answer them all at once.
         </p>
 
         {/* Cross-paper toggle */}
         {hasMultiplePapers && (
-          <button
-            onClick={() => setCrossPaper(!crossPaper)}
-            className={`flex items-center gap-2 w-full px-3 py-2 rounded-lg border transition-all text-left ${
-              crossPaper
-                ? "border-foreground/20 bg-foreground/5"
-                : "border-border/50 bg-transparent hover:border-border"
-            }`}
-          >
-            <div className={`w-7 h-4 rounded-full transition-colors relative shrink-0 ${
-              crossPaper ? "bg-foreground" : "bg-muted-foreground/20"
-            }`}>
-              <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-background shadow-sm transition-all ${
-                crossPaper ? "left-3.5" : "left-0.5"
-              }`} />
-            </div>
-            <div>
-              <p className="text-[var(--text-sm)] font-medium leading-tight">
+          <div className="flex items-start gap-3 rounded-lg border border-border/60 bg-card/20 px-3 py-2.5">
+            <svg
+              className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/80"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              aria-hidden
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
+            </svg>
+            <div className="min-w-0 flex-1">
+              <p className="text-[var(--text-sm)] font-medium leading-tight text-foreground">
                 Cross-Paper Mode
               </p>
-              <p className="text-[var(--text-xs)] text-muted-foreground/50 leading-tight">
+              <p className="text-[var(--text-xs)] leading-snug text-muted-foreground/80">
                 Ask questions across all {sessionPapers.length} papers in session
               </p>
             </div>
-          </button>
+            <SwitchField
+              checked={crossPaper}
+              onCheckedChange={setCrossPaper}
+              aria-label="Toggle cross-paper mode"
+            />
+          </div>
         )}
 
         {!qaLoading && (
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-[var(--text-xs)] font-semibold uppercase tracking-wider text-muted-foreground/50">
-                {hideSuggestions ? "Suggestions hidden" : "Suggested questions"}
-              </p>
-              <button
-                onClick={toggleSuggestions}
-                className="text-[var(--text-xs)] font-medium text-muted-foreground/60 hover:text-foreground transition-colors"
-                aria-pressed={hideSuggestions}
-              >
-                {hideSuggestions ? "Show" : "Hide"}
-              </button>
-            </div>
+            <SectionHeader
+              title={hideSuggestions ? "Suggestions hidden" : "Suggested questions"}
+              action={
+                <button
+                  type="button"
+                  onClick={toggleSuggestions}
+                  className="text-[var(--text-xs)] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  aria-pressed={hideSuggestions}
+                >
+                  {hideSuggestions ? "Show" : "Hide"}
+                </button>
+              }
+            />
             {!hideSuggestions && (
               <div className="flex flex-wrap gap-1.5">
                 {visiblePrompts.map((prompt) => (
@@ -231,11 +235,12 @@ export function QAPanel({ paperId }: QAPanelProps) {
                     // suggestions, which prevents React from briefly
                     // flashing a wrong label during the transition.
                     key={prompt}
+                    type="button"
                     onClick={() => {
                       addQuestion(prompt);
                       setUsedPrompts((prev) => new Set(prev).add(prompt));
                     }}
-                    className="text-[var(--text-xs)] px-2.5 py-1 rounded-full glass-subtle text-muted-foreground hover:text-foreground hover:bg-accent transition-colors font-medium"
+                    className="rounded-md border border-border/60 bg-transparent px-2.5 py-1 text-left text-[var(--text-xs)] font-medium text-muted-foreground transition-colors motion-safe:duration-150 motion-safe:ease-out hover:border-border hover:bg-accent/40 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                   >
                     {prompt}
                   </button>
@@ -247,25 +252,27 @@ export function QAPanel({ paperId }: QAPanelProps) {
                     they just stay collapsed visually with a + glyph. */}
                 {!crossPaper && (
                   <button
+                    type="button"
                     onClick={handleGenerateMore}
                     disabled={extraLoading}
-                    className="text-[var(--text-xs)] px-2.5 py-1 rounded-full glass-subtle text-muted-foreground hover:text-foreground hover:bg-accent transition-colors font-medium disabled:opacity-50 inline-flex items-center gap-1"
+                    className="inline-flex h-[1.75rem] min-w-[1.75rem] items-center justify-center gap-1 rounded-md border border-dashed border-border/70 bg-transparent px-2 text-[var(--text-xs)] font-medium text-muted-foreground transition-colors motion-safe:duration-150 hover:border-border hover:bg-accent/40 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50"
                     title={
                       visiblePrompts.length === 0
                         ? "Generate paper-specific question suggestions"
                         : "Add more paper-specific suggestions"
                     }
+                    aria-label={visiblePrompts.length === 0 ? "Suggest questions" : "More like these"}
                   >
                     {extraLoading ? (
                       <>
-                        <span className="inline-block w-2.5 h-2.5 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" />
-                        Thinking…
+                        <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-[1.5px] border-current border-t-transparent" />
+                        <span>Thinking…</span>
                       </>
                     ) : (
                       <>
-                        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                        </svg>
+                        <span className="inline-flex h-4 w-4 items-center justify-center rounded border border-border/60 text-[var(--text-xs)] font-semibold leading-none">
+                          +
+                        </span>
                         {visiblePrompts.length === 0 ? "Suggest questions" : "More like these"}
                       </>
                     )}
@@ -274,7 +281,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
               </div>
             )}
             {extraError && (
-              <p role="alert" className="text-[var(--text-xs)] text-destructive/80 leading-snug">
+              <p role="alert" className="text-[var(--text-xs)] leading-snug text-destructive/90">
                 {extraError}
               </p>
             )}
@@ -291,85 +298,92 @@ export function QAPanel({ paperId }: QAPanelProps) {
         />
         <div className="flex gap-2">
           <button
+            type="button"
             onClick={handleAdd}
-            className={`flex-1 text-[var(--text-sm)] font-medium py-1.5 rounded-lg border transition-all ${
-              justAdded
-                ? "border-green-300 bg-green-50 text-green-700"
-                : "border-border hover:bg-accent"
-            }`}
+            className={
+              `h-9 flex-1 rounded-lg border text-[var(--text-sm)] font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ` +
+              (justAdded
+                ? "border-success/40 bg-success/10 text-success"
+                : "border-border bg-transparent text-foreground hover:bg-accent")
+            }
           >
             {justAdded ? "✓ Added" : "Add Question"}
           </button>
           <button
+            type="button"
             onClick={handleAnswerAll}
             disabled={questions.length === 0 || qaLoading}
-            className="flex-1 text-[var(--text-sm)] font-medium py-1.5 rounded-xl btn-primary-glass text-background transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            className="btn-primary-glass h-9 flex-1 rounded-lg px-3 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {qaLoading ? "Answering..." : `Answer All (${questions.length})`}
+            {qaLoading ? "Answering…" : `Answer All (${questions.length})`}
           </button>
         </div>
       </div>
 
       {qaLoading && (
-        <div className="flex flex-col items-center gap-2 py-4">
-          <AnalysisProgress kind="qa" className="mx-auto" />
-          <p className="text-[var(--text-xs)] text-muted-foreground animate-pulse">
-            {crossPaper && hasMultiplePapers ? "Analyzing across papers..." : "Analyzing..."}
+        <div className="flex min-h-[20vh] flex-col items-center justify-center gap-2 py-4">
+          <div className="mx-auto w-full max-w-xs">
+            <AnalysisProgress kind="qa" className="mx-auto" />
+          </div>
+          <p className="text-[var(--text-sm)] text-muted-foreground">
+            {crossPaper && hasMultiplePapers ? "Analyzing across papers…" : "Analyzing…"}
           </p>
         </div>
       )}
 
       {qaError && (
-        <div role="alert" className="rounded-lg bg-destructive/10 border border-destructive/20 px-3.5 py-2.5 space-y-1">
-          <p className="text-[var(--text-sm)] text-destructive font-medium">
+        <div role="alert" className="space-y-1 rounded-lg border border-destructive/20 bg-destructive/10 px-3.5 py-2.5">
+          <p className="text-[var(--text-sm)] font-medium text-destructive">
             {qaErrorKind === "limit" ? "Limit reached" : "Couldn't answer"}
           </p>
-          <p className="text-[var(--text-xs)] text-destructive">{qaError}</p>
+          <p className="text-[var(--text-xs)] text-destructive/90">{qaError}</p>
         </div>
       )}
 
       {questions.length > 0 && !qaLoading && (
-        <div className="space-y-2">
-          <div className="flex items-baseline gap-2">
-            <h3 className="text-[var(--text-md)] font-semibold text-foreground">Queued</h3>
-            <span className="text-[var(--text-xs)] text-muted-foreground/60 tabular-nums">{questions.length}</span>
-          </div>
-          {questions.map((q, i) => (
-            <div key={i} className="flex items-start gap-2.5 rounded-xl glass-subtle px-3.5 py-2">
-              <span className="text-[var(--text-xs)] text-muted-foreground/50 font-medium shrink-0 mt-0.5 tabular-nums">
-                {i + 1}.
-              </span>
-              <p className="text-[var(--text-md)] flex-1">{q}</p>
-              <button
-                onClick={() => removeQuestion(i)}
-                className="text-muted-foreground/40 hover:text-destructive shrink-0 mt-0.5 transition-colors"
+        <div>
+          <SectionHeader title="Queued" count={questions.length} />
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-card/30">
+            {questions.map((q, i) => (
+              <div
+                key={i}
+                className="flex items-start gap-2 border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40"
               >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          ))}
+                <p className="min-w-0 flex-1 text-[var(--text-md)]">{q}</p>
+                <button
+                  type="button"
+                  onClick={() => removeQuestion(i)}
+                  className="shrink-0 text-muted-foreground/50 transition-colors hover:text-destructive focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                  aria-label="Remove from queue"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       {qaResults.length > 0 && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-baseline gap-2">
-              <h3 className="text-[var(--text-md)] font-semibold text-foreground">Answers</h3>
-              <span className="text-[var(--text-xs)] text-muted-foreground/60 tabular-nums">{qaResults.length}</span>
-              {crossPaper && hasMultiplePapers && (
-                <span className="text-[var(--text-xs)] text-muted-foreground/50">cross-paper</span>
-              )}
-            </div>
-            <button
-              onClick={() => { setQAResults([]); clearQuestions(); setUsedPrompts(new Set()); setQAError(""); }}
-              className="text-[var(--text-xs)] text-muted-foreground/50 hover:text-muted-foreground transition-colors font-medium"
-            >
-              Clear
-            </button>
-          </div>
+          <SectionHeader
+            title="Answers"
+            count={qaResults.length}
+            action={
+              <button
+                type="button"
+                onClick={() => { setQAResults([]); clearQuestions(); setUsedPrompts(new Set()); setQAError(""); }}
+                className="text-[var(--text-xs)] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              >
+                Clear
+              </button>
+            }
+          />
+          {crossPaper && hasMultiplePapers && (
+            <p className="text-[var(--text-xs)] text-muted-foreground/80">Cross-paper session</p>
+          )}
           {/*
             Newest answer first. Numeric ordinals were dropped at the user's
             request — the visual order now carries the "which is newest"
@@ -378,11 +392,11 @@ export function QAPanel({ paperId }: QAPanelProps) {
           */}
           {[...qaResults].reverse().map((item, i) => (
             <div key={qaResults.length - 1 - i} className="space-y-2">
-              <div className="flex items-start gap-2 px-1">
-                <p className="text-[var(--text-md)] font-semibold leading-snug">{item.question}</p>
-              </div>
-              <div className="rounded-xl glass-subtle px-3.5 py-2.5 border-l-2 border-foreground/10">
-                <div className="text-[var(--text-sm)] text-muted-foreground"><Md>{item.answer}</Md></div>
+              <p className="px-0.5 text-[var(--text-md)] font-semibold leading-snug">{item.question}</p>
+              <div className="border border-border/60 border-l-[3px] border-l-foreground/20 bg-card/40 px-3.5 py-2.5 rounded-r-lg rounded-bl-lg">
+                <div className="text-[var(--text-sm)] text-muted-foreground">
+                  <Md>{item.answer}</Md>
+                </div>
               </div>
             </div>
           ))}

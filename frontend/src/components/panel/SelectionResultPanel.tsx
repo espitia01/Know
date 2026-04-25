@@ -2,9 +2,11 @@
 
 import { useState, memo } from "react";
 import { Md } from "@/components/ui/Md";
+import { Badge } from "@/components/ui/badge";
 import type { SelectionAnalysisResult } from "@/lib/api";
 import { ACTION_LABELS, normalizeSelectionAction, selectionKey } from "@/lib/selectionActions";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
+import { SectionHeader } from "@/components/panel/SectionHeader";
 
 interface SelectionResultPanelProps {
   result: SelectionAnalysisResult | null;
@@ -13,16 +15,27 @@ interface SelectionResultPanelProps {
   onFollowUp: (question: string, context: string) => Promise<void>;
 }
 
+function ThreadGlyph() {
+  return (
+    <span
+      className="mt-0.5 inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center text-[10px] font-normal leading-none text-muted-foreground/40"
+      aria-hidden
+    >
+      ↳
+    </span>
+  );
+}
+
 export function SelectionResultPanel({ result, loading, history, onFollowUp }: SelectionResultPanelProps) {
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
 
   if (loading && !result) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-12">
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-12">
         <div className="w-full max-w-xs">
           <AnalysisProgress kind="selection" />
         </div>
-        <span className="text-[var(--text-md)] text-muted-foreground">Analyzing selection...</span>
+        <span className="text-[var(--text-sm)] text-muted-foreground">Analyzing selection…</span>
       </div>
     );
   }
@@ -61,7 +74,7 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
 
   // The "active" thread is the one whose root or follow-ups contain
   // the currently displayed `result`. It renders in the main pane
-  // (with the follow-up input). Everything else lives under "History".
+  // (with the follow-up input). Everything else lives under "History."
   const activeKey = result ? selectionKey(result) : null;
   const activeThread = activeKey
     ? threads.find(
@@ -75,13 +88,18 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
     <div className="space-y-3">
       <ResultCard result={t.root} />
       {t.followups.length > 0 && (
-        <div className="ml-4 pl-3 border-l-2 border-border/60 space-y-3">
+        <div className="ml-3 space-y-3 border-l border-border/70 pl-4">
           {t.followups.map((f) => (
             <div key={selectionKey(f)} className="space-y-2">
-              <p className="text-[var(--text-xs)] font-semibold uppercase tracking-wider text-muted-foreground/50">
+              <p className="text-[var(--text-xs)] font-medium text-muted-foreground/75">
                 You asked
               </p>
-              <p className="text-[var(--text-sm)] font-medium leading-snug">{f.question || f.selected_text}</p>
+              <div className="flex items-start gap-1.5">
+                <ThreadGlyph />
+                <p className="text-[var(--text-sm)] font-medium leading-snug text-foreground">
+                  {f.question || f.selected_text}
+                </p>
+              </div>
               <ResultCard result={f} hideHeader hideQuote />
             </div>
           ))}
@@ -97,8 +115,10 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
           {renderThreadCard(activeThread)}
           {loading && (
             <div className="flex flex-col items-center gap-2 py-3">
-              <div className="w-full max-w-xs"><AnalysisProgress kind="selection" /></div>
-              <span className="text-[var(--text-xs)] text-muted-foreground animate-pulse">Processing follow-up...</span>
+              <div className="w-full max-w-xs">
+                <AnalysisProgress kind="selection" />
+              </div>
+              <span className="text-[var(--text-xs)] text-muted-foreground motion-safe:animate-pulse">Processing follow-up…</span>
             </div>
           )}
           <FollowUpInput
@@ -113,66 +133,65 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
           re-keyed by index, which made the panel "shuffle" entries on
           every store update because React mistook them for moves. */}
       {threads.filter((t) => t !== activeThread).length > 0 && (
-        <div className="space-y-2 pt-2 border-t border-border/50">
-          <p className="text-[var(--text-xs)] font-semibold uppercase tracking-wider text-muted-foreground/50">
-            History
-          </p>
-          {threads
-            .filter((t) => t !== activeThread)
-            .map((t) => {
-              const isExpanded = expandedHistory === t.rootKey;
-              const action = normalizeSelectionAction(t.root.action);
-              return (
-                <div
-                  key={t.rootKey}
-                  className="rounded-xl border border-border glass-subtle overflow-hidden"
-                >
-                  <button
-                    onClick={() =>
-                      setExpandedHistory(isExpanded ? null : t.rootKey)
-                    }
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors"
-                  >
-                    <span
-                      className="text-[var(--text-xs)] font-semibold uppercase shrink-0 px-1.5 py-0.5 rounded"
-                      data-action={action}
-                      style={{
-                        // Inline so the badge color tracks the same
-                        // per-action palette as the PDF underlines.
-                        // Fallback to the muted text token if the
-                        // action isn't one we know.
-                        color: "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)))",
-                        background:
-                          "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)) / 0.12)",
-                      }}
+        <div className="space-y-2 border-t border-border/50 pt-2">
+          <SectionHeader title="History" count={threads.filter((t) => t !== activeThread).length} />
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-card/30">
+            {threads
+              .filter((t) => t !== activeThread)
+              .map((t) => {
+                const isExpanded = expandedHistory === t.rootKey;
+                const action = normalizeSelectionAction(t.root.action);
+                return (
+                  <div key={t.rootKey} className="border-b border-border/60 last:border-b-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedHistory(isExpanded ? null : t.rootKey)
+                      }
+                      className="flex w-full items-center gap-2 px-4 py-3 text-left motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                     >
-                      {ACTION_LABELS[action] || action}
-                    </span>
-                    <span className="text-[var(--text-xs)] text-muted-foreground/60 truncate flex-1">
-                      {t.root.selected_text.length > 80
-                        ? t.root.selected_text.slice(0, 80) + "..."
-                        : t.root.selected_text}
-                    </span>
-                    {t.followups.length > 0 && (
-                      <span className="text-[var(--text-xs)] text-muted-foreground/40 tabular-nums shrink-0">
-                        +{t.followups.length}
+                      <span
+                        className="shrink-0 text-[var(--text-2xs)] font-medium tracking-wide"
+                        data-action={action}
+                        style={{
+                          // Inline so the badge color tracks the same
+                          // per-action palette as the PDF underlines.
+                          // Fallback to the muted text token if the
+                          // action isn't one we know.
+                          color: "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)))",
+                          background:
+                            "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)) / 0.12)",
+                        }}
+                      >
+                        {ACTION_LABELS[action] || action}
                       </span>
+                      <span className="min-w-0 flex-1 truncate text-[var(--text-xs)] text-muted-foreground/80">
+                        {t.root.selected_text.length > 80
+                          ? t.root.selected_text.slice(0, 80) + "…"
+                          : t.root.selected_text}
+                      </span>
+                      {t.followups.length > 0 && (
+                        <span className="shrink-0 font-mono text-[0.7rem] font-light tabular-nums text-muted-foreground/60">
+                          +{t.followups.length}
+                        </span>
+                      )}
+                      <svg
+                        className={`h-3 w-3 shrink-0 text-muted-foreground/30 motion-safe:transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                        aria-hidden
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    {isExpanded && (
+                      <div className="border-t border-border/40 px-4 pb-3 motion-safe:animate-fade-in">
+                        {renderThreadCard(t)}
+                      </div>
                     )}
-                    <svg
-                      className={`w-3 h-3 text-muted-foreground/30 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                  {isExpanded && (
-                    <div className="px-3 pb-3 animate-fade-in">
-                      {renderThreadCard(t)}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                  </div>
+                );
+              })}
+          </div>
         </div>
       )}
     </div>
@@ -201,16 +220,17 @@ function FollowUpInput({ context, onSubmit }: { context: string; onSubmit: (q: s
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
-        placeholder="Ask a follow-up question..."
+        placeholder="Ask a follow-up question…"
         disabled={submitting}
-        className="flex-1 text-[var(--text-sm)] px-3 py-1.5 rounded-xl border border-border glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+        className="min-h-9 flex-1 rounded-lg border border-border/80 bg-card/30 px-3 py-1.5 text-[var(--text-sm)] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-ring/40 disabled:opacity-50"
       />
       <button
+        type="button"
         onClick={handleSubmit}
         disabled={!input.trim() || submitting}
-        className="text-[var(--text-xs)] font-medium px-3 py-1.5 rounded-xl btn-primary-glass text-background transition-opacity disabled:opacity-30 shrink-0"
+        className="btn-primary-glass h-9 shrink-0 rounded-lg px-3 text-[var(--text-xs)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {submitting ? "..." : "Ask"}
+        {submitting ? "…" : "Ask"}
       </button>
     </div>
   );
@@ -234,7 +254,7 @@ function ResultCard({
       {!hideHeader && (
         <div className="flex items-center gap-2">
           <span
-            className="text-[var(--text-xs)] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded"
+            className="text-[var(--text-2xs)] font-medium tracking-wide"
             data-action={action}
             style={{
               color: "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)))",
@@ -245,61 +265,69 @@ function ResultCard({
             {ACTION_LABELS[action] || action}
           </span>
           {isStreaming && (
-            <span className="text-[var(--text-xs)] text-muted-foreground/40 animate-pulse">streaming...</span>
+            <span className="text-[var(--text-xs)] text-muted-foreground/50 motion-safe:animate-pulse">streaming…</span>
           )}
         </div>
       )}
 
       {!hideQuote && (
-        <div className="text-[var(--text-xs)] text-muted-foreground/45 px-1 py-1 italic leading-relaxed">
-          &ldquo;{result.selected_text.length > 200 ? result.selected_text.slice(0, 200) + "..." : result.selected_text}&rdquo;
+        <div className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/60">
+          <span className="italic">
+            &ldquo;{result.selected_text.length > 200 ? result.selected_text.slice(0, 200) + "…" : result.selected_text}&rdquo;
+          </span>
         </div>
       )}
 
-      {result.explanation && (
-        <div className="prose prose-sm dark:prose-invert max-w-none text-[var(--text-md)] leading-relaxed">
-          <Md>{result.explanation}</Md>
-          {isStreaming && (
-            <span className="inline-block w-1.5 h-4 bg-foreground/60 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
+      {(result.explanation || result.elaboration || result.answer) && (
+        <div className="rounded-lg border border-border/60 border-l-[3px] border-l-foreground/20 bg-card/40 px-3.5 py-2.5">
+          {result.explanation && (
+            <div className="prose prose-sm max-w-none text-[var(--text-md)] leading-relaxed dark:prose-invert">
+              <Md>{result.explanation}</Md>
+              {isStreaming && (
+                <span className="ml-0.5 inline-block h-4 w-1.5 align-text-bottom rounded-sm bg-foreground/60 motion-safe:animate-pulse" />
+              )}
+            </div>
           )}
-        </div>
-      )}
-
-      {result.elaboration && (
-        <div className="prose prose-sm dark:prose-invert max-w-none text-[var(--text-md)] leading-relaxed">
-          <Md>{result.elaboration}</Md>
-        </div>
-      )}
-
-      {result.answer && (
-        <div className="prose prose-sm dark:prose-invert max-w-none text-[var(--text-md)] leading-relaxed">
-          <Md>{result.answer}</Md>
+          {result.elaboration && (
+            <div className="prose prose-sm max-w-none text-[var(--text-md)] leading-relaxed dark:prose-invert">
+              <Md>{result.elaboration}</Md>
+            </div>
+          )}
+          {result.answer && (
+            <div className="prose prose-sm max-w-none text-[var(--text-md)] leading-relaxed dark:prose-invert">
+              <Md>{result.answer}</Md>
+            </div>
+          )}
         </div>
       )}
 
       {!hasContent && isStreaming && (
         <div className="space-y-2 py-4">
           <AnalysisProgress kind="selection" />
-          <p className="text-[var(--text-xs)] text-muted-foreground animate-pulse text-center">Generating analysis...</p>
+          <p className="text-center text-[var(--text-xs)] text-muted-foreground motion-safe:animate-pulse">Generating analysis…</p>
         </div>
       )}
 
       {result.assumptions && result.assumptions.length > 0 && (
-        <div className="space-y-2">
+        <div className="overflow-hidden rounded-lg border border-border/60">
           {result.assumptions.map((a, i) => (
-            <div key={i} className="glass-subtle rounded-xl px-3 py-2">
+            <div
+              key={i}
+              className="border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40"
+            >
               <div className="flex items-start gap-2">
-                <span className={`text-[var(--text-xs)] font-semibold uppercase px-1.5 py-0.5 rounded-lg shrink-0 ${
-                  a.type === "explicit"
-                    ? "bg-success/15 text-success"
-                    : "bg-warning/15 text-warning"
-                }`}>
+                <Badge
+                  variant={a.type === "explicit" ? "soft" : "outline"}
+                  className={a.type === "explicit" ? "text-success" : "text-warning"}
+                >
                   {a.type}
-                </span>
-                <div className="flex-1 text-[var(--text-sm)] leading-relaxed">
+                </Badge>
+                <div className="min-w-0 flex-1 text-[var(--text-sm)] leading-relaxed">
                   <Md>{a.statement}</Md>
                   {a.significance && (
-                    <div className="text-muted-foreground/60 mt-1 text-[var(--text-xs)]"><Md>{a.significance}</Md></div>
+                    <div className="mt-1 text-[var(--text-xs)] text-muted-foreground/80">
+                      <Md>{a.significance}</Md>
+                    </div>
                   )}
                 </div>
               </div>
@@ -319,9 +347,11 @@ const DerivationView = memo(function DerivationView({ result }: { result: Select
   return (
     <div className="space-y-3">
       {result.starting_point && (
-        <div className="glass-subtle rounded-xl px-3 py-2.5 border border-border/60">
-          <p className="text-[var(--text-xs)] font-semibold uppercase tracking-wider text-muted-foreground/50 mb-1">⌐ Starting Point</p>
-          <div className="text-[var(--text-md)]"><Md>{result.starting_point}</Md></div>
+        <div className="rounded-lg border border-border/60 bg-card/30 px-3 py-2.5">
+          <p className="mb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">Starting point</p>
+          <div className="text-[var(--text-md)]">
+            <Md>{result.starting_point}</Md>
+          </div>
         </div>
       )}
 
@@ -332,9 +362,11 @@ const DerivationView = memo(function DerivationView({ result }: { result: Select
       </div>
 
       {result.final_result && (
-        <div className="rounded-lg px-3 py-2.5 border border-success/35 ring-1 ring-success/10">
-          <p className="text-[var(--text-xs)] font-semibold uppercase tracking-wider text-success mb-1">Final Result</p>
-          <div className="text-[var(--text-md)]"><Md>{result.final_result}</Md></div>
+        <div className="rounded-lg border border-success/30 bg-card/30 px-3 py-2.5 ring-1 ring-success/10">
+          <p className="mb-1 text-[var(--text-xs)] font-semibold text-success">Final result</p>
+          <div className="text-[var(--text-md)]">
+            <Md>{result.final_result}</Md>
+          </div>
         </div>
       )}
     </div>
@@ -346,43 +378,51 @@ const StepCard = memo(function StepCard({ step }: { step: NonNullable<SelectionA
   const [showHint, setShowHint] = useState(false);
 
   return (
-    <div className="rounded-xl border border-border glass-subtle overflow-hidden">
-      <div className="px-3 py-2 glass">
+    <div className="overflow-hidden rounded-lg border border-border/60 bg-card/30">
+      <div className="border-b border-border/50 px-3 py-2">
         <div className="flex items-center gap-2">
-          <span className="text-[var(--text-xs)] font-bold text-muted-foreground/50 w-5 h-5 flex items-center justify-center rounded-full glass shrink-0">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border/60 text-[var(--text-xs)] font-medium text-muted-foreground/80">
             {step.step_number}
           </span>
-          <div className="text-[var(--text-sm)] flex-1"><Md>{step.prompt}</Md></div>
+          <div className="min-w-0 flex-1 text-[var(--text-sm)]">
+            <Md>{step.prompt}</Md>
+          </div>
         </div>
       </div>
-      <div className="px-3 py-2 space-y-2">
-        <div className="flex gap-2">
+      <div className="space-y-2 px-3 py-2">
+        <div className="flex flex-wrap gap-2">
           {!showAnswer && (
             <button
+              type="button"
               onClick={() => setShowAnswer(true)}
-              className="text-[var(--text-xs)] font-medium text-foreground/70 hover:text-foreground px-2 py-0.5 rounded border border-border hover:bg-accent transition-colors"
+              className="h-8 rounded-lg border border-border bg-transparent px-2.5 text-[var(--text-xs)] font-medium text-foreground transition-colors hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
-              Show Answer
+              Show answer
             </button>
           )}
           {!showHint && !showAnswer && (
             <button
+              type="button"
               onClick={() => setShowHint(true)}
-              className="text-[var(--text-xs)] font-medium text-muted-foreground/50 hover:text-muted-foreground px-2 py-0.5 rounded border border-border/50 hover:bg-accent transition-colors"
+              className="text-[var(--text-xs)] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               Hint
             </button>
           )}
         </div>
         {showHint && !showAnswer && (
-          <div className="text-[var(--text-xs)] text-warning italic bg-warning/10 px-2.5 py-1.5 rounded border border-warning/25">
+          <div className="rounded-md border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-[var(--text-xs)] italic text-warning">
             <Md>{step.hint}</Md>
           </div>
         )}
         {showAnswer && (
-          <div className="space-y-2 animate-fade-in">
-            <div className="text-[var(--text-sm)] font-medium"><Md>{step.answer}</Md></div>
-            <div className="text-[var(--text-xs)] text-muted-foreground/60 leading-relaxed"><Md>{step.explanation}</Md></div>
+          <div className="space-y-2 motion-safe:animate-fade-in">
+            <div className="text-[var(--text-sm)] font-medium">
+              <Md>{step.answer}</Md>
+            </div>
+            <div className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/80">
+              <Md>{step.explanation}</Md>
+            </div>
           </div>
         )}
       </div>

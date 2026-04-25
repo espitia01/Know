@@ -1047,3 +1047,67 @@ body::before {
   outline: none;
   box-shadow: none;
 }
+
+/* Analysis-pane v2 — minimalist panel chrome (additions only) */
+:root {
+  --text-2xs: 10.5px;
+}
+
+/* Tab indicator: short pill under label; motion only when not reduced. */
+@media (prefers-reduced-motion: no-preference) {
+  .analysis-panel-tabs [data-slot="tabs-trigger"]::after {
+    transition: opacity 160ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 160ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+}
+.analysis-panel-tabs [data-slot="tabs-trigger"]::after {
+  left: 50% !important;
+  right: auto !important;
+  width: 1.1rem !important;
+  max-width: calc(100% - 0.4rem) !important;
+  height: 2px !important;
+  bottom: 0 !important;
+  border-radius: 2px;
+  transform: translateX(-50%) !important;
+  transform-origin: center bottom;
+}
+
+/* Scrollport: top edge soft fade of content. */
+.analysis-scroll-fade {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 24px,
+    #000 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 24px,
+    #000 100%
+  );
+}
+
+/* Primary CTA in analysis pane: tighter radius, stronger disabled. */
+.analysis-pane-v2 :is(.btn-primary-glass) {
+  border-radius: var(--radius-lg);
+}
+.analysis-pane-v2 :is(.btn-primary-glass):disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.analysis-pane-v2 :is(.btn-primary-glass):disabled:hover {
+  transform: none;
+  opacity: 0.4;
+}
+
+/* Notes row actions: show on row hover for fine pointers; always show on touch. */
+@media (hover: hover) and (pointer: fine) {
+  .analysis-note-row .analysis-note-actions {
+    opacity: 0;
+  }
+  .analysis-note-row:hover .analysis-note-actions,
+  .analysis-note-row:focus-within .analysis-note-actions {
+    opacity: 1;
+  }
+}

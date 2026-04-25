@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { api, type FigureInfo } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
+import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 
 interface FiguresPanelProps {
   paperId: string;
@@ -93,31 +94,6 @@ function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: ()
           className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
         />
       </div>
-    </div>
-  );
-}
-
-function ProgressBar({ running }: { running: boolean }) {
-  const [width, setWidth] = useState(0);
-
-  useEffect(() => {
-    if (!running) { setWidth(100); return; }
-    setWidth(0);
-    const start = Date.now();
-    const interval = setInterval(() => {
-      const elapsed = (Date.now() - start) / 1000;
-      // Asymptotic: approaches 90% over ~30s, never reaches 100 until done
-      setWidth(Math.min(90, 90 * (1 - Math.exp(-elapsed / 12))));
-    }, 200);
-    return () => clearInterval(interval);
-  }, [running]);
-
-  return (
-    <div className="w-full h-1 bg-accent rounded-full overflow-hidden">
-      <div
-        className="h-full bg-foreground/60 rounded-full transition-all duration-300 ease-out"
-        style={{ width: `${width}%` }}
-      />
     </div>
   );
 }
@@ -340,9 +316,11 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   // during a paper switch where `paper` still points at the previous one.
   if (!paperReady) {
     return (
-      <div className="flex flex-col items-center justify-center py-10 gap-3">
-        <div className="w-5 h-5 border-2 border-muted-foreground/20 border-t-muted-foreground/60 rounded-full animate-spin" />
-        <p className="text-[var(--text-sm)] text-muted-foreground/60">Loading figures...</p>
+      <div className="flex min-h-[30vh] flex-col items-center justify-center gap-3 py-10">
+        <div className="w-full max-w-xs">
+          <AnalysisProgress kind="search" />
+        </div>
+        <p className="text-[var(--text-sm)] text-muted-foreground/80">Loading figures…</p>
       </div>
     );
   }
@@ -360,11 +338,12 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           </p>
         </div>
         <button
+          type="button"
           onClick={handleReextract}
           disabled={reextracting}
-          className="text-[var(--text-sm)] font-medium btn-primary-glass text-background px-4 py-2 rounded-xl transition-opacity disabled:opacity-50"
+          className="btn-primary-glass rounded-lg px-4 py-2 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {reextracting ? "Re-extracting figures..." : "Re-extract figures"}
+          {reextracting ? "Re-extracting figures…" : "Re-extract figures"}
         </button>
       </div>
     );
@@ -397,7 +376,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           <button
             type="button"
             onClick={() => setLightboxFig(selected)}
-            className="block w-full rounded-xl glass-subtle overflow-hidden cursor-zoom-in hover:bg-accent transition-colors focus:outline-none focus:ring-2 focus:ring-foreground/20"
+            className="block w-full cursor-zoom-in overflow-hidden rounded-lg border border-border/60 bg-card/20 transition-colors hover:bg-accent/40 focus:outline-none focus:ring-2 focus:ring-ring/40"
             title="Click to expand"
             aria-label="Expand figure"
           >
@@ -417,7 +396,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           {chat.length === 0 && !loading && (
             <button
               onClick={() => handleAnalyze(selected)}
-              className="w-full text-[var(--text-sm)] font-medium btn-primary-glass text-background px-4 py-2 rounded-xl transition-opacity"
+              className="btn-primary-glass w-full rounded-lg px-4 py-2 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               Analyze This Figure
             </button>
@@ -435,11 +414,13 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
                   </div>
                 ) : (
                   <div key={i} className="flex justify-start w-full">
-                    <div className="glass-subtle rounded-xl rounded-bl-sm px-3 py-2.5 max-w-[95%] w-full">
+                    <div className="w-full max-w-[95%] rounded-lg border border-border/60 bg-card/30 px-3 py-2.5">
                       {msg.streaming && !msg.text && (
                         <div className="space-y-2">
-                          <ProgressBar running={true} />
-                          <p className="text-[var(--text-xs)] text-muted-foreground animate-pulse">Analyzing figure...</p>
+                          <div className="w-full max-w-xs">
+                            <AnalysisProgress kind="search" />
+                          </div>
+                          <p className="text-[var(--text-xs)] text-muted-foreground motion-safe:animate-pulse">Analyzing figure…</p>
                         </div>
                       )}
                       {msg.text && (
@@ -459,10 +440,10 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
           {/* Loading indicator for initial send before stream starts */}
           {loading && chat.length > 0 && chat[chat.length - 1].role === "user" && (
-            <div className="flex justify-start w-full">
-              <div className="glass-subtle rounded-xl rounded-bl-sm px-3 py-2.5 w-full space-y-2">
-                <ProgressBar running={true} />
-                <p className="text-[var(--text-xs)] text-muted-foreground animate-pulse">Sending to AI...</p>
+            <div className="flex w-full justify-start">
+              <div className="w-full max-w-sm space-y-2 rounded-lg border border-border/60 bg-card/30 px-3 py-2.5">
+                <AnalysisProgress kind="search" />
+                <p className="text-[var(--text-xs)] text-muted-foreground motion-safe:animate-pulse">Sending to AI…</p>
               </div>
             </div>
           )}
@@ -485,7 +466,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
             <button
               onClick={handleAsk}
               disabled={!question.trim() || loading}
-              className="text-[var(--text-xs)] font-medium px-3 py-2 rounded-xl btn-primary-glass text-background transition-opacity disabled:opacity-30 shrink-0"
+              className="btn-primary-glass h-9 shrink-0 rounded-lg px-3 text-[var(--text-xs)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
             >
               Ask
             </button>
@@ -511,13 +492,13 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
             <button
               key={fig.id}
               onClick={() => setSelected(fig)}
-              className="group relative rounded-xl overflow-hidden bg-background border border-border hover:border-border-strong hover:shadow-sm transition-all ring-focus text-left"
+              className="group relative overflow-hidden rounded-lg border border-border/60 bg-card/20 text-left ring-focus transition-[border-color,box-shadow] motion-safe:duration-150 hover:border-border hover:shadow-sm"
             >
               <div className="aspect-[4/3] overflow-hidden bg-muted/30 relative">
                 <AuthImage
                   src={api.getFigureUrl(paperId, fig.id)}
                   alt={fig.caption || fig.id}
-                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                  className="h-full w-full object-cover"
                 />
                 {convoCount > 0 && (
                   <div className="absolute top-1.5 right-1.5 bg-foreground text-background text-[9px] font-semibold leading-none min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center shadow-sm">

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { getProgressStart } from "@/lib/analysisState";
 
-type ProgressKind = "preReading" | "assumptions" | "summary" | "selection" | "qa";
+type ProgressKind = "preReading" | "assumptions" | "summary" | "selection" | "qa" | "search";
 
 const HALF_LIFE: Record<ProgressKind, number> = {
   preReading: 10,
@@ -11,6 +11,7 @@ const HALF_LIFE: Record<ProgressKind, number> = {
   summary: 20,
   selection: 8,
   qa: 10,
+  search: 8,
 };
 
 export function AnalysisProgress({

@@ -7,6 +7,7 @@ import { Md } from "@/components/ui/Md";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionHeader } from "@/components/panel/SectionHeader";
 import {
   Accordion,
   AccordionContent,
@@ -17,6 +18,12 @@ import {
 interface PreReadingPanelProps {
   paperId: string;
 }
+
+const rowListClass =
+  "overflow-hidden rounded-lg border border-border/60 bg-card/30";
+
+const rowItemClass =
+  "border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out hover:bg-accent/40";
 
 export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
   const { preReading, setPreReading, preReadingLoading, setPreReadingLoading } = useStore();
@@ -46,9 +53,11 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
 
   if (preReadingLoading) {
     return (
-      <div className="flex flex-col items-center gap-3 py-8 justify-center animate-fade-in">
-        <AnalysisProgress kind="preReading" paperId={paperId} />
-        <p className="text-[var(--text-md)] text-muted-foreground">Analyzing paper...</p>
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-8 motion-safe:animate-fade-in">
+        <div className="w-full max-w-xs">
+          <AnalysisProgress kind="preReading" paperId={paperId} />
+        </div>
+        <p className="text-[var(--text-sm)] text-muted-foreground">Analyzing paper…</p>
       </div>
     );
   }
@@ -66,20 +75,28 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
   const { definitions, research_questions, prior_work, concepts } = preReading;
 
   return (
-    <div className="space-y-1 animate-fade-in">
+    <div className="space-y-1 motion-safe:animate-fade-in">
       <Accordion multiple defaultValue={[]}>
         {definitions.length > 0 && (
           <AccordionItem value="definitions" className="border-b-0">
-            <AccordionTrigger className="text-[var(--text-md)] font-semibold py-2.5 hover:no-underline">
-              <span>Definitions <span className="text-muted-foreground/50 font-normal ml-1">{definitions.length}</span></span>
+            <AccordionTrigger className="py-2.5 hover:no-underline">
+              <SectionHeader
+                className="mb-0"
+                title="Definitions"
+                count={definitions.length}
+              />
             </AccordionTrigger>
             <AccordionContent>
-              <div className="space-y-2 pb-2">
+              <div className={rowListClass}>
                 {definitions.map((d, i) => (
-                  <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
-                    <p className="font-medium text-[var(--text-md)] mb-0.5">{d.term}</p>
-                    <div className="text-[var(--text-sm)] text-muted-foreground"><Md>{d.definition}</Md></div>
-                    {d.source && <p className="text-[var(--text-xs)] text-muted-foreground/50 mt-1">Source: {d.source}</p>}
+                  <div key={i} className={rowItemClass}>
+                    <p className="mb-0.5 font-medium text-[var(--text-md)]">{d.term}</p>
+                    <div className="text-[var(--text-sm)] text-muted-foreground">
+                      <Md>{d.definition}</Md>
+                    </div>
+                    {d.source && (
+                      <p className="mt-1 text-[var(--text-xs)] text-muted-foreground/70">Source: {d.source}</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -89,15 +106,25 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
 
         {research_questions.length > 0 && (
           <AccordionItem value="questions" className="border-b-0">
-            <AccordionTrigger className="text-[var(--text-md)] font-semibold py-2.5 hover:no-underline">
-              <span>Research Questions <span className="text-muted-foreground/50 font-normal ml-1">{research_questions.length}</span></span>
+            <AccordionTrigger className="py-2.5 hover:no-underline">
+              <SectionHeader
+                className="mb-0"
+                title="Research questions"
+                count={research_questions.length}
+              />
             </AccordionTrigger>
             <AccordionContent>
-              <div className="space-y-2 pb-2">
+              <div className={rowListClass}>
                 {research_questions.map((q, i) => (
-                  <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
-                    <div className="text-[var(--text-md)]"><Md>{q.question}</Md></div>
-                    {q.context && <div className="text-[var(--text-xs)] text-muted-foreground/70 mt-1"><Md>{q.context}</Md></div>}
+                  <div key={i} className={rowItemClass}>
+                    <div className="text-[var(--text-md)]">
+                      <Md>{q.question}</Md>
+                    </div>
+                    {q.context && (
+                      <div className="mt-1 text-[var(--text-xs)] text-muted-foreground/80">
+                        <Md>{q.context}</Md>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -107,16 +134,26 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
 
         {concepts.length > 0 && (
           <AccordionItem value="concepts" className="border-b-0">
-            <AccordionTrigger className="text-[var(--text-md)] font-semibold py-2.5 hover:no-underline">
-              <span>Key Concepts <span className="text-muted-foreground/50 font-normal ml-1">{concepts.length}</span></span>
+            <AccordionTrigger className="py-2.5 hover:no-underline">
+              <SectionHeader
+                className="mb-0"
+                title="Key concepts"
+                count={concepts.length}
+              />
             </AccordionTrigger>
             <AccordionContent>
-              <div className="space-y-2 pb-2">
+              <div className={rowListClass}>
                 {concepts.map((c, i) => (
-                  <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
-                    <p className="font-medium text-[var(--text-md)] mb-0.5">{c.name}</p>
-                    <div className="text-[var(--text-sm)] text-muted-foreground"><Md>{c.description}</Md></div>
-                    {c.importance && <div className="text-[var(--text-xs)] text-muted-foreground/50 mt-1 italic"><Md>{c.importance}</Md></div>}
+                  <div key={i} className={rowItemClass}>
+                    <p className="mb-0.5 font-medium text-[var(--text-md)]">{c.name}</p>
+                    <div className="text-[var(--text-sm)] text-muted-foreground">
+                      <Md>{c.description}</Md>
+                    </div>
+                    {c.importance && (
+                      <div className="mt-1 text-[var(--text-xs)] italic text-muted-foreground/70">
+                        <Md>{c.importance}</Md>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -126,15 +163,21 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
 
         {prior_work.length > 0 && (
           <AccordionItem value="prior" className="border-b-0">
-            <AccordionTrigger className="text-[var(--text-md)] font-semibold py-2.5 hover:no-underline">
-              <span>Prior Work <span className="text-muted-foreground/50 font-normal ml-1">{prior_work.length}</span></span>
+            <AccordionTrigger className="py-2.5 hover:no-underline">
+              <SectionHeader
+                className="mb-0"
+                title="Prior work"
+                count={prior_work.length}
+              />
             </AccordionTrigger>
             <AccordionContent>
-              <div className="space-y-2 pb-2">
+              <div className={rowListClass}>
                 {prior_work.map((p, i) => (
-                  <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
-                    <p className="font-medium text-[var(--text-md)] mb-0.5">{p.title}</p>
-                    <div className="text-[var(--text-sm)] text-muted-foreground"><Md>{p.relevance}</Md></div>
+                  <div key={i} className={rowItemClass}>
+                    <p className="mb-0.5 font-medium text-[var(--text-md)]">{p.title}</p>
+                    <div className="text-[var(--text-sm)] text-muted-foreground">
+                      <Md>{p.relevance}</Md>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -145,8 +188,9 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
 
       <div className="pt-2">
         <button
+          type="button"
           onClick={handleAnalyze}
-          className="text-[var(--text-sm)] text-muted-foreground/60 hover:text-muted-foreground transition-colors font-medium"
+          className="text-[var(--text-xs)] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           Re-analyze
         </button>

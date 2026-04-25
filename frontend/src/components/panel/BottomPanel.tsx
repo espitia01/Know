@@ -30,13 +30,10 @@ const POSITION_LABEL: Record<PanelPosition, string> = {
   left: "Left",
 };
 
-// Shared tab style — underlined, in the spirit of Linear / Things /
-// Notion. We rely on the base TabsList `variant="line"` for the actual
-// underline geometry (it draws a hairline `::after` pseudo-element that
-// fades in on the active tab) and only override the text weight and
-// padding so the labels feel like section headings rather than pills.
+// Tab labels: compact weight + tracking; active state from data-active.
+// `::after` indicator is refined in globals.css under `.analysis-panel-tabs`.
 const TAB_STYLE =
-  "text-[var(--text-xs)] h-7 px-2.5 font-medium text-muted-foreground/70 hover:text-foreground data-active:text-foreground [&::after]:h-[1.5px] [&::after]:rounded-full";
+  "text-[var(--text-xs)] h-7 px-2.5 font-medium tracking-[0.01em] text-muted-foreground hover:text-foreground data-active:text-foreground";
 
 const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
   right: {
@@ -190,11 +187,11 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
     <Tabs
       value={effectiveTab}
       onValueChange={setActiveTab}
-      className="flex flex-col h-full"
+      className="analysis-panel-tabs flex h-full flex-col"
     >
-      <div className="shrink-0 flex items-center gap-1 px-3 h-[38px] border-b border-border/70 bg-background/60 backdrop-blur-md min-w-0">
-        <div className="overflow-x-auto scrollbar-hide min-w-0 flex-1">
-          <TabsList variant="line" className="h-8 gap-1 p-0 flex-nowrap inline-flex w-max">
+      <div className="flex h-[38px] min-w-0 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-3">
+        <div className="min-w-0 flex-1 overflow-x-auto scrollbar-hide">
+          <TabsList variant="line" className="inline-flex h-8 w-max max-w-full flex-nowrap gap-1 p-0">
             {showSelectionTab && (
               <TabsTrigger value="selection" className={TAB_STYLE} title={FEATURE_TOOLTIPS["Selection"]}>
                 Selection
@@ -221,7 +218,14 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
                   disabled={locked}
                 >
                   {locked && (
-                    <svg className="w-3 h-3 mr-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg
+                      className="mr-0.5 h-2.5 w-2.5 shrink-0 opacity-50"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={1.5}
+                      aria-hidden
+                    >
                       <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                     </svg>
                   )}
@@ -232,10 +236,17 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
             {hasMultiplePapers && canAccess(tier, "multi-qa") && (
               <TabsTrigger
                 value="compare"
-                className={TAB_STYLE}
+                className={`${TAB_STYLE} data-active:[&>svg]:opacity-100`}
                 title="Compare and ask questions across all papers in this session"
               >
-                <svg className="w-3 h-3 mr-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <svg
+                  className="mr-0.5 h-3 w-3 shrink-0 opacity-70"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                  aria-hidden
+                >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
                 </svg>
                 Compare
@@ -252,17 +263,32 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
             ref={menuButtonRef}
             type="button"
             onClick={() => setMenuOpen((v) => !v)}
-            className="p-1 rounded-md text-muted-foreground/70 hover:text-foreground hover:bg-accent/60 transition-colors data-open:bg-accent/60"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground data-open:bg-accent/60 data-open:[&_path]:text-foreground motion-safe:duration-150"
             data-open={menuOpen ? "" : undefined}
             title="Panel options — text size, pane position"
             aria-label="Panel options"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
           >
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
-              <circle cx="5"  cy="12" r="1.6" />
-              <circle cx="12" cy="12" r="1.6" />
-              <circle cx="19" cy="12" r="1.6" />
+            <svg
+              className="h-3.5 w-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <line x1="4" x2="4" y1="21" y2="14" />
+              <line x1="4" x2="4" y1="10" y2="3" />
+              <line x1="12" x2="12" y1="21" y2="12" />
+              <line x1="12" x2="12" y1="8" y2="3" />
+              <line x1="20" x2="20" y1="21" y2="16" />
+              <line x1="20" x2="20" y1="12" y2="3" />
+              <line x1="1" x2="7" y1="14" y2="14" />
+              <line x1="9" x2="15" y1="8" y2="8" />
+              <line x1="17" x2="23" y1="16" y2="16" />
             </svg>
           </button>
         </div>
@@ -275,7 +301,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
           style={{ position: "fixed", top: menuCoords.top, right: menuCoords.right, zIndex: 1000 }}
           className="w-56 rounded-xl border border-border bg-popover text-popover-foreground shadow-xl p-2 animate-fade-in"
         >
-          <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] uppercase tracking-wider font-semibold text-muted-foreground/70">
+          <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">
             Text size
           </div>
           <div className="flex items-center gap-1 px-1 pb-2">
@@ -313,7 +339,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
 
           <div className="h-px bg-border/70 mx-1 my-1" />
 
-          <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] uppercase tracking-wider font-semibold text-muted-foreground/70">
+          <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">
             Pane position
           </div>
           <button
@@ -337,9 +363,9 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
         document.body,
       )}
 
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="analysis-scroll-fade min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <div
-          className="px-5 py-5 max-w-3xl mx-auto w-full"
+          className="analysis-pane-v2 mx-auto min-h-dvh w-full max-w-3xl px-4 py-4 md:px-6 md:py-6"
           style={{ ["--analysis-font-scale" as string]: analysisFontScale }}
         >
           {showSelectionTab && mountedTabs.has("selection") && (

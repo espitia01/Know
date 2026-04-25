@@ -4,13 +4,21 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
+import { Badge } from "@/components/ui/badge";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionHeader } from "@/components/panel/SectionHeader";
 
 interface AssumptionsPanelProps {
   paperId: string;
 }
+
+const rowListClass =
+  "overflow-hidden rounded-lg border border-border/60 bg-card/30";
+
+const rowItemClass =
+  "border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out hover:bg-accent/40";
 
 export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
   const { assumptions, setAssumptions, assumptionsLoading, setAssumptionsLoading, paper } = useStore();
@@ -57,9 +65,11 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
 
   if (assumptionsLoading) {
     return (
-      <div className="flex flex-col items-center gap-3 py-8 justify-center animate-fade-in">
-        <AnalysisProgress kind="assumptions" paperId={paperId} />
-        <p className="text-[var(--text-md)] text-muted-foreground">Extracting assumptions…</p>
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-8 motion-safe:animate-fade-in">
+        <div className="w-full max-w-xs">
+          <AnalysisProgress kind="assumptions" paperId={paperId} />
+        </div>
+        <p className="text-[var(--text-sm)] text-muted-foreground">Extracting assumptions…</p>
       </div>
     );
   }
@@ -70,6 +80,18 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
         title={coolingDown ? "Assumptions need a short pause" : error ? "Assumption extraction did not return results" : "Extract assumptions"}
         body={coolingDown ? "The model did not find usable assumptions on the last attempt. Try again in a few minutes." : error || "Identify explicit and implicit assumptions in this paper."}
         cta={coolingDown ? undefined : { label: error ? "Try again" : "Extract Assumptions", onClick: handleExtract }}
+        secondaryAction={
+          !coolingDown
+            ? {
+                label: "Why didn't this work?",
+                onClick: () => {
+                  window.alert(
+                    "The model may miss assumptions in non-standard writing, very short sections, or when claims are only implied. Try again after a few minutes, or re-run after more of the paper has been processed.",
+                  );
+                },
+              }
+            : undefined
+        }
       />
     );
   }
@@ -78,21 +100,20 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
   const implicit = assumptions.filter((a) => a.type === "implicit");
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 motion-safe:animate-fade-in">
       {explicit.length > 0 && (
-        <section className="space-y-2">
-          <div className="flex items-baseline gap-2">
-            <h3 className="text-[var(--text-md)] font-semibold text-foreground">Explicit</h3>
-            <span className="text-[var(--text-xs)] text-muted-foreground/60 tabular-nums">{explicit.length}</span>
-          </div>
-          <div className="space-y-2">
+        <section>
+          <SectionHeader title="Explicit" count={explicit.length} />
+          <div className={rowListClass}>
             {explicit.map((a, i) => (
-              <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
-                <div className="text-[var(--text-md)] leading-relaxed"><Md>{a.statement}</Md></div>
+              <div key={i} className={rowItemClass}>
+                <div className="text-[var(--text-md)] leading-relaxed">
+                  <Md>{a.statement}</Md>
+                </div>
                 {a.section && (
-                  <span className="inline-block mt-1.5 text-[var(--text-xs)] text-muted-foreground/60 bg-muted px-2 py-0.5 rounded-full font-medium">
+                  <Badge variant="soft" className="mt-2">
                     {a.section}
-                  </span>
+                  </Badge>
                 )}
               </div>
             ))}
@@ -101,19 +122,23 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
       )}
 
       {implicit.length > 0 && (
-        <section className="space-y-2">
-          <div className="flex items-baseline gap-2">
-            <h3 className="text-[var(--text-md)] font-semibold text-foreground">Implicit</h3>
-            <span className="text-[var(--text-xs)] text-muted-foreground/60 tabular-nums">{implicit.length}</span>
-          </div>
-          <div className="space-y-2">
+        <section>
+          <SectionHeader title="Implicit" count={implicit.length} />
+          <div className={rowListClass}>
             {implicit.map((a, i) => (
-              <div key={i} className="rounded-xl glass-subtle border border-dashed border-border px-3.5 py-2.5">
-                <div className="text-[var(--text-md)] leading-relaxed"><Md>{a.statement}</Md></div>
+              <div key={i} className={rowItemClass}>
+                <div className="mb-1.5">
+                  <Badge variant="dot" className="font-medium normal-case">
+                    Implicit
+                  </Badge>
+                </div>
+                <div className="text-[var(--text-md)] leading-relaxed">
+                  <Md>{a.statement}</Md>
+                </div>
                 {a.section && (
-                  <span className="inline-block mt-1.5 text-[var(--text-xs)] text-muted-foreground/60 bg-muted px-2 py-0.5 rounded-full font-medium">
+                  <Badge variant="soft" className="mt-2">
                     {a.section}
-                  </span>
+                  </Badge>
                 )}
               </div>
             ))}
@@ -123,8 +148,9 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
 
       <div className="pt-1">
         <button
+          type="button"
           onClick={handleExtract}
-          className="text-[var(--text-xs)] font-medium text-muted-foreground/60 hover:text-foreground transition-colors"
+          className="text-[var(--text-xs)] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           Re-extract
         </button>

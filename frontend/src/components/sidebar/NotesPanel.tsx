@@ -4,9 +4,20 @@ import { useState, useRef } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Textarea } from "@/components/ui/textarea";
+import { SectionHeader } from "@/components/panel/SectionHeader";
 
 interface NotesPanelProps {
   paperId: string;
+}
+
+function formatNoteDate(ts: number) {
+  const d = new Date(ts * 1000);
+  const y = d.getFullYear();
+  const nowY = new Date().getFullYear();
+  if (y === nowY) {
+    return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(d);
+  }
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(d);
 }
 
 export function NotesPanel({ paperId }: NotesPanelProps) {
@@ -66,12 +77,6 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
     }
   };
 
-  const formatTime = (ts: number) => {
-    const d = new Date(ts * 1000);
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " " +
-      d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-  };
-
   return (
     <div className="space-y-3">
       <div className="space-y-2">
@@ -86,13 +91,14 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
           className="text-[var(--text-md)] resize-none"
         />
         <div className="flex items-center justify-between">
-          <p className="text-[var(--text-xs)] text-muted-foreground/40">Ctrl+Enter to save</p>
+          <p className="text-[var(--text-xs)] text-muted-foreground/80">Ctrl+Enter to save</p>
           <button
+            type="button"
             onClick={handleAdd}
             disabled={!input.trim() || saving}
-            className="text-[var(--text-sm)] font-medium btn-primary-glass text-background px-4 py-1 rounded-xl transition-opacity disabled:opacity-40"
+            className="btn-primary-glass h-9 rounded-lg px-4 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {saving ? "Saving..." : "Save Note"}
+            {saving ? "Saving…" : "Save Note"}
           </button>
         </div>
         {error && (
@@ -101,55 +107,76 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
       </div>
 
       {notes.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-[var(--text-sm)] font-semibold text-muted-foreground/70 uppercase tracking-widest">
-            Notes <span className="text-muted-foreground/40">{notes.length}</span>
-          </p>
-          {[...notes].reverse().map((note) => (
-            <div key={note.id} className="group rounded-xl glass-subtle px-3.5 py-2.5">
-              {editing === note.id ? (
-                <div className="space-y-2">
-                  <Textarea
-                    value={editText}
-                    onChange={(e) => setEditText(e.target.value)}
-                    rows={2}
-                    className="text-[var(--text-md)] resize-none"
-                    autoFocus
-                  />
-                  <div className="flex gap-2">
-                    <button onClick={() => handleUpdate(note.id)} className="text-[var(--text-xs)] font-medium text-foreground">Save</button>
-                    <button onClick={() => setEditing(null)} className="text-[var(--text-xs)] text-muted-foreground">Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <p className="text-[var(--text-md)] leading-relaxed whitespace-pre-wrap">{note.text}</p>
-                  <div className="flex items-center justify-between mt-1.5">
-                    <span className="text-[var(--text-xs)] text-muted-foreground/40">{formatTime(note.created_at)}</span>
-                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div>
+          <SectionHeader title="Notes" count={notes.length} />
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-card/30">
+            {[...notes].reverse().map((note) => (
+              <div
+                key={note.id}
+                className="analysis-note-row group/note border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40"
+              >
+                {editing === note.id ? (
+                  <div className="space-y-2">
+                    <Textarea
+                      value={editText}
+                      onChange={(e) => setEditText(e.target.value)}
+                      rows={2}
+                      className="text-[var(--text-md)] resize-none"
+                      autoFocus
+                    />
+                    <div className="flex gap-2">
                       <button
-                        onClick={() => { setEditing(note.id); setEditText(note.text); }}
-                        className="text-[var(--text-xs)] text-muted-foreground hover:text-foreground transition-colors"
+                        type="button"
+                        onClick={() => handleUpdate(note.id)}
+                        className="text-[var(--text-xs)] font-medium text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                       >
-                        Edit
+                        Save
                       </button>
                       <button
-                        onClick={() => handleDelete(note.id)}
-                        className="text-[var(--text-xs)] text-muted-foreground hover:text-destructive transition-colors"
+                        type="button"
+                        onClick={() => setEditing(null)}
+                        className="text-[var(--text-xs)] text-muted-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                       >
-                        Delete
+                        Cancel
                       </button>
                     </div>
                   </div>
-                </>
-              )}
-            </div>
-          ))}
+                ) : (
+                  <>
+                    <p className="whitespace-pre-wrap text-[var(--text-md)] leading-relaxed">
+                      {note.text}
+                    </p>
+                    <div className="mt-1.5 flex items-center justify-between">
+                      <span className="font-mono text-[0.7rem] font-light tabular-nums text-muted-foreground/70">
+                        {formatNoteDate(note.created_at)}
+                      </span>
+                      <div className="analysis-note-actions flex gap-2 opacity-100 motion-safe:transition-opacity">
+                        <button
+                          type="button"
+                          onClick={() => { setEditing(note.id); setEditText(note.text); }}
+                          className="text-[var(--text-xs)] font-medium text-muted-foreground hover:text-foreground focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(note.id)}
+                          className="text-[var(--text-xs)] font-medium text-muted-foreground hover:text-destructive focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       {notes.length === 0 && (
-        <p className="text-center text-[var(--text-md)] text-muted-foreground/50 py-4">
+        <p className="py-4 text-center text-[var(--text-md)] text-muted-foreground/80">
           No notes yet. Jot down thoughts as you read.
         </p>
       )}

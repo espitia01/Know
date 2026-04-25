@@ -6,6 +6,7 @@ import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionHeader } from "@/components/panel/SectionHeader";
 import {
   activeSummaryStreams as activeStreams,
   clearProgressStart,
@@ -151,10 +152,11 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
 
   if (summaryLoading && !effectiveSummary) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 gap-3">
-        <AnalysisProgress kind="summary" paperId={paperId} />
-        <p className="text-[var(--text-md)] text-muted-foreground">Generating detailed summary...</p>
-        <p className="text-[var(--text-xs)] text-muted-foreground/50">This may take 30-60 seconds</p>
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-12">
+        <div className="w-full max-w-xs">
+          <AnalysisProgress kind="summary" paperId={paperId} />
+        </div>
+        <p className="text-[var(--text-sm)] text-muted-foreground">Generating detailed summary…</p>
       </div>
     );
   }
@@ -163,7 +165,11 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     return (
       <EmptyState
         title={fetchError ? "Failed to generate summary" : "Summary not available yet"}
-        body={fetchError || "Generate a detailed overview, contributions, methods, results, and limitations."}
+        body={
+          fetchError
+            ? fetchError
+            : "Generate a detailed overview, contributions, methods, results, and limitations. Generation often takes 30–60 seconds once started."
+        }
         cta={{
           label: fetchError ? "Retry" : "Generate Summary",
           onClick: () => {
@@ -181,27 +187,35 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   const s = effectiveSummary;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {s.overview && (
         <section>
-          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Overview</h3>
-          <Md>{s.overview}</Md>
+          <SectionHeader title="Overview" />
+          <div className="prose prose-sm max-w-none leading-relaxed dark:prose-invert">
+            <Md>{s.overview}</Md>
+          </div>
         </section>
       )}
       {s.motivation && (
         <section>
-          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Motivation</h3>
-          <Md>{s.motivation}</Md>
+          <SectionHeader title="Motivation" />
+          <div className="prose prose-sm max-w-none leading-relaxed dark:prose-invert">
+            <Md>{s.motivation}</Md>
+          </div>
         </section>
       )}
       {s.key_contributions?.length > 0 && (
         <section>
-          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Key Contributions</h3>
+          <SectionHeader title="Key contributions" count={s.key_contributions.length} />
           <ul className="space-y-2">
             {s.key_contributions.map((c, i) => (
               <li key={i} className="flex gap-2">
-                <span className="text-[var(--text-sm)] text-muted-foreground/40 shrink-0 mt-0.5">{i + 1}.</span>
-                <Md>{c}</Md>
+                <span className="mt-0.5 shrink-0 text-[var(--text-sm)] text-muted-foreground/50">
+                  {i + 1}.
+                </span>
+                <div className="prose prose-sm min-w-0 max-w-none leading-relaxed dark:prose-invert">
+                  <Md>{c}</Md>
+                </div>
               </li>
             ))}
           </ul>
@@ -209,30 +223,43 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.methodology && (
         <section>
-          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Methodology</h3>
-          <Md>{s.methodology}</Md>
+          <SectionHeader title="Methodology" />
+          <div className="prose prose-sm max-w-none leading-relaxed dark:prose-invert">
+            <Md>{s.methodology}</Md>
+          </div>
         </section>
       )}
       {s.main_results && (
         <section>
-          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Main Results</h3>
-          <Md>{s.main_results}</Md>
+          <SectionHeader title="Main results" />
+          <div className="prose prose-sm max-w-none leading-relaxed dark:prose-invert">
+            <Md>{s.main_results}</Md>
+          </div>
         </section>
       )}
       {s.discussion && (
         <section>
-          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Discussion</h3>
-          <Md>{s.discussion}</Md>
+          <SectionHeader title="Discussion" />
+          <div className="prose prose-sm max-w-none leading-relaxed dark:prose-invert">
+            <Md>{s.discussion}</Md>
+          </div>
         </section>
       )}
       {s.key_equations?.length > 0 && (
         <section>
-          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Key Equations</h3>
-          <div className="space-y-2">
+          <SectionHeader title="Key equations" count={s.key_equations.length} />
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-card/30">
             {s.key_equations.map((eq, i) => (
-              <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
-                <Md>{eq.equation}</Md>
-                <div className="text-[var(--text-sm)] text-muted-foreground mt-1"><Md>{eq.meaning}</Md></div>
+              <div
+                key={i}
+                className="border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out hover:bg-accent/40"
+              >
+                <div className="prose prose-sm max-w-none dark:prose-invert">
+                  <Md>{eq.equation}</Md>
+                </div>
+                <div className="mt-1.5 text-[var(--text-sm)] text-muted-foreground">
+                  <Md>{eq.meaning}</Md>
+                </div>
               </div>
             ))}
           </div>
@@ -240,12 +267,17 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.key_figures_and_tables?.length > 0 && (
         <section>
-          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Key Figures & Tables</h3>
-          <div className="space-y-2">
+          <SectionHeader title="Key figures & tables" count={s.key_figures_and_tables.length} />
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-card/30">
             {s.key_figures_and_tables.map((fig, i) => (
-              <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
-                <span className="text-[var(--text-sm)] font-semibold">{fig.id}</span>
-                <div className="text-[var(--text-sm)] text-muted-foreground mt-0.5"><Md>{fig.description}</Md></div>
+              <div
+                key={i}
+                className="border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out hover:bg-accent/40"
+              >
+                <p className="text-[var(--text-sm)] font-medium text-foreground">{fig.id}</p>
+                <div className="mt-0.5 text-[var(--text-sm)] text-muted-foreground">
+                  <Md>{fig.description}</Md>
+                </div>
               </div>
             ))}
           </div>
@@ -253,12 +285,14 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.limitations?.length > 0 && (
         <section>
-          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Limitations</h3>
+          <SectionHeader title="Limitations" count={s.limitations.length} />
           <ul className="space-y-1">
             {s.limitations.map((l, i) => (
               <li key={i} className="flex gap-2">
-                <span className="text-[var(--text-sm)] text-muted-foreground/40 shrink-0">•</span>
-                <Md>{l}</Md>
+                <span className="shrink-0 text-[var(--text-sm)] text-muted-foreground/50">•</span>
+                <div className="prose prose-sm min-w-0 max-w-none leading-relaxed dark:prose-invert">
+                  <Md>{l}</Md>
+                </div>
               </li>
             ))}
           </ul>
@@ -266,8 +300,10 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.future_work && (
         <section>
-          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Future Work</h3>
-          <Md>{s.future_work}</Md>
+          <SectionHeader title="Future work" />
+          <div className="prose prose-sm max-w-none leading-relaxed dark:prose-invert">
+            <Md>{s.future_work}</Md>
+          </div>
         </section>
       )}
     </div>
