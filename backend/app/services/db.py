@@ -219,6 +219,40 @@ def update_cached_analysis(paper_id: str, user_id: str, cached_analysis: dict) -
         logger.error("Failed to update cached_analysis: %s", e)
 
 
+def append_selection(paper_id: str, user_id: str, entry: dict) -> bool:
+    """Atomically append a selection entry to cached_analysis.selections."""
+    client = get_db()
+    if not client:
+        return False
+    try:
+        res = client.rpc("append_selection", {
+            "p_paper_id": paper_id,
+            "p_user_id": user_id,
+            "p_entry": entry,
+        }).execute()
+        return bool(res and res.data)
+    except Exception as e:
+        logger.error("append_selection RPC failed for %s/%s: %s", user_id, paper_id, e)
+        return False
+
+
+def append_qa_session(paper_id: str, user_id: str, entry: dict) -> bool:
+    """Atomically append a Q&A session to cached_analysis.qa_sessions."""
+    client = get_db()
+    if not client:
+        return False
+    try:
+        res = client.rpc("append_qa_session", {
+            "p_paper_id": paper_id,
+            "p_user_id": user_id,
+            "p_entry": entry,
+        }).execute()
+        return bool(res and res.data)
+    except Exception as e:
+        logger.error("append_qa_session RPC failed for %s/%s: %s", user_id, paper_id, e)
+        return False
+
+
 MAX_LIST_LIMIT = 500
 
 

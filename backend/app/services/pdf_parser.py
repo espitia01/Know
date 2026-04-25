@@ -6,6 +6,8 @@ import json
 import logging
 import re
 import threading
+import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -47,6 +49,10 @@ def append_capped(paper_cache: dict, key: str, item, limit: int = MAX_CACHED_ITE
 
 _paper_locks: dict[str, threading.Lock] = {}
 _locks_lock = threading.Lock()
+_paper_cache: "OrderedDict[tuple[str, str], tuple[float, ParsedPaper]]" = OrderedDict()
+_paper_cache_lock = threading.Lock()
+PAPER_CACHE_TTL_SECONDS = 60.0
+PAPER_CACHE_MAX = 256
 
 
 def _get_paper_lock(paper_id: str) -> threading.Lock:
@@ -59,8 +65,17 @@ def _get_paper_lock(paper_id: str) -> threading.Lock:
 def _forget_paper_lock(paper_id: str) -> None:
     """Drop the lock for a paper that no longer exists. Prevents the lock
     registry from growing unbounded over a worker's lifetime."""
+    invalidate_paper_cache(paper_id)
     with _locks_lock:
         _paper_locks.pop(paper_id, None)
+
+
+def invalidate_paper_cache(paper_id: str, user_id: str | None = None) -> None:
+    """Drop process-local cached ParsedPaper objects for a paper."""
+    with _paper_cache_lock:
+        for key in list(_paper_cache.keys()):
+            if key[0] == paper_id and (user_id is None or key[1] == (user_id or "")):
+                _paper_cache.pop(key, None)
 
 
 @dataclass
@@ -506,6 +521,7 @@ def save_paper(paper: ParsedPaper, user_id: str | None = None) -> None:
     meta_path = paper_dir / "paper.json"
     with _get_paper_lock(paper.id):
         meta_path.write_text(paper.model_dump_json(indent=2))
+    invalidate_paper_cache(paper.id, user_id)
 
     if user_id:
         from .db import save_paper_meta
@@ -536,6 +552,7 @@ def mutate_paper(
         meta_path = settings.papers_dir / paper.id / "paper.json"
         meta_path.parent.mkdir(parents=True, exist_ok=True)
         meta_path.write_text(paper.model_dump_json(indent=2))
+        invalidate_paper_cache(paper.id, user_id)
 
     # DB persistence is best done outside the per-paper filesystem lock
     # because it issues a network call, but before the caller observes the
@@ -543,6 +560,22 @@ def mutate_paper(
     from .db import save_paper_meta
     save_paper_meta(paper.model_dump(), user_id)
     return paper
+
+
+def append_cached_analysis_local(
+    paper_id: str, user_id: str, key: str, entry,
+) -> None:
+    """Mirror an atomic DB append into the local paper.json cache only."""
+    lock = _get_paper_lock(paper_id)
+    with lock:
+        paper = _load_paper_locked(paper_id, user_id)
+        if paper is None:
+            return
+        append_capped(paper.cached_analysis, key, entry)
+        meta_path = settings.papers_dir / paper.id / "paper.json"
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        meta_path.write_text(paper.model_dump_json(indent=2))
+        invalidate_paper_cache(paper.id, user_id)
 
 
 def _load_paper_locked(paper_id: str, user_id: str | None) -> ParsedPaper | None:
@@ -584,8 +617,25 @@ def _load_paper_locked(paper_id: str, user_id: str | None) -> ParsedPaper | None
 
 def get_paper(paper_id: str, user_id: str | None = None) -> ParsedPaper | None:
     """Load a previously parsed paper by ID (from disk, with Supabase fallback)."""
+    cache_key = (paper_id, user_id or "")
+    now = time.time()
+    with _paper_cache_lock:
+        cached = _paper_cache.get(cache_key)
+        if cached and now - cached[0] < PAPER_CACHE_TTL_SECONDS:
+            _paper_cache.move_to_end(cache_key)
+            return cached[1].model_copy(deep=True)
+        if cached:
+            _paper_cache.pop(cache_key, None)
     with _get_paper_lock(paper_id):
-        return _load_paper_locked(paper_id, user_id)
+        paper = _load_paper_locked(paper_id, user_id)
+    if paper is not None:
+        with _paper_cache_lock:
+            _paper_cache[cache_key] = (now, paper.model_copy(deep=True))
+            _paper_cache.move_to_end(cache_key)
+            while len(_paper_cache) > PAPER_CACHE_MAX:
+                _paper_cache.popitem(last=False)
+        return paper.model_copy(deep=True)
+    return None
 
 
 def get_figure_path(paper_id: str, fig_id: str) -> Path | None:

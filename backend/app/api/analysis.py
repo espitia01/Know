@@ -56,10 +56,13 @@ from ..services.llm import (
 )
 from ..services.pdf_parser import (
     append_capped,
+    append_cached_analysis_local,
     get_paper,
     get_figure_path,
     mutate_paper,
 )
+from ..services.db import append_selection as append_selection_db
+from ..services.db import append_qa_session as append_qa_session_db
 from ..auth import require_auth
 from ..gating import (
     check_feature_access,
@@ -147,9 +150,14 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
             # server analyzed, and persist the user's short follow-up prompt
             # separately so hydration does not rewrite threaded entries.
             result["question"] = question
-        def _apply(p):
-            append_capped(p.cached_analysis, "selections", result)
-        mutate_paper(paper_id, user_id, _apply)
+        # Per audit §7.1: append this JSONB item atomically in Postgres
+        # instead of read-modify-writing the whole paper row.
+        if not append_selection_db(paper_id, user_id, result):
+            def _apply(p):
+                append_capped(p.cached_analysis, "selections", result)
+            mutate_paper(paper_id, user_id, _apply)
+        else:
+            append_cached_analysis_local(paper_id, user_id, "selections", result)
         return result
     except ValueError as exc:
         release_usage(token)
@@ -277,10 +285,13 @@ async def selection_analysis_stream(
             if question:
                 result["question"] = question
 
-            def _apply(p):
-                append_capped(p.cached_analysis, "selections", result)
             try:
-                mutate_paper(paper_id, user_id, _apply)
+                if append_selection_db(paper_id, user_id, result):
+                    append_cached_analysis_local(paper_id, user_id, "selections", result)
+                else:
+                    def _apply(p):
+                        append_capped(p.cached_analysis, "selections", result)
+                    mutate_paper(paper_id, user_id, _apply)
             except Exception:
                 logger.exception("Failed to persist selection stream for %s", paper_id)
             completed = True
@@ -530,9 +541,13 @@ async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)
             resp = QAResponse(**result)
         else:
             resp = QAResponse(items=[QAItem(**item) for item in result])
-        def _apply(p):
-            append_capped(p.cached_analysis, "qa_sessions", resp.model_dump())
-        mutate_paper(paper_id, user_id, _apply)
+        payload = resp.model_dump()
+        if not append_qa_session_db(paper_id, user_id, payload):
+            def _apply(p):
+                append_capped(p.cached_analysis, "qa_sessions", payload)
+            mutate_paper(paper_id, user_id, _apply)
+        else:
+            append_cached_analysis_local(paper_id, user_id, "qa_sessions", payload)
         return resp
     except ValueError as exc:
         release_usage(token)

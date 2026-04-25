@@ -7,7 +7,7 @@ import shutil
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request, Depends
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from ..config import settings
 from ..models.schemas import ParsedPaper
@@ -92,7 +92,10 @@ async def upload_paper(request: Request, user_id: str = Depends(require_auth)):
         await loop.run_in_executor(None, lambda: pdf_path.write_bytes(content))
 
         try:
-            raw = extract_pdf(pdf_path, paper_id)
+            # Per audit §7.3: PDF parsing is CPU/disk heavy. Keep the
+            # event loop free so health checks and other users' requests
+            # are not blocked behind a large upload.
+            raw = await loop.run_in_executor(None, extract_pdf, pdf_path, paper_id)
         except Exception:
             pdf_path.unlink(missing_ok=True)
             raise HTTPException(status_code=422, detail="Failed to parse PDF. Please try a different file.")
@@ -164,6 +167,10 @@ async def get_paper_pdf(paper_id: str, user_id: str = Depends(require_auth)):
     """Serve the raw PDF file for the in-browser viewer."""
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
+    signed = cloud_storage.create_signed_url(user_id, f"{paper_id}.pdf", 600)
+    if signed:
+        return RedirectResponse(signed, status_code=302)
+
     pdf_path = settings.papers_dir / f"{paper_id}.pdf"
 
     if pdf_path.exists():
@@ -185,6 +192,10 @@ async def get_figure(paper_id: str, fig_id: str, user_id: str = Depends(require_
     _validate_id(paper_id, "paper_id")
     _validate_id(fig_id, "fig_id")
     _verify_paper_owner(paper_id, user_id)
+
+    signed = cloud_storage.create_signed_url(user_id, f"{paper_id}/figures/{fig_id}.png", 600)
+    if signed:
+        return RedirectResponse(signed, status_code=302)
 
     fig_path = get_figure_path(paper_id, fig_id)
     if fig_path:

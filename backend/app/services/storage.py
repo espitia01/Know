@@ -56,6 +56,23 @@ def download_file(user_id: str, path: str) -> bytes | None:
         return None
 
 
+def create_signed_url(user_id: str, path: str, expires_in: int = 600) -> str | None:
+    """Create a short-lived signed URL for a private Supabase object."""
+    bucket = _get_bucket()
+    if not bucket:
+        return None
+
+    full_path = f"{user_id}/{path}"
+    try:
+        res = bucket.create_signed_url(full_path, expires_in)
+        if isinstance(res, dict):
+            return res.get("signedURL") or res.get("signed_url")
+        return None
+    except Exception as e:
+        logger.debug("Storage signed URL failed for %s: %s", full_path, e)
+        return None
+
+
 def delete_paper_files(user_id: str, paper_id: str) -> None:
     """Delete the PDF and all figures for a paper from Supabase Storage."""
     bucket = _get_bucket()
