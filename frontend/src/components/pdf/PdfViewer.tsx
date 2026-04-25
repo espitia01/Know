@@ -94,22 +94,24 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, retryKey, cachedBlobUrl]);
 
-  // Background-download the full PDF after the first paint so the next
-  // time the user opens this paper it loads from the in-memory cache.
-  // We don't block on this — the visible render is already using the
-  // range-request URL above.
+  // Background-download the full PDF only after the reader has been open
+  // long enough to show intent. This avoids fighting PDF.js range requests
+  // during quick paper checks and skips very large PDFs entirely.
   useEffect(() => {
     if (!url || cachedBlobUrl) return;
     let cancelled = false;
     const controller = new AbortController();
-    // Small delay so we don't compete with PDF.js' own range requests
-    // for the first render — just priming the cache for next time.
     const timer = setTimeout(() => {
-      fetch(url, {
-        headers: getAuthHeadersSync(),
-        signal: controller.signal,
-      })
-        .then((r) => (r.ok ? r.blob() : null))
+      const headers = getAuthHeadersSync();
+      fetch(url, { method: "HEAD", headers, signal: controller.signal })
+        .then((head) => {
+          const size = Number(head.headers.get("content-length") || 0);
+          if (head.ok && size > 25 * 1024 * 1024) return null;
+          // Per F-SPEED: only prefetch once the user settles in, and avoid
+          // caching huge PDFs that would consume memory/bandwidth.
+          return fetch(url, { headers, signal: controller.signal });
+        })
+        .then((r) => (r && r.ok ? r.blob() : null))
         .then((blob) => {
           if (!blob || cancelled) return;
           const objUrl = URL.createObjectURL(blob);
@@ -126,7 +128,7 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
           }
         })
         .catch(() => { /* background prefetch — non-fatal */ });
-    }, 800);
+    }, 3000);
     return () => {
       cancelled = true;
       controller.abort();

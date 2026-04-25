@@ -5,12 +5,19 @@ import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import Link from "next/link";
-import { Md as SafeMd } from "@/components/ui/Md";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import type { PaperSummary } from "@/lib/api";
 import { FEATURE_TOOLTIPS } from "@/lib/tooltips";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+const SafeMd = dynamic(
+  () => import("@/components/ui/Md").then((m) => m.Md),
+  {
+    ssr: false,
+    loading: () => <span className="opacity-60">…</span>,
+  },
+);
 
 const PdfViewer = dynamic(
   () => import("@/components/pdf/PdfViewer").then((m) => m.PdfViewer),

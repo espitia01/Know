@@ -3,12 +3,26 @@
 from __future__ import annotations
 
 import logging
+import time
+from collections import OrderedDict
 from functools import lru_cache
 from typing import Any
 
 from ..config import settings
 
 logger = logging.getLogger(__name__)
+_list_papers_cache: "OrderedDict[tuple[str, int, int], tuple[float, list[dict]]]" = OrderedDict()
+_LIST_PAPERS_TTL_SECONDS = 30.0
+_LIST_PAPERS_CACHE_MAX = 256
+
+
+def _clear_list_papers_cache(user_id: str | None = None) -> None:
+    if not user_id:
+        _list_papers_cache.clear()
+        return
+    for key in list(_list_papers_cache.keys()):
+        if key[0] == user_id:
+            _list_papers_cache.pop(key, None)
 
 
 @lru_cache(maxsize=1)
@@ -78,6 +92,7 @@ def update_user_tier(user_id: str, tier: str) -> None:
     if not client:
         return
     client.table("users").update({"tier": tier}).eq("user_id", user_id).execute()
+    _clear_list_papers_cache(user_id)
 
 
 def update_user_stripe_customer(user_id: str, customer_id: str) -> None:
@@ -173,6 +188,7 @@ def save_paper_meta(paper_dict: dict, user_id: str) -> None:
             client.table("papers").upsert(row, on_conflict="id").execute()
         except Exception as e:
             logger.error("save_paper_meta failed: %s", e)
+    _clear_list_papers_cache(user_id)
 
 
 def get_paper_meta(paper_id: str, user_id: str) -> dict | None:
@@ -274,6 +290,14 @@ def list_papers_meta(
 
     limit = max(1, min(int(limit or MAX_LIST_LIMIT), MAX_LIST_LIMIT))
     offset = max(0, int(offset or 0))
+    cache_key = (user_id, limit, offset)
+    now = time.time()
+    cached = _list_papers_cache.get(cache_key)
+    if cached and now - cached[0] < _LIST_PAPERS_TTL_SECONDS:
+        _list_papers_cache.move_to_end(cache_key)
+        return [dict(r) for r in cached[1]]
+    if cached:
+        _list_papers_cache.pop(cache_key, None)
 
     try:
         res = (
@@ -291,6 +315,12 @@ def list_papers_meta(
     for r in rows:
         notes = r.get("notes") or []
         r["notes_count"] = len(notes) if isinstance(notes, list) else 0
+    # Per F-SPEED: library/sidebar listings are hit repeatedly during
+    # navigation; a short per-user TTL avoids redundant Supabase reads.
+    _list_papers_cache[cache_key] = (now, [dict(r) for r in rows])
+    _list_papers_cache.move_to_end(cache_key)
+    while len(_list_papers_cache) > _LIST_PAPERS_CACHE_MAX:
+        _list_papers_cache.popitem(last=False)
     return rows
 
 
@@ -302,6 +332,7 @@ def delete_paper_meta(paper_id: str, user_id: str) -> None:
     if not client:
         return
     client.table("papers").delete().eq("id", paper_id).eq("user_id", user_id).execute()
+    _clear_list_papers_cache(user_id)
     try:
         remove_paper_from_workspaces(paper_id, user_id)
     except Exception as e:
