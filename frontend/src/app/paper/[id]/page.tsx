@@ -909,15 +909,17 @@ function PaperContent() {
   const handleAddPaper = useCallback((id: string, title: string) => {
     // Register the paper in the multi-paper session tab bar…
     addSessionPaper({ id, title });
-    setShowAddPaper(false);
     // …and open it. Previously we silently added it to the session
     // without navigating, which made uploads look like they had failed
     // because the reader was still showing the old paper. Switch to the
     // new paper explicitly unless the user is already looking at it
     // (idempotent — `handleSwitchPaper` no-ops when id === activePaperId).
     if (id !== activePaperId) {
+      // Per F-UPLOAD-LAG: make navigation the first visible response to a
+      // completed upload; the popover can close after the route handoff.
       handleSwitchPaper(id);
     }
+    setShowAddPaper(false);
   }, [addSessionPaper, activePaperId, handleSwitchPaper]);
 
   const handleRemoveSessionPaper = useCallback((id: string) => {

@@ -6,7 +6,7 @@ import re
 import shutil
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Depends
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from ..config import settings
@@ -32,6 +32,27 @@ _SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
+def _mirror_upload_to_storage(user_id: str, paper_id: str, content: bytes) -> None:
+    """Best-effort mirror of uploaded PDF and extracted figure PNGs."""
+    try:
+        cloud_storage.upload_file(user_id, f"{paper_id}.pdf", content, "application/pdf")
+        figures_dir = settings.papers_dir / paper_id / "figures"
+        if figures_dir.exists():
+            for fig_file in figures_dir.iterdir():
+                if fig_file.suffix == ".png":
+                    cloud_storage.upload_file(
+                        user_id,
+                        f"{paper_id}/figures/{fig_file.name}",
+                        fig_file.read_bytes(),
+                        "image/png",
+                    )
+    except Exception:
+        # Per F-UPLOAD-LAG: storage mirroring must never turn a successful
+        # local parse/save into a failed upload response.
+        import logging
+        logging.getLogger(__name__).exception("Storage mirror failed for paper %s", paper_id)
+
+
 def _validate_id(value: str, name: str = "ID") -> str:
     """Reject IDs containing path traversal characters."""
     if not value or not _SAFE_ID_RE.match(value):
@@ -50,7 +71,11 @@ def _verify_paper_owner(paper_id: str, user_id: str) -> None:
 
 
 @router.post("/upload", response_model=ParsedPaper)
-async def upload_paper(request: Request, user_id: str = Depends(require_auth)):
+async def upload_paper(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(require_auth),
+):
     """Upload a new paper.
 
     ``check_paper_limit`` atomically reserves a slot in ``users.paper_count``
@@ -101,7 +126,12 @@ async def upload_paper(request: Request, user_id: str = Depends(require_auth)):
             raise HTTPException(status_code=422, detail="Failed to parse PDF. Please try a different file.")
 
         try:
-            meta = await extract_metadata(raw.raw_text, user_id=user_id)
+            # Per F-UPLOAD-LAG: metadata is nice-to-have for display, but a
+            # slow upstream model should not keep the reader closed.
+            meta = await asyncio.wait_for(
+                extract_metadata(raw.raw_text, user_id=user_id),
+                timeout=15,
+            )
         except Exception:
             meta = {"title": "", "authors": []}
 
@@ -115,17 +145,7 @@ async def upload_paper(request: Request, user_id: str = Depends(require_auth)):
 
         save_paper(paper, user_id=user_id)
 
-        cloud_storage.upload_file(user_id, f"{paper_id}.pdf", content, "application/pdf")
-        figures_dir = settings.papers_dir / paper_id / "figures"
-        if figures_dir.exists():
-            for fig_file in figures_dir.iterdir():
-                if fig_file.suffix == ".png":
-                    cloud_storage.upload_file(
-                        user_id,
-                        f"{paper_id}/figures/{fig_file.name}",
-                        fig_file.read_bytes(),
-                        "image/png",
-                    )
+        background_tasks.add_task(_mirror_upload_to_storage, user_id, paper_id, content)
 
         slot_reserved = False
         return paper
