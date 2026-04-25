@@ -1072,6 +1072,23 @@ body::before {
   transform-origin: center bottom;
 }
 
+/* Tab strip (narrow side panes): visible thin horizontal scrollbar so overflow
+   is discoverable; content still uses touch-pan-x / wheel to scroll. */
+.analysis-tab-strip-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--border), transparent 30%) transparent;
+}
+.analysis-tab-strip-scroll::-webkit-scrollbar {
+  height: 5px;
+}
+.analysis-tab-strip-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.analysis-tab-strip-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--border), var(--muted-foreground) 15%);
+  border-radius: 999px;
+}
+
 /* Scrollport: top edge soft fade of content. */
 .analysis-scroll-fade {
   -webkit-mask-image: linear-gradient(

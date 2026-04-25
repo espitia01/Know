@@ -32,8 +32,10 @@ const POSITION_LABEL: Record<PanelPosition, string> = {
 
 // Tab labels: compact weight + tracking; active state from data-active.
 // `::after` indicator is refined in globals.css under `.analysis-panel-tabs`.
+// `flex-none shrink-0` overrides TabsTrigger’s default `flex-1` so many tabs
+// don’t compress in a narrow right/left column — the row scrolls instead.
 const TAB_STYLE =
-  "text-[var(--text-xs)] h-7 px-2.5 font-medium tracking-[0.01em] text-muted-foreground hover:text-foreground data-active:text-foreground";
+  "shrink-0 flex-none text-[var(--text-xs)] h-7 px-2.5 font-medium tracking-[0.01em] text-muted-foreground hover:text-foreground data-active:text-foreground";
 
 const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
   right: {
@@ -190,8 +192,14 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       className="analysis-panel-tabs flex h-full flex-col"
     >
       <div className="flex h-[38px] min-w-0 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-3">
-        <div className="min-w-0 flex-1 overflow-x-auto scrollbar-hide">
-          <TabsList variant="line" className="inline-flex h-8 w-max max-w-full flex-nowrap gap-1 p-0">
+        {/* min-w-0 + overflow-x-auto: side panels stay narrow; tab row scrolls
+            horizontally. Tab triggers must stay flex-none (see TAB_STYLE) or
+            labels collapse. Light scrollbar so the strip is discoverable. */}
+        <div className="min-h-0 min-w-0 flex-1 touch-pan-x overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-gutter:stable] analysis-tab-strip-scroll">
+          <TabsList
+            variant="line"
+            className="inline-flex h-8 w-max flex-nowrap justify-start gap-1 p-0"
+          >
             {showSelectionTab && (
               <TabsTrigger value="selection" className={TAB_STYLE} title={FEATURE_TOOLTIPS["Selection"]}>
                 Selection
