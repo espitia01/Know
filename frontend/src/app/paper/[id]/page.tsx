@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import Image from "next/image";
 import { UserButton } from "@clerk/nextjs";
 import { useShallow } from "zustand/react/shallow";
-import { api, type SelectionAnalysisResult, type PaperListEntry } from "@/lib/api";
+import { api, type SelectionAnalysisResult, type PaperListEntry, type ParsedPaper } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { selectionKey } from "@/lib/selectionActions";
 import { SelectionToolbar, type SelectionAction } from "@/components/pdf/SelectionToolbar";
@@ -46,6 +46,48 @@ const MIN_BOTTOM = 180;
 const MAX_BOTTOM = 500;
 
 const POSITIONS: PanelPosition[] = ["right", "bottom", "left"];
+
+function mergeCachedAnalysis(current: ParsedPaper, previous?: ParsedPaper): ParsedPaper {
+  if (!previous) return current;
+  const incoming = current.cached_analysis || {};
+  const prior = previous.cached_analysis || {};
+  const merged = { ...incoming };
+
+  // Per F-HYDRATION: a background Supabase rebuild can be slimmer than the
+  // session cache. Preserve already-populated artifacts instead of flipping
+  // the pane back to empty states on paper switch/refetch.
+  for (const key of ["pre_reading", "summary", "selections", "qa_sessions"] as const) {
+    const incomingValue = incoming[key];
+    const priorValue = prior[key];
+    const incomingEmpty = Array.isArray(incomingValue)
+      ? incomingValue.length === 0
+      : !incomingValue;
+    if (incomingEmpty && priorValue) {
+      (merged as Record<string, unknown>)[key] = priorValue;
+    }
+  }
+
+  const incomingAssumptions = incoming.assumptions?.assumptions;
+  const priorAssumptions = prior.assumptions?.assumptions;
+  if (
+    (!Array.isArray(incomingAssumptions) || incomingAssumptions.length === 0) &&
+    Array.isArray(priorAssumptions) &&
+    priorAssumptions.length > 0
+  ) {
+    merged.assumptions = prior.assumptions;
+  }
+
+  if (!merged.assumptions_cooldown_until && prior.assumptions_cooldown_until) {
+    merged.assumptions_cooldown_until = prior.assumptions_cooldown_until;
+  }
+
+  return {
+    ...current,
+    cached_analysis: merged,
+    figures: current.figures?.length ? current.figures : previous.figures,
+    notes: current.notes?.length ? current.notes : previous.notes,
+  };
+}
 
 /**
  * Inline, Google-Docs-style paper rename control.
@@ -691,8 +733,9 @@ function PaperContent() {
       .getPaper(activePaperId)
       .then((p) => {
         if (stale) return;
-        setPaper(p);
-        cachePaper(p);
+        const merged = mergeCachedAnalysis(p, useStore.getState().papersById[activePaperId]);
+        setPaper(merged);
+        cachePaper(merged);
         initialLoadDone.current = true;
       })
       .catch((e) => {
@@ -769,9 +812,16 @@ function PaperContent() {
 
     const pid = activePaperId;
     const cache = loadedPaperCache || {};
+    const sessionCache = useStore.getState().papersById[pid]?.cached_analysis || {};
+    const cooldownUntil = Math.max(
+      Number(cache.assumptions_cooldown_until || 0),
+      Number(sessionCache.assumptions_cooldown_until || 0),
+    );
+    const assumptionsCoolingDown = cooldownUntil > Date.now() / 1000;
+    const hasPreReading = !!(cache.pre_reading || sessionCache.pre_reading);
 
     if (
-      !cache.pre_reading &&
+      !hasPreReading &&
       canAccess(tierUser?.tier || "free", "prepare") &&
       !hasActiveRequest(pid, "preReading") &&
       !autoAnalyzedPapers.has(`${pid}:preReading`)
@@ -797,9 +847,16 @@ function PaperContent() {
     const serverAssumptions = Array.isArray(cache.assumptions?.assumptions)
       ? cache.assumptions.assumptions
       : null;
-    const hasUsableAssumptions = !!(serverAssumptions && serverAssumptions.length > 0);
+    const sessionAssumptions = Array.isArray(sessionCache.assumptions?.assumptions)
+      ? sessionCache.assumptions.assumptions
+      : null;
+    const hasUsableAssumptions = !!(
+      (serverAssumptions && serverAssumptions.length > 0) ||
+      (sessionAssumptions && sessionAssumptions.length > 0)
+    );
     if (
       !hasUsableAssumptions &&
+      !assumptionsCoolingDown &&
       useStore.getState().assumptions.length === 0 &&
       canAccess(tierUser?.tier || "free", "assumptions") &&
       !hasActiveRequest(pid, "assumptions") &&

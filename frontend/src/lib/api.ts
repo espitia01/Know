@@ -248,6 +248,7 @@ export interface ParsedPaper {
     summary?: PaperSummary;
     figure_analyses?: FigureAnalysis[];
     skipped_steps?: Record<string, unknown>[];
+    assumptions_cooldown_until?: number;
   };
 }
 

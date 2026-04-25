@@ -13,10 +13,12 @@ interface AssumptionsPanelProps {
 }
 
 export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
-  const { assumptions, setAssumptions, assumptionsLoading, setAssumptionsLoading } = useStore();
+  const { assumptions, setAssumptions, assumptionsLoading, setAssumptionsLoading, paper } = useStore();
   const currentPaperRef = useRef(paperId);
   currentPaperRef.current = paperId;
   const [error, setError] = useState<string | null>(null);
+  const cooldownUntil = Number(paper?.id === paperId ? paper.cached_analysis?.assumptions_cooldown_until || 0 : 0);
+  const coolingDown = cooldownUntil > Date.now() / 1000;
 
   // Reset the local error whenever we switch to a different paper — the
   // previous paper's failure banner should not bleed into the new one.
@@ -65,9 +67,9 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
   if (assumptions.length === 0) {
     return (
       <EmptyState
-        title={error ? "Assumption extraction did not return results" : "Extract assumptions"}
-        body={error || "Identify explicit and implicit assumptions in this paper."}
-        cta={{ label: error ? "Try again" : "Extract Assumptions", onClick: handleExtract }}
+        title={coolingDown ? "Assumptions need a short pause" : error ? "Assumption extraction did not return results" : "Extract assumptions"}
+        body={coolingDown ? "The model did not find usable assumptions on the last attempt. Try again in a few minutes." : error || "Identify explicit and implicit assumptions in this paper."}
+        cta={coolingDown ? undefined : { label: error ? "Try again" : "Extract Assumptions", onClick: handleExtract }}
       />
     );
   }

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 
@@ -89,6 +90,7 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
     token = reserve_usage(
         user_id, paper_id, "api_call", model=resolve_analysis_model(user_id)
     )
+    analysis_payload = None
     try:
         result = await analyze_paper(paper.raw_text, user_id=user_id)
         analysis = PreReadingAnalysis(
@@ -97,9 +99,7 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
             prior_work=result.get("prior_work", []),
             concepts=result.get("concepts", []),
         )
-        def _apply(p):
-            p.cached_analysis["pre_reading"] = analysis.model_dump()
-        mutate_paper(paper_id, user_id, _apply)
+        analysis_payload = analysis.model_dump()
         return analysis
     except ValueError as exc:
         release_usage(token)
@@ -112,6 +112,18 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
         release_usage(token)
         logger.exception("Analysis failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Analysis failed. Please try again.")
+    finally:
+        if analysis_payload is not None:
+            try:
+                # Per F-HYDRATION: persist paid-for output even if a
+                # post-LLM response path later fails.
+                mutate_paper(
+                    paper_id,
+                    user_id,
+                    lambda p: p.cached_analysis.__setitem__("pre_reading", analysis_payload),
+                )
+            except Exception:
+                logger.exception("Failed to persist pre_reading for %s", paper_id)
 
 
 @router.post("/{paper_id}/selection")
@@ -389,6 +401,7 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
     token = reserve_usage(
         user_id, paper_id, "api_call", model=resolve_analysis_model(user_id)
     )
+    assumptions_payload = None
     try:
         result = await extract_assumptions(paper.raw_text, user_id=user_id)
         # If the LLM output was malformed and we fell through to the
@@ -402,6 +415,19 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
         raw_items = result.get("assumptions") if isinstance(result, dict) else None
         if not isinstance(raw_items, list) or len(raw_items) == 0:
             release_usage(token)
+            # Per F-HYDRATION: remember empty assumptions briefly so the
+            # frontend does not hammer this endpoint every time the user
+            # switches back to the paper.
+            try:
+                mutate_paper(
+                    paper_id,
+                    user_id,
+                    lambda p: p.cached_analysis.__setitem__(
+                        "assumptions_cooldown_until", int(time.time()) + 1800,
+                    ),
+                )
+            except Exception:
+                logger.exception("Failed to persist assumptions cooldown for %s", paper_id)
             logger.warning(
                 "Assumptions extraction returned no items for paper %s (raw=%s)",
                 paper_id, type(result).__name__,
@@ -411,9 +437,7 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
                 detail="The analysis model didn't return usable assumptions. Please try again.",
             )
         resp = AssumptionsResponse(assumptions=raw_items)
-        def _apply(p):
-            p.cached_analysis["assumptions"] = resp.model_dump()
-        mutate_paper(paper_id, user_id, _apply)
+        assumptions_payload = resp.model_dump()
         return resp
     except ValueError as exc:
         release_usage(token)
@@ -426,6 +450,18 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
         release_usage(token)
         logger.exception("Assumptions extraction failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Assumptions extraction failed. Please try again.")
+    finally:
+        if assumptions_payload is not None:
+            try:
+                # Per F-HYDRATION: persist paid-for assumptions even if a
+                # later response/serialization step fails.
+                mutate_paper(
+                    paper_id,
+                    user_id,
+                    lambda p: p.cached_analysis.__setitem__("assumptions", assumptions_payload),
+                )
+            except Exception:
+                logger.exception("Failed to persist assumptions for %s", paper_id)
 
 
 @router.post("/{paper_id}/derivation/exercise", response_model=DerivationExercise)
@@ -574,14 +610,13 @@ async def summary(paper_id: str, user_id: str = Depends(require_auth)):
     token = reserve_usage(
         user_id, paper_id, "api_call", model=resolve_analysis_model(user_id)
     )
+    summary_payload = None
     try:
         result = await summarize_paper(paper.raw_text, user_id=user_id)
         if not result or not result.get("overview"):
             release_usage(token)
             raise HTTPException(status_code=502, detail="Summary generation returned empty results. Please retry.")
-        def _apply(p):
-            p.cached_analysis["summary"] = result
-        mutate_paper(paper_id, user_id, _apply)
+        summary_payload = result
         return result
     except ValueError as exc:
         release_usage(token)
@@ -594,6 +629,18 @@ async def summary(paper_id: str, user_id: str = Depends(require_auth)):
         release_usage(token)
         logger.exception("Summary generation failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Summary generation failed. Please try again.")
+    finally:
+        if summary_payload is not None:
+            try:
+                # Per F-HYDRATION: keep completed summaries durable even if
+                # response serialization or a client disconnect follows.
+                mutate_paper(
+                    paper_id,
+                    user_id,
+                    lambda p: p.cached_analysis.__setitem__("summary", summary_payload),
+                )
+            except Exception:
+                logger.exception("Failed to persist summary for %s", paper_id)
 
 
 @router.post("/{paper_id}/summary-stream")
