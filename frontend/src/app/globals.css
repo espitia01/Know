@@ -71,6 +71,13 @@
    Light theme — warm off-white, slightly cool ink
    ──────────────────────────────────────────────────────────────────── */
 :root {
+  /* Analysis-pane typography scale. Per audit §12.1, keep panel text on a
+     compact four-step scale instead of many one-off pixel sizes. */
+  --text-xs: 11px;
+  --text-sm: 12.5px;
+  --text-md: 14px;
+  --text-lg: 16px;
+
   --background: oklch(0.992 0.002 90);
   --foreground: oklch(0.18 0.012 260);
 
@@ -940,27 +947,25 @@ body::before {
    In light mode it's near-black; in dark mode it's near-white with
    foreground-colored text. */
 .btn-primary-glass {
-  background: linear-gradient(
-    to bottom,
-    color-mix(in oklab, var(--primary) 100%, transparent),
-    color-mix(in oklab, var(--primary) 92%, oklch(0 0 0) 8%)
-  );
+  /* Per audit §12.3/§13.1: make primary actions neutral and product-tool
+     like instead of relying on saturated marketing gradients. */
+  background: var(--primary);
   color: var(--primary-foreground);
   box-shadow:
-    var(--shadow-md),
-    inset 0 1px 0 rgb(255 255 255 / 0.07);
-  transition: box-shadow 0.2s ease, transform 0.2s ease, filter 0.2s ease;
+    var(--shadow-sm),
+    inset 0 1px 0 rgb(255 255 255 / 0.06);
+  transition: opacity 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
 }
 .btn-primary-glass:hover {
   box-shadow:
-    var(--shadow-lg),
-    inset 0 1px 0 rgb(255 255 255 / 0.10);
+    var(--shadow-md),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
   transform: translateY(-0.5px);
-  filter: brightness(1.04);
+  opacity: 0.94;
 }
 .btn-primary-glass:active {
   transform: translateY(0);
-  filter: brightness(0.97);
+  opacity: 0.88;
 }
 .btn-primary-glass:focus-visible {
   outline: 2px solid var(--ring);

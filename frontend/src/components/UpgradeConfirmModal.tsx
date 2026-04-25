@@ -181,7 +181,7 @@ export function UpgradeConfirmModal({ tier, tierLabel, open, onClose, onUpgraded
               type="button"
               onClick={() => submit("now")}
               disabled={submitting !== null || loadingPreview || !preview}
-              className="mt-3 w-full text-[13px] font-semibold py-2.5 rounded-xl bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-sm hover:opacity-95 transition-opacity disabled:opacity-50"
+              className="mt-3 w-full text-[13px] font-semibold py-2.5 rounded-xl bg-foreground text-background shadow-sm hover:opacity-95 transition-opacity disabled:opacity-50"
             >
               {submitting === "now" ? "Upgrading…" : `Upgrade now · ${loadingPreview ? "…" : immediate}`}
             </button>

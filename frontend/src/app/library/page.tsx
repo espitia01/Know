@@ -557,9 +557,9 @@ function LibraryContent() {
                   click the gated Workspaces tab. Show what they get and a
                   direct link to pricing so the CTA is one click away. */}
               {!canMultiPaper && (
-                <div className="rounded-xl border border-border/70 bg-gradient-to-br from-violet-500/[0.07] to-purple-500/[0.07] p-4 space-y-3">
+                <div className="rounded-xl border border-border/70 bg-background/60 p-4 space-y-3">
                   <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-sm shadow-violet-500/20">
+                    <div className="w-7 h-7 rounded-lg bg-foreground flex items-center justify-center shadow-sm">
                       <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6V4m0 16v-2M6 12H4m16 0h-2m-2.343-5.657l-1.414 1.414M7.757 16.243l-1.414 1.414m0-11.314l1.414 1.414m8.486 8.486l1.414 1.414" />
                       </svg>
@@ -577,7 +577,7 @@ function LibraryContent() {
                   </ul>
                   <Link
                     href="/#pricing"
-                    className="block text-center text-[11px] font-semibold bg-gradient-to-r from-violet-500 to-purple-600 text-white py-1.5 rounded-lg shadow-sm shadow-violet-500/20 hover:shadow-md hover:shadow-violet-500/30 transition-shadow"
+                    className="block text-center text-[11px] font-semibold bg-foreground text-background py-1.5 rounded-lg shadow-sm hover:shadow-md transition-shadow"
                   >
                     Upgrade to Researcher
                   </Link>

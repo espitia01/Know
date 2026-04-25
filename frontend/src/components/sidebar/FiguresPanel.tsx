@@ -44,7 +44,7 @@ function AuthImage({ src, alt, className }: { src: string; alt: string; classNam
 
   if (failed) {
     return (
-      <div className={`flex items-center justify-center text-muted-foreground/30 text-[11px] ${className || ""}`}>
+      <div className={`flex items-center justify-center text-muted-foreground/30 text-[var(--text-xs)] ${className || ""}`}>
         No preview
       </div>
     );
@@ -56,6 +56,9 @@ function AuthImage({ src, alt, className }: { src: string; alt: string; classNam
       </div>
     );
   }
+  // Authenticated figure blobs are fetched with bearer headers above and
+  // materialized as object URLs, so Next/Image cannot optimize them.
+  // eslint-disable-next-line @next/next/no-img-element
   return <img src={blobUrl} alt={alt} className={className} />;
 }
 
@@ -339,7 +342,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     return (
       <div className="flex flex-col items-center justify-center py-10 gap-3">
         <div className="w-5 h-5 border-2 border-muted-foreground/20 border-t-muted-foreground/60 rounded-full animate-spin" />
-        <p className="text-[12px] text-muted-foreground/60">Loading figures...</p>
+        <p className="text-[var(--text-sm)] text-muted-foreground/60">Loading figures...</p>
       </div>
     );
   }
@@ -351,15 +354,15 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           <svg className="w-10 h-10 mx-auto text-muted-foreground/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
           </svg>
-          <p className="text-[13px] text-muted-foreground/70">No figures detected yet.</p>
-          <p className="text-[11px] text-muted-foreground/50 max-w-xs mx-auto leading-relaxed">
+          <p className="text-[var(--text-md)] text-muted-foreground/70">No figures detected yet.</p>
+          <p className="text-[var(--text-xs)] text-muted-foreground/50 max-w-xs mx-auto leading-relaxed">
             Extraction can miss figures on scanned or unusually laid-out PDFs. Try re-extracting — the updated pipeline often finds them on a second pass.
           </p>
         </div>
         <button
           onClick={handleReextract}
           disabled={reextracting}
-          className="text-[12px] font-medium btn-primary-glass text-background px-4 py-2 rounded-xl transition-opacity disabled:opacity-50"
+          className="text-[var(--text-sm)] font-medium btn-primary-glass text-background px-4 py-2 rounded-xl transition-opacity disabled:opacity-50"
         >
           {reextracting ? "Re-extracting figures..." : "Re-extract figures"}
         </button>
@@ -383,11 +386,11 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         <div className="flex items-center gap-2 pb-3 border-b border-border/50 shrink-0">
           <button
             onClick={() => setSelected(null)}
-            className="text-[12px] text-muted-foreground hover:text-foreground transition-colors font-medium"
+            className="text-[var(--text-sm)] text-muted-foreground hover:text-foreground transition-colors font-medium"
           >
             &larr; All Figures
           </button>
-          <span className="text-[11px] text-muted-foreground/40">Page {selected.page + 1}</span>
+          <span className="text-[var(--text-xs)] text-muted-foreground/40">Page {selected.page + 1}</span>
         </div>
 
         <div className="flex-1 overflow-y-auto min-h-0 py-3 space-y-3">
@@ -406,7 +409,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           </button>
 
           {selected.caption && (
-            <p className="text-[11px] text-muted-foreground/60 italic leading-relaxed line-clamp-3">
+            <p className="text-[var(--text-xs)] text-muted-foreground/60 italic leading-relaxed line-clamp-3">
               {selected.caption}
             </p>
           )}
@@ -414,7 +417,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           {chat.length === 0 && !loading && (
             <button
               onClick={() => handleAnalyze(selected)}
-              className="w-full text-[12px] font-medium btn-primary-glass text-background px-4 py-2 rounded-xl transition-opacity"
+              className="w-full text-[var(--text-sm)] font-medium btn-primary-glass text-background px-4 py-2 rounded-xl transition-opacity"
             >
               Analyze This Figure
             </button>
@@ -427,7 +430,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
                 msg.role === "user" ? (
                   <div key={i} className="flex justify-end">
                     <div className="bg-foreground text-background rounded-xl rounded-br-sm px-3 py-2 max-w-[85%]">
-                      <p className="text-[12px] leading-relaxed">{msg.text}</p>
+                      <p className="text-[var(--text-sm)] leading-relaxed">{msg.text}</p>
                     </div>
                   </div>
                 ) : (
@@ -436,11 +439,11 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
                       {msg.streaming && !msg.text && (
                         <div className="space-y-2">
                           <ProgressBar running={true} />
-                          <p className="text-[11px] text-muted-foreground animate-pulse">Analyzing figure...</p>
+                          <p className="text-[var(--text-xs)] text-muted-foreground animate-pulse">Analyzing figure...</p>
                         </div>
                       )}
                       {msg.text && (
-                        <div className="text-[12.5px] leading-relaxed">
+                        <div className="text-[var(--text-sm)] leading-relaxed">
                           <Md>{msg.text}</Md>
                           {msg.streaming && (
                             <span className="inline-block w-1.5 h-4 bg-foreground/60 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
@@ -459,7 +462,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
             <div className="flex justify-start w-full">
               <div className="glass-subtle rounded-xl rounded-bl-sm px-3 py-2.5 w-full space-y-2">
                 <ProgressBar running={true} />
-                <p className="text-[11px] text-muted-foreground animate-pulse">Sending to AI...</p>
+                <p className="text-[var(--text-xs)] text-muted-foreground animate-pulse">Sending to AI...</p>
               </div>
             </div>
           )}
@@ -477,12 +480,12 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               }}
               placeholder="Ask about this figure..."
               disabled={loading}
-              className="flex-1 text-[12px] px-3 py-2 rounded-xl border border-border glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+              className="flex-1 text-[var(--text-sm)] px-3 py-2 rounded-xl border border-border glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
             />
             <button
               onClick={handleAsk}
               disabled={!question.trim() || loading}
-              className="text-[11px] font-medium px-3 py-2 rounded-xl btn-primary-glass text-background transition-opacity disabled:opacity-30 shrink-0"
+              className="text-[var(--text-xs)] font-medium px-3 py-2 rounded-xl btn-primary-glass text-background transition-opacity disabled:opacity-30 shrink-0"
             >
               Ask
             </button>
@@ -494,7 +497,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
   return (
     <div className="space-y-3.5">
-      <p className="text-[11.5px] text-muted-foreground/70">
+      <p className="text-[var(--text-xs)] text-muted-foreground/70">
         Tap a figure to analyse &amp; ask questions.
       </p>
 
@@ -523,7 +526,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
                 )}
               </div>
               <div className="px-2.5 py-1.5">
-                <p className="text-[11px] font-medium text-foreground/90 truncate">
+                <p className="text-[var(--text-xs)] font-medium text-foreground/90 truncate">
                   {captionShort}
                 </p>
               </div>
@@ -533,13 +536,13 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
       </div>
 
       <div className="pt-2 flex items-center justify-between gap-3 border-t border-border/60">
-        <p className="text-[11px] text-muted-foreground/60">
+        <p className="text-[var(--text-xs)] text-muted-foreground/60">
           Missing a figure?
         </p>
         <button
           onClick={handleReextract}
           disabled={reextracting}
-          className="text-[11px] font-medium px-2.5 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-40 shrink-0"
+          className="text-[var(--text-xs)] font-medium px-2.5 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-40 shrink-0"
         >
           {reextracting ? "Re-extracting…" : "Re-extract"}
         </button>

@@ -4,38 +4,15 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { api, type PaperSummary } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
+import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
+import { EmptyState } from "@/components/ui/EmptyState";
 import {
   activeSummaryStreams as activeStreams,
-  getProgressStart,
   clearProgressStart,
 } from "@/lib/analysisState";
 
 interface SummaryPanelProps {
   paperId: string;
-}
-
-function SummaryProgressBar({ paperId }: { paperId: string }) {
-  const [width, setWidth] = useState(() => {
-    const start = getProgressStart(paperId, "summary");
-    const elapsed = (Date.now() - start) / 1000;
-    return Math.min(90, 90 * (1 - Math.exp(-elapsed / 20)));
-  });
-  useEffect(() => {
-    const start = getProgressStart(paperId, "summary");
-    const interval = setInterval(() => {
-      const elapsed = (Date.now() - start) / 1000;
-      setWidth(Math.min(90, 90 * (1 - Math.exp(-elapsed / 20))));
-    }, 200);
-    return () => clearInterval(interval);
-  }, [paperId]);
-  return (
-    <div className="w-full max-w-xs h-1.5 bg-accent rounded-full overflow-hidden">
-      <div
-        className="h-full bg-foreground/60 rounded-full transition-all duration-300 ease-out"
-        style={{ width: `${width}%` }}
-      />
-    </div>
-  );
 }
 
 async function fetchSummaryInBackground(
@@ -175,61 +152,55 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   if (summaryLoading && !effectiveSummary) {
     return (
       <div className="flex flex-col items-center justify-center py-12 gap-3">
-        <SummaryProgressBar paperId={paperId} />
-        <p className="text-[13px] text-muted-foreground">Generating detailed summary...</p>
-        <p className="text-[11px] text-muted-foreground/50">This may take 30-60 seconds</p>
+        <AnalysisProgress kind="summary" paperId={paperId} />
+        <p className="text-[var(--text-md)] text-muted-foreground">Generating detailed summary...</p>
+        <p className="text-[var(--text-xs)] text-muted-foreground/50">This may take 30-60 seconds</p>
       </div>
     );
   }
 
   if (!effectiveSummary) {
     return (
-      <div className="text-center py-8">
-        <p className="text-[13px] text-muted-foreground/60">
-          {fetchError ? "Failed to generate summary." : "Summary not available yet."}
-        </p>
-        {fetchError && (
-          <p className="mt-1 text-[11px] text-destructive/80 max-w-xs mx-auto">{fetchError}</p>
-        )}
-        <button
-          onClick={() => {
+      <EmptyState
+        title={fetchError ? "Failed to generate summary" : "Summary not available yet"}
+        body={fetchError || "Generate a detailed overview, contributions, methods, results, and limitations."}
+        cta={{
+          label: fetchError ? "Retry" : "Generate Summary",
+          onClick: () => {
             fetchAttempted.current = null;
             const ctrl = activeStreams.get(paperId);
             if (ctrl) { ctrl.abort(); activeStreams.delete(paperId); }
             clearProgressStart(paperId, "summary");
             startFetch(paperId);
-          }}
-          className="mt-2 text-[12px] font-medium text-foreground hover:opacity-80 transition-opacity"
-        >
-          {fetchError ? "Retry" : "Generate Summary"}
-        </button>
-      </div>
+          },
+        }}
+      />
     );
   }
 
   const s = effectiveSummary;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {s.overview && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Overview</h3>
+          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Overview</h3>
           <Md>{s.overview}</Md>
         </section>
       )}
       {s.motivation && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Motivation</h3>
+          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Motivation</h3>
           <Md>{s.motivation}</Md>
         </section>
       )}
       {s.key_contributions?.length > 0 && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Key Contributions</h3>
-          <ul className="space-y-1.5">
+          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Key Contributions</h3>
+          <ul className="space-y-2">
             {s.key_contributions.map((c, i) => (
               <li key={i} className="flex gap-2">
-                <span className="text-[12px] text-muted-foreground/40 shrink-0 mt-0.5">{i + 1}.</span>
+                <span className="text-[var(--text-sm)] text-muted-foreground/40 shrink-0 mt-0.5">{i + 1}.</span>
                 <Md>{c}</Md>
               </li>
             ))}
@@ -238,30 +209,30 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.methodology && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Methodology</h3>
+          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Methodology</h3>
           <Md>{s.methodology}</Md>
         </section>
       )}
       {s.main_results && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Main Results</h3>
+          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Main Results</h3>
           <Md>{s.main_results}</Md>
         </section>
       )}
       {s.discussion && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Discussion</h3>
+          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Discussion</h3>
           <Md>{s.discussion}</Md>
         </section>
       )}
       {s.key_equations?.length > 0 && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Key Equations</h3>
+          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Key Equations</h3>
           <div className="space-y-2">
             {s.key_equations.map((eq, i) => (
               <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
                 <Md>{eq.equation}</Md>
-                <div className="text-[12px] text-muted-foreground mt-1"><Md>{eq.meaning}</Md></div>
+                <div className="text-[var(--text-sm)] text-muted-foreground mt-1"><Md>{eq.meaning}</Md></div>
               </div>
             ))}
           </div>
@@ -269,12 +240,12 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.key_figures_and_tables?.length > 0 && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Key Figures & Tables</h3>
-          <div className="space-y-1.5">
+          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Key Figures & Tables</h3>
+          <div className="space-y-2">
             {s.key_figures_and_tables.map((fig, i) => (
               <div key={i} className="rounded-xl glass-subtle px-3.5 py-2.5">
-                <span className="text-[12px] font-semibold">{fig.id}</span>
-                <div className="text-[12px] text-muted-foreground mt-0.5"><Md>{fig.description}</Md></div>
+                <span className="text-[var(--text-sm)] font-semibold">{fig.id}</span>
+                <div className="text-[var(--text-sm)] text-muted-foreground mt-0.5"><Md>{fig.description}</Md></div>
               </div>
             ))}
           </div>
@@ -282,11 +253,11 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.limitations?.length > 0 && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Limitations</h3>
+          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Limitations</h3>
           <ul className="space-y-1">
             {s.limitations.map((l, i) => (
               <li key={i} className="flex gap-2">
-                <span className="text-[12px] text-muted-foreground/40 shrink-0">•</span>
+                <span className="text-[var(--text-sm)] text-muted-foreground/40 shrink-0">•</span>
                 <Md>{l}</Md>
               </li>
             ))}
@@ -295,7 +266,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.future_work && (
         <section>
-          <h3 className="text-[13px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Future Work</h3>
+          <h3 className="text-[var(--text-md)] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2">Future Work</h3>
           <Md>{s.future_work}</Md>
         </section>
       )}

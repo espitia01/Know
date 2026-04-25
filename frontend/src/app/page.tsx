@@ -349,7 +349,7 @@ export default function LandingPage() {
                 style={{ transitionDelay: `${i * 110}ms` }}
               >
                 {t.highlight && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3.5 py-1 bg-gradient-to-r from-violet-500 to-purple-600 text-white text-[11px] font-semibold rounded-full tracking-wide shadow-lg shadow-violet-500/25">
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3.5 py-1 bg-foreground text-background text-[11px] font-semibold rounded-full tracking-wide shadow-sm">
                     Most Popular
                   </div>
                 )}

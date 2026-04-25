@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { useClerk, UserButton } from "@clerk/nextjs";
-import { api, SettingsResponse, clearAuthState } from "@/lib/api";
+import { api, clearAuthState } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useUserTier } from "@/lib/UserTierContext";
 import { useStore } from "@/lib/store";
@@ -65,7 +65,6 @@ function SettingsContent() {
   const router = useRouter();
   const { signOut } = useClerk();
   const { user: tierUser, refresh: refreshTier } = useUserTier();
-  const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [analysisModel, setAnalysisModel] = useState("");
   const [fastModel, setFastModel] = useState("");
@@ -105,7 +104,6 @@ function SettingsContent() {
   useEffect(() => {
     if (!showModels) return;
     api.getSettings().then((s) => {
-      setSettings(s);
       setAnalysisModel(s.analysis_model);
       setFastModel(s.fast_model);
     }).catch(() => setLoadError("Failed to load settings."));
@@ -131,7 +129,8 @@ function SettingsContent() {
       if (analysisModel) update.analysis_model = analysisModel;
       if (fastModel) update.fast_model = fastModel;
       const result = await api.updateSettings(update);
-      setSettings(result);
+      setAnalysisModel(result.analysis_model);
+      setFastModel(result.fast_model);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
@@ -351,7 +350,7 @@ function SettingsContent() {
               {tierUser.tier === "free" && (
                 <button
                   onClick={() => router.push("/#pricing")}
-                  className="text-[12px] font-semibold bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2 rounded-xl hover:opacity-90 transition-all shadow-sm"
+                  className="text-[12px] font-semibold bg-foreground text-background px-4 py-2 rounded-xl hover:opacity-90 transition-all shadow-sm"
                 >
                   Upgrade
                 </button>
@@ -359,7 +358,7 @@ function SettingsContent() {
               {tierUser.tier === "scholar" && (
                 <button
                   onClick={() => { setBillingError(""); setShowUpgradeConfirm(true); }}
-                  className="text-[12px] font-semibold bg-gradient-to-r from-violet-500 to-purple-600 text-white px-4 py-2 rounded-xl hover:opacity-90 transition-all shadow-sm"
+                  className="text-[12px] font-semibold bg-foreground text-background px-4 py-2 rounded-xl hover:opacity-90 transition-all shadow-sm"
                 >
                   Upgrade to Researcher
                 </button>

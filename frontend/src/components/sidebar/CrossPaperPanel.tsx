@@ -54,14 +54,14 @@ export function CrossPaperPanel() {
           <svg className="w-4 h-4 text-muted-foreground/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
           </svg>
-          <p className="text-[13px] font-semibold text-foreground">Cross-Paper Analysis</p>
+          <p className="text-[var(--text-md)] font-semibold text-foreground">Cross-Paper Analysis</p>
         </div>
-        <p className="text-[12px] text-muted-foreground mb-3">
+        <p className="text-[var(--text-sm)] text-muted-foreground mb-3">
           Ask questions that span all {sessionPapers.length} papers in this session.
         </p>
         <div className="flex flex-wrap gap-1.5 mb-3 px-1">
           {sessionPapers.map((p) => (
-            <span key={p.id} className="text-[10px] px-2 py-1 rounded-full glass-subtle text-muted-foreground truncate max-w-[200px]">
+            <span key={p.id} className="text-[var(--text-xs)] px-2 py-1 rounded-full glass-subtle text-muted-foreground truncate max-w-[200px]">
               {p.title.length > 30 ? p.title.slice(0, 30) + "..." : p.title}
             </span>
           ))}
@@ -74,7 +74,7 @@ export function CrossPaperPanel() {
             <button
               key={prompt}
               onClick={() => handleAsk(prompt)}
-              className="text-[11px] px-2.5 py-1.5 rounded-xl glass-subtle text-muted-foreground hover:text-foreground hover:bg-accent transition-all font-medium"
+              className="text-[var(--text-xs)] px-2.5 py-1.5 rounded-xl glass-subtle text-muted-foreground hover:text-foreground hover:bg-accent transition-all font-medium"
             >
               {prompt}
             </button>
@@ -89,12 +89,12 @@ export function CrossPaperPanel() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           rows={2}
-          className="text-[13px] resize-none"
+          className="text-[var(--text-md)] resize-none"
         />
         <button
           onClick={() => handleAsk()}
           disabled={!input.trim() || loading}
-          className="w-full text-[12px] font-semibold py-2.5 rounded-xl btn-primary-glass text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          className="w-full text-[var(--text-sm)] font-semibold py-2.5 rounded-xl btn-primary-glass text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {loading ? "Analyzing across papers..." : "Ask"}
         </button>
@@ -103,34 +103,34 @@ export function CrossPaperPanel() {
       {loading && (
         <div className="flex items-center justify-center gap-2 py-4">
           <div className="w-4 h-4 border-2 border-border border-t-foreground rounded-full animate-spin" />
-          <p className="text-[12px] text-muted-foreground">Comparing papers...</p>
+          <p className="text-[var(--text-sm)] text-muted-foreground">Comparing papers...</p>
         </div>
       )}
 
       {error && (
         <div className="rounded-lg bg-destructive/10 border border-destructive/20 px-3.5 py-2.5">
-          <p className="text-[12px] text-destructive font-medium">Error</p>
-          <p className="text-[11px] text-destructive mt-0.5">{error}</p>
+          <p className="text-[var(--text-sm)] text-destructive font-medium">Error</p>
+          <p className="text-[var(--text-xs)] text-destructive mt-0.5">{error}</p>
         </div>
       )}
 
       {crossPaperResults.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground">
+            <p className="text-[var(--text-xs)] font-bold uppercase tracking-[0.15em] text-muted-foreground">
               Results
             </p>
             <button
               onClick={clearCrossPaperResults}
-              className="text-[11px] text-muted-foreground hover:text-foreground/90 transition-colors font-medium"
+              className="text-[var(--text-xs)] text-muted-foreground hover:text-foreground/90 transition-colors font-medium"
             >
               Clear
             </button>
           </div>
           {crossPaperResults.map((r, i) => (
             <div key={i} className="rounded-2xl glass px-4 py-3 space-y-2">
-              <p className="text-[13px] font-medium text-foreground">{r.question}</p>
-              <div className="text-[12px] text-muted-foreground">
+              <p className="text-[var(--text-md)] font-medium text-foreground">{r.question}</p>
+              <div className="text-[var(--text-sm)] text-muted-foreground">
                 <Md>{r.answer}</Md>
               </div>
             </div>

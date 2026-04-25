@@ -83,59 +83,59 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleAdd(); }
           }}
           rows={2}
-          className="text-[13px] resize-none"
+          className="text-[var(--text-md)] resize-none"
         />
         <div className="flex items-center justify-between">
-          <p className="text-[11px] text-muted-foreground/40">Ctrl+Enter to save</p>
+          <p className="text-[var(--text-xs)] text-muted-foreground/40">Ctrl+Enter to save</p>
           <button
             onClick={handleAdd}
             disabled={!input.trim() || saving}
-            className="text-[12px] font-medium btn-primary-glass text-background px-4 py-1 rounded-xl transition-opacity disabled:opacity-40"
+            className="text-[var(--text-sm)] font-medium btn-primary-glass text-background px-4 py-1 rounded-xl transition-opacity disabled:opacity-40"
           >
             {saving ? "Saving..." : "Save Note"}
           </button>
         </div>
         {error && (
-          <p role="alert" className="text-[11px] text-destructive">{error}</p>
+          <p role="alert" className="text-[var(--text-xs)] text-destructive">{error}</p>
         )}
       </div>
 
       {notes.length > 0 && (
-        <div className="space-y-1.5">
-          <p className="text-[12px] font-semibold text-muted-foreground/70 uppercase tracking-widest">
+        <div className="space-y-2">
+          <p className="text-[var(--text-sm)] font-semibold text-muted-foreground/70 uppercase tracking-widest">
             Notes <span className="text-muted-foreground/40">{notes.length}</span>
           </p>
           {[...notes].reverse().map((note) => (
             <div key={note.id} className="group rounded-xl glass-subtle px-3.5 py-2.5">
               {editing === note.id ? (
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <Textarea
                     value={editText}
                     onChange={(e) => setEditText(e.target.value)}
                     rows={2}
-                    className="text-[13px] resize-none"
+                    className="text-[var(--text-md)] resize-none"
                     autoFocus
                   />
                   <div className="flex gap-2">
-                    <button onClick={() => handleUpdate(note.id)} className="text-[11px] font-medium text-foreground">Save</button>
-                    <button onClick={() => setEditing(null)} className="text-[11px] text-muted-foreground">Cancel</button>
+                    <button onClick={() => handleUpdate(note.id)} className="text-[var(--text-xs)] font-medium text-foreground">Save</button>
+                    <button onClick={() => setEditing(null)} className="text-[var(--text-xs)] text-muted-foreground">Cancel</button>
                   </div>
                 </div>
               ) : (
                 <>
-                  <p className="text-[13px] leading-relaxed whitespace-pre-wrap">{note.text}</p>
+                  <p className="text-[var(--text-md)] leading-relaxed whitespace-pre-wrap">{note.text}</p>
                   <div className="flex items-center justify-between mt-1.5">
-                    <span className="text-[10px] text-muted-foreground/40">{formatTime(note.created_at)}</span>
+                    <span className="text-[var(--text-xs)] text-muted-foreground/40">{formatTime(note.created_at)}</span>
                     <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => { setEditing(note.id); setEditText(note.text); }}
-                        className="text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                        className="text-[var(--text-xs)] text-muted-foreground hover:text-foreground transition-colors"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => handleDelete(note.id)}
-                        className="text-[10px] text-muted-foreground hover:text-destructive transition-colors"
+                        className="text-[var(--text-xs)] text-muted-foreground hover:text-destructive transition-colors"
                       >
                         Delete
                       </button>
@@ -149,7 +149,7 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
       )}
 
       {notes.length === 0 && (
-        <p className="text-center text-[13px] text-muted-foreground/50 py-4">
+        <p className="text-center text-[var(--text-md)] text-muted-foreground/50 py-4">
           No notes yet. Jot down thoughts as you read.
         </p>
       )}

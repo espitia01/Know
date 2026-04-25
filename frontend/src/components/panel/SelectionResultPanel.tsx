@@ -1,29 +1,10 @@
 "use client";
 
-import { useState, useEffect, memo } from "react";
+import { useState, memo } from "react";
 import { Md } from "@/components/ui/Md";
 import type { SelectionAnalysisResult } from "@/lib/api";
 import { ACTION_LABELS, normalizeSelectionAction, selectionKey } from "@/lib/selectionActions";
-
-function AnalysisProgressBar() {
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const start = Date.now();
-    const interval = setInterval(() => {
-      const elapsed = (Date.now() - start) / 1000;
-      setWidth(Math.min(90, 90 * (1 - Math.exp(-elapsed / 8))));
-    }, 150);
-    return () => clearInterval(interval);
-  }, []);
-  return (
-    <div className="w-full h-1 bg-accent rounded-full overflow-hidden">
-      <div
-        className="h-full bg-foreground/60 rounded-full transition-all duration-200 ease-out"
-        style={{ width: `${width}%` }}
-      />
-    </div>
-  );
-}
+import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 
 interface SelectionResultPanelProps {
   result: SelectionAnalysisResult | null;
@@ -39,9 +20,9 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-12">
         <div className="w-full max-w-xs">
-          <AnalysisProgressBar />
+          <AnalysisProgress kind="selection" />
         </div>
-        <span className="text-[13px] text-muted-foreground">Analyzing selection...</span>
+        <span className="text-[var(--text-md)] text-muted-foreground">Analyzing selection...</span>
       </div>
     );
   }
@@ -96,11 +77,11 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
       {t.followups.length > 0 && (
         <div className="ml-4 pl-3 border-l-2 border-border/60 space-y-3">
           {t.followups.map((f) => (
-            <div key={selectionKey(f)} className="space-y-1.5">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+            <div key={selectionKey(f)} className="space-y-2">
+              <p className="text-[var(--text-xs)] font-semibold uppercase tracking-wider text-muted-foreground/50">
                 You asked
               </p>
-              <p className="text-[12.5px] font-medium leading-snug">{f.question || f.selected_text}</p>
+              <p className="text-[var(--text-sm)] font-medium leading-snug">{f.question || f.selected_text}</p>
               <ResultCard result={f} hideHeader hideQuote />
             </div>
           ))}
@@ -110,14 +91,14 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
   );
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {result && activeThread && (
         <>
           {renderThreadCard(activeThread)}
           {loading && (
             <div className="flex flex-col items-center gap-2 py-3">
-              <div className="w-full max-w-xs"><AnalysisProgressBar /></div>
-              <span className="text-[11px] text-muted-foreground animate-pulse">Processing follow-up...</span>
+              <div className="w-full max-w-xs"><AnalysisProgress kind="selection" /></div>
+              <span className="text-[var(--text-xs)] text-muted-foreground animate-pulse">Processing follow-up...</span>
             </div>
           )}
           <FollowUpInput
@@ -133,7 +114,7 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
           every store update because React mistook them for moves. */}
       {threads.filter((t) => t !== activeThread).length > 0 && (
         <div className="space-y-2 pt-2 border-t border-border/50">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+          <p className="text-[var(--text-xs)] font-semibold uppercase tracking-wider text-muted-foreground/50">
             History
           </p>
           {threads
@@ -153,7 +134,7 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
                     className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/30 transition-colors"
                   >
                     <span
-                      className="text-[10px] font-semibold uppercase shrink-0 px-1.5 py-0.5 rounded"
+                      className="text-[var(--text-xs)] font-semibold uppercase shrink-0 px-1.5 py-0.5 rounded"
                       data-action={action}
                       style={{
                         // Inline so the badge color tracks the same
@@ -167,13 +148,13 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
                     >
                       {ACTION_LABELS[action] || action}
                     </span>
-                    <span className="text-[11px] text-muted-foreground/60 truncate flex-1">
+                    <span className="text-[var(--text-xs)] text-muted-foreground/60 truncate flex-1">
                       {t.root.selected_text.length > 80
                         ? t.root.selected_text.slice(0, 80) + "..."
                         : t.root.selected_text}
                     </span>
                     {t.followups.length > 0 && (
-                      <span className="text-[10px] text-muted-foreground/40 tabular-nums shrink-0">
+                      <span className="text-[var(--text-xs)] text-muted-foreground/40 tabular-nums shrink-0">
                         +{t.followups.length}
                       </span>
                     )}
@@ -222,12 +203,12 @@ function FollowUpInput({ context, onSubmit }: { context: string; onSubmit: (q: s
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
         placeholder="Ask a follow-up question..."
         disabled={submitting}
-        className="flex-1 text-[12px] px-3 py-1.5 rounded-xl border border-border glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+        className="flex-1 text-[var(--text-sm)] px-3 py-1.5 rounded-xl border border-border glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
       />
       <button
         onClick={handleSubmit}
         disabled={!input.trim() || submitting}
-        className="text-[11px] font-medium px-3 py-1.5 rounded-xl btn-primary-glass text-background transition-opacity disabled:opacity-30 shrink-0"
+        className="text-[var(--text-xs)] font-medium px-3 py-1.5 rounded-xl btn-primary-glass text-background transition-opacity disabled:opacity-30 shrink-0"
       >
         {submitting ? "..." : "Ask"}
       </button>
@@ -253,7 +234,7 @@ function ResultCard({
       {!hideHeader && (
         <div className="flex items-center gap-2">
           <span
-            className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded"
+            className="text-[var(--text-xs)] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded"
             data-action={action}
             style={{
               color: "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)))",
@@ -264,19 +245,19 @@ function ResultCard({
             {ACTION_LABELS[action] || action}
           </span>
           {isStreaming && (
-            <span className="text-[10px] text-muted-foreground/40 animate-pulse">streaming...</span>
+            <span className="text-[var(--text-xs)] text-muted-foreground/40 animate-pulse">streaming...</span>
           )}
         </div>
       )}
 
       {!hideQuote && (
-        <div className="text-[11px] text-muted-foreground/50 glass-subtle px-3 py-2 rounded-xl italic leading-relaxed">
+        <div className="text-[var(--text-xs)] text-muted-foreground/45 px-1 py-1 italic leading-relaxed">
           &ldquo;{result.selected_text.length > 200 ? result.selected_text.slice(0, 200) + "..." : result.selected_text}&rdquo;
         </div>
       )}
 
       {result.explanation && (
-        <div className="prose prose-sm dark:prose-invert max-w-none text-[13px] leading-relaxed">
+        <div className="prose prose-sm dark:prose-invert max-w-none text-[var(--text-md)] leading-relaxed">
           <Md>{result.explanation}</Md>
           {isStreaming && (
             <span className="inline-block w-1.5 h-4 bg-foreground/60 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
@@ -285,21 +266,21 @@ function ResultCard({
       )}
 
       {result.elaboration && (
-        <div className="prose prose-sm dark:prose-invert max-w-none text-[13px] leading-relaxed">
+        <div className="prose prose-sm dark:prose-invert max-w-none text-[var(--text-md)] leading-relaxed">
           <Md>{result.elaboration}</Md>
         </div>
       )}
 
       {result.answer && (
-        <div className="prose prose-sm dark:prose-invert max-w-none text-[13px] leading-relaxed">
+        <div className="prose prose-sm dark:prose-invert max-w-none text-[var(--text-md)] leading-relaxed">
           <Md>{result.answer}</Md>
         </div>
       )}
 
       {!hasContent && isStreaming && (
         <div className="space-y-2 py-4">
-          <AnalysisProgressBar />
-          <p className="text-[11px] text-muted-foreground animate-pulse text-center">Generating analysis...</p>
+          <AnalysisProgress kind="selection" />
+          <p className="text-[var(--text-xs)] text-muted-foreground animate-pulse text-center">Generating analysis...</p>
         </div>
       )}
 
@@ -308,17 +289,17 @@ function ResultCard({
           {result.assumptions.map((a, i) => (
             <div key={i} className="glass-subtle rounded-xl px-3 py-2">
               <div className="flex items-start gap-2">
-                <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-lg shrink-0 ${
+                <span className={`text-[var(--text-xs)] font-semibold uppercase px-1.5 py-0.5 rounded-lg shrink-0 ${
                   a.type === "explicit"
                     ? "bg-success/15 text-success"
                     : "bg-warning/15 text-warning"
                 }`}>
                   {a.type}
                 </span>
-                <div className="flex-1 text-[12px] leading-relaxed">
+                <div className="flex-1 text-[var(--text-sm)] leading-relaxed">
                   <Md>{a.statement}</Md>
                   {a.significance && (
-                    <div className="text-muted-foreground/60 mt-1 text-[11px]"><Md>{a.significance}</Md></div>
+                    <div className="text-muted-foreground/60 mt-1 text-[var(--text-xs)]"><Md>{a.significance}</Md></div>
                   )}
                 </div>
               </div>
@@ -338,22 +319,22 @@ const DerivationView = memo(function DerivationView({ result }: { result: Select
   return (
     <div className="space-y-3">
       {result.starting_point && (
-        <div className="glass-subtle rounded-xl px-3 py-2.5">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50 mb-1">Starting Point</p>
-          <div className="text-[13px]"><Md>{result.starting_point}</Md></div>
+        <div className="glass-subtle rounded-xl px-3 py-2.5 border border-border/60">
+          <p className="text-[var(--text-xs)] font-semibold uppercase tracking-wider text-muted-foreground/50 mb-1">⌐ Starting Point</p>
+          <div className="text-[var(--text-md)]"><Md>{result.starting_point}</Md></div>
         </div>
       )}
 
-      <div className="space-y-2.5">
+      <div className="space-y-2">
         {result.steps!.map((step) => (
           <StepCard key={step.step_number} step={step} />
         ))}
       </div>
 
       {result.final_result && (
-        <div className="bg-success/10 rounded-lg px-3 py-2.5 border border-success/25">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-success mb-1">Final Result</p>
-          <div className="text-[13px]"><Md>{result.final_result}</Md></div>
+        <div className="rounded-lg px-3 py-2.5 border border-success/35 ring-1 ring-success/10">
+          <p className="text-[var(--text-xs)] font-semibold uppercase tracking-wider text-success mb-1">Final Result</p>
+          <div className="text-[var(--text-md)]"><Md>{result.final_result}</Md></div>
         </div>
       )}
     </div>
@@ -368,10 +349,10 @@ const StepCard = memo(function StepCard({ step }: { step: NonNullable<SelectionA
     <div className="rounded-xl border border-border glass-subtle overflow-hidden">
       <div className="px-3 py-2 glass">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold text-muted-foreground/50 w-5 h-5 flex items-center justify-center rounded-full glass shrink-0">
+          <span className="text-[var(--text-xs)] font-bold text-muted-foreground/50 w-5 h-5 flex items-center justify-center rounded-full glass shrink-0">
             {step.step_number}
           </span>
-          <div className="text-[12px] flex-1"><Md>{step.prompt}</Md></div>
+          <div className="text-[var(--text-sm)] flex-1"><Md>{step.prompt}</Md></div>
         </div>
       </div>
       <div className="px-3 py-2 space-y-2">
@@ -379,7 +360,7 @@ const StepCard = memo(function StepCard({ step }: { step: NonNullable<SelectionA
           {!showAnswer && (
             <button
               onClick={() => setShowAnswer(true)}
-              className="text-[11px] font-medium text-foreground/70 hover:text-foreground px-2 py-0.5 rounded border border-border hover:bg-accent transition-colors"
+              className="text-[var(--text-xs)] font-medium text-foreground/70 hover:text-foreground px-2 py-0.5 rounded border border-border hover:bg-accent transition-colors"
             >
               Show Answer
             </button>
@@ -387,21 +368,21 @@ const StepCard = memo(function StepCard({ step }: { step: NonNullable<SelectionA
           {!showHint && !showAnswer && (
             <button
               onClick={() => setShowHint(true)}
-              className="text-[11px] font-medium text-muted-foreground/50 hover:text-muted-foreground px-2 py-0.5 rounded border border-border/50 hover:bg-accent transition-colors"
+              className="text-[var(--text-xs)] font-medium text-muted-foreground/50 hover:text-muted-foreground px-2 py-0.5 rounded border border-border/50 hover:bg-accent transition-colors"
             >
               Hint
             </button>
           )}
         </div>
         {showHint && !showAnswer && (
-          <div className="text-[11px] text-warning italic bg-warning/10 px-2.5 py-1.5 rounded border border-warning/25">
+          <div className="text-[var(--text-xs)] text-warning italic bg-warning/10 px-2.5 py-1.5 rounded border border-warning/25">
             <Md>{step.hint}</Md>
           </div>
         )}
         {showAnswer && (
-          <div className="space-y-1.5 animate-fade-in">
-            <div className="text-[12px] font-medium"><Md>{step.answer}</Md></div>
-            <div className="text-[11px] text-muted-foreground/60 leading-relaxed"><Md>{step.explanation}</Md></div>
+          <div className="space-y-2 animate-fade-in">
+            <div className="text-[var(--text-sm)] font-medium"><Md>{step.answer}</Md></div>
+            <div className="text-[var(--text-xs)] text-muted-foreground/60 leading-relaxed"><Md>{step.explanation}</Md></div>
           </div>
         )}
       </div>

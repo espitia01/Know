@@ -36,7 +36,7 @@ const POSITION_LABEL: Record<PanelPosition, string> = {
 // fades in on the active tab) and only override the text weight and
 // padding so the labels feel like section headings rather than pills.
 const TAB_STYLE =
-  "text-[11.5px] h-7 px-2.5 font-medium text-muted-foreground/70 hover:text-foreground data-active:text-foreground [&::after]:h-[1.5px] [&::after]:rounded-full";
+  "text-[var(--text-xs)] h-7 px-2.5 font-medium text-muted-foreground/70 hover:text-foreground data-active:text-foreground [&::after]:h-[1.5px] [&::after]:rounded-full";
 
 const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
   right: {
@@ -275,7 +275,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
           style={{ position: "fixed", top: menuCoords.top, right: menuCoords.right, zIndex: 1000 }}
           className="w-56 rounded-xl border border-border bg-popover text-popover-foreground shadow-xl p-2 animate-fade-in"
         >
-          <div className="px-2 pt-1 pb-1 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/70">
+          <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] uppercase tracking-wider font-semibold text-muted-foreground/70">
             Text size
           </div>
           <div className="flex items-center gap-1 px-1 pb-2">
@@ -286,13 +286,13 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
               className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
               aria-label="Decrease text size"
             >
-              <span className="text-[11px] font-semibold leading-none">A−</span>
+              <span className="text-[var(--text-xs)] font-semibold leading-none">A−</span>
             </button>
             <button
               type="button"
               onClick={() => setAnalysisFontScale(1)}
               disabled={Math.abs(analysisFontScale - 1) < 1e-6}
-              className="flex-1 h-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none text-[11px] font-medium tabular-nums"
+              className="flex-1 h-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none text-[var(--text-xs)] font-medium tabular-nums"
               aria-label="Reset text size"
             >
               {Math.round(analysisFontScale * 100)}%
@@ -304,23 +304,23 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
               className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
               aria-label="Increase text size"
             >
-              <span className="text-[13px] font-semibold leading-none">A+</span>
+              <span className="text-[var(--text-md)] font-semibold leading-none">A+</span>
             </button>
           </div>
-          <div className="px-2 pb-2 text-[10px] text-muted-foreground/70 leading-snug">
+          <div className="px-2 pb-2 text-[var(--text-xs)] text-muted-foreground/70 leading-snug">
             Saved across every paper and reload.
           </div>
 
           <div className="h-px bg-border/70 mx-1 my-1" />
 
-          <div className="px-2 pt-1 pb-1 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground/70">
+          <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] uppercase tracking-wider font-semibold text-muted-foreground/70">
             Pane position
           </div>
           <button
             type="button"
             role="menuitem"
             onClick={() => { onCyclePosition(); setMenuOpen(false); }}
-            className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-[12px] hover:bg-accent transition-colors"
+            className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-[var(--text-sm)] hover:bg-accent transition-colors"
           >
             <span className="flex items-center gap-2 text-foreground/90">
               <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -328,9 +328,9 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
               </svg>
               {POSITION_LABEL[position]}
             </span>
-            <span className="text-[10px] text-muted-foreground/80">{icon.next}</span>
+            <span className="text-[var(--text-xs)] text-muted-foreground/80">{icon.next}</span>
           </button>
-          <div className="px-2 pt-1 text-[10px] text-muted-foreground/70 leading-snug">
+          <div className="px-2 pt-1 text-[var(--text-xs)] text-muted-foreground/70 leading-snug">
             Saved across every paper and reload.
           </div>
         </div>,

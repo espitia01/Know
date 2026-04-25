@@ -125,7 +125,7 @@ function DashboardContent() {
           {tierUser?.tier === "free" && (
             <Link
               href="/#pricing"
-              className="text-[12px] font-medium bg-gradient-to-r from-violet-500 to-purple-600 text-white px-3.5 py-1.5 rounded-xl shadow-lg shadow-violet-500/20"
+              className="text-[12px] font-medium bg-foreground text-background px-3.5 py-1.5 rounded-xl shadow-sm"
             >
               Upgrade
             </Link>

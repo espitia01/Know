@@ -6,26 +6,10 @@ import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
 import { Textarea } from "@/components/ui/textarea";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
+import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 
 interface QAPanelProps {
   paperId: string;
-}
-
-function ProgressBar() {
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const start = Date.now();
-    const interval = setInterval(() => {
-      const elapsed = (Date.now() - start) / 1000;
-      setWidth(Math.min(90, 90 * (1 - Math.exp(-elapsed / 10))));
-    }, 150);
-    return () => clearInterval(interval);
-  }, []);
-  return (
-    <div className="w-full max-w-xs h-1 bg-accent rounded-full overflow-hidden mx-auto">
-      <div className="h-full bg-foreground/60 rounded-full transition-all duration-200 ease-out" style={{ width: `${width}%` }} />
-    </div>
-  );
 }
 
 // Static seeds shown on first paint. Once the user has clicked
@@ -191,8 +175,8 @@ export function QAPanel({ paperId }: QAPanelProps) {
 
   return (
     <div className="space-y-3">
-      <div className="space-y-2.5">
-        <p className="text-[13px] text-muted-foreground">
+      <div className="space-y-2">
+        <p className="text-[var(--text-md)] text-muted-foreground">
           Queue questions as you read, then answer them all at once.
         </p>
 
@@ -214,10 +198,10 @@ export function QAPanel({ paperId }: QAPanelProps) {
               }`} />
             </div>
             <div>
-              <p className="text-[12px] font-medium leading-tight">
+              <p className="text-[var(--text-sm)] font-medium leading-tight">
                 Cross-Paper Mode
               </p>
-              <p className="text-[10px] text-muted-foreground/50 leading-tight">
+              <p className="text-[var(--text-xs)] text-muted-foreground/50 leading-tight">
                 Ask questions across all {sessionPapers.length} papers in session
               </p>
             </div>
@@ -225,14 +209,14 @@ export function QAPanel({ paperId }: QAPanelProps) {
         )}
 
         {!qaLoading && (
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+              <p className="text-[var(--text-xs)] font-semibold uppercase tracking-wider text-muted-foreground/50">
                 {hideSuggestions ? "Suggestions hidden" : "Suggested questions"}
               </p>
               <button
                 onClick={toggleSuggestions}
-                className="text-[10px] font-medium text-muted-foreground/60 hover:text-foreground transition-colors"
+                className="text-[var(--text-xs)] font-medium text-muted-foreground/60 hover:text-foreground transition-colors"
                 aria-pressed={hideSuggestions}
               >
                 {hideSuggestions ? "Show" : "Hide"}
@@ -251,7 +235,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
                       addQuestion(prompt);
                       setUsedPrompts((prev) => new Set(prev).add(prompt));
                     }}
-                    className="text-[11px] px-2.5 py-1 rounded-full glass-subtle text-muted-foreground hover:text-foreground hover:bg-accent transition-colors font-medium"
+                    className="text-[var(--text-xs)] px-2.5 py-1 rounded-full glass-subtle text-muted-foreground hover:text-foreground hover:bg-accent transition-colors font-medium"
                   >
                     {prompt}
                   </button>
@@ -265,7 +249,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
                   <button
                     onClick={handleGenerateMore}
                     disabled={extraLoading}
-                    className="text-[11px] px-2.5 py-1 rounded-full border border-dashed border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-colors font-medium disabled:opacity-50 inline-flex items-center gap-1"
+                    className="text-[var(--text-xs)] px-2.5 py-1 rounded-full glass-subtle text-muted-foreground hover:text-foreground hover:bg-accent transition-colors font-medium disabled:opacity-50 inline-flex items-center gap-1"
                     title={
                       visiblePrompts.length === 0
                         ? "Generate paper-specific question suggestions"
@@ -290,7 +274,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
               </div>
             )}
             {extraError && (
-              <p role="alert" className="text-[10.5px] text-destructive/80 leading-snug">
+              <p role="alert" className="text-[var(--text-xs)] text-destructive/80 leading-snug">
                 {extraError}
               </p>
             )}
@@ -303,12 +287,12 @@ export function QAPanel({ paperId }: QAPanelProps) {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           rows={2}
-          className="text-[13px] resize-none"
+          className="text-[var(--text-md)] resize-none"
         />
         <div className="flex gap-2">
           <button
             onClick={handleAdd}
-            className={`flex-1 text-[12px] font-medium py-1.5 rounded-lg border transition-all ${
+            className={`flex-1 text-[var(--text-sm)] font-medium py-1.5 rounded-lg border transition-all ${
               justAdded
                 ? "border-green-300 bg-green-50 text-green-700"
                 : "border-border hover:bg-accent"
@@ -319,7 +303,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
           <button
             onClick={handleAnswerAll}
             disabled={questions.length === 0 || qaLoading}
-            className="flex-1 text-[12px] font-medium py-1.5 rounded-xl btn-primary-glass text-background transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex-1 text-[var(--text-sm)] font-medium py-1.5 rounded-xl btn-primary-glass text-background transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {qaLoading ? "Answering..." : `Answer All (${questions.length})`}
           </button>
@@ -328,8 +312,8 @@ export function QAPanel({ paperId }: QAPanelProps) {
 
       {qaLoading && (
         <div className="flex flex-col items-center gap-2 py-4">
-          <ProgressBar />
-          <p className="text-[11px] text-muted-foreground animate-pulse">
+          <AnalysisProgress kind="qa" className="mx-auto" />
+          <p className="text-[var(--text-xs)] text-muted-foreground animate-pulse">
             {crossPaper && hasMultiplePapers ? "Analyzing across papers..." : "Analyzing..."}
           </p>
         </div>
@@ -337,25 +321,25 @@ export function QAPanel({ paperId }: QAPanelProps) {
 
       {qaError && (
         <div role="alert" className="rounded-lg bg-destructive/10 border border-destructive/20 px-3.5 py-2.5 space-y-1">
-          <p className="text-[12px] text-destructive font-medium">
+          <p className="text-[var(--text-sm)] text-destructive font-medium">
             {qaErrorKind === "limit" ? "Limit reached" : "Couldn't answer"}
           </p>
-          <p className="text-[11px] text-destructive">{qaError}</p>
+          <p className="text-[var(--text-xs)] text-destructive">{qaError}</p>
         </div>
       )}
 
       {questions.length > 0 && !qaLoading && (
         <div className="space-y-2">
           <div className="flex items-baseline gap-2">
-            <h3 className="text-[13px] font-semibold text-foreground">Queued</h3>
-            <span className="text-[11px] text-muted-foreground/60 tabular-nums">{questions.length}</span>
+            <h3 className="text-[var(--text-md)] font-semibold text-foreground">Queued</h3>
+            <span className="text-[var(--text-xs)] text-muted-foreground/60 tabular-nums">{questions.length}</span>
           </div>
           {questions.map((q, i) => (
             <div key={i} className="flex items-start gap-2.5 rounded-xl glass-subtle px-3.5 py-2">
-              <span className="text-[11px] text-muted-foreground/50 font-medium shrink-0 mt-0.5 tabular-nums">
+              <span className="text-[var(--text-xs)] text-muted-foreground/50 font-medium shrink-0 mt-0.5 tabular-nums">
                 {i + 1}.
               </span>
-              <p className="text-[13px] flex-1">{q}</p>
+              <p className="text-[var(--text-md)] flex-1">{q}</p>
               <button
                 onClick={() => removeQuestion(i)}
                 className="text-muted-foreground/40 hover:text-destructive shrink-0 mt-0.5 transition-colors"
@@ -373,15 +357,15 @@ export function QAPanel({ paperId }: QAPanelProps) {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-baseline gap-2">
-              <h3 className="text-[13px] font-semibold text-foreground">Answers</h3>
-              <span className="text-[11px] text-muted-foreground/60 tabular-nums">{qaResults.length}</span>
+              <h3 className="text-[var(--text-md)] font-semibold text-foreground">Answers</h3>
+              <span className="text-[var(--text-xs)] text-muted-foreground/60 tabular-nums">{qaResults.length}</span>
               {crossPaper && hasMultiplePapers && (
-                <span className="text-[10px] text-muted-foreground/50">cross-paper</span>
+                <span className="text-[var(--text-xs)] text-muted-foreground/50">cross-paper</span>
               )}
             </div>
             <button
               onClick={() => { setQAResults([]); clearQuestions(); setUsedPrompts(new Set()); setQAError(""); }}
-              className="text-[11px] text-muted-foreground/50 hover:text-muted-foreground transition-colors font-medium"
+              className="text-[var(--text-xs)] text-muted-foreground/50 hover:text-muted-foreground transition-colors font-medium"
             >
               Clear
             </button>
@@ -393,12 +377,12 @@ export function QAPanel({ paperId }: QAPanelProps) {
             list was inverted anyway.
           */}
           {[...qaResults].reverse().map((item, i) => (
-            <div key={qaResults.length - 1 - i} className="space-y-1.5">
+            <div key={qaResults.length - 1 - i} className="space-y-2">
               <div className="flex items-start gap-2 px-1">
-                <p className="text-[13px] font-semibold leading-snug">{item.question}</p>
+                <p className="text-[var(--text-md)] font-semibold leading-snug">{item.question}</p>
               </div>
               <div className="rounded-xl glass-subtle px-3.5 py-2.5 border-l-2 border-foreground/10">
-                <div className="text-[12px] text-muted-foreground"><Md>{item.answer}</Md></div>
+                <div className="text-[var(--text-sm)] text-muted-foreground"><Md>{item.answer}</Md></div>
               </div>
             </div>
           ))}
