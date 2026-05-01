@@ -15,9 +15,10 @@ import { BibtexModal } from "@/components/BibtexModal";
 import { CitationScopeModal } from "@/components/CitationScopeModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
-import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import {
-  autoAnalyzedPapers,
+  WORKSPACE_FEATURES_COMING_SOON_TOOLTIP,
+  WORKSPACE_FEATURES_TEMPORARILY_DISABLED,
+} from "@/lib/workspaceFeatureFlags";
   hasActiveRequest,
   markRequestStart,
   markRequestEnd,
@@ -476,6 +477,7 @@ function PaperContent() {
   // Q&A. Gate them on the same `multi-qa` feature so Scholar users don't
   // open a session they can't meaningfully use.
   const canMultiPaper = !tierLoading && !!tierUser && canAccess(tierUser.tier, "multi-qa");
+  const workspaceFeaturesComingSoon = WORKSPACE_FEATURES_TEMPORARILY_DISABLED;
   const paperId = params.id as string;
   const { paper, setPaper, loading, setLoading, cachePaper } = useStore(
     useShallow((s) => ({
@@ -1395,7 +1397,10 @@ function PaperContent() {
     </>
   );
 
-  const showSessionBar = canMultiPaper && sessionPapers.length > 1;
+  const showSessionBar =
+    canMultiPaper &&
+    !workspaceFeaturesComingSoon &&
+    sessionPapers.length > 1;
 
   return (
     <>
@@ -1452,7 +1457,24 @@ function PaperContent() {
         )}
 
         {/* Add paper button */}
-        {canMultiPaper && (
+        {workspaceFeaturesComingSoon ? (
+          <span
+            className="relative shrink-0 inline-flex cursor-not-allowed"
+            title={WORKSPACE_FEATURES_COMING_SOON_TOOLTIP}
+          >
+            <button
+              type="button"
+              disabled
+              className="flex items-center gap-1 text-[11px] text-muted-foreground px-2 py-1 rounded-md opacity-45 cursor-not-allowed"
+              aria-disabled="true"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              <span className="hidden sm:inline">Add Paper</span>
+            </button>
+          </span>
+        ) : canMultiPaper ? (
         <div className="relative shrink-0" data-dropdown>
           <button
             onClick={() => { setShowFolderPicker(false); setShowWorkspaceMenu(false); setShowAddPaper(!showAddPaper); }}
@@ -1472,7 +1494,7 @@ function PaperContent() {
             />
           )}
         </div>
-        )}
+        ) : null}
 
         {/* Folder assignment */}
         <div className="relative shrink-0" data-dropdown>
@@ -1554,7 +1576,24 @@ function PaperContent() {
         )}
 
         {/* Workspace save/load */}
-        {canMultiPaper && (
+        {workspaceFeaturesComingSoon ? (
+          <span
+            className="relative shrink-0 inline-flex cursor-not-allowed"
+            title={WORKSPACE_FEATURES_COMING_SOON_TOOLTIP}
+          >
+            <button
+              type="button"
+              disabled
+              className="flex items-center gap-1 text-[11px] text-muted-foreground px-2 py-1 rounded-md opacity-45 cursor-not-allowed"
+              aria-disabled="true"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+              </svg>
+              <span className="hidden sm:inline">Workspace</span>
+            </button>
+          </span>
+        ) : canMultiPaper ? (
         <div className="relative shrink-0" data-dropdown>
           <button
             onClick={handleOpenWorkspaceMenu}
@@ -1651,7 +1690,7 @@ function PaperContent() {
             </div>
           )}
         </div>
-        )}
+        ) : null}
 
         <button
           onClick={togglePanel}

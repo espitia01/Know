@@ -11,6 +11,10 @@ import { useStore } from "@/lib/store";
 import { BibtexModal } from "@/components/BibtexModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
+import {
+  WORKSPACE_FEATURES_COMING_SOON_TOOLTIP,
+  WORKSPACE_FEATURES_TEMPORARILY_DISABLED,
+} from "@/lib/workspaceFeatureFlags";
 import { forgetPaper } from "@/lib/analysisState";
 
 function FolderIcon({ className = "w-4 h-4", filled = false }: { className?: string; filled?: boolean }) {
@@ -32,6 +36,8 @@ function LibraryContent() {
   // Workspaces are part of the multi-paper/Researcher feature set — gate the
   // sidebar tab and CTAs on the same `multi-qa` capability.
   const canMultiPaper = !tierLoading && !!tierUser && canAccess(tierUser.tier, "multi-qa");
+  const workspaceFeaturesComingSoon = WORKSPACE_FEATURES_TEMPORARILY_DISABLED;
+  const workspacesUiEnabled = canMultiPaper && !workspaceFeaturesComingSoon;
   const [papers, setPapers] = useState<PaperListEntry[]>([]);
   const [search, setSearch] = useState("");
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
@@ -73,10 +79,15 @@ function LibraryContent() {
   }, []);
 
   useEffect(() => {
-    if (sidebarTab === "workspaces" && !workspacesFetched && !workspacesLoading) {
+    if (
+      sidebarTab === "workspaces" &&
+      !workspacesFetched &&
+      !workspacesLoading &&
+      !workspaceFeaturesComingSoon
+    ) {
       loadWorkspaces();
     }
-  }, [sidebarTab, workspacesFetched, workspacesLoading, loadWorkspaces]);
+  }, [sidebarTab, workspacesFetched, workspacesLoading, loadWorkspaces, workspaceFeaturesComingSoon]);
 
   const handleOpenWorkspace = useCallback(async (ws: typeof workspaces[0]) => {
     clearSession();
@@ -403,14 +414,20 @@ function LibraryContent() {
               className={`flex-1 inline-flex items-center justify-center gap-1 text-[11px] font-semibold py-1.5 rounded-lg transition-all ${
                 sidebarTab === "workspaces"
                   ? "glass-strong text-foreground shadow-sm"
-                  : canMultiPaper
+                  : workspacesUiEnabled
                   ? "text-muted-foreground hover:text-foreground/90"
                   : "text-muted-foreground/70 hover:text-foreground/90"
               }`}
-              title={canMultiPaper ? undefined : "Workspaces are a Researcher feature — click to learn more"}
+              title={
+                workspaceFeaturesComingSoon
+                  ? WORKSPACE_FEATURES_COMING_SOON_TOOLTIP
+                  : canMultiPaper
+                  ? undefined
+                  : "Workspaces are a Researcher feature — click to learn more"
+              }
             >
               Workspaces
-              {!canMultiPaper && (
+              {(workspaceFeaturesComingSoon || !canMultiPaper) && (
                 <svg className="w-2.5 h-2.5 text-muted-foreground/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                 </svg>
@@ -553,10 +570,21 @@ function LibraryContent() {
             </>
           ) : (
             <div className="space-y-2">
-              {/* Upsell card: Scholar / free users land here when they
-                  click the gated Workspaces tab. Show what they get and a
-                  direct link to pricing so the CTA is one click away. */}
-              {!canMultiPaper && (
+              {workspaceFeaturesComingSoon ? (
+                <div className="rounded-xl border border-border/70 bg-background/60 p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center">
+                      <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <p className="text-[12px] font-semibold text-foreground">Workspaces</p>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    {WORKSPACE_FEATURES_COMING_SOON_TOOLTIP}
+                  </p>
+                </div>
+              ) : !canMultiPaper ? (
                 <div className="rounded-xl border border-border/70 bg-background/60 p-4 space-y-3">
                   <div className="flex items-center gap-2">
                     <div className="w-7 h-7 rounded-lg bg-foreground flex items-center justify-center shadow-sm">
@@ -582,8 +610,7 @@ function LibraryContent() {
                     Upgrade to Researcher
                   </Link>
                 </div>
-              )}
-              {!canMultiPaper ? null : workspacesLoading ? (
+              ) : workspacesLoading ? (
                 <div className="flex items-center justify-center py-8">
                   <div className="w-4 h-4 border-2 border-border border-t-foreground rounded-full animate-spin" />
                 </div>
@@ -654,7 +681,7 @@ function LibraryContent() {
                   </div>
                 ))
               )}
-              {canMultiPaper && (
+              {workspacesUiEnabled && (
                 <button
                   onClick={loadWorkspaces}
                   className="w-full text-[11px] text-muted-foreground/80 hover:text-muted-foreground transition-colors py-1.5 font-medium"
