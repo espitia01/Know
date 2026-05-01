@@ -664,6 +664,13 @@ function PaperContent() {
     return () => document.removeEventListener("mousedown", handler);
   }, [showAddPaper, showFolderPicker, showWorkspaceMenu]);
 
+  // Tracks the previous `focusMode` value so we only call `exitFullscreen`
+  // when the user turns focus mode *off*, not on every mount with
+  // `focusMode === false`. Otherwise navigating from the dashboard in
+  // browser fullscreen would immediately exit fullscreen (this effect
+  // used to treat "not in focus mode" as "must not be fullscreen").
+  const prevFocusModeForFullscreenRef = useRef<boolean | null>(null);
+
   // Focus mode / fullscreen wiring. Two things happen here:
   //   1. When focusMode flips on we request browser fullscreen so the OS
   //      chrome (tabs, address bar, dock) also gets out of the way.
@@ -682,9 +689,14 @@ function PaperContent() {
       if (!document.fullscreenElement && el.requestFullscreen) {
         el.requestFullscreen().catch(() => { /* best-effort */ });
       }
-    } else if (document.fullscreenElement && document.exitFullscreen) {
+    } else if (
+      prevFocusModeForFullscreenRef.current === true &&
+      document.fullscreenElement &&
+      document.exitFullscreen
+    ) {
       document.exitFullscreen().catch(() => { /* ignore */ });
     }
+    prevFocusModeForFullscreenRef.current = focusMode;
   }, [focusMode]);
 
   useEffect(() => {
