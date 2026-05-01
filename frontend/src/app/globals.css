@@ -1145,3 +1145,27 @@ body::before {
     opacity: 1;
   }
 }
+
+/* Landing: trust logos marquee — translate left → right (seamless loop with duplicated row). */
+@keyframes landing-trust-marquee-ltr {
+  from {
+    transform: translateX(-50%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.landing-trust-marquee-track {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  animation: landing-trust-marquee-ltr 52s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-trust-marquee-track {
+    animation: none;
+    transform: translateX(0);
+  }
+}

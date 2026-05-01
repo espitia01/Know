@@ -11,6 +11,10 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { DISCORD_URL } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 
+function trustPublicSrc(filename: string) {
+  return `/trust/${encodeURIComponent(filename)}`;
+}
+
 function useInView(threshold = 0.15) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
@@ -32,17 +36,63 @@ function useInView(threshold = 0.15) {
   return { ref, visible };
 }
 
-/** School marks as SVG assets in /public/trust (mixed wordmarks + Commons vectors). */
+/** One entry per file in `frontend/public/trust` (11 assets — keep in sync). */
 const TRUST_LOGOS = [
-  { name: "Stanford University", src: "/trust/stanford.svg", className: "h-6 w-auto sm:h-7 max-w-[132px] object-contain object-left" },
-  { name: "Harvard University", src: "/trust/harvard.svg", className: "h-7 w-auto sm:h-8 max-w-[140px] object-contain object-left" },
-  { name: "MIT", src: "/trust/mit.svg", className: "h-6 w-auto sm:h-7 max-w-[108px] object-contain object-left" },
-  { name: "UC Berkeley", src: "/trust/berkeley.svg", className: "h-8 w-auto sm:h-9 max-w-[56px] object-contain object-left" },
-  { name: "Georgia Institute of Technology", src: "/trust/georgia-tech.svg", className: "h-8 w-auto sm:h-9 max-w-[118px] object-contain object-left" },
-  { name: "The University of Texas at Austin", src: "/trust/ut-austin.svg", className: "h-5 w-auto sm:h-6 max-w-[168px] object-contain object-left" },
-  { name: "Caltech", src: "/trust/caltech.svg", className: "h-5 w-auto sm:h-6 max-w-[118px] object-contain object-left" },
-  { name: "Princeton University", src: "/trust/princeton.svg", className: "h-5 w-auto sm:h-6 max-w-[148px] object-contain object-left" },
-  { name: "Carnegie Mellon University", src: "/trust/cmu.svg", className: "h-5 w-auto sm:h-6 max-w-[150px] object-contain object-left" },
+  {
+    name: "University of California, Berkeley",
+    file: "University_of_California,_Berkeley_logo.svg.png",
+    className: "h-7 w-auto sm:h-8 max-w-[180px] object-contain object-left",
+  },
+  {
+    name: "California Institute of Technology",
+    file: "Caltech_Logo.svg.png",
+    className: "h-6 w-auto sm:h-7 max-w-[120px] object-contain object-left",
+  },
+  {
+    name: "Carnegie Mellon University",
+    file: "CMU_Logo_Stack_Red.png",
+    className: "h-12 w-auto sm:h-14 max-w-[76px] object-contain object-left",
+  },
+  {
+    name: "Columbia University",
+    file: "0*3qIWoFnZgVUtsXB-.png",
+    className: "h-10 w-auto sm:h-11 max-w-[64px] object-contain object-left",
+  },
+  {
+    name: "Duke University",
+    file: "Duke_University_logo.svg.png",
+    className: "h-6 w-auto sm:h-7 max-w-[140px] object-contain object-left",
+  },
+  {
+    name: "Georgia Institute of Technology",
+    file: "Georgia_Tech_Yellow_Jackets_logo.svg",
+    className: "h-8 w-auto sm:h-9 max-w-[56px] object-contain object-left",
+  },
+  {
+    name: "Harvard University",
+    file: "harvard.svg",
+    className: "h-7 w-auto sm:h-8 max-w-[140px] object-contain object-left",
+  },
+  {
+    name: "Indian Institute of Science",
+    file: "IISc_Master_Seal_Black_Transparent.png",
+    className: "h-10 w-auto sm:h-11 max-w-[88px] object-contain object-left",
+  },
+  {
+    name: "MIT",
+    file: "mit.svg",
+    className: "h-6 w-auto sm:h-7 max-w-[108px] object-contain object-left",
+  },
+  {
+    name: "Princeton University",
+    file: "Princeton-University-Logo-Vector.png",
+    className: "h-6 w-auto sm:h-7 max-w-[200px] object-contain object-left",
+  },
+  {
+    name: "The University of Texas at Austin",
+    file: "University_of_Texas_at_Austin_logo.svg.png",
+    className: "h-7 w-auto sm:h-8 max-w-[220px] object-contain object-left",
+  },
 ] as const;
 
 const features = [
@@ -143,7 +193,7 @@ const tiers = [
     price: "$10",
     period: "/month",
     summary: "The toolkit serious coursework and literature reviews expect—higher caps, richer prep, and exports.",
-    idealFor: "Graduate cohorts & dedicated readers",
+    idealFor: "Undergrads & dedicated readers",
     cta: "Subscribe to Scholar",
     tier: "scholar",
     highlight: true,
@@ -163,7 +213,7 @@ const tiers = [
     price: "$20",
     period: "/month",
     summary: "For people living inside PDFs—uncapped depth, cross-paper reasoning, and the strongest model when stakes are high.",
-    idealFor: "PIs, reviewers, and cross-topic work",
+    idealFor: "Grad students, PIs, reviewers, thinkers",
     cta: "Subscribe to Researcher",
     tier: "researcher",
     highlight: false,
@@ -212,71 +262,71 @@ export default function LandingPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Nav — minimal, editorial */}
-      <header className="sticky top-0 z-50 border-b border-border/50 bg-background/90 backdrop-blur-md supports-[backdrop-filter]:bg-background/75">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-5 sm:px-8">
-          <Link href="/" className="flex items-center gap-2.5 rounded-md ring-focus">
-            <Image src="/logo.png" alt="Know" width={24} height={24} className="rounded-md opacity-95" />
-            <span className="text-[15px] font-semibold tracking-[-0.04em] text-foreground">Know</span>
-          </Link>
-          <nav className="flex items-center gap-1 sm:gap-6">
-            <div className="hidden items-center gap-8 text-[13px] tracking-tight text-muted-foreground sm:flex">
-              <a href="#features" className="transition-colors hover:text-foreground">
-                Product
-              </a>
-              <a href="#pricing" className="transition-colors hover:text-foreground">
-                Plans
-              </a>
-              <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">
-                Community
-              </a>
-            </div>
-            <ThemeToggle />
-            {isLoaded && !isSignedIn && (
-              <>
-                <Link
-                  href="/sign-in"
-                  className="hidden text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline"
-                >
-                  Sign in
-                </Link>
-                <Link
-                  href="/sign-up"
-                  className="rounded-full bg-foreground px-4 py-2 text-[13px] font-medium text-background transition-opacity hover:opacity-90"
-                >
-                  Get started
-                </Link>
-              </>
-            )}
-            {isLoaded && isSignedIn && (
-              <>
-                <Link
-                  href="/dashboard"
-                  className="text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Dashboard
-                </Link>
-                <UserButton appearance={{ elements: { userButtonPopoverActionButton__manageAccount: { display: "none" } } }} />
-              </>
-            )}
-          </nav>
-        </div>
-      </header>
+      {/* Nav + hero share one surface so the fold isn&apos;t a hard seam */}
+      <div className="relative overflow-hidden border-b border-border/40">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-20%,color-mix(in_oklch,var(--foreground),transparent_94%),transparent)]" />
+        <header className="relative z-50 sticky top-0 border-0 bg-transparent backdrop-blur-md supports-[backdrop-filter]:bg-background/40">
+          <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-5 sm:px-8">
+            <Link href="/" className="flex items-center gap-2.5 rounded-md ring-focus">
+              <Image src="/logo.png" alt="Know" width={24} height={24} className="rounded-md opacity-95" />
+              <span className="text-[15px] font-semibold tracking-[-0.04em] text-foreground">Know</span>
+            </Link>
+            <nav className="flex items-center gap-1 sm:gap-6">
+              <div className="hidden items-center gap-8 text-[13px] tracking-tight text-muted-foreground sm:flex">
+                <a href="#features" className="transition-colors hover:text-foreground">
+                  Product
+                </a>
+                <a href="#pricing" className="transition-colors hover:text-foreground">
+                  Plans
+                </a>
+                <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">
+                  Community
+                </a>
+              </div>
+              <ThemeToggle />
+              {isLoaded && !isSignedIn && (
+                <>
+                  <Link
+                    href="/sign-in"
+                    className="hidden text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground sm:inline"
+                  >
+                    Sign in
+                  </Link>
+                  <Link
+                    href="/sign-up"
+                    className="rounded-full bg-foreground px-4 py-2 text-[13px] font-medium text-background transition-opacity hover:opacity-90"
+                  >
+                    Get started
+                  </Link>
+                </>
+              )}
+              {isLoaded && isSignedIn && (
+                <>
+                  <Link
+                    href="/dashboard"
+                    className="text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Dashboard
+                  </Link>
+                  <UserButton appearance={{ elements: { userButtonPopoverActionButton__manageAccount: { display: "none" } } }} />
+                </>
+              )}
+            </nav>
+          </div>
+        </header>
 
-      <main>
         {/* Hero */}
         <section
           ref={hero.ref}
           className={cn(
-            "relative border-b border-border/40 px-5 pb-24 pt-20 sm:px-8 sm:pb-28 sm:pt-24",
+            "relative z-10 px-5 pb-24 pt-12 sm:px-8 sm:pb-28 sm:pt-16",
             "transition-[opacity,transform] duration-1000 ease-[cubic-bezier(0.16,1,0.3,1)]",
             hero.visible ? "opacity-100" : "opacity-0 translate-y-4"
           )}
         >
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-20%,color-mix(in_oklch,var(--foreground),transparent_94%),transparent)]" />
           <div className="relative mx-auto max-w-3xl text-center">
-            <p className="mb-6 text-[12px] font-medium uppercase tracking-[0.28em] text-muted-foreground/90">
-              Reading companion for serious PDFs
+            <p className="mb-6 text-[13px] font-medium tracking-[0.02em] text-muted-foreground/90 sm:text-[14px]">
+              Thinking and Reasoning companion for serious papers
             </p>
             <h1 className="font-display text-[clamp(2.35rem,5.5vw,3.85rem)] font-semibold leading-[1.08] tracking-[-0.045em] text-foreground text-balance">
               Stay with the paper until it actually makes sense.
@@ -302,7 +352,9 @@ export default function LandingPage() {
             <p className="mt-6 text-[13px] text-muted-foreground/75">No credit card to explore the Free plan.</p>
           </div>
         </section>
+      </div>
 
+      <main>
         {/* Social proof */}
         <section
           ref={trust.ref}
@@ -316,21 +368,29 @@ export default function LandingPage() {
             <p className="text-center text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground/80">
               Loved by scholars &amp; researchers at
             </p>
-            <div className="mt-10 grid grid-cols-2 items-center justify-items-center gap-x-6 gap-y-8 sm:flex sm:flex-wrap sm:justify-center sm:gap-x-10 sm:gap-y-10">
-              {TRUST_LOGOS.map(({ name, src, className }) => (
-                <img
-                  key={src}
-                  src={src}
-                  alt={name}
-                  className={cn(
-                    className,
-                    "shrink-0 opacity-[0.5] grayscale contrast-90",
-                    "transition-opacity duration-500 hover:opacity-[0.72]"
-                  )}
-                  loading="lazy"
-                  decoding="async"
-                />
-              ))}
+            <div
+              className="mt-10 -mx-5 overflow-hidden sm:-mx-8"
+              style={{
+                maskImage: "linear-gradient(to right, transparent, black 10%, black 90%, transparent)",
+                WebkitMaskImage: "linear-gradient(to right, transparent, black 10%, black 90%, transparent)",
+              }}
+            >
+              <div className="landing-trust-marquee-track flex w-max items-center gap-12 py-2 sm:gap-14">
+                {[...TRUST_LOGOS, ...TRUST_LOGOS].map(({ name, file, className }, i) => (
+                  <img
+                    key={`${file}-${i}`}
+                    src={trustPublicSrc(file)}
+                    alt={name}
+                    className={cn(
+                      className,
+                      "shrink-0 opacity-[0.5] grayscale contrast-90",
+                      "transition-opacity duration-500 hover:opacity-[0.72]"
+                    )}
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </section>
