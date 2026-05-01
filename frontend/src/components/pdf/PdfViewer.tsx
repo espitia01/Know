@@ -47,6 +47,26 @@ const PDF_BLOB_CACHE_SIZE = 8;
 // retina displays; 1.4 matches what users were manually zooming to almost
 // every session. All displayed percentages are normalised against this.
 const BASELINE_SCALE = 1.4;
+const MIN_ZOOM_SCALE = 0.5;
+const MAX_ZOOM_SCALE = 3;
+
+function usePdfCanvasDeviceRatio() {
+  const [ratio, setRatio] = useState(1);
+  useEffect(() => {
+    const update = () => {
+      const raw = window.devicePixelRatio || 1;
+      // Many external / desktop displays report 1× DPR even when the PDF
+      // canvas looks soft; floor at ~1.35 for sharper text without blowing up
+      // memory on 3× phones (cap at 2.75).
+      const sharpened = Math.min(2.75, Math.max(raw, 1.35));
+      setRatio(sharpened);
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+  return ratio;
+}
 
 export function PdfViewer({
   url,
@@ -57,6 +77,20 @@ export function PdfViewer({
 }: PdfViewerProps) {
   const [numPages, setNumPages] = useState(0);
   const [scale, setScale] = useState(BASELINE_SCALE);
+  const canvasDpr = usePdfCanvasDeviceRatio();
+  const documentOptions = useMemo(
+    () => ({
+      // Bundling every cmap into /public would be huge; load from npm CDN at
+      // the exact pdfjs-dist version we ship (same major/minor as the worker).
+      // Needed for many math / unicode / non-Latin PDFs.
+      cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
+      cMapPacked: true,
+      standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/`,
+      enableXfa: true,
+      useSystemFonts: true,
+    }),
+    [],
+  );
   const [, setCurrentPage] = useState(1);
   const [pageInput, setPageInput] = useState("1");
   const [loadError, setLoadError] = useState("");
@@ -167,6 +201,10 @@ export function PdfViewer({
       setLoadError("PDF worker failed to load. Please refresh the page.");
     } else if (msg.includes("Invalid PDF") || msg.includes("password")) {
       setLoadError("This PDF file appears to be corrupted or password-protected.");
+    } else if (msg.includes("CMap") || msg.includes(" cmap") || msg.toLowerCase().includes("font")) {
+      setLoadError(
+        "This PDF uses fonts or encodings that could not be loaded. Try re-downloading the file from the publisher, or open it in another reader and export a new PDF.",
+      );
     } else {
       setLoadError(msg || "Failed to render PDF");
     }
@@ -967,10 +1005,41 @@ export function PdfViewer({
     };
   }, []);
 
-  const zoomIn = () => setScale((s) => Math.min(3, s + 0.2));
-  const zoomOut = () => setScale((s) => Math.max(0.5, s - 0.2));
-  const zoomReset = () => setScale(BASELINE_SCALE);
+  const zoomFieldDirty = useRef(false);
   const displayedPercent = Math.round((scale / BASELINE_SCALE) * 100);
+  const [zoomField, setZoomField] = useState(String(displayedPercent));
+
+  useEffect(() => {
+    if (!zoomFieldDirty.current) setZoomField(String(displayedPercent));
+  }, [displayedPercent]);
+
+  const applyZoomFromField = useCallback(() => {
+    zoomFieldDirty.current = false;
+    const raw = zoomField.replace(/%/g, "").trim();
+    const n = parseFloat(raw);
+    if (!Number.isFinite(n)) {
+      setZoomField(String(displayedPercent));
+      return;
+    }
+    const pct = Math.min(300, Math.max(40, Math.round(n)));
+    let next = BASELINE_SCALE * (pct / 100);
+    next = Math.min(MAX_ZOOM_SCALE, Math.max(MIN_ZOOM_SCALE, Math.round(next * 1000) / 1000));
+    setScale(next);
+    setZoomField(String(Math.round((next / BASELINE_SCALE) * 100)));
+  }, [zoomField, displayedPercent]);
+
+  const zoomIn = () => {
+    zoomFieldDirty.current = false;
+    setScale((s) => Math.min(MAX_ZOOM_SCALE, Math.round((s + 0.2) * 100) / 100));
+  };
+  const zoomOut = () => {
+    zoomFieldDirty.current = false;
+    setScale((s) => Math.max(MIN_ZOOM_SCALE, Math.round((s - 0.2) * 100) / 100));
+  };
+  const zoomReset = () => {
+    zoomFieldDirty.current = false;
+    setScale(BASELINE_SCALE);
+  };
 
   const scrollToPage = (page: number) => {
     const el = containerRef.current?.querySelector(`[data-page-number="${page}"]`);
@@ -999,6 +1068,7 @@ export function PdfViewer({
       >
         <div className="flex items-center gap-1">
           <button
+            type="button"
             onClick={zoomOut}
             className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/70 transition-all text-[15px]"
             title="Zoom out"
@@ -1006,14 +1076,36 @@ export function PdfViewer({
           >
             −
           </button>
+          <div className="flex h-7 items-center gap-0.5 rounded-lg border border-border/60 bg-background/50 px-1">
+            <input
+              value={zoomField}
+              onChange={(e) => {
+                zoomFieldDirty.current = true;
+                setZoomField(e.target.value);
+              }}
+              onKeyDown={(e) => e.key === "Enter" && applyZoomFromField()}
+              onBlur={applyZoomFromField}
+              type="text"
+              inputMode="decimal"
+              name="know_pdf_zoom_percent"
+              autoComplete="off"
+              className="w-10 bg-transparent text-center text-[11px] font-mono text-foreground outline-none"
+              title="Zoom % (100 = default reading size). Press Enter or click away."
+              aria-label="Zoom percentage"
+            />
+            <span className="pr-0.5 text-[10px] text-muted-foreground/80">%</span>
+          </div>
           <button
+            type="button"
             onClick={zoomReset}
-            className="h-7 px-2 flex items-center justify-center rounded-lg text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/70 transition-all font-mono"
-            aria-label={`Reset zoom (currently ${displayedPercent}%)`}
+            className="h-7 px-1.5 flex items-center justify-center rounded-lg text-[10px] text-muted-foreground hover:text-foreground hover:bg-accent/70 transition-all font-medium"
+            title="Reset zoom to default reading size"
+            aria-label="Reset zoom"
           >
-            {displayedPercent}%
+            Reset
           </button>
           <button
+            type="button"
             onClick={zoomIn}
             className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/70 transition-all text-[15px]"
             title="Zoom in"
@@ -1083,6 +1175,7 @@ export function PdfViewer({
         ) : (
           <Document
             file={fileData}
+            options={documentOptions}
             onLoadSuccess={onDocumentLoadSuccess}
             onLoadError={onDocumentLoadError}
             loading={
@@ -1122,6 +1215,7 @@ export function PdfViewer({
                     key={pageNum}
                     pageNumber={pageNum}
                     scale={scale}
+                    devicePixelRatio={canvasDpr}
                     className="shadow-lg bg-card"
                     renderTextLayer={true}
                     renderAnnotationLayer={true}

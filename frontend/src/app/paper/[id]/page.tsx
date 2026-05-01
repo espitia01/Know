@@ -477,7 +477,11 @@ function PaperContent() {
   const params = useParams();
   const router = useRouter();
   const { user: tierUser, loading: tierLoading } = useUserTier();
-  const isFree = tierLoading ? true : (!tierUser || tierUser.tier === "free");
+  // Don't treat "tier is loading" as free — that hid Scholar/Researcher
+  // affordances during every background `refresh()` (e.g. returning from
+  // another browser tab). Unknown signed-in tier before first fetch: still no
+  // `tierUser`, so gated features stay off until data arrives.
+  const isFree = !tierUser || tierUser.tier === "free";
   // Multi-paper sessions + workspaces are only useful alongside cross-paper
   // Q&A. Gate them on the same `multi-qa` feature so Scholar users don't
   // open a session they can't meaningfully use.

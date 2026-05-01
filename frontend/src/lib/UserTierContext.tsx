@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode, useMemo } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode, useMemo } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { api } from "@/lib/api";
 
@@ -34,6 +34,10 @@ export function UserTierProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const userRef = useRef<UserInfo | null>(null);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   const refresh = useCallback(async () => {
     if (!isLoaded) return;
@@ -43,7 +47,11 @@ export function UserTierProvider({ children }: { children: ReactNode }) {
       setError(false);
       return;
     }
-    setLoading(true);
+    // Background refresh (tab focus / visibility) should not flip `loading`
+    // back to true — that made paid-only navbar controls (e.g. Citation)
+    // disappear until the round-trip finished.
+    const hadUser = userRef.current !== null;
+    if (!hadUser) setLoading(true);
     setError(false);
     try {
       const data = await api.getCurrentUser();
