@@ -48,7 +48,7 @@ const MAX_BOTTOM = 500;
 const POSITIONS: PanelPosition[] = ["right", "bottom", "left"];
 
 function mergeCachedAnalysis(current: ParsedPaper, previous?: ParsedPaper): ParsedPaper {
-  if (!previous) return current;
+  if (!previous || previous.id !== current.id) return current;
   const incoming = current.cached_analysis || {};
   const prior = previous.cached_analysis || {};
   const merged = { ...incoming };
@@ -560,6 +560,7 @@ function PaperContent() {
   useEffect(() => {
     if (paperId !== activePaperId) {
       sseAbortRef.current?.abort();
+      hydratedForRef.current = null;
       resetAnalysisState();
       // If a background fetch for the incoming paper is still in flight,
       // re-show its loading state so the UI doesn't flash "Analyze Paper".
@@ -886,6 +887,7 @@ function PaperContent() {
     sseAbortRef.current?.abort();
     setSelection(null);
     setSelectionResult(null);
+    hydratedForRef.current = null;
 
     resetAnalysisState();
     if (hasActiveRequest(id, "preReading")) setPreReadingLoading(true);

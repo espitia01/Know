@@ -164,10 +164,40 @@ export const useStore = create<AppStore>()(
   persist(
     (set, get) => ({
       paper: null,
-      // Per audit §2.2: keep setPaper pure. Paper-switch clearing belongs
-      // in the route/session transition path so hydration does not double-
-      // clear and briefly show empty states before cached_analysis lands.
-      setPaper: (p) => set({ paper: p }),
+      // When the active document id changes (new paper, upload handoff from
+      // dashboard, library open, etc.), drop all analysis UI slices so we
+      // never show paper B with paper A's summary/prepare state. The reader
+      // page also calls resetAnalysisState on URL transitions; this path
+      // catches every other setPaper entrypoint. Same-id updates (refetch,
+      // folder change, figure re-extract) only replace `paper`.
+      setPaper: (p) =>
+        set((s) => {
+          const prevId = s.paper?.id ?? null;
+          const nextId = p?.id ?? null;
+          if (prevId === nextId) {
+            return { paper: p };
+          }
+          return {
+            paper: p,
+            preReading: null,
+            assumptions: [],
+            summary: null,
+            notes: [],
+            selectionHistory: [],
+            selectionResult: null,
+            qaResults: [],
+            questions: [],
+            exercise: null,
+            searchResults: [],
+            preReadingLoading: false,
+            assumptionsLoading: false,
+            summaryLoading: false,
+            selectionLoading: false,
+            qaLoading: false,
+            exerciseLoading: false,
+            searchLoading: false,
+          };
+        }),
 
       papersById: {},
       cachePaper: (p) =>

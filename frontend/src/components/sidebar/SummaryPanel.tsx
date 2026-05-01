@@ -109,6 +109,11 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   const fetchAttempted = useRef<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
+  useEffect(() => {
+    fetchAttempted.current = null;
+    setFetchError(null);
+  }, [paperId]);
+
   // Guard against cross-paper bleed of the global `summary` slice:
   // surface a summary only when the global `paper` *is* the paper
   // this panel was mounted for. The store-level `setPaper` clears
