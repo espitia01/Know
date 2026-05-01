@@ -4,7 +4,7 @@ export const runtime = "edge";
 export const size = { width: 512, height: 512 };
 export const contentType = "image/png";
 
-/** High-DPI favicon — crisp “K” mark scaled down by the browser. */
+/** High-DPI favicon — white mark on dark tile (matches reader nav / logo treatment). */
 export default function Icon() {
   return new ImageResponse(
     (
@@ -15,7 +15,7 @@ export default function Icon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "linear-gradient(152deg, #2a3140 0%, #1a1d26 42%, #3d4558 100%)",
+          background: "#18181b",
           borderRadius: 112,
         }}
       >
@@ -23,10 +23,10 @@ export default function Icon() {
           style={{
             fontSize: 300,
             fontWeight: 700,
-            color: "#f4f4f5",
+            color: "#ffffff",
             fontFamily:
               'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-            letterSpacing: "-0.06em",
+            letterSpacing: "-0.07em",
             lineHeight: 1,
           }}
         >

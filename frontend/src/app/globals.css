@@ -1134,6 +1134,11 @@ body::before {
   opacity: 0.4;
 }
 
+/* Analysis body: slight negative tracking reads tighter next to tabular nums. */
+.analysis-pane-v2 {
+  letter-spacing: -0.01em;
+}
+
 /* Notes row actions: show on row hover for fine pointers; always show on touch. */
 @media (hover: hover) and (pointer: fine) {
   .analysis-note-row .analysis-note-actions {

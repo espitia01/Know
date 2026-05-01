@@ -7,23 +7,13 @@ import type { SelectionAnalysisResult } from "@/lib/api";
 import { ACTION_LABELS, normalizeSelectionAction, selectionKey } from "@/lib/selectionActions";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { SectionHeader } from "@/components/panel/SectionHeader";
+import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
 
 interface SelectionResultPanelProps {
   result: SelectionAnalysisResult | null;
   loading: boolean;
   history: SelectionAnalysisResult[];
   onFollowUp: (question: string, context: string) => Promise<void>;
-}
-
-function ThreadGlyph() {
-  return (
-    <span
-      className="mt-0.5 inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center text-[10px] font-normal leading-none text-muted-foreground/40"
-      aria-hidden
-    >
-      ↳
-    </span>
-  );
 }
 
 function FollowUpThreadList({ followups }: { followups: SelectionAnalysisResult[] }) {
@@ -49,43 +39,28 @@ function FollowUpThreadList({ followups }: { followups: SelectionAnalysisResult[
   if (followups.length === 0) return null;
 
   return (
-    <div className="ml-2 space-y-2 border-l-2 border-border/35 pl-3 sm:ml-3 sm:pl-4">
-      {followups.map((f) => {
+    <div className="space-y-2">
+      {followups.map((f, i) => {
         const k = selectionKey(f);
         const open = openKey === k;
         const q = f.question || f.selected_text;
         return (
-          <div
+          <AnalysisAccordionRow
             key={k}
-            className="overflow-hidden rounded-xl border border-border/50 bg-card/30 shadow-sm ring-1 ring-border/20 dark:bg-card/22 dark:shadow-none dark:ring-border/15"
-          >
-            <button
-              type="button"
-              onClick={() => setOpenKey(open ? null : k)}
-              className="flex w-full items-start gap-2 px-3 py-2.5 text-left motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-              aria-expanded={open}
-            >
-              <ThreadGlyph />
-              <span className="min-w-0 flex-1 text-[var(--text-sm)] font-medium leading-snug text-foreground">
-                {q}
-              </span>
-              <svg
-                className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/50 motion-safe:transition-transform ${open ? "rotate-180" : ""}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
+            open={open}
+            onOpenChange={(next) => setOpenKey(next ? k : null)}
+            title={q}
+            leading={
+              <span
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border/50 bg-background/60 text-[10px] font-medium tabular-nums text-muted-foreground dark:bg-card/30"
                 aria-hidden
               >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {open && (
-              <div className="border-t border-border/40 px-3 pb-3 pt-1 motion-safe:animate-fade-in">
-                <ResultCard result={f} hideHeader hideQuote />
-              </div>
-            )}
-          </div>
+                {i + 1}
+              </span>
+            }
+          >
+            <ResultCard result={f} hideHeader hideQuote />
+          </AnalysisAccordionRow>
         );
       })}
     </div>
@@ -157,10 +132,8 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
     <div className="space-y-4">
       <ResultCard result={t.root} />
       {t.followups.length > 0 && (
-        <div className="space-y-2">
-          <p className="px-0.5 text-[var(--text-2xs)] font-semibold uppercase tracking-wide text-muted-foreground/65">
-            Follow-ups
-          </p>
+        <div>
+          <SectionHeader title="Follow-ups" count={t.followups.length} className="mb-2" />
           <FollowUpThreadList followups={t.followups} />
         </div>
       )}
@@ -173,7 +146,7 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
         <>
           {renderThreadCard(activeThread)}
           {loading && (
-            <div className="flex w-full flex-col items-center gap-2.5 rounded-xl border border-border/50 bg-muted/15 px-4 py-5 dark:bg-muted/10">
+            <div className="flex w-full flex-col items-center gap-2.5 rounded-lg border border-border/55 bg-muted/10 px-4 py-5 dark:bg-muted/[0.08]">
               <div className="w-full max-w-xs">
                 <AnalysisProgress kind="selection" className="mx-auto" />
               </div>
@@ -183,8 +156,8 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
             </div>
           )}
           {canAskFollowUp && (
-            <div className="border-t border-border/45 pt-5">
-              <p className="mb-2 text-[var(--text-xs)] font-medium text-muted-foreground/85">
+            <div className="border-t border-border/50 pt-4">
+              <p className="mb-2 text-[11px] font-medium text-muted-foreground">
                 Ask a follow-up about this passage
               </p>
               <FollowUpInput
@@ -201,31 +174,27 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
           re-keyed by index, which made the panel "shuffle" entries on
           every store update because React mistook them for moves. */}
       {threads.filter((t) => t !== activeThread).length > 0 && (
-        <div className="space-y-3 border-t border-border/50 pt-6">
+        <div className="space-y-2 border-t border-border/50 pt-6">
           <SectionHeader title="History" count={threads.filter((t) => t !== activeThread).length} />
-          <div className="overflow-hidden rounded-xl border border-border/55 bg-card/40 shadow-sm dark:bg-card/25 dark:shadow-none">
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-card/45 divide-y divide-border/50 dark:border-border/55 dark:bg-card/22">
             {threads
               .filter((t) => t !== activeThread)
               .map((t) => {
                 const isExpanded = expandedHistory === t.rootKey;
                 const action = normalizeSelectionAction(t.root.action);
                 return (
-                  <div key={t.rootKey} className="border-b border-border/60 last:border-b-0">
+                  <div key={t.rootKey}>
                     <button
                       type="button"
                       onClick={() =>
                         setExpandedHistory(isExpanded ? null : t.rootKey)
                       }
-                      className="flex w-full items-center gap-2 px-4 py-3 text-left motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors duration-150 hover:bg-accent/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                     >
                       <span
-                        className="shrink-0 text-[var(--text-2xs)] font-medium tracking-wide"
+                        className="shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium tracking-wide"
                         data-action={action}
                         style={{
-                          // Inline so the badge color tracks the same
-                          // per-action palette as the PDF underlines.
-                          // Fallback to the muted text token if the
-                          // action isn't one we know.
                           color: "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)))",
                           background:
                             "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)) / 0.12)",
@@ -233,18 +202,18 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
                       >
                         {ACTION_LABELS[action] || action}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-[var(--text-xs)] text-muted-foreground/80">
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">
                         {t.root.selected_text.length > 80
                           ? t.root.selected_text.slice(0, 80) + "…"
                           : t.root.selected_text}
                       </span>
                       {t.followups.length > 0 && (
-                        <span className="shrink-0 font-mono text-[0.7rem] font-light tabular-nums text-muted-foreground/60">
+                        <span className="shrink-0 font-mono text-[10px] font-normal tabular-nums text-muted-foreground/65">
                           +{t.followups.length}
                         </span>
                       )}
                       <svg
-                        className={`h-3 w-3 shrink-0 text-muted-foreground/30 motion-safe:transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                        className={`h-4 w-4 shrink-0 text-muted-foreground/40 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${isExpanded ? "rotate-180" : ""}`}
                         fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
                         aria-hidden
                       >
@@ -252,7 +221,7 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
                       </svg>
                     </button>
                     {isExpanded && (
-                      <div className="border-t border-border/40 px-4 pb-3 motion-safe:animate-fade-in">
+                      <div className="border-t border-border/50 bg-muted/[0.03] px-3 pb-3 pt-2 dark:bg-muted/[0.05]">
                         {renderThreadCard(t)}
                       </div>
                     )}
@@ -296,13 +265,13 @@ function FollowUpInput({ context, onSubmit }: { context: string; onSubmit: (q: s
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
         placeholder="Ask a follow-up question…"
         disabled={submitting}
-        className="know-non-credential-input min-h-9 flex-1 rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-[var(--text-sm)] shadow-sm placeholder:text-muted-foreground/55 focus:outline-none focus:ring-2 focus:ring-ring/35 disabled:opacity-50 dark:bg-card/30"
+        className="know-non-credential-input min-h-9 flex-1 rounded-lg border border-border/65 bg-background/85 px-3 py-2 text-[var(--text-sm)] shadow-none placeholder:text-muted-foreground/55 focus:outline-none focus:ring-2 focus:ring-ring/30 disabled:opacity-50 dark:bg-card/28"
       />
       <button
         type="button"
         onClick={handleSubmit}
         disabled={!input.trim() || submitting}
-        className="btn-primary-glass h-9 shrink-0 rounded-xl px-3.5 text-[var(--text-xs)] font-semibold text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+        className="btn-primary-glass h-9 shrink-0 rounded-lg px-3.5 text-[var(--text-xs)] font-semibold text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
       >
         {submitting ? "…" : "Ask"}
       </button>
@@ -323,6 +292,7 @@ function ResultCard({
   const hasContent = !!(result.explanation || result.elaboration || result.answer || result.assumptions?.length || result.steps?.length);
   const action = normalizeSelectionAction(result.action);
   const streamingLabel = action === "followup" ? "Thinking…" : "Generating analysis…";
+  const inAccordion = hideHeader && hideQuote;
 
   return (
     <div className="space-y-3">
@@ -354,7 +324,13 @@ function ResultCard({
       )}
 
       {(result.explanation || result.elaboration || result.answer) && (
-        <div className="rounded-xl border border-border/50 border-l-[3px] border-l-foreground/25 bg-card/55 px-3.5 py-3 shadow-sm dark:shadow-none dark:bg-card/40">
+        <div
+          className={
+            inAccordion
+              ? "rounded-md border border-border/45 bg-background/55 px-3 py-2.5 dark:bg-card/22"
+              : "rounded-lg border border-border/50 border-l-[3px] border-l-foreground/18 bg-card/50 px-3.5 py-3 dark:bg-card/32"
+          }
+        >
           {result.explanation && (
             <div className="prose prose-sm max-w-none text-[var(--text-md)] leading-relaxed dark:prose-invert">
               <Md>{result.explanation}</Md>

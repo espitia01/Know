@@ -14,7 +14,7 @@ export default function AppleIcon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "linear-gradient(152deg, #2a3140 0%, #1a1d26 42%, #3d4558 100%)",
+          background: "#18181b",
           borderRadius: 40,
         }}
       >
@@ -22,10 +22,10 @@ export default function AppleIcon() {
           style={{
             fontSize: 108,
             fontWeight: 700,
-            color: "#f4f4f5",
+            color: "#ffffff",
             fontFamily:
               'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-            letterSpacing: "-0.06em",
+            letterSpacing: "-0.07em",
             lineHeight: 1,
           }}
         >

@@ -17,12 +17,12 @@ export function SectionHeader({
   return (
     <div
       className={cn(
-        "mb-3 flex min-h-[1.25rem] items-baseline justify-between gap-2 border-b border-border/40 pb-2",
+        "mb-2.5 flex min-h-[1.25rem] items-baseline justify-between gap-2 border-b border-border/50 pb-2",
         className
       )}
     >
       <div className="flex min-w-0 items-baseline gap-2">
-        <h2 className="shrink-0 text-[var(--text-md)] font-semibold tracking-tight text-foreground">
+        <h2 className="shrink-0 text-[13px] font-semibold tracking-tight text-foreground">
           {title}
         </h2>
         {count != null && (

@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { SectionHeader } from "@/components/panel/SectionHeader";
+import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
 import { SwitchField } from "@/components/ui/switch";
 
 interface QAPanelProps {
@@ -367,11 +368,11 @@ export function QAPanel({ paperId }: QAPanelProps) {
       {questions.length > 0 && !qaLoading && (
         <div>
           <SectionHeader title="Queued" count={questions.length} />
-          <div className="overflow-hidden rounded-lg border border-border/60 bg-card/30">
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-card/40 divide-y divide-border/50 dark:bg-card/25">
             {questions.map((q, i) => (
               <div
                 key={i}
-                className="flex items-start gap-2 border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40"
+                className="flex items-start gap-2 px-3 py-2.5 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/25"
               >
                 <p className="min-w-0 flex-1 text-[var(--text-md)]">{q}</p>
                 <button
@@ -391,7 +392,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
       )}
 
       {qaResults.length > 0 && (
-        <div className="space-y-4">
+        <div className="space-y-2">
           <SectionHeader
             title="Answers"
             count={qaResults.length}
@@ -418,44 +419,24 @@ export function QAPanel({ paperId }: QAPanelProps) {
             const idx = qaResults.length - 1 - i;
             const itemKey = `qa-${idx}`;
             const open = openQAKey === itemKey;
+            const listPosition = i + 1;
             return (
-              <div
+              <AnalysisAccordionRow
                 key={itemKey}
-                className="overflow-hidden rounded-xl border border-border/50 bg-card/35 shadow-sm ring-1 ring-border/25 dark:bg-card/25 dark:shadow-none dark:ring-border/15"
-              >
-                <button
-                  type="button"
-                  onClick={() => setOpenQAKey(open ? null : itemKey)}
-                  className="flex w-full items-start gap-2 px-3.5 py-3 text-left motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-                  aria-expanded={open}
-                >
-                  <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-border/55 bg-muted/25 text-[var(--text-2xs)] font-semibold text-muted-foreground">
-                    Q
-                  </span>
-                  <span className="min-w-0 flex-1 text-[var(--text-md)] font-semibold leading-snug text-foreground">
-                    {item.question}
-                  </span>
-                  <svg
-                    className={`mt-1 h-3.5 w-3.5 shrink-0 text-muted-foreground/50 motion-safe:transition-transform ${open ? "rotate-180" : ""}`}
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    strokeWidth={2}
+                open={open}
+                onOpenChange={(next) => setOpenQAKey(next ? itemKey : null)}
+                title={item.question}
+                leading={
+                  <span
+                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border/55 bg-background/70 text-[10px] font-semibold tabular-nums text-muted-foreground dark:bg-card/35"
                     aria-hidden
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                {open && (
-                  <div className="border-t border-border/45 px-3.5 pb-3.5 pt-2 motion-safe:animate-fade-in">
-                    <div className="rounded-lg border border-border/40 border-l-[3px] border-l-foreground/20 bg-muted/15 px-3 py-2.5 dark:bg-card/35">
-                      <div className="text-[var(--text-sm)] text-muted-foreground">
-                        <Md>{item.answer}</Md>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+                    {listPosition}
+                  </span>
+                }
+              >
+                <Md>{item.answer}</Md>
+              </AnalysisAccordionRow>
             );
           })}
         </div>

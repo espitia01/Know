@@ -36,7 +36,7 @@ const POSITION_LABEL: Record<PanelPosition, string> = {
 // `flex-none shrink-0` overrides TabsTrigger’s default `flex-1` so many tabs
 // don’t compress in a narrow right/left column — the row scrolls instead.
 const TAB_STYLE =
-  "shrink-0 flex-none h-7 rounded-md px-2.5 text-[var(--text-xs)] font-medium tracking-[0.02em] text-muted-foreground hover:text-foreground data-active:text-foreground";
+  "shrink-0 flex-none h-7 rounded-md px-2.5 text-[11px] font-medium tracking-normal text-muted-foreground hover:text-foreground data-active:text-foreground data-active:font-semibold";
 
 const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
   right: {
@@ -294,7 +294,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       onValueChange={setActiveTab}
       className="analysis-panel-tabs flex h-full flex-col"
     >
-      <div className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-border/45 bg-muted/12 px-3 dark:bg-muted/[0.07]">
+      <div className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-border/50 bg-muted/10 px-3 dark:bg-muted/[0.06]">
         {/* min-w-0 + overflow-x-auto: side panels stay narrow; tab row scrolls
             horizontally. Tab triggers must stay flex-none (see TAB_STYLE) or
             labels collapse. Light scrollbar so the strip is discoverable. */}
@@ -476,7 +476,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
 
       <div className="analysis-scroll-fade min-h-0 flex-1 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable]">
         <div
-          className="analysis-pane-v2 mx-auto w-full max-w-3xl px-4 py-5 md:px-8 md:py-8"
+          className="analysis-pane-v2 mx-auto w-full max-w-3xl px-4 py-5 md:px-8 md:py-7"
           style={{ ["--analysis-font-scale" as string]: analysisFontScale }}
         >
           {showSelectionTab && mountedTabs.has("selection") && (
