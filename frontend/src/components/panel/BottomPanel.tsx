@@ -338,7 +338,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
               className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
               aria-label="Increase text size"
             >
-              <span className="text-[var(--text-md)] font-semibold leading-none">A+</span>
+              <span className="text-[var(--text-xs)] font-semibold leading-none">A+</span>
             </button>
           </div>
           <div className="px-2 pb-2 text-[var(--text-xs)] text-muted-foreground/70 leading-snug">

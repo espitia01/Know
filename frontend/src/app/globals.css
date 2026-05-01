@@ -682,12 +682,11 @@
   color: var(--foreground);
   /* Everything inside the pane — text, headings, math — scales from a
      single CSS variable that the user controls via the A-/A+ buttons.
-     Defaulting to 1 means the current layout is unchanged until someone
-     opts in. We expose the knob via `--analysis-font-scale` on
-     `.analysis-content`, with `em`-based KaTeX sizing below so formulas
-     grow in lockstep with body text. */
-  font-size: calc(14px * var(--analysis-font-scale, 1));
-  line-height: 1.6;
+     Base is slightly below body (14px) so markdown and math feel closer
+     to tab chrome (`--text-sm` / `--text-xs`) without hurting legibility.
+     `--analysis-font-scale` is set on `.analysis-pane-v2` / `.analysis-content`. */
+  font-size: calc(13px * var(--analysis-font-scale, 1));
+  line-height: 1.55;
 }
 .analysis-content .katex-display {
   margin: 0.9em 0;
@@ -697,21 +696,20 @@
   justify-content: center;
 }
 .analysis-content .katex-display > .katex { text-align: center; }
-/* Math copy has historically been illegible because KaTeX fell below body
-   size — subscripts/superscripts become unreadable around 10px. Bump
-   inline math to 1.15em and display math to 1.2em so indices remain
-   legible even at the default font scale. */
-.analysis-content .katex { font-size: 1.15em; overflow-x: auto; overflow-y: hidden; }
-.analysis-content .katex-display > .katex { font-size: 1.2em; }
+/* Inline math slightly above body so superscripts stay readable; keep
+   close to prose size so the pane feels even. Display math only modestly
+   larger. */
+.analysis-content .katex { font-size: 1.06em; overflow-x: auto; overflow-y: hidden; }
+.analysis-content .katex-display > .katex { font-size: 1.12em; }
 .analysis-content p {
   margin-bottom: 0.4em;
-  line-height: 1.6;
+  line-height: 1.55;
 }
 .analysis-content p:has(.katex-display) { text-align: center; }
 .analysis-content ul, .analysis-content ol {
   margin-bottom: 0.4em;
   padding-left: 1.2em;
-  line-height: 1.6;
+  line-height: 1.55;
 }
 .analysis-content li { margin-bottom: 0.15em; }
 .analysis-content strong { font-weight: 600; }
@@ -772,9 +770,9 @@
   letter-spacing: -0.01em;
   color: var(--foreground);
 }
-.analysis-content h1 { font-size: 1.25em; }
-.analysis-content h2 { font-size: 1.15em; }
-.analysis-content h3 { font-size: 1.05em; }
+.analysis-content h1 { font-size: 1.18em; }
+.analysis-content h2 { font-size: 1.1em; }
+.analysis-content h3 { font-size: 1.02em; }
 .analysis-content hr {
   border: none;
   border-top: 1px solid var(--border);
