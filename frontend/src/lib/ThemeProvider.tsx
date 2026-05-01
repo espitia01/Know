@@ -4,16 +4,17 @@
  * Lightweight theme provider.
  *
  * - `theme` is one of "light" | "dark" | "system". We persist the user's
- *   choice in localStorage so it survives reloads and cross-tab toggles,
- *   and listen to `prefers-color-scheme` so "system" updates live.
- * - We do NOT render anything server-side that depends on theme; the
- *   actual `.dark` class is applied by the inline `<script>` in
- *   `layout.tsx` BEFORE first paint to avoid a white flash in dark mode.
- *   This provider just keeps the class in sync for subsequent changes.
+ *   choice in localStorage (per Clerk userId) so it survives reloads and
+ *   cross-tab toggles, and listen to `prefers-color-scheme` so "system"
+ *   updates live.
+ * - The inline script in `layout.tsx` can only follow the OS preference
+ *   before React + Clerk resolve the signed-in user; this provider then
+ *   applies the stored per-account choice.
  * - The toggle UI reads `theme` (the user's stored preference), not the
  *   effective `resolvedTheme`, so the three-state cycle is predictable.
  */
 
+import { useAuth } from "@clerk/nextjs";
 import {
   createContext,
   useCallback,
@@ -33,9 +34,19 @@ interface ThemeContextValue {
   toggleTheme: () => void;
 }
 
-const STORAGE_KEY = "know:theme";
+/** @deprecated Global theme key — removed from reads to avoid cross-account bleed. */
+export const LEGACY_THEME_STORAGE_KEY = "know:theme";
+
+export function themeStorageKey(userId: string | null): string {
+  return userId ? `know:theme:v2:${userId}` : `know:theme:v2:signed-out`;
+}
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+function readDomResolvedTheme(): ResolvedTheme {
+  if (typeof document === "undefined") return "light";
+  return document.documentElement.classList.contains("dark") ? "dark" : "light";
+}
 
 function getSystemTheme(): ResolvedTheme {
   if (typeof window === "undefined") return "light";
@@ -46,7 +57,6 @@ function applyThemeClass(resolved: ResolvedTheme) {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
   root.classList.toggle("dark", resolved === "dark");
-  // Keep the mobile browser chrome color in sync so the PWA looks right.
   const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
   if (meta) {
     meta.content = resolved === "dark" ? "#16181f" : "#fbfbfb";
@@ -54,14 +64,17 @@ function applyThemeClass(resolved: ResolvedTheme) {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const { isLoaded, userId } = useAuth();
   const [theme, setThemeState] = useState<ThemeMode>("system");
-  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>("light");
+  const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>(readDomResolvedTheme);
 
-  // Hydrate from localStorage once, then compute the effective mode.
+  const storageKey = useMemo(() => themeStorageKey(userId ?? null), [userId]);
+
   useEffect(() => {
+    if (!isLoaded) return;
     let stored: ThemeMode = "system";
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(storageKey);
       if (raw === "light" || raw === "dark" || raw === "system") stored = raw;
     } catch {
       // Ignore storage errors (private mode, quota, etc.) — fall back to system.
@@ -70,9 +83,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const effective = stored === "system" ? getSystemTheme() : stored;
     setResolvedTheme(effective);
     applyThemeClass(effective);
-  }, []);
+  }, [isLoaded, storageKey]);
 
-  // Live-update when the OS theme changes and the user is on "system".
   useEffect(() => {
     if (theme !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -85,10 +97,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => mq.removeEventListener("change", onChange);
   }, [theme]);
 
-  // Cross-tab sync.
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key !== STORAGE_KEY || !e.newValue) return;
+      if (e.key !== storageKey || !e.newValue) return;
       if (e.newValue === "light" || e.newValue === "dark" || e.newValue === "system") {
         setThemeState(e.newValue);
         const eff = e.newValue === "system" ? getSystemTheme() : e.newValue;
@@ -98,22 +109,26 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  }, [storageKey]);
 
-  const setTheme = useCallback((t: ThemeMode) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, t);
-    } catch {
-      // ignore
-    }
-    setThemeState(t);
-    const eff = t === "system" ? getSystemTheme() : t;
-    setResolvedTheme(eff);
-    applyThemeClass(eff);
-  }, []);
+  const setTheme = useCallback(
+    (t: ThemeMode) => {
+      if (!isLoaded) return;
+      try {
+        localStorage.setItem(storageKey, t);
+        localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+      setThemeState(t);
+      const eff = t === "system" ? getSystemTheme() : t;
+      setResolvedTheme(eff);
+      applyThemeClass(eff);
+    },
+    [isLoaded, storageKey],
+  );
 
   const toggleTheme = useCallback(() => {
-    // Three-state cycle: system → light → dark → system.
     setTheme(theme === "system" ? "light" : theme === "light" ? "dark" : "system");
   }, [theme, setTheme]);
 
@@ -128,8 +143,6 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 export function useTheme(): ThemeContextValue {
   const ctx = useContext(ThemeContext);
   if (!ctx) {
-    // Safe fallback so components using useTheme outside the provider
-    // (e.g. in tests) don't crash.
     return {
       theme: "system",
       resolvedTheme: "light",
@@ -141,22 +154,17 @@ export function useTheme(): ThemeContextValue {
 }
 
 /**
- * Inline script evaluated BEFORE React hydrates. Sets the correct `.dark`
- * class and meta theme-color so the page doesn't flash white when a
- * dark-mode user lands on it.
- *
- * Kept tiny and defensive — any throw here would block rendering.
+ * Inline script evaluated BEFORE React hydrates. Uses OS color scheme only;
+ * per-account theme is applied once Clerk + ThemeProvider load (localStorage
+ * is scoped by userId and cannot be read safely here).
  */
 export const THEME_INIT_SCRIPT = `
 (function () {
   try {
-    var k = "${STORAGE_KEY}";
-    var m = localStorage.getItem(k);
     var sys = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    var t = (m === "light" || m === "dark") ? m : sys;
-    if (t === "dark") document.documentElement.classList.add("dark");
+    if (sys === "dark") document.documentElement.classList.add("dark");
     var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", t === "dark" ? "#16181f" : "#fbfbfb");
+    if (meta) meta.setAttribute("content", sys === "dark" ? "#16181f" : "#fbfbfb");
   } catch (e) { /* no-op */ }
 })();
 `.trim();

@@ -1,28 +1,40 @@
 "use client";
 
+import { useAuth } from "@clerk/nextjs";
 import { useEffect } from "react";
-import { applyBackgroundState, loadBackgroundState } from "@/lib/backgroundImage";
+import {
+  applyBackgroundState,
+  backgroundStorageKey,
+  loadBackgroundStateForUser,
+} from "@/lib/backgroundImage";
+import { useTheme } from "@/lib/ThemeProvider";
 
 /**
- * Reads the user's saved background preference from localStorage on
- * the client and applies it to the document root. Listens for
- * storage events so a change made in another tab (e.g. Settings
- * opened in a second window) propagates live to every mounted page.
- *
- * Deliberately headless — rendering null avoids hydration mismatches
- * and keeps the component cheap to mount from the root layout.
+ * Reads the signed-in user's saved background from localStorage on the
+ * client and applies it to the document root. Listens for storage events
+ * so a change made in another tab propagates live. Re-applies when the
+ * color scheme changes so light/dark preset variants stay in sync.
  */
 export function BackgroundImageProvider() {
-  useEffect(() => {
-    applyBackgroundState(loadBackgroundState());
+  const { isLoaded, userId } = useAuth();
+  const { resolvedTheme } = useTheme();
 
+  useEffect(() => {
+    if (!isLoaded) return;
+    applyBackgroundState(loadBackgroundStateForUser(userId ?? null), resolvedTheme === "dark");
+  }, [isLoaded, userId, resolvedTheme]);
+
+  useEffect(() => {
+    if (!isLoaded || !userId) return;
+
+    const key = backgroundStorageKey(userId);
     const onStorage = (e: StorageEvent) => {
-      if (e.key !== "know-bg-image") return;
-      applyBackgroundState(loadBackgroundState());
+      if (e.key !== key) return;
+      applyBackgroundState(loadBackgroundStateForUser(userId), resolvedTheme === "dark");
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  }, [isLoaded, userId, resolvedTheme]);
 
   return null;
 }

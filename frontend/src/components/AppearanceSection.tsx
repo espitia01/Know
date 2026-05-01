@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@clerk/nextjs";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
@@ -8,9 +9,11 @@ import {
   BackgroundState,
   DEFAULT_BACKGROUND_STATE,
   applyBackgroundState,
-  loadBackgroundState,
-  saveBackgroundState,
+  loadBackgroundStateForUser,
+  presetDisplayImage,
+  saveBackgroundStateForUser,
 } from "@/lib/backgroundImage";
+import { useTheme } from "@/lib/ThemeProvider";
 
 type Props = {
   /** The user's subscription tier; controls whether the picker is active. */
@@ -29,20 +32,25 @@ type Props = {
  */
 export function AppearanceSection({ tier }: Props) {
   const entitled = tier === "scholar" || tier === "researcher";
+  const { userId } = useAuth();
+  const { resolvedTheme } = useTheme();
 
   const [state, setState] = useState<BackgroundState>(DEFAULT_BACKGROUND_STATE);
 
-  // Hydrate from localStorage on mount so the preview reflects the
-  // user's actual saved choice the moment the panel opens.
   useEffect(() => {
-    setState(loadBackgroundState());
-  }, []);
+    if (!userId) return;
+    setState(loadBackgroundStateForUser(userId));
+  }, [userId]);
 
-  const persist = useCallback((next: BackgroundState) => {
-    setState(next);
-    saveBackgroundState(next);
-    applyBackgroundState(next);
-  }, []);
+  const persist = useCallback(
+    (next: BackgroundState) => {
+      if (!userId) return;
+      setState(next);
+      saveBackgroundStateForUser(next, userId);
+      applyBackgroundState(next, resolvedTheme === "dark");
+    },
+    [userId, resolvedTheme],
+  );
 
   const selectPreset = useCallback(
     (id: BackgroundPresetId) => {
@@ -107,11 +115,12 @@ export function AppearanceSection({ tier }: Props) {
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
             {visiblePresets.map((p) => {
               const active = state.presetId === p.id;
+              const swatchImage = presetDisplayImage(p, resolvedTheme === "dark");
               const swatchStyle: React.CSSProperties =
                 p.id === "none"
                   ? { background: "var(--background)" }
                   : {
-                      backgroundImage: p.image,
+                      backgroundImage: swatchImage,
                       backgroundSize: p.size ?? "cover",
                       backgroundRepeat: p.repeat ?? "no-repeat",
                       backgroundPosition: p.position ?? "center",
