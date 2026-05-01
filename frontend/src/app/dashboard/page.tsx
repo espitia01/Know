@@ -5,6 +5,7 @@ import { useDropzone } from "react-dropzone";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
+import { Library } from "lucide-react";
 import { UserButton, useUser } from "@clerk/nextjs";
 import { api, PaperListEntry } from "@/lib/api";
 import { useStore } from "@/lib/store";
@@ -14,6 +15,32 @@ import { FeedbackModal } from "@/components/FeedbackModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { FullscreenToggle } from "@/components/FullscreenToggle";
 import { DISCORD_URL } from "@/lib/constants";
+
+const STUDY_HEADLINES = [
+  "Turn a difficult PDF into something you truly understand.",
+  "One focused read today beats a week of half-attention skimming.",
+  "Stay with one argument until it clicks—that's how expertise compounds.",
+  "Upload something that challenges you; growth lives in the hard parts.",
+  "Clear the noise. Give one paper your full attention this session.",
+  "Depth beats drift. What will you study in earnest today?",
+  "Your next insight is probably in a section you haven't re-read yet.",
+  "Read slowly, take notes, test yourself—the plain path is the fast path.",
+  "Make today the day a confusing passage finally makes sense.",
+  "Start with a question, then let the paper answer it line by line.",
+  "Consistency compounds. Even twenty focused minutes move the needle.",
+  "Treat this like lab work: one text, one thread, one honest pass.",
+  "Trade scrolling for a single deliberate stretch of close reading.",
+  "Let the difficult pages teach you—that's what they're for.",
+  "You rarely need more papers—more time with the right one.",
+] as const;
+
+function getStudyHeadline(firstName?: string | null): string {
+  const day = Math.floor(Date.now() / 86_400_000);
+  const line = STUDY_HEADLINES[day % STUDY_HEADLINES.length];
+  const n = firstName?.trim();
+  if (!n) return line;
+  return `${n}, ${line.charAt(0).toLowerCase()}${line.slice(1)}`;
+}
 
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(false);
@@ -49,14 +76,7 @@ function DashboardContent() {
   const [showFeedback, setShowFeedback] = useState(false);
   const isMobile = useIsMobile();
 
-  const greeting = (() => {
-    const hour = new Date().getHours();
-    const name = clerkUser?.firstName || "";
-    const nameStr = name ? `, ${name}` : "";
-    if (hour < 12) return `Good morning${nameStr}`;
-    if (hour < 17) return `Good afternoon${nameStr}`;
-    return `Good evening${nameStr}`;
-  })();
+  const studyHeadline = getStudyHeadline(clerkUser?.firstName);
 
   useEffect(() => {
     api.listPapers()
@@ -121,7 +141,7 @@ function DashboardContent() {
   if (isMobile) {
     return (
       <main className="flex-1 flex flex-col items-center px-6 pt-[15vh] pb-12 bg-mesh min-h-screen text-foreground">
-        <div className="absolute top-5 right-5 flex items-center gap-3">
+        <div className="absolute top-5 right-5 flex items-center gap-2.5">
           {tierUser?.tier === "free" && (
             <Link
               href="/#pricing"
@@ -130,6 +150,14 @@ function DashboardContent() {
               Upgrade
             </Link>
           )}
+          <Link
+            href="/library"
+            title="Open your library"
+            aria-label="Open your library"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border/55 bg-background/75 text-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-accent hover:border-border-strong"
+          >
+            <Library className="h-[18px] w-[18px] text-foreground/85" strokeWidth={1.75} aria-hidden />
+          </Link>
           <FullscreenToggle />
           <ThemeToggle />
           <UserButton
@@ -147,7 +175,7 @@ function DashboardContent() {
               <Image src="/logo.png" alt="Know" width={56} height={56} priority className="rounded-xl" />
             </div>
             <div className="space-y-2">
-              <h1 className="font-display text-[26px] font-bold tracking-[-0.04em] text-foreground text-balance">{greeting}</h1>
+              <h1 className="font-display text-[26px] font-bold tracking-[-0.04em] text-foreground text-balance">{studyHeadline}</h1>
               <p className="text-muted-foreground text-[15px] leading-relaxed">
                 Know is optimized for desktop. The full paper analysis experience requires a larger screen.
               </p>
@@ -200,7 +228,7 @@ function DashboardContent() {
 
   return (
     <main className="flex-1 flex flex-col items-center px-6 pt-[10vh] pb-12 bg-mesh min-h-screen text-foreground">
-      <div className="absolute top-5 right-5 flex items-center gap-2.5">
+      <div className="absolute top-5 right-5 flex items-center gap-2">
         {tierUser?.tier === "free" && (
           <Link
             href="/#pricing"
@@ -212,6 +240,15 @@ function DashboardContent() {
             Upgrade
           </Link>
         )}
+        <Link
+          href="/library"
+          title="Your library — all papers and folders"
+          aria-label="Open your library"
+          className="inline-flex h-9 items-center gap-2 rounded-xl border border-border/60 bg-background/70 px-3 text-[12px] font-semibold text-foreground/90 shadow-sm backdrop-blur-sm transition-all hover:bg-accent hover:border-border-strong hover:text-foreground ring-focus"
+        >
+          <Library className="h-[17px] w-[17px] shrink-0 text-foreground/80" strokeWidth={1.75} aria-hidden />
+          <span className="hidden min-[380px]:inline">Library</span>
+        </Link>
         <FullscreenToggle />
         <ThemeToggle />
         <UserButton
@@ -230,7 +267,7 @@ function DashboardContent() {
             <Image src="/logo.png" alt="Know" width={56} height={56} priority className="rounded-xl" />
           </div>
           <div className="space-y-1.5">
-            <h1 className="font-display text-[30px] font-bold tracking-[-0.04em] text-foreground text-balance">{greeting}</h1>
+            <h1 className="font-display text-[30px] font-bold tracking-[-0.04em] text-foreground text-balance">{studyHeadline}</h1>
             <p className="text-muted-foreground text-[15px]">
               Upload a paper to start learning
             </p>
@@ -283,15 +320,17 @@ function DashboardContent() {
         {/* Recent papers */}
         {papers.length > 0 && (
           <div className="space-y-3 animate-fade-in">
-            <div className="flex items-center justify-between px-1">
+            <div className="flex items-center justify-between gap-2 px-1">
               <h2 className="text-[12px] text-muted-foreground/80 uppercase tracking-[0.15em] font-semibold">
                 Recent
               </h2>
               <button
+                type="button"
                 onClick={() => router.push("/library")}
-                className="text-[12px] text-muted-foreground hover:text-foreground/90 transition-colors font-medium"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border/55 bg-background/60 px-2.5 py-1 text-[11px] font-semibold text-foreground/90 shadow-sm transition-colors hover:bg-accent hover:border-border-strong"
               >
-                View all &rarr;
+                <Library className="h-3.5 w-3.5 text-foreground/75" strokeWidth={2} aria-hidden />
+                Open library
               </button>
             </div>
 
@@ -326,12 +365,6 @@ function DashboardContent() {
 
         {/* Footer nav */}
         <div className="flex items-center justify-center gap-8 pt-4">
-          <button
-            onClick={() => router.push("/library")}
-            className="text-[12px] text-muted-foreground hover:text-foreground/90 transition-colors font-medium"
-          >
-            Library
-          </button>
           <button
             onClick={() => router.push("/settings")}
             className="text-[12px] text-muted-foreground hover:text-foreground/90 transition-colors font-medium"
