@@ -17,21 +17,21 @@ import { FullscreenToggle } from "@/components/FullscreenToggle";
 import { DISCORD_URL } from "@/lib/constants";
 
 const STUDY_HEADLINES = [
-  "Turn a difficult PDF into something you truly understand.",
-  "One focused read today beats a week of half-attention skimming.",
-  "Stay with one argument until it clicks—that's how expertise compounds.",
-  "Upload something that challenges you; growth lives in the hard parts.",
-  "Clear the noise. Give one paper your full attention this session.",
-  "Depth beats drift. What will you study in earnest today?",
-  "Your next insight is probably in a section you haven't re-read yet.",
-  "Read slowly, take notes, test yourself—the plain path is the fast path.",
-  "Make today the day a confusing passage finally makes sense.",
-  "Start with a question, then let the paper answer it line by line.",
-  "Consistency compounds. Even twenty focused minutes move the needle.",
-  "Treat this like lab work: one text, one thread, one honest pass.",
-  "Trade scrolling for a single deliberate stretch of close reading.",
-  "Let the difficult pages teach you—that's what they're for.",
-  "You rarely need more papers—more time with the right one.",
+  "Turn a hard PDF into real understanding.",
+  "One focused read beats a week of skimming.",
+  "Stay with the argument until it clicks.",
+  "Upload something difficult—that's growth.",
+  "Give one paper your full attention.",
+  "Depth today beats drift tomorrow.",
+  "The insight you need is in a skipped section.",
+  "Read slowly—that’s the shortcut.",
+  "Make sense of one hard passage today.",
+  "Start with a question; let the paper answer.",
+  "Even twenty focused minutes count.",
+  "One paper, one honest pass.",
+  "Trade scrolling for one close read.",
+  "Hard pages are doing their job.",
+  "More time on the right paper—not more papers.",
 ] as const;
 
 function getStudyHeadline(firstName?: string | null): string {
@@ -145,7 +145,7 @@ function DashboardContent() {
           {tierUser?.tier === "free" && (
             <Link
               href="/#pricing"
-              className="text-[12px] font-medium bg-foreground text-background px-3.5 py-1.5 rounded-xl shadow-sm"
+              className="text-[12px] font-medium bg-foreground text-background px-3.5 py-1.5 rounded-xl"
             >
               Upgrade
             </Link>
@@ -154,7 +154,7 @@ function DashboardContent() {
             href="/library"
             title="Open your library"
             aria-label="Open your library"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border/55 bg-background/75 text-foreground shadow-sm backdrop-blur-sm transition-colors hover:bg-accent hover:border-border-strong"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border/70 bg-background/90 text-foreground transition-colors hover:bg-accent hover:border-border-strong"
           >
             <Library className="h-[18px] w-[18px] text-foreground/85" strokeWidth={1.75} aria-hidden />
           </Link>
@@ -232,7 +232,7 @@ function DashboardContent() {
         {tierUser?.tier === "free" && (
           <Link
             href="/#pricing"
-            className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-foreground/90 hover:text-foreground px-3 py-1.5 rounded-full glass-subtle hover:shadow-sm transition-all ring-focus"
+            className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-foreground/90 hover:text-foreground px-3 py-1.5 rounded-full border border-border/60 bg-background/80 transition-colors ring-focus"
           >
             <svg className="w-3 h-3 text-foreground/70" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
               <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z" />
@@ -244,7 +244,7 @@ function DashboardContent() {
           href="/library"
           title="Your library — all papers and folders"
           aria-label="Open your library"
-          className="inline-flex h-9 items-center gap-2 rounded-xl border border-border/60 bg-background/70 px-3 text-[12px] font-semibold text-foreground/90 shadow-sm backdrop-blur-sm transition-all hover:bg-accent hover:border-border-strong hover:text-foreground ring-focus"
+            className="inline-flex h-9 items-center gap-2 rounded-xl border border-border/70 bg-background/90 px-3 text-[12px] font-semibold text-foreground/90 transition-colors hover:bg-accent hover:border-border-strong hover:text-foreground ring-focus"
         >
           <Library className="h-[17px] w-[17px] shrink-0 text-foreground/80" strokeWidth={1.75} aria-hidden />
           <span className="hidden min-[380px]:inline">Library</span>
@@ -317,6 +317,14 @@ function DashboardContent() {
           <p className="text-[13px] text-destructive text-center animate-fade-in">{error}</p>
         )}
 
+        <p className="text-center text-[12px] text-muted-foreground/85">
+          <Link href="/settings#integrations" className="underline underline-offset-2 hover:text-foreground/90">
+            Google Drive &amp; Workspace
+          </Link>
+          <span className="text-muted-foreground/50"> · </span>
+          <span className="text-muted-foreground/70">import coming soon</span>
+        </p>
+
         {/* Recent papers */}
         {papers.length > 0 && (
           <div className="space-y-3 animate-fade-in">
@@ -327,14 +335,14 @@ function DashboardContent() {
               <button
                 type="button"
                 onClick={() => router.push("/library")}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-border/55 bg-background/60 px-2.5 py-1 text-[11px] font-semibold text-foreground/90 shadow-sm transition-colors hover:bg-accent hover:border-border-strong"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border/70 bg-card px-2.5 py-1 text-[11px] font-semibold text-foreground/90 transition-colors hover:bg-accent hover:border-border-strong"
               >
                 <Library className="h-3.5 w-3.5 text-foreground/75" strokeWidth={2} aria-hidden />
                 Open library
               </button>
             </div>
 
-            <div className="glass rounded-2xl divide-y divide-border overflow-hidden">
+            <div className="rounded-2xl border border-border bg-card divide-y divide-border overflow-hidden">
               {papers.slice(0, 3).map((p) => (
                 <button
                   key={p.id}

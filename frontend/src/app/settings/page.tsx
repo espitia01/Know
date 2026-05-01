@@ -269,6 +269,36 @@ function SettingsContent() {
             users see the upsell card inside the component). */}
         <AppearanceSection tier={tier} />
 
+        <div id="integrations" className="glass rounded-2xl p-6 space-y-3 scroll-mt-24">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-card">
+              <svg className="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15a4.5 4.5 0 004.5 4.5h7.004a4.5 4.5 0 00.522-8.972m-1.522-.53A4.501 4.501 0 0016.5 6.75h-1.132m0 0A4.5 4.5 0 0012 2.25H9.75A4.5 4.5 0 006.35 6.75" />
+              </svg>
+            </div>
+            <div className="min-w-0 space-y-1">
+              <p className="text-[14px] font-semibold text-foreground">Google Drive &amp; Workspace</p>
+              <p className="text-[12px] leading-relaxed text-muted-foreground">
+                We&apos;re working on importing PDFs directly from Google Drive and shared drives (Workspace).
+                You&apos;ll sign in with Google, pick files, and they&apos;ll open in Know like a normal upload—no
+                manual download step.
+              </p>
+              <p className="text-[11px] font-medium text-muted-foreground/90">
+                Status: <span className="text-foreground/80">in development</span>
+                {" · "}
+                <a
+                  href={DISCORD_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline underline-offset-2 hover:text-foreground/90"
+                >
+                  Tell us what you need on Discord
+                </a>
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* Usage */}
         {usage && (
           <div className="glass rounded-2xl p-6 space-y-4">

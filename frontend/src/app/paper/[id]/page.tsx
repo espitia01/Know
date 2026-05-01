@@ -507,10 +507,9 @@ function PaperContent() {
       setPanelSize: s.setPanelSize,
     })),
   );
-  const { headerHidden, toggleHeader, setHeaderHidden, focusMode, toggleFocusMode, setFocusMode } = useStore(
+  const { headerHidden, setHeaderHidden, focusMode, toggleFocusMode, setFocusMode } = useStore(
     useShallow((s) => ({
       headerHidden: s.headerHidden,
-      toggleHeader: s.toggleHeader,
       setHeaderHidden: s.setHeaderHidden,
       focusMode: s.focusMode,
       toggleFocusMode: s.toggleFocusMode,
@@ -1732,19 +1731,6 @@ function PaperContent() {
           }`}
         >
           {panelVisible ? "Hide Analysis" : "Show Analysis"}
-        </button>
-
-        {/* Collapse the top bar without going fullscreen — gives the
-            reader more vertical space while keeping window chrome. */}
-        <button
-          onClick={toggleHeader}
-          className="shrink-0 text-muted-foreground/70 hover:text-foreground transition-colors ring-focus rounded-md p-1"
-          title="Hide top bar"
-          aria-label="Hide top bar"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
-          </svg>
         </button>
 
         {/* Focus mode: drop all chrome and request browser fullscreen.

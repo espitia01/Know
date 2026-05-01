@@ -497,6 +497,24 @@ export const api = {
     });
   },
 
+  /** Anonymous trial: Explain/Derive only; server enforces a low per-paper cap. */
+  trialAnalyzeSelectionStream: async (
+    paperId: string,
+    selectedText: string,
+    action: string,
+    options?: { signal?: AbortSignal },
+  ) =>
+    fetch(`${API_BASE}/api/trial/selection-stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        paper_id: paperId,
+        selected_text: selectedText,
+        action,
+      }),
+      signal: options?.signal,
+    }),
+
   analyze: (id: string) =>
     request<PreReadingAnalysis>(`/api/papers/${id}/analyze`, { method: "POST" }),
 

@@ -16,6 +16,8 @@ interface SelectionToolbarProps {
   rect: DOMRect;
   onAction: (action: SelectionAction, text: string) => void;
   onDismiss: () => void;
+  /** Demo / quota: when `used &gt;= limit`, actions are disabled. */
+  selectionQuota?: { used: number; limit: number };
 }
 
 function ExplainIcon() {
@@ -85,7 +87,7 @@ const actions: {
   },
 ];
 
-export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionToolbarProps) {
+export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuota }: SelectionToolbarProps) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const mountedAt = useRef(Date.now());
@@ -168,6 +170,8 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
     };
   }, [onDismiss]);
 
+  const quotaBlocked = selectionQuota !== undefined && selectionQuota.used >= selectionQuota.limit;
+
   const cleanText = text.replace(/\s+/g, " ").trim();
 
   // Pointer-events must be suppressed on the wrapper so the initial
@@ -189,21 +193,24 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
         {visibleActions.map((a, i) => (
           <button
             key={a.id}
+            type="button"
+            disabled={quotaBlocked}
             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              if (quotaBlocked) return;
               onAction(a.id, cleanText);
             }}
             // `data-tooltip` powers the rich CSS tooltip declared in
             // globals.css; the native `title` is kept as a fallback for
             // assistive tech and long-press on touch devices.
-            data-tooltip={a.hint}
-            title={a.hint}
-            aria-label={`${a.label} — ${a.hint}`}
+            data-tooltip={quotaBlocked ? "Demo selection limit reached — create a free account for more." : a.hint}
+            title={quotaBlocked ? "Demo selection limit reached — create a free account for more." : a.hint}
+            aria-label={quotaBlocked ? "Demo selection limit reached" : `${a.label} — ${a.hint}`}
             className={`know-toolbar-btn group flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/70 active:scale-[0.97] transition-all whitespace-nowrap ${
               i === 0 ? "" : "ml-px"
-            }`}
+            } ${quotaBlocked ? "opacity-40 cursor-not-allowed hover:bg-transparent hover:text-muted-foreground" : ""}`}
           >
             <a.Icon />
             <span className="leading-none">{a.label}</span>

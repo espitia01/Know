@@ -83,7 +83,13 @@ export default function TrialPage() {
             <Image src="/logo.png" alt="Know" width={24} height={24} className="rounded-md" />
             <span className="text-[15px] font-semibold tracking-[-0.03em] text-foreground">Know</span>
           </Link>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <Link
+              href="/#pricing"
+              className="text-[12px] font-semibold text-foreground/90 border border-border/70 rounded-lg px-2.5 py-1.5 transition-colors hover:bg-accent sm:text-[13px] sm:px-3"
+            >
+              Plans
+            </Link>
             <ThemeToggle />
             <Link
               href="/sign-in"

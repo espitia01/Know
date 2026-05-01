@@ -14,6 +14,8 @@ interface SelectionResultPanelProps {
   loading: boolean;
   history: SelectionAnalysisResult[];
   onFollowUp: (question: string, context: string) => Promise<void>;
+  /** When false, hides the follow-up composer (e.g. anonymous trial). */
+  allowFollowUp?: boolean;
 }
 
 function FollowUpThreadList({ followups }: { followups: SelectionAnalysisResult[] }) {
@@ -67,7 +69,13 @@ function FollowUpThreadList({ followups }: { followups: SelectionAnalysisResult[
   );
 }
 
-export function SelectionResultPanel({ result, loading, history, onFollowUp }: SelectionResultPanelProps) {
+export function SelectionResultPanel({
+  result,
+  loading,
+  history,
+  onFollowUp,
+  allowFollowUp = true,
+}: SelectionResultPanelProps) {
   const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
 
   if (loading && !result) {
@@ -126,7 +134,7 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
     : null;
 
   const canAskFollowUp =
-    !!result && !result.streaming && !loading;
+    allowFollowUp && !!result && !result.streaming && !loading;
 
   const renderThreadCard = (t: ThreadNode) => (
     <div className="space-y-4">
@@ -328,7 +336,7 @@ function ResultCard({
           className={
             inAccordion
               ? "rounded-md border border-border/45 bg-background/55 px-3 py-2.5 dark:bg-card/22"
-              : "rounded-lg border border-border/50 border-l-[3px] border-l-foreground/18 bg-card/50 px-3.5 py-3 dark:bg-card/32"
+              : "rounded-lg border border-border/50 bg-card/50 px-3.5 py-3 dark:bg-card/32"
           }
         >
           {result.explanation && (

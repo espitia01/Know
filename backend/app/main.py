@@ -8,10 +8,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from .config import settings
 from .auth import require_auth
+
+TRIAL_SELECTION_CAP = 2
 
 
 import logging as _logging
@@ -434,7 +436,14 @@ async def trial_get_paper(paper_id: str, request: Request):
     paper = get_paper(paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
-    return {"id": paper.id, "title": paper.title, "authors": paper.authors}
+    used = int(paper.cached_analysis.get("trial_selections_used") or 0)
+    return {
+        "id": paper.id,
+        "title": paper.title,
+        "authors": paper.authors,
+        "trial_selections_used": used,
+        "trial_selections_limit": TRIAL_SELECTION_CAP,
+    }
 
 
 @app.get("/api/trial/paper/{paper_id}/pdf")
@@ -449,6 +458,98 @@ async def trial_get_pdf(paper_id: str, request: Request):
     if not pdf_path.exists():
         raise HTTPException(status_code=404, detail="PDF not found")
     return FileResponse(pdf_path, media_type="application/pdf")
+
+
+@app.post("/api/trial/selection-stream")
+async def trial_selection_stream(request: Request, body: dict):
+    """Stream Explain/Derive for anonymous trial papers with a strict per-paper cap."""
+    _check_trial_rate(request)
+    import json as _json
+    import asyncio
+
+    from .api.papers import _validate_id
+    from .services.pdf_parser import get_paper, mutate_local_paper, append_capped
+    from .services.llm import (
+        AnthropicProvider,
+        get_fast_provider,
+        _get_selection_prompt,
+        _normalize_latex_delimiters,
+    )
+
+    paper_id = (body.get("paper_id") or "").strip()
+    if not paper_id.startswith("trial_"):
+        raise HTTPException(status_code=400, detail="Demo selections only work for trial papers")
+    _validate_id(paper_id, "paper_id")
+
+    selected_text = (body.get("selected_text") or "").strip()
+    if len(selected_text) > 4000:
+        selected_text = selected_text[:4000]
+    action = body.get("action", "explain")
+    if action == "question":
+        action = "explain"
+    if action not in ("explain", "derive"):
+        raise HTTPException(status_code=400, detail="This demo supports Explain and Derive only")
+    if not selected_text:
+        raise HTTPException(status_code=400, detail="No text selected")
+
+    paper = get_paper(paper_id, user_id=None)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    used = int(paper.cached_analysis.get("trial_selections_used") or 0)
+    if used >= TRIAL_SELECTION_CAP:
+        raise HTTPException(
+            status_code=429,
+            detail="You've used both selections in this demo. Create a free account to continue.",
+        )
+
+    provider = get_fast_provider(None)
+    if not isinstance(provider, AnthropicProvider):
+        raise HTTPException(status_code=503, detail="Streaming is unavailable")
+
+    system, user_text = _get_selection_prompt(paper.raw_text, selected_text, action)
+
+    async def event_stream():
+        full_text = ""
+        disconnected = False
+        try:
+            async for chunk in provider.stream_complete(system, user_text, max_tokens=2048):
+                if await request.is_disconnected():
+                    disconnected = True
+                    break
+                full_text += chunk
+                normalized = _normalize_latex_delimiters(chunk)
+                yield f"data: {_json.dumps({'type': 'chunk', 'text': normalized})}\n\n"
+
+            if disconnected:
+                return
+
+            full_text = _normalize_latex_delimiters(full_text)
+            yield f"data: {_json.dumps({'type': 'done', 'full_text': full_text})}\n\n"
+
+            result = {
+                "action": action,
+                "selected_text": selected_text,
+                "explanation": full_text,
+            }
+
+            def _apply(p):
+                prev = int(p.cached_analysis.get("trial_selections_used") or 0)
+                p.cached_analysis["trial_selections_used"] = prev + 1
+                append_capped(p.cached_analysis, "selections", result)
+
+            try:
+                mutate_local_paper(paper_id, _apply)
+            except Exception:
+                _main_logger.exception("trial selection persist failed for %s", paper_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _main_logger.exception("Trial selection stream error for %s", paper_id)
+            yield f"data: {_json.dumps({'type': 'error', 'message': 'Analysis failed. Please try again.'})}\n\n"
+            yield f"data: {_json.dumps({'type': 'done', 'full_text': ''})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 # --- Protected routers (auth via per-endpoint Depends(require_auth)) ---

@@ -562,6 +562,27 @@ def mutate_paper(
     return paper
 
 
+def mutate_local_paper(paper_id: str, mutator) -> ParsedPaper:
+    """Load → mutate → save for papers that exist only on disk (no Supabase row).
+
+    Trial papers use this path so concurrent selection streams don't stomp each
+    other's ``cached_analysis`` writes.
+    """
+    lock = _get_paper_lock(paper_id)
+    with lock:
+        paper = _load_paper_locked(paper_id, None)
+        if paper is None:
+            raise FileNotFoundError(paper_id)
+        result = mutator(paper)
+        if isinstance(result, ParsedPaper):
+            paper = result
+        meta_path = settings.papers_dir / paper.id / "paper.json"
+        meta_path.parent.mkdir(parents=True, exist_ok=True)
+        meta_path.write_text(paper.model_dump_json(indent=2))
+        invalidate_paper_cache(paper.id, None)
+    return paper
+
+
 def append_cached_analysis_local(
     paper_id: str, user_id: str, key: str, entry,
 ) -> None:
