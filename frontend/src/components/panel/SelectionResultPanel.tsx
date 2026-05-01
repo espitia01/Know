@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, memo } from "react";
+import { useState, memo, useEffect, useRef } from "react";
 import { Md } from "@/components/ui/Md";
 import { Badge } from "@/components/ui/badge";
 import type { SelectionAnalysisResult } from "@/lib/api";
@@ -23,6 +23,72 @@ function ThreadGlyph() {
     >
       ↳
     </span>
+  );
+}
+
+function FollowUpThreadList({ followups }: { followups: SelectionAnalysisResult[] }) {
+  const prevCount = useRef(0);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    const n = followups.length;
+    const last = n ? selectionKey(followups[n - 1]) : null;
+    if (n > prevCount.current && last) {
+      setOpenKey(last);
+    } else if (n === 0) {
+      setOpenKey(null);
+    } else {
+      setOpenKey((k) => {
+        if (!k) return k;
+        return followups.some((f) => selectionKey(f) === k) ? k : last;
+      });
+    }
+    prevCount.current = n;
+  }, [followups]);
+
+  if (followups.length === 0) return null;
+
+  return (
+    <div className="ml-2 space-y-2 border-l-2 border-border/35 pl-3 sm:ml-3 sm:pl-4">
+      {followups.map((f) => {
+        const k = selectionKey(f);
+        const open = openKey === k;
+        const q = f.question || f.selected_text;
+        return (
+          <div
+            key={k}
+            className="overflow-hidden rounded-xl border border-border/50 bg-card/30 shadow-sm ring-1 ring-border/20 dark:bg-card/22 dark:shadow-none dark:ring-border/15"
+          >
+            <button
+              type="button"
+              onClick={() => setOpenKey(open ? null : k)}
+              className="flex w-full items-start gap-2 px-3 py-2.5 text-left motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              aria-expanded={open}
+            >
+              <ThreadGlyph />
+              <span className="min-w-0 flex-1 text-[var(--text-sm)] font-medium leading-snug text-foreground">
+                {q}
+              </span>
+              <svg
+                className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/50 motion-safe:transition-transform ${open ? "rotate-180" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {open && (
+              <div className="border-t border-border/40 px-3 pb-3 pt-1 motion-safe:animate-fade-in">
+                <ResultCard result={f} hideHeader hideQuote />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -88,24 +154,14 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
     !!result && !result.streaming && !loading;
 
   const renderThreadCard = (t: ThreadNode) => (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <ResultCard result={t.root} />
       {t.followups.length > 0 && (
-        <div className="ml-3 space-y-4 border-l-2 border-border/40 pl-4">
-          {t.followups.map((f) => (
-            <div key={selectionKey(f)} className="space-y-2">
-              <p className="text-[var(--text-xs)] font-medium text-muted-foreground/75">
-                You asked
-              </p>
-              <div className="flex items-start gap-1.5">
-                <ThreadGlyph />
-                <p className="text-[var(--text-sm)] font-medium leading-snug text-foreground">
-                  {f.question || f.selected_text}
-                </p>
-              </div>
-              <ResultCard result={f} hideHeader hideQuote />
-            </div>
-          ))}
+        <div className="space-y-2">
+          <p className="px-0.5 text-[var(--text-2xs)] font-semibold uppercase tracking-wide text-muted-foreground/65">
+            Follow-ups
+          </p>
+          <FollowUpThreadList followups={t.followups} />
         </div>
       )}
     </div>
@@ -117,12 +173,12 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
         <>
           {renderThreadCard(activeThread)}
           {loading && (
-            <div className="flex flex-col items-center gap-2 rounded-xl border border-border/50 bg-muted/20 py-4">
+            <div className="flex w-full flex-col items-center gap-2.5 rounded-xl border border-border/50 bg-muted/15 px-4 py-5 dark:bg-muted/10">
               <div className="w-full max-w-xs">
-                <AnalysisProgress kind="selection" />
+                <AnalysisProgress kind="selection" className="mx-auto" />
               </div>
-              <span className="text-[var(--text-xs)] text-muted-foreground motion-safe:animate-pulse">
-                Processing follow-up…
+              <span className="text-center text-[var(--text-xs)] text-muted-foreground motion-safe:animate-pulse">
+                Thinking…
               </span>
             </div>
           )}
@@ -266,6 +322,7 @@ function ResultCard({
   const isStreaming = result.streaming;
   const hasContent = !!(result.explanation || result.elaboration || result.answer || result.assumptions?.length || result.steps?.length);
   const action = normalizeSelectionAction(result.action);
+  const streamingLabel = action === "followup" ? "Thinking…" : "Generating analysis…";
 
   return (
     <div className="space-y-3">
@@ -320,9 +377,13 @@ function ResultCard({
       )}
 
       {!hasContent && isStreaming && (
-        <div className="space-y-2 py-4">
-          <AnalysisProgress kind="selection" />
-          <p className="text-center text-[var(--text-xs)] text-muted-foreground motion-safe:animate-pulse">Generating analysis…</p>
+        <div className="flex w-full flex-col items-center gap-2 py-4">
+          <div className="w-full max-w-xs">
+            <AnalysisProgress kind="selection" className="mx-auto" />
+          </div>
+          <p className="text-center text-[var(--text-xs)] text-muted-foreground motion-safe:animate-pulse">
+            {streamingLabel}
+          </p>
         </div>
       )}
 

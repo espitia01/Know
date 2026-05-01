@@ -294,7 +294,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       onValueChange={setActiveTab}
       className="analysis-panel-tabs flex h-full flex-col"
     >
-      <div className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-border/55 bg-muted/10 px-3 dark:bg-muted/5">
+      <div className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-border/45 bg-muted/12 px-3 dark:bg-muted/[0.07]">
         {/* min-w-0 + overflow-x-auto: side panels stay narrow; tab row scrolls
             horizontally. Tab triggers must stay flex-none (see TAB_STYLE) or
             labels collapse. Light scrollbar so the strip is discoverable. */}
@@ -476,7 +476,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
 
       <div className="analysis-scroll-fade min-h-0 flex-1 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable]">
         <div
-          className="analysis-pane-v2 mx-auto w-full max-w-3xl px-4 py-4 md:px-6 md:py-6"
+          className="analysis-pane-v2 mx-auto w-full max-w-3xl px-4 py-5 md:px-8 md:py-8"
           style={{ ["--analysis-font-scale" as string]: analysisFontScale }}
         >
           {showSelectionTab && mountedTabs.has("selection") && (

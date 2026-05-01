@@ -7,9 +7,10 @@
  *   choice in localStorage (per Clerk userId) so it survives reloads and
  *   cross-tab toggles, and listen to `prefers-color-scheme` so "system"
  *   updates live.
- * - The inline script in `layout.tsx` can only follow the OS preference
- *   before React + Clerk resolve the signed-in user; this provider then
- *   applies the stored per-account choice.
+ * - An inline script in `layout.tsx` reads a mirrored cookie plus any
+ *   `know:theme:v2:*` localStorage entry before React runs so the first
+ *   paint matches the user's pinned light/dark preference (not a brief
+ *   system-theme flash). This provider then reconciles after Clerk loads.
  * - The toggle UI reads `theme` (the user's stored preference), not the
  *   effective `resolvedTheme`, so the three-state cycle is predictable.
  */
@@ -63,6 +64,60 @@ function applyThemeClass(resolved: ResolvedTheme) {
   }
 }
 
+/** Cookie mirrored from this provider so the bootstrap script can resolve
+ *  theme before React without waiting on Clerk. */
+export const THEME_PREFERENCE_COOKIE = "know_theme";
+
+export function syncThemePreferenceCookie(mode: ThemeMode) {
+  if (typeof document === "undefined") return;
+  try {
+    document.cookie = `${THEME_PREFERENCE_COOKIE}=${encodeURIComponent(mode)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Inline script evaluated BEFORE React hydrates. Order: preference cookie →
+ * any stored `know:theme:v2:*` value → legacy `know:theme` → system.
+ */
+export const THEME_INIT_SCRIPT = `
+(function () {
+  try {
+    function getCookie(name) {
+      var parts = ("; " + document.cookie).split("; " + name + "=");
+      if (parts.length < 2) return "";
+      return decodeURIComponent(parts.pop().split(";").shift() || "");
+    }
+    function readPref() {
+      var c = getCookie("${THEME_PREFERENCE_COOKIE}");
+      if (c === "light" || c === "dark" || c === "system") return c;
+      try {
+        var i, k, v;
+        for (i = 0; i < localStorage.length; i++) {
+          k = localStorage.key(i);
+          if (k && k.indexOf("know:theme:v2:") === 0) {
+            v = localStorage.getItem(k);
+            if (v === "light" || v === "dark" || v === "system") return v;
+          }
+        }
+        v = localStorage.getItem("${LEGACY_THEME_STORAGE_KEY}");
+        if (v === "light" || v === "dark") return v;
+      } catch (e0) { /* no-op */ }
+      return "system";
+    }
+    function resolve(p) {
+      if (p === "light" || p === "dark") return p;
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    var resolved = resolve(readPref());
+    document.documentElement.classList.toggle("dark", resolved === "dark");
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", resolved === "dark" ? "#16181f" : "#fbfbfb");
+  } catch (e) { /* no-op */ }
+})();
+`.trim();
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const { isLoaded, userId } = useAuth();
   const [theme, setThemeState] = useState<ThemeMode>("system");
@@ -80,6 +135,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       // Ignore storage errors (private mode, quota, etc.) — fall back to system.
     }
     setThemeState(stored);
+    syncThemePreferenceCookie(stored);
     const effective = stored === "system" ? getSystemTheme() : stored;
     setResolvedTheme(effective);
     applyThemeClass(effective);
@@ -101,6 +157,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const onStorage = (e: StorageEvent) => {
       if (e.key !== storageKey || !e.newValue) return;
       if (e.newValue === "light" || e.newValue === "dark" || e.newValue === "system") {
+        syncThemePreferenceCookie(e.newValue);
         setThemeState(e.newValue);
         const eff = e.newValue === "system" ? getSystemTheme() : e.newValue;
         setResolvedTheme(eff);
@@ -120,6 +177,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // ignore
       }
+      syncThemePreferenceCookie(t);
       setThemeState(t);
       const eff = t === "system" ? getSystemTheme() : t;
       setResolvedTheme(eff);
@@ -152,19 +210,3 @@ export function useTheme(): ThemeContextValue {
   }
   return ctx;
 }
-
-/**
- * Inline script evaluated BEFORE React hydrates. Uses OS color scheme only;
- * per-account theme is applied once Clerk + ThemeProvider load (localStorage
- * is scoped by userId and cannot be read safely here).
- */
-export const THEME_INIT_SCRIPT = `
-(function () {
-  try {
-    var sys = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-    if (sys === "dark") document.documentElement.classList.add("dark");
-    var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", sys === "dark" ? "#16181f" : "#fbfbfb");
-  } catch (e) { /* no-op */ }
-})();
-`.trim();
