@@ -12,3 +12,4 @@ build/
 .vercel/
 .turbo/
 frontend/package-lock 2.json
+.claude/
