@@ -10,6 +10,10 @@ const compat = new FlatCompat({
 });
 
 const eslintConfig = [
+  {
+    // Next build output is CommonJS-heavy generated code — never lint it.
+    ignores: [".next/**", "out/**", "node_modules/**", "next-env.d.ts", "public/**/*.mjs"],
+  },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
 ];
 
