@@ -92,6 +92,10 @@ export function CrossPaperPanel() {
 
       <div className="space-y-2">
         <Textarea
+          name="know_cross_paper_question"
+          autoComplete="off"
+          autoCorrect="on"
+          spellCheck
           placeholder="Ask a question across all papers…"
           value={input}
           onChange={(e) => setInput(e.target.value)}

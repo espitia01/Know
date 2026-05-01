@@ -217,12 +217,18 @@ function FollowUpInput({ context, onSubmit }: { context: string; onSubmit: (q: s
   return (
     <div className="flex gap-2 pt-1">
       <input
+        type="search"
+        name="know_selection_followup"
+        autoComplete="off"
+        autoCorrect="on"
+        spellCheck
+        enterKeyHint="send"
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
         placeholder="Ask a follow-up question…"
         disabled={submitting}
-        className="min-h-9 flex-1 rounded-lg border border-border/80 bg-card/30 px-3 py-1.5 text-[var(--text-sm)] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-ring/40 disabled:opacity-50"
+        className="know-non-credential-input min-h-9 flex-1 rounded-lg border border-border/80 bg-card/30 px-3 py-1.5 text-[var(--text-sm)] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-ring/40 disabled:opacity-50"
       />
       <button
         type="button"

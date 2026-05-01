@@ -454,6 +454,12 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         <div className="shrink-0 pt-2 border-t border-border/50">
           <div className="flex gap-2">
             <input
+              type="search"
+              name="know_figure_followup"
+              autoComplete="off"
+              autoCorrect="on"
+              spellCheck
+              enterKeyHint="send"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               onKeyDown={(e) => {
@@ -461,7 +467,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               }}
               placeholder="Ask about this figure..."
               disabled={loading}
-              className="flex-1 text-[var(--text-sm)] px-3 py-2 rounded-xl border border-border glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+              className="know-non-credential-input flex-1 text-[var(--text-sm)] px-3 py-2 rounded-xl border border-border glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
             />
             <button
               onClick={handleAsk}

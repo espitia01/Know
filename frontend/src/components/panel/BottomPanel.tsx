@@ -4,7 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { createPortal } from "react-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useStore } from "@/lib/store";
-import { api } from "@/lib/api";
+import { api, type SelectionAnalysisResult } from "@/lib/api";
+import { consumeSelectionSse } from "@/lib/selectionSse";
 import { FEATURE_TOOLTIPS } from "@/lib/tooltips";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { SelectionResultPanel } from "./SelectionResultPanel";
@@ -53,10 +54,12 @@ const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
 };
 
 export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPanelProps) {
+  const followUpAbortRef = useRef<AbortController | null>(null);
+
   const {
     activeTab, setActiveTab,
     selectionResult, selectionLoading, selectionHistory,
-    setSelectionResult, setSelectionLoading, addSelectionToHistory,
+    setSelectionResult, setSelectionLoading, upsertSelectionInHistory,
     sessionPapers, bumpUsageRefresh,
     analysisFontScale, bumpAnalysisFontScale, setAnalysisFontScale,
   } = useStore();
@@ -153,37 +156,137 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
   }, [menuOpen]);
 
   const handleFollowUp = useCallback(async (question: string, context: string) => {
-    setSelectionLoading(true);
+    followUpAbortRef.current?.abort();
+    const controller = new AbortController();
+    followUpAbortRef.current = controller;
+
+    const startedFor = paperId;
+    const stillHere = () => useStore.getState().paper?.id === startedFor;
+
+    const clientKey =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `fu-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    const payloadText = `${context}\n\nFollow-up question: ${question}`;
+
+    const provisional: SelectionAnalysisResult = {
+      action: "followup",
+      selected_text: payloadText,
+      question,
+      explanation: "",
+      streaming: true,
+      clientKey,
+    };
+
+    upsertSelectionInHistory(provisional);
+    setSelectionResult(provisional);
+    setSelectionLoading(false);
+
     try {
-      // Server now accepts `followup` as a first-class action so the
-      // result persists with the right label across reloads. Earlier
-      // versions sent `"question"` and overrode the action client-side
-      // — that worked in-session but the server stored
-      // `action: "question"` so on refresh the follow-up showed up
-      // as "Answer" in history (which is what users were reporting).
-      const result = await api.analyzeSelection(
-        paperId,
-        `${context}\n\nFollow-up question: ${question}`,
-        "followup",
-        { question },
-      );
-      // Per audit §11.3: keep server `selected_text` intact so hydration
-      // doesn't rewrite the entry; surface the user's short prompt via
-      // a separate `question` field for the threaded UI.
-      const followUpResult = { ...result, action: "followup" as const, question };
-      addSelectionToHistory(followUpResult);
-      setSelectionResult(followUpResult);
-      bumpUsageRefresh();
-    } catch (e) {
-      setSelectionResult({
-        action: "followup",
-        selected_text: question,
-        explanation: `Follow-up failed: ${e instanceof Error ? e.message : "Unknown error"}`,
+      const res = await api.analyzeSelectionStream(paperId, payloadText, "followup", {
+        signal: controller.signal,
+        question,
       });
-    } finally {
-      setSelectionLoading(false);
+      if (controller.signal.aborted) return;
+      if (!res.ok) {
+        const detail = await res.text();
+        let msg = `HTTP ${res.status}`;
+        try { msg = JSON.parse(detail).detail || msg; } catch { /* ignore */ }
+        const errBody: SelectionAnalysisResult = {
+          action: "followup",
+          selected_text: payloadText,
+          question,
+          explanation:
+            res.status === 403 || res.status === 429
+              ? `**Limit reached.** ${msg}\n\nUpgrade your plan to continue.`
+              : msg,
+          streaming: false,
+          clientKey,
+        };
+        if (stillHere()) {
+          upsertSelectionInHistory(errBody);
+          setSelectionResult(errBody);
+        }
+        return;
+      }
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No stream");
+
+      let sawTerminalEvent = false;
+
+      await consumeSelectionSse(reader, controller.signal, {
+        onChunk: (accumulated) => {
+          if (!stillHere()) return;
+          const chunkBody: SelectionAnalysisResult = {
+            action: "followup",
+            selected_text: payloadText,
+            question,
+            explanation: accumulated,
+            streaming: true,
+            clientKey,
+          };
+          upsertSelectionInHistory(chunkBody);
+          setSelectionResult(chunkBody);
+        },
+        onDone: (finalText) => {
+          sawTerminalEvent = true;
+          if (!stillHere()) return;
+          const finalResult: SelectionAnalysisResult = {
+            action: "followup",
+            selected_text: payloadText,
+            question,
+            explanation: finalText,
+            streaming: false,
+            clientKey,
+          };
+          upsertSelectionInHistory(finalResult);
+          setSelectionResult(finalResult);
+          bumpUsageRefresh();
+        },
+        onError: (message) => {
+          sawTerminalEvent = true;
+          if (!stillHere()) return;
+          const errResult: SelectionAnalysisResult = {
+            action: "followup",
+            selected_text: payloadText,
+            question,
+            explanation: `Error: ${message}`,
+            streaming: false,
+            clientKey,
+          };
+          upsertSelectionInHistory(errResult);
+          setSelectionResult(errResult);
+        },
+      });
+
+      if (!sawTerminalEvent && !controller.signal.aborted && stillHere()) {
+        const errResult: SelectionAnalysisResult = {
+          action: "followup",
+          selected_text: payloadText,
+          question,
+          explanation: "Follow-up ended unexpectedly.",
+          streaming: false,
+          clientKey,
+        };
+        upsertSelectionInHistory(errResult);
+        setSelectionResult(errResult);
+      }
+    } catch (e) {
+      if (controller.signal.aborted) return;
+      if (!stillHere()) return;
+      const errResult: SelectionAnalysisResult = {
+        action: "followup",
+        selected_text: payloadText,
+        question,
+        explanation: `Follow-up failed: ${e instanceof Error ? e.message : "Unknown error"}`,
+        streaming: false,
+        clientKey,
+      };
+      upsertSelectionInHistory(errResult);
+      setSelectionResult(errResult);
     }
-  }, [paperId, setSelectionLoading, setSelectionResult, addSelectionToHistory, bumpUsageRefresh]);
+  }, [paperId, setSelectionLoading, setSelectionResult, upsertSelectionInHistory, bumpUsageRefresh]);
 
   return (
     <Tabs
@@ -371,9 +474,9 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
         document.body,
       )}
 
-      <div className="analysis-scroll-fade min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
+      <div className="analysis-scroll-fade min-h-0 flex-1 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable]">
         <div
-          className="analysis-pane-v2 mx-auto min-h-dvh w-full max-w-3xl px-4 py-4 md:px-6 md:py-6"
+          className="analysis-pane-v2 mx-auto w-full max-w-3xl px-4 py-4 md:px-6 md:py-6"
           style={{ ["--analysis-font-scale" as string]: analysisFontScale }}
         >
           {showSelectionTab && mountedTabs.has("selection") && (

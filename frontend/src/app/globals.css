@@ -570,6 +570,7 @@
 [data-action="assumptions"] { --highlight-rgb: 234 158 25;  /* amber  */ }
 [data-action="followup"]    { --highlight-rgb: 16  185 129; /* teal   */ }
 [data-action="question"]    { --highlight-rgb: 16  185 129; /* legacy alias of followup */ }
+[data-action="note"]        { --highlight-rgb: 71  85 105;  /* slate — saved PDF notes */ }
 .know-selection-action {
   --highlight-rgb: var(--pdf-selection);
 }
@@ -1101,6 +1102,22 @@ body::before {
     #000 24px,
     #000 100%
   );
+}
+
+/*
+ * Safari often treats generic text inputs in the analysis pane as password /
+ * credential fields (key icon, strong-password UI). `type="search"` plus
+ * explicit non-credential autocomplete discourages that without affecting UX:
+ * appearance is normalized to look like a plain text field.
+ */
+.know-non-credential-input[type="search"] {
+  -webkit-appearance: textfield;
+  appearance: textfield;
+}
+.know-non-credential-input[type="search"]::-webkit-search-decoration,
+.know-non-credential-input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 /* Primary CTA in analysis pane: tighter radius, stronger disabled. */

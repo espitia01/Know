@@ -4,30 +4,33 @@ export type SelectionActionType =
   | "explain"
   | "derive"
   | "assumptions"
-  | "followup";
+  | "followup"
+  | "note";
 
 export const ACTION_LABELS: Record<SelectionActionType, string> = {
   explain: "Explanation",
   derive: "Derivation",
   assumptions: "Assumptions",
   followup: "Follow-up",
+  note: "Note",
 };
 
 export function normalizeSelectionAction(action: string | undefined): SelectionActionType {
-  // Legacy `question` entries were persisted before Ask was folded into
-  // Explain. Normalize at the boundary so labels, colors, and identity keys
-  // all agree without mutating the stored cache entry.
-  if (action === "derive" || action === "assumptions" || action === "followup") {
-    return action;
-  }
+  const raw = typeof action === "string" ? action.trim().toLowerCase() : "";
+  if (raw === "derive") return "derive";
+  if (raw === "assumptions") return "assumptions";
+  if (raw === "followup" || raw === "question") return "followup";
+  if (raw === "note") return "note";
   return "explain";
 }
 
 export function selectionKey(r: SelectionAnalysisResult): string {
+  if (r.clientKey) return r.clientKey;
   const head = (r.explanation || r.elaboration || r.answer || "").slice(0, 64);
+  const norm = normalizeSelectionAction(r.action);
   const identityText =
-    normalizeSelectionAction(r.action) === "followup"
+    norm === "followup"
       ? (r.question || r.selected_text || "")
       : (r.selected_text || "");
-  return `${normalizeSelectionAction(r.action)}::${identityText.trim()}::${head}`;
+  return `${norm}::${identityText.trim()}::${head}`;
 }

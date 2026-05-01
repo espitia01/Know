@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
+import { selectionLooksLikeEquationSnippet } from "@/lib/selectionMathHeuristic";
 
 // `question` is intentionally absent: it used to surface as a separate
 // "Ask" button but produced near-identical results to "Explain" because
@@ -91,7 +92,10 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss }: SelectionT
   const { user } = useUserTier();
   const tier = user?.tier || "free";
 
+  const showDerive = selectionLooksLikeEquationSnippet(text);
+
   const visibleActions = actions.filter((a) => {
+    if (a.id === "derive" && !showDerive) return false;
     if (a.id === "note") return canAccess(tier, "notes");
     if (a.id === "explain" || a.id === "derive") return canAccess(tier, "selection");
     if (a.id === "assumptions") return canAccess(tier, "assumptions");

@@ -228,6 +228,12 @@ export interface Note {
   created_at: number;
 }
 
+/** Bibliography line as extracted for the paper reader (numbered references). */
+export interface PaperReference {
+  id: string;
+  text: string;
+}
+
 export interface ParsedPaper {
   id: string;
   title: string;
@@ -345,6 +351,8 @@ export interface SelectionAnalysisResult {
   final_result?: string;
   steps?: DerivationStep[];
   streaming?: boolean;
+  /** Stable id for in-flight streams so threaded UI + history stay keyed while text grows */
+  clientKey?: string;
 }
 
 export interface SettingsResponse {
@@ -469,16 +477,23 @@ export const api = {
       body: JSON.stringify({ selected_text: selectedText, action }),
     }),
 
-  analyzeSelectionStream: async (id: string, selectedText: string, action: string, signal?: AbortSignal) => {
+  analyzeSelectionStream: async (
+    id: string,
+    selectedText: string,
+    action: string,
+    options?: { signal?: AbortSignal; question?: string },
+  ) => {
     const headers = await authHeaders();
+    const body: Record<string, string> = { selected_text: selectedText, action };
+    if (options?.question) body.question = options.question;
     return fetch(`${API_BASE}/api/papers/${id}/selection-stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...headers,
       },
-      body: JSON.stringify({ selected_text: selectedText, action }),
-      signal,
+      body: JSON.stringify(body),
+      signal: options?.signal,
     });
   },
 

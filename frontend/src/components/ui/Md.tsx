@@ -42,11 +42,21 @@ export const Md = memo(function Md({ children, className }: MdProps) {
   // `children` avoids thousands of repeated regex passes.
   const processed = useMemo(() => preprocessLatex(children), [children]);
 
+  const katexOptions = useMemo(
+    () => ({
+      throwOnError: false,
+      // Lenient parsing: partial/streaming TeX and uncommon macros should
+      // degrade gracefully instead of blowing up the whole markdown block.
+      strict: false as const,
+    }),
+    [],
+  );
+
   return (
     <div className={className ?? "analysis-content"}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[[rehypeKatex, katexOptions]]}
         components={{
           a: ({ href, children: linkChildren }) => (
             <a

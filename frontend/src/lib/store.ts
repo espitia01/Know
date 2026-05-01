@@ -11,6 +11,7 @@ import type {
   SelectionAnalysisResult,
   PaperSummary,
 } from "./api";
+import { selectionKey as selectionResultKey } from "./selectionActions";
 
 type ReaderPanelPosition = "right" | "left" | "bottom";
 
@@ -105,6 +106,8 @@ interface AppStore {
   setSelectionLoading: (l: boolean) => void;
   selectionHistory: SelectionAnalysisResult[];
   addSelectionToHistory: (r: SelectionAnalysisResult) => void;
+  /** Insert or merge by `clientKey` (streaming chunks / final replace). */
+  upsertSelectionInHistory: (r: SelectionAnalysisResult) => void;
   // Surface a past selection in the analysis pane — used when the user
   // clicks an existing underline in the PDF. Pins the pane open, jumps
   // to the Selection tab, and sets the active result.
@@ -386,6 +389,18 @@ export const useStore = create<AppStore>()(
       selectionHistory: [],
       addSelectionToHistory: (r) =>
         set((s) => ({ selectionHistory: [r, ...s.selectionHistory].slice(0, 50) })),
+      upsertSelectionInHistory: (r) =>
+        set((s) => {
+          if (r.clientKey) {
+            const idx = s.selectionHistory.findIndex((h) => h.clientKey === r.clientKey);
+            if (idx >= 0) {
+              const next = [...s.selectionHistory];
+              next[idx] = { ...next[idx], ...r };
+              return { selectionHistory: next };
+            }
+          }
+          return { selectionHistory: [r, ...s.selectionHistory].slice(0, 50) };
+        }),
       openSelectionFromHistory: (r) =>
         set({
           selectionResult: r,
@@ -395,13 +410,11 @@ export const useStore = create<AppStore>()(
         }),
       removeSelectionFromHistory: (r) =>
         set((s) => {
-          const key = (x: SelectionAnalysisResult) =>
-            `${x.action ?? "explain"}::${(x.selected_text ?? "").trim()}`;
-          const target = key(r);
+          const target = selectionResultKey(r);
           return {
-            selectionHistory: s.selectionHistory.filter((h) => key(h) !== target),
+            selectionHistory: s.selectionHistory.filter((h) => selectionResultKey(h) !== target),
             selectionResult:
-              s.selectionResult && key(s.selectionResult) === target
+              s.selectionResult && selectionResultKey(s.selectionResult) === target
                 ? null
                 : s.selectionResult,
           };

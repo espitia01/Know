@@ -23,6 +23,9 @@ interface PdfViewerProps {
   paperId?: string;
   onTextSelected?: (text: string, rect: DOMRect) => void;
   onSelectionClear?: () => void;
+  /** When true, leave room on the right of the mini toolbar — e.g. floating
+   *  “show nav bar” control so “Select text to analyze” is not covered. */
+  reserveToolbarRightForOverlay?: boolean;
 }
 
 const PAGE_GAP = 16;
@@ -45,7 +48,13 @@ const PDF_BLOB_CACHE_SIZE = 8;
 // every session. All displayed percentages are normalised against this.
 const BASELINE_SCALE = 1.4;
 
-export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: PdfViewerProps) {
+export function PdfViewer({
+  url,
+  paperId,
+  onTextSelected,
+  onSelectionClear,
+  reserveToolbarRightForOverlay = false,
+}: PdfViewerProps) {
   const [numPages, setNumPages] = useState(0);
   const [scale, setScale] = useState(BASELINE_SCALE);
   const [, setCurrentPage] = useState(1);
@@ -261,12 +270,21 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
   const drawUnderlinesForPage = useCallback((pageEl: HTMLElement, history: SelectionAnalysisResult[]) => {
     const textLayer = pageEl.querySelector(".react-pdf__Page__textContent, .textLayer") as HTMLElement | null;
 
-    pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
-    if (!textLayer || history.length === 0) return;
-    // Bail if pdfjs hasn't populated text spans yet. The container div
-    // gets inserted before the individual spans, so redrawing here
-    // would walk zero nodes, paint nothing, and then we'd wait until
-    // the next mutation to try again. Better to just no-op.
+    const peekHost = pageEl as HTMLElement & {
+      __knowHighlights?: Array<{
+        entry: SelectionAnalysisResult;
+        rects: Array<{ x: number; y: number; w: number; h: number }>;
+      }>;
+    };
+
+    if (!textLayer || history.length === 0) {
+      pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
+      peekHost.__knowHighlights = [];
+      return;
+    }
+    // pdfjs inserts the layer shell before the text spans arrive. Redrawing
+    // in that window used to strip overlays first and then bail — users saw
+    // highlights vanish until another mutation fired.
     if (textLayer.childElementCount === 0) return;
 
     const pageStyle = getComputedStyle(pageEl);
@@ -290,7 +308,11 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       slices.push({ start: combined.length, node: n as Text });
       combined += text;
     }
-    if (!combined || slices.length === 0) return;
+    if (!combined || slices.length === 0) {
+      pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
+      peekHost.__knowHighlights = [];
+      return;
+    }
 
     // Produce the normalized view + the index mapping back to the raw
     // string. We walk char-by-char so normalization never shifts offset
@@ -318,7 +340,11 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       normalized += out.toLowerCase();
       normIdxToRawIdx.push(i);
     }
-    if (!normalized) return;
+    if (!normalized) {
+      pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
+      peekHost.__knowHighlights = [];
+      return;
+    }
 
     const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const locate = (rawFlat: number) => {
@@ -329,6 +355,8 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
       }
       return null;
     };
+
+    pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
 
     const overlay = document.createElement("div");
     overlay.className = "know-selection-overlay";
@@ -497,7 +525,7 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
         continue;
       }
       const rects = Array.from(range.getClientRects()).filter(
-        (r) => r.width >= 4 && r.height >= 4,
+        (r) => r.width > 0.5 && r.height > 0.5,
       );
       if (rects.length === 0) continue;
 
@@ -785,7 +813,11 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
     });
     top.observe(container, { subtree: true, childList: true });
 
+    const resizeRo = new ResizeObserver(() => scheduleAll());
+    resizeRo.observe(container);
+
     return () => {
+      resizeRo.disconnect();
       top.disconnect();
       pageObservers.forEach((m) => m.disconnect());
       pageObservers.clear();
@@ -960,7 +992,11 @@ export function PdfViewer({ url, paperId, onTextSelected, onSelectionClear }: Pd
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border glass-subtle">
+      <div
+        className={`shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border glass-subtle ${
+          reserveToolbarRightForOverlay ? "pr-[3.25rem] sm:pr-[3.75rem]" : ""
+        }`}
+      >
         <div className="flex items-center gap-1">
           <button
             onClick={zoomOut}

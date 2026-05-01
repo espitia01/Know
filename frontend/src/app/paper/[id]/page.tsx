@@ -9,6 +9,7 @@ import { useShallow } from "zustand/react/shallow";
 import { api, type SelectionAnalysisResult, type PaperListEntry, type ParsedPaper } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { selectionKey } from "@/lib/selectionActions";
+import { consumeSelectionSse } from "@/lib/selectionSse";
 import { SelectionToolbar, type SelectionAction } from "@/components/pdf/SelectionToolbar";
 import { AnalysisPanel, type PanelPosition } from "@/components/panel/BottomPanel";
 import { BibtexModal } from "@/components/BibtexModal";
@@ -19,13 +20,16 @@ import {
   WORKSPACE_FEATURES_COMING_SOON_TOOLTIP,
   WORKSPACE_FEATURES_TEMPORARILY_DISABLED,
 } from "@/lib/workspaceFeatureFlags";
+import {
   hasActiveRequest,
   markRequestStart,
   markRequestEnd,
   clearProgressStart,
   forgetPaper,
   allowAutoAnalyzeRetry,
+  autoAnalyzedPapers,
 } from "@/lib/analysisState";
+import { useUserTier, canAccess } from "@/lib/UserTierContext";
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
@@ -523,11 +527,11 @@ function PaperContent() {
       setSummaryLoading: s.setSummaryLoading,
     })),
   );
-  const { setSelectionResult, setSelectionLoading, addSelectionToHistory, setActiveTab } = useStore(
+  const { setSelectionResult, setSelectionLoading, upsertSelectionInHistory, setActiveTab } = useStore(
     useShallow((s) => ({
       setSelectionResult: s.setSelectionResult,
       setSelectionLoading: s.setSelectionLoading,
-      addSelectionToHistory: s.addSelectionToHistory,
+      upsertSelectionInHistory: s.upsertSelectionInHistory,
       setActiveTab: s.setActiveTab,
     })),
   );
@@ -1154,107 +1158,132 @@ function PaperContent() {
 
     setPanelVisible(true);
     setActiveTab("selection");
-    setSelectionLoading(true);
-    setSelectionResult(null);
+
+    const clientKey =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `sel-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+    const provisional: SelectionAnalysisResult = {
+      action,
+      selected_text: text,
+      explanation: "",
+      streaming: true,
+      clientKey,
+    };
 
     const guardedSetSelectionResult = (r: SelectionAnalysisResult | null) => {
       if (!stillOnStartedPaper()) return;
       setSelectionResult(r);
+    };
+    const guardedUpsertHistory = (r: SelectionAnalysisResult) => {
+      if (!stillOnStartedPaper()) return;
+      upsertSelectionInHistory(r);
     };
     const guardedSetSelectionLoading = (l: boolean) => {
       if (!stillOnStartedPaper()) return;
       setSelectionLoading(l);
     };
 
+    guardedUpsertHistory(provisional);
+    guardedSetSelectionResult(provisional);
+    guardedSetSelectionLoading(false);
+
     try {
-      const res = await api.analyzeSelectionStream(startedFor, text, action, controller.signal);
+      const res = await api.analyzeSelectionStream(startedFor, text, action, {
+        signal: controller.signal,
+      });
       if (controller.signal.aborted) return;
       if (!res.ok) {
         const detail = await res.text();
         let msg = `HTTP ${res.status}`;
         try { msg = JSON.parse(detail).detail || msg; } catch { /* ignore */ }
-        if (res.status === 403 || res.status === 429) {
-          guardedSetSelectionResult({ action, selected_text: text, explanation: `**Limit reached.** ${msg}\n\nUpgrade your plan to continue.` });
-          guardedSetSelectionLoading(false);
-          return;
-        }
-        throw new Error(msg);
+        const errBody: SelectionAnalysisResult = {
+          action,
+          selected_text: text,
+          explanation:
+            res.status === 403 || res.status === 429
+              ? `**Limit reached.** ${msg}\n\nUpgrade your plan to continue.`
+              : msg,
+          streaming: false,
+          clientKey,
+        };
+        guardedUpsertHistory(errBody);
+        guardedSetSelectionResult(errBody);
+        guardedSetSelectionLoading(false);
+        return;
       }
       const reader = res.body?.getReader();
       if (!reader) throw new Error("No stream");
 
-      const decoder = new TextDecoder();
-      let accumulated = "";
-      let buffer = "";
+      let sawTerminalEvent = false;
 
-      guardedSetSelectionResult({
-        action,
-        selected_text: text,
-        explanation: "",
-        streaming: true,
-      });
-      guardedSetSelectionLoading(false);
-
-      while (true) {
-        if (controller.signal.aborted) { reader.cancel(); break; }
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const event = JSON.parse(line.slice(6));
-            if (event.type === "chunk") {
-              accumulated += event.text;
-              guardedSetSelectionResult({
-                action,
-                selected_text: text,
-                explanation: accumulated,
-                streaming: true,
-              });
-            } else if (event.type === "done") {
-              const finalText = event.full_text || accumulated;
-              const finalResult = {
-                action,
-                selected_text: text,
-                explanation: finalText,
-              };
-              guardedSetSelectionResult(finalResult);
-              // Server already persisted the selection to
-              // `paper.cached_analysis.selections` via `append_capped`
-              // before returning `done`, so on any future page load the
-              // hydrate-from-server effect will restore it. Here we only
-              // update the in-memory history — and only if we're still
-              // viewing the paper this stream started for.
-              if (stillOnStartedPaper()) {
-                addSelectionToHistory(finalResult);
-                refreshUsage();
-              }
-            } else if (event.type === "error") {
-              guardedSetSelectionResult({
-                action,
-                selected_text: text,
-                explanation: `Error: ${event.message}`,
-              });
-            }
-          } catch {
-            // ignore malformed SSE
+      await consumeSelectionSse(reader, controller.signal, {
+        onChunk: (accumulated) => {
+          const chunkBody: SelectionAnalysisResult = {
+            action,
+            selected_text: text,
+            explanation: accumulated,
+            streaming: true,
+            clientKey,
+          };
+          guardedUpsertHistory(chunkBody);
+          guardedSetSelectionResult(chunkBody);
+        },
+        onDone: (finalText) => {
+          sawTerminalEvent = true;
+          const finalResult: SelectionAnalysisResult = {
+            action,
+            selected_text: text,
+            explanation: finalText,
+            streaming: false,
+            clientKey,
+          };
+          guardedUpsertHistory(finalResult);
+          guardedSetSelectionResult(finalResult);
+          if (stillOnStartedPaper()) {
+            refreshUsage();
           }
-        }
+        },
+        onError: (message) => {
+          sawTerminalEvent = true;
+          const errResult: SelectionAnalysisResult = {
+            action,
+            selected_text: text,
+            explanation: `Error: ${message}`,
+            streaming: false,
+            clientKey,
+          };
+          guardedUpsertHistory(errResult);
+          guardedSetSelectionResult(errResult);
+        },
+      });
+
+      if (!sawTerminalEvent && !controller.signal.aborted) {
+        const errResult: SelectionAnalysisResult = {
+          action,
+          selected_text: text,
+          explanation: "Analysis ended unexpectedly.",
+          streaming: false,
+          clientKey,
+        };
+        guardedUpsertHistory(errResult);
+        guardedSetSelectionResult(errResult);
       }
     } catch (e) {
       if (controller.signal.aborted) return;
-      guardedSetSelectionResult({
+      const errResult: SelectionAnalysisResult = {
         action,
         selected_text: text,
         explanation: `Analysis failed: ${e instanceof Error ? e.message : "Unknown error"}`,
-      });
+        streaming: false,
+        clientKey,
+      };
+      guardedUpsertHistory(errResult);
+      guardedSetSelectionResult(errResult);
       guardedSetSelectionLoading(false);
     }
-  }, [activePaperId, setPanelVisible, setActiveTab, setSelectionLoading, setSelectionResult, addSelectionToHistory, refreshUsage]);
+  }, [activePaperId, setPanelVisible, setActiveTab, setSelectionLoading, setSelectionResult, upsertSelectionInHistory, refreshUsage]);
 
   const onDragStart = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1397,6 +1426,7 @@ function PaperContent() {
         paperId={activePaperId}
         onTextSelected={handleTextSelected}
         onSelectionClear={handleSelectionClear}
+        reserveToolbarRightForOverlay={headerHidden && !focusMode}
       />
       {selection && (
         <SelectionToolbar

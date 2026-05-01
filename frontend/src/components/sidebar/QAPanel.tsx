@@ -289,6 +289,10 @@ export function QAPanel({ paperId }: QAPanelProps) {
         )}
 
         <Textarea
+          name="know_qa_question"
+          autoComplete="off"
+          autoCorrect="on"
+          spellCheck
           placeholder={crossPaper && hasMultiplePapers ? "Ask across all papers..." : "Type a question..."}
           value={input}
           onChange={(e) => setInput(e.target.value)}

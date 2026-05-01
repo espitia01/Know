@@ -51,6 +51,7 @@ const ENV_ALIASES: Record<string, string> = {
   "gather*": "gathered",
   equation: "aligned",
   "equation*": "aligned",
+  split: "aligned",
 };
 
 function rewriteEnv(envName: string, body: string): { open: string; close: string } {
