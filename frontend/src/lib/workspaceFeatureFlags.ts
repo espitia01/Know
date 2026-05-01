@@ -4,5 +4,6 @@
  */
 export const WORKSPACE_FEATURES_TEMPORARILY_DISABLED = true;
 
+/** Full text for native `title` tooltips on navbar controls (hover). */
 export const WORKSPACE_FEATURES_COMING_SOON_TOOLTIP =
-  "Coming soon — workspaces and adding papers to a session will be available shortly.";
+  "Coming soon: add papers to a session and use saved workspaces. These features are not available yet—you can still read, upload from the library, and analyze one paper at a time.";

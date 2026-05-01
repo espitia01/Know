@@ -17,7 +17,7 @@ export function SectionHeader({
   return (
     <div
       className={cn(
-        "mb-3 flex min-h-[1.25rem] items-baseline justify-between gap-2",
+        "mb-3 flex min-h-[1.25rem] items-baseline justify-between gap-2 border-b border-border/40 pb-2",
         className
       )}
     >

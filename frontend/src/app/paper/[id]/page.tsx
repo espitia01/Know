@@ -16,6 +16,7 @@ import { BibtexModal } from "@/components/BibtexModal";
 import { CitationScopeModal } from "@/components/CitationScopeModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
+import { ComingSoonNavControl } from "@/components/reader/ComingSoonNavControl";
 import {
   WORKSPACE_FEATURES_COMING_SOON_TOOLTIP,
   WORKSPACE_FEATURES_TEMPORARILY_DISABLED,
@@ -1453,7 +1454,7 @@ function PaperContent() {
           reserve its 48px, so we drop it from the tree entirely and rely
           on the floating restore control below to bring it back. */}
       {!chromeHidden && (
-      <header className="shrink-0 flex items-center gap-2.5 px-4 h-[48px] border-b border-border/80 glass-nav z-30 relative">
+      <header className="relative z-30 flex h-12 shrink-0 items-center gap-2.5 border-b border-border/70 px-4 shadow-sm glass-nav">
         <button
           onClick={() => { clearSession(); router.push("/dashboard"); }}
           className="text-muted-foreground/80 hover:text-foreground transition-colors shrink-0 ring-focus rounded-md p-1 -ml-1"
@@ -1500,27 +1501,20 @@ function PaperContent() {
 
         {/* Add paper button */}
         {workspaceFeaturesComingSoon ? (
-          <span
-            className="relative shrink-0 inline-flex cursor-not-allowed"
-            title={WORKSPACE_FEATURES_COMING_SOON_TOOLTIP}
-          >
-            <button
-              type="button"
-              disabled
-              className="flex items-center gap-1 text-[11px] text-muted-foreground px-2 py-1 rounded-md opacity-45 cursor-not-allowed"
-              aria-disabled="true"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <ComingSoonNavControl
+            label="Add Paper"
+            tooltip={WORKSPACE_FEATURES_COMING_SOON_TOOLTIP}
+            icon={
+              <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
-              <span className="hidden sm:inline">Add Paper</span>
-            </button>
-          </span>
+            }
+          />
         ) : canMultiPaper ? (
         <div className="relative shrink-0" data-dropdown>
           <button
             onClick={() => { setShowFolderPicker(false); setShowWorkspaceMenu(false); setShowAddPaper(!showAddPaper); }}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground/90 px-2 py-1 rounded-md hover:bg-accent/60 transition-colors"
+            className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground/90"
             title="Add paper to session"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1619,27 +1613,20 @@ function PaperContent() {
 
         {/* Workspace save/load */}
         {workspaceFeaturesComingSoon ? (
-          <span
-            className="relative shrink-0 inline-flex cursor-not-allowed"
-            title={WORKSPACE_FEATURES_COMING_SOON_TOOLTIP}
-          >
-            <button
-              type="button"
-              disabled
-              className="flex items-center gap-1 text-[11px] text-muted-foreground px-2 py-1 rounded-md opacity-45 cursor-not-allowed"
-              aria-disabled="true"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <ComingSoonNavControl
+            label="Workspace"
+            tooltip={WORKSPACE_FEATURES_COMING_SOON_TOOLTIP}
+            icon={
+              <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
               </svg>
-              <span className="hidden sm:inline">Workspace</span>
-            </button>
-          </span>
+            }
+          />
         ) : canMultiPaper ? (
         <div className="relative shrink-0" data-dropdown>
           <button
             onClick={handleOpenWorkspaceMenu}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground/90 px-2 py-1 rounded-md hover:bg-accent/60 transition-colors"
+            className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground/90"
             title="Save or load workspace"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

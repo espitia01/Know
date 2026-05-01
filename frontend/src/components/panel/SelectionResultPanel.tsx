@@ -84,11 +84,14 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
       )
     : null;
 
+  const canAskFollowUp =
+    !!result && !result.streaming && !loading;
+
   const renderThreadCard = (t: ThreadNode) => (
     <div className="space-y-3">
       <ResultCard result={t.root} />
       {t.followups.length > 0 && (
-        <div className="ml-3 space-y-3 border-l border-border/70 pl-4">
+        <div className="ml-3 space-y-4 border-l-2 border-border/40 pl-4">
           {t.followups.map((f) => (
             <div key={selectionKey(f)} className="space-y-2">
               <p className="text-[var(--text-xs)] font-medium text-muted-foreground/75">
@@ -109,22 +112,31 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {result && activeThread && (
         <>
           {renderThreadCard(activeThread)}
           {loading && (
-            <div className="flex flex-col items-center gap-2 py-3">
+            <div className="flex flex-col items-center gap-2 rounded-xl border border-border/50 bg-muted/20 py-4">
               <div className="w-full max-w-xs">
                 <AnalysisProgress kind="selection" />
               </div>
-              <span className="text-[var(--text-xs)] text-muted-foreground motion-safe:animate-pulse">Processing follow-up…</span>
+              <span className="text-[var(--text-xs)] text-muted-foreground motion-safe:animate-pulse">
+                Processing follow-up…
+              </span>
             </div>
           )}
-          <FollowUpInput
-            context={activeThread.root.selected_text}
-            onSubmit={onFollowUp}
-          />
+          {canAskFollowUp && (
+            <div className="border-t border-border/45 pt-5">
+              <p className="mb-2 text-[var(--text-xs)] font-medium text-muted-foreground/85">
+                Ask a follow-up about this passage
+              </p>
+              <FollowUpInput
+                context={activeThread.root.selected_text}
+                onSubmit={onFollowUp}
+              />
+            </div>
+          )}
         </>
       )}
 
@@ -133,9 +145,9 @@ export function SelectionResultPanel({ result, loading, history, onFollowUp }: S
           re-keyed by index, which made the panel "shuffle" entries on
           every store update because React mistook them for moves. */}
       {threads.filter((t) => t !== activeThread).length > 0 && (
-        <div className="space-y-2 border-t border-border/50 pt-2">
+        <div className="space-y-3 border-t border-border/50 pt-6">
           <SectionHeader title="History" count={threads.filter((t) => t !== activeThread).length} />
-          <div className="overflow-hidden rounded-lg border border-border/60 bg-card/30">
+          <div className="overflow-hidden rounded-xl border border-border/55 bg-card/40 shadow-sm dark:bg-card/25 dark:shadow-none">
             {threads
               .filter((t) => t !== activeThread)
               .map((t) => {
@@ -215,7 +227,7 @@ function FollowUpInput({ context, onSubmit }: { context: string; onSubmit: (q: s
   };
 
   return (
-    <div className="flex gap-2 pt-1">
+    <div className="flex gap-2">
       <input
         type="search"
         name="know_selection_followup"
@@ -228,13 +240,13 @@ function FollowUpInput({ context, onSubmit }: { context: string; onSubmit: (q: s
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
         placeholder="Ask a follow-up question…"
         disabled={submitting}
-        className="know-non-credential-input min-h-9 flex-1 rounded-lg border border-border/80 bg-card/30 px-3 py-1.5 text-[var(--text-sm)] placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-ring/40 disabled:opacity-50"
+        className="know-non-credential-input min-h-9 flex-1 rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-[var(--text-sm)] shadow-sm placeholder:text-muted-foreground/55 focus:outline-none focus:ring-2 focus:ring-ring/35 disabled:opacity-50 dark:bg-card/30"
       />
       <button
         type="button"
         onClick={handleSubmit}
         disabled={!input.trim() || submitting}
-        className="btn-primary-glass h-9 shrink-0 rounded-lg px-3 text-[var(--text-xs)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+        className="btn-primary-glass h-9 shrink-0 rounded-xl px-3.5 text-[var(--text-xs)] font-semibold text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
       >
         {submitting ? "…" : "Ask"}
       </button>
@@ -260,12 +272,12 @@ function ResultCard({
       {!hideHeader && (
         <div className="flex items-center gap-2">
           <span
-            className="text-[var(--text-2xs)] font-medium tracking-wide"
+            className="rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
             data-action={action}
             style={{
               color: "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)))",
               background:
-                "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)) / 0.12)",
+                "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)) / 0.14)",
             }}
           >
             {ACTION_LABELS[action] || action}
@@ -277,15 +289,15 @@ function ResultCard({
       )}
 
       {!hideQuote && (
-        <div className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/60">
-          <span className="italic">
+        <div className="rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5 text-[var(--text-xs)] leading-relaxed text-muted-foreground/75">
+          <span className="italic text-foreground/85">
             &ldquo;{result.selected_text.length > 200 ? result.selected_text.slice(0, 200) + "…" : result.selected_text}&rdquo;
           </span>
         </div>
       )}
 
       {(result.explanation || result.elaboration || result.answer) && (
-        <div className="rounded-lg border border-border/60 border-l-[3px] border-l-foreground/20 bg-card/40 px-3.5 py-2.5">
+        <div className="rounded-xl border border-border/50 border-l-[3px] border-l-foreground/25 bg-card/55 px-3.5 py-3 shadow-sm dark:shadow-none dark:bg-card/40">
           {result.explanation && (
             <div className="prose prose-sm max-w-none text-[var(--text-md)] leading-relaxed dark:prose-invert">
               <Md>{result.explanation}</Md>

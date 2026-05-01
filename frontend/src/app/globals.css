@@ -841,10 +841,11 @@
   box-shadow: var(--shadow-md);
 }
 .glass-nav {
-  background: rgb(var(--surface-tint) / 0.78);
-  backdrop-filter: blur(24px) saturate(1.15);
-  -webkit-backdrop-filter: blur(24px) saturate(1.15);
-  border-bottom: 1px solid rgb(var(--surface-line) / 0.06);
+  background: rgb(var(--surface-tint) / 0.82);
+  backdrop-filter: blur(24px) saturate(1.12);
+  -webkit-backdrop-filter: blur(24px) saturate(1.12);
+  border-bottom: 1px solid rgb(var(--surface-line) / 0.07);
+  box-shadow: 0 1px 0 0 rgb(var(--surface-line) / 0.04);
 }
 
 /* ────────────────────────────────────────────────────────────────────────
