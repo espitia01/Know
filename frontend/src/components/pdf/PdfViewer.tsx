@@ -126,17 +126,70 @@ function usePdfCanvasDeviceRatio() {
   useEffect(() => {
     const update = () => {
       const raw = window.devicePixelRatio || 1;
-      // Many external / desktop displays report 1× DPR even when the PDF
-      // canvas looks soft; floor at ~1.35 for sharper text without blowing up
-      // memory on 3× phones (cap at 2.75).
-      const sharpened = Math.min(2.75, Math.max(raw, 1.35));
-      setRatio(sharpened);
+      // Use the platform-reported DPR directly. Capped at 3 to avoid
+      // pathological canvas sizes on 3x phones; no floor, because
+      // fractional DPR causes glyph-span misalignment in the text layer
+      // and is the leading cause of selection drift.
+      setRatio(Math.min(3, raw));
     };
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
   return ratio;
+}
+
+/** Expand a Range outward to the nearest word boundary at each end.
+ *  Mid-word releases become whole-word selections — same affordance
+ *  as Apple Books / Kindle / SciSpace. Returns null when boundaries
+ *  can't be determined; callers should fall back to the live range. */
+function snapRangeToWords(range: Range): Range | null {
+  if (typeof Intl === "undefined" || !("Segmenter" in Intl)) return null;
+  const startNode = range.startContainer;
+  const endNode = range.endContainer;
+  if (startNode.nodeType !== Node.TEXT_NODE) return null;
+  if (endNode.nodeType !== Node.TEXT_NODE) return null;
+
+  const seg = new Intl.Segmenter(undefined, { granularity: "word" });
+
+  // Walk segments of the start node; if the cursor landed *inside* a
+  // word-like segment, pull the start back to that segment's beginning.
+  const startText = startNode.textContent ?? "";
+  let newStart = range.startOffset;
+  for (const s of seg.segment(startText)) {
+    if (!s.isWordLike) continue;
+    const segStart = s.index;
+    const segEnd = s.index + s.segment.length;
+    if (segStart < range.startOffset && range.startOffset < segEnd) {
+      newStart = segStart;
+      break;
+    }
+    if (segStart >= range.startOffset) break;
+  }
+
+  // Same logic at the trailing edge: extend forward to the end of the
+  // word the cursor stopped inside.
+  const endText = endNode.textContent ?? "";
+  let newEnd = range.endOffset;
+  for (const s of seg.segment(endText)) {
+    if (!s.isWordLike) continue;
+    const segStart = s.index;
+    const segEnd = s.index + s.segment.length;
+    if (segStart < range.endOffset && range.endOffset < segEnd) {
+      newEnd = segEnd;
+    }
+    if (segStart >= range.endOffset) break;
+  }
+
+  if (newStart === range.startOffset && newEnd === range.endOffset) return null;
+  const next = document.createRange();
+  try {
+    next.setStart(startNode, newStart);
+    next.setEnd(endNode, newEnd);
+  } catch {
+    return null;
+  }
+  return next;
 }
 
 export function PdfViewer({
@@ -1057,6 +1110,17 @@ export function PdfViewer({
       onSelectionClear?.();
       return;
     }
+
+    // Snap outward to whole words before reading the text. Apple Books /
+    // Kindle / SciSpace all do this; without it, mid-word releases produce
+    // ragged selections and the toolbar fires with truncated tokens.
+    const liveRange = sel.getRangeAt(0);
+    const snapped = snapRangeToWords(liveRange);
+    if (snapped) {
+      sel.removeAllRanges();
+      sel.addRange(snapped);
+    }
+
     let text = sel.toString().trim();
     if (text.length < 2) return;
 
@@ -1069,6 +1133,8 @@ export function PdfViewer({
 
     if (text.length < 2) return;
 
+    // Re-read the rect from the (possibly snapped) range so the toolbar
+    // anchors to the new selection, not the pre-snap drag endpoint.
     const range = sel.getRangeAt(0);
     const rect = range.getBoundingClientRect();
     onTextSelected?.(text, rect);

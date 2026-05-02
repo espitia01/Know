@@ -434,8 +434,6 @@
      Safari's PDF viewer.
    • `user-select: text` is explicit so no ancestor `user-select: none`
      (e.g. from a draggable parent) can leak in and block selection.
-   • A hardware-accelerated text layer removes the lag that made
-     dragging across large pages feel "sticky".
    • The selection color is a translucent accent blue so users can still
      read the underlying glyphs through the highlight. Crisper than our
      previous `--ring` tint, which washed out on bright page backgrounds.
@@ -448,11 +446,6 @@
   user-select: text;
   -webkit-user-select: text;
   cursor: text;
-  /* Promote to its own compositor layer so selection redraws don't
-     re-paint the canvas beneath. Measurably smoother drag on large
-     multi-column papers. */
-  transform: translateZ(0);
-  will-change: transform;
 }
 .react-pdf__Page__textContent span,
 .react-pdf__Page__textContent br {
