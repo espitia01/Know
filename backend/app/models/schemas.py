@@ -43,7 +43,7 @@ class PriorWork(BaseModel):
     title: str
     relevance: str
     ref_id: str = ""
-
+    url: str = ""
 
 class Concept(BaseModel):
     name: str

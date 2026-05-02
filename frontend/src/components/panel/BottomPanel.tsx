@@ -10,6 +10,7 @@ import { FEATURE_TOOLTIPS } from "@/lib/tooltips";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { SelectionResultPanel } from "./SelectionResultPanel";
 import { PreReadingPanel } from "../sidebar/PreReadingPanel";
+import { RelatedWorkPanel } from "../sidebar/RelatedWorkPanel";
 import { QAPanel } from "../sidebar/QAPanel";
 import { AssumptionsPanel } from "../sidebar/AssumptionsPanel";
 import { NotesPanel } from "../sidebar/NotesPanel";
@@ -314,6 +315,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
             <TabsTrigger value="summary" className={TAB_STYLE} title={FEATURE_TOOLTIPS["Summary"]}>Summary</TabsTrigger>
             {([
               { value: "preread", feature: "prepare", label: "Prepare" },
+              { value: "sources", feature: "prepare", label: "Related" },
               { value: "assume", feature: "assumptions", label: "Assumptions" },
               { value: "qa", feature: "qa", label: "Q&A" },
               { value: "figures", feature: "figures", label: "Figures" },
@@ -494,6 +496,9 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
           )}
           {mountedTabs.has("preread") && (
             <TabsContent value="preread" className="mt-0"><PreReadingPanel paperId={paperId} /></TabsContent>
+          )}
+          {mountedTabs.has("sources") && (
+            <TabsContent value="sources" className="mt-0"><RelatedWorkPanel paperId={paperId} /></TabsContent>
           )}
           {mountedTabs.has("assume") && (
             <TabsContent value="assume" className="mt-0"><AssumptionsPanel paperId={paperId} /></TabsContent>

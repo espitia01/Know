@@ -770,7 +770,16 @@ async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
 
 1. "definitions": array of {{"term": "...", "definition": "...", "source": "..."}} - key technical terms and their definitions. Use LaTeX notation for math (e.g., $E = mc^2$).
 2. "research_questions": array of {{"question": "...", "context": "..."}} - the main questions this paper tries to answer
-3. "prior_work": array of {{"title": "...", "relevance": "...", "ref_id": "..."}} - important prior work this paper builds on
+3. "prior_work": array of {{"title": "...", "relevance": "...", "ref_id": "...", "url": "..."}}
+   Important prior external sources this paper builds on. Cross-check titles with the bibliography / reference list when present.
+
+   Field rules:
+   - "ref_id": stable handle when obvious — e.g. arXiv id "2312.02901", bare DOI tail "10.1103/...", "PMID:12345678", or the bibliography label "[12]".
+   - "url": a single clickable https URL when you can cite it cleanly from the paper or standard patterns:
+     • DOIs → "https://doi.org/<doi>"
+     • arXiv ids → "https://arxiv.org/abs/<id>"
+     • PubMed → "https://pubmed.ncbi.nlm.nih.gov/<PMID>/"
+     If unsure, leave "url" as "" rather than guessing.
 4. "concepts": array of {{"name": "...", "description": "...", "importance": "..."}} - key scientific/physics concepts the reader should understand. Use LaTeX for math.
 
 Paper content:

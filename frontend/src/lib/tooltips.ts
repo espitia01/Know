@@ -5,8 +5,8 @@ export const FEATURE_TOOLTIPS: Record<string, string> = {
     "A detailed, structured summary covering motivation, methodology, results, limitations, and key equations",
   "Pre-Reading Prep":
     "AI extracts definitions, key concepts, research questions, and prior work before you start reading",
-  "Prepare":
-    "AI extracts definitions, key concepts, research questions, and prior work before you start reading",
+  "Related":
+    "Prior work cited by this paper. Each bullet links out when URLs or citation ids (DOI / arXiv / PubMed) are known",
   "Assumption Analysis":
     "Uncover the implicit and explicit assumptions underlying the paper's methodology and conclusions",
   "Assumptions":

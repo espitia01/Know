@@ -282,6 +282,8 @@ export interface PriorWork {
   title: string;
   relevance: string;
   ref_id: string;
+  /** Model-extracted canonical https link when confidently known */
+  url?: string;
 }
 
 export interface Concept {
