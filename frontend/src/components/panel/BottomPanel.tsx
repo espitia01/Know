@@ -319,7 +319,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
               { value: "qa", feature: "qa", label: "Q&A" },
               { value: "figures", feature: "figures", label: "Figures" },
               { value: "notes", feature: "notes", label: "Notes" },
-              { value: "sources", feature: "prepare", label: "References" },
+              { value: "sources", feature: "prepare", label: "Related" },
             ] as const).map((tab) => {
               const locked = !canAccess(tier, tab.feature);
               return (

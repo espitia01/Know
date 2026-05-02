@@ -13,6 +13,10 @@ interface RelatedWorkPanelProps {
   paperId: string;
 }
 
+/** Shown beneath the Related tab chrome; explains bib-extracted citations + Scholar. */
+const RELATED_TAB_INTRO =
+  "Works cited via this manuscript’s bibliography—line breaks are normalized only. Themes group citations when Prepare can infer a thread; tap a citation to search it on Google Scholar.";
+
 /** One bibliography line: hyperlink wraps the verbatim excerpt; Scholar searches that text. */
 function VerbatimCitationLink({ work }: { work: PriorWork }) {
   const scholarHref = scholarSearchHrefFromPriorWork(work);
@@ -62,26 +66,32 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
 
   if (preReadingLoading) {
     return (
-      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-8 motion-safe:animate-fade-in">
-        <div className="w-full max-w-xs">
-          <AnalysisProgress kind="preReading" paperId={paperId} />
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-8 motion-safe:animate-fade-in md:max-w-none">
+        <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground">{RELATED_TAB_INTRO}</p>
+        <div className="flex min-h-[32vh] flex-col items-center justify-center gap-3">
+          <div className="w-full max-w-xs">
+            <AnalysisProgress kind="preReading" paperId={paperId} />
+          </div>
+          <p className="text-[var(--text-sm)] text-muted-foreground">Extracting bibliography…</p>
         </div>
-        <p className="text-[var(--text-sm)] text-muted-foreground">Parsing references…</p>
       </div>
     );
   }
 
   if (!preReading || preReading.prior_work.length === 0) {
     return (
-      <EmptyState
-        title={preReading ? "No references parsed" : "References not generated"}
-        body={
-          preReading
-            ? "Prepare could not find a numbered bibliography in this PDF text. Re-run Prepare when references are selectable as text."
-            : "Run Prepare to extract the bibliography from the manuscript."
-        }
-        cta={{ label: "Run Prepare", onClick: handleRunPrepare }}
-      />
+      <div className="space-y-4 motion-safe:animate-fade-in">
+        <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground">{RELATED_TAB_INTRO}</p>
+        <EmptyState
+          title={preReading ? "No related citations parsed" : "Related work not loaded"}
+          body={
+            preReading
+              ? "Prepare couldn’t isolate a numbered bibliography in this PDF. Re-run it when references are selectable as text."
+              : "Run Prepare to extract cited works from this paper’s bibliography."
+          }
+          cta={{ label: "Run Prepare", onClick: handleRunPrepare }}
+        />
+      </div>
     );
   }
 
@@ -93,6 +103,7 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
 
   return (
     <div className="space-y-8 motion-safe:animate-fade-in">
+      <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground">{RELATED_TAB_INTRO}</p>
       {topical?.length ? (
         topical.map((sec, si) => (
           <section key={`cluster-${si}`} className="space-y-3">

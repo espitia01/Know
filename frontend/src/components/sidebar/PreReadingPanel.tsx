@@ -167,7 +167,7 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
             <AccordionTrigger className="py-2.5 hover:no-underline">
               <SectionHeader
                 className="mb-0"
-                title="References"
+                title="Related"
                 count={prior_work.length}
               />
             </AccordionTrigger>
