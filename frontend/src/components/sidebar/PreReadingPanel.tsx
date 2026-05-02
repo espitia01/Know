@@ -8,7 +8,7 @@ import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/anal
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SectionHeader } from "@/components/panel/SectionHeader";
-import { priorWorkHref } from "@/lib/priorWorkLinks";
+import { scholarSearchHrefFromPriorWork } from "@/lib/priorWorkLinks";
 import {
   Accordion,
   AccordionContent,
@@ -174,24 +174,24 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
             <AccordionContent>
               <div className={rowListClass}>
                 {prior_work.map((p, i) => {
-                  const href = priorWorkHref(p);
+                  const scholarHref = scholarSearchHrefFromPriorWork(p);
                   const display =
                     (typeof p.citation_display === "string" && p.citation_display.trim()) ||
                     p.title.trim() ||
                     "Untitled reference";
                   return (
                     <div key={i} className={rowItemClass}>
-                      {href ? (
+                      {scholarHref ? (
                         <a
-                          href={href}
+                          href={scholarHref}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="mb-0.5 block font-medium text-[var(--text-md)] text-primary underline underline-offset-2 hover:opacity-90"
+                          className="mb-0.5 block whitespace-pre-wrap font-medium text-[var(--text-md)] text-primary underline underline-offset-2 hover:opacity-90"
                         >
                           {display}
                         </a>
                       ) : (
-                        <p className="mb-0.5 font-medium text-[var(--text-md)]">{display}</p>
+                        <p className="mb-0.5 whitespace-pre-wrap font-medium text-[var(--text-md)]">{display}</p>
                       )}
                       <div className="text-[var(--text-sm)] text-muted-foreground">
                         <Md>{p.relevance}</Md>

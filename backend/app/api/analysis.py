@@ -64,8 +64,8 @@ from ..services.pdf_parser import (
 )
 from ..services.citation_resolve import (
     bibliography_to_prior_work_entries,
+    build_prior_work_topics_from_clusters,
     enrich_prior_work_from_bibliography,
-    finalize_pre_reading_urls,
     merge_reference_summaries,
     normalize_pre_reading_prior_work,
     normalize_prior_row_hydrated,
@@ -107,13 +107,15 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
         bib_rows = bibliography_to_prior_work_entries(bib_blob)
         if len(bib_rows) >= 2:
             merge_reference_summaries(bib_rows, result.get("reference_summaries"))
-            result["prior_work"] = [normalize_prior_row_hydrated(r) for r in bib_rows]
-            result["prior_work_topics"] = []
+            hydrated = [normalize_prior_row_hydrated(r) for r in bib_rows]
+            enrich_prior_work_from_bibliography(hydrated, bib_blob)
+            topics = build_prior_work_topics_from_clusters(hydrated, result.get("reference_clusters"))
+            result["prior_work"] = hydrated
+            result["prior_work_topics"] = topics
         else:
             normalize_pre_reading_prior_work(result)
+            enrich_prior_work_from_bibliography(result.get("prior_work") or [], bib_blob)
 
-        enrich_prior_work_from_bibliography(result.get("prior_work") or [], bib_blob)
-        await finalize_pre_reading_urls(result)
         analysis = PreReadingAnalysis(
             definitions=result.get("definitions", []),
             research_questions=result.get("research_questions", []),

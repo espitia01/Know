@@ -323,7 +323,30 @@ def _canonical_bib_index(label: str) -> str | None:
     return str(int(m.group(0))) if m else None
 
 
-def _arxiv_from_blob(blob: str) -> str | None:
+_MAX_INLINE_BIB_RANGE = 42
+
+
+def expand_bib_label_to_canonical_keys(fragment: Any) -> list[str]:
+    """Turn ``12``, ``[1–3]``, ``1-5``, ``1—7`` … into discrete canonical bibliography keys."""
+
+    raw = str(fragment if fragment is not None else "").strip()
+    if not raw:
+        return []
+    raw_norm = raw.replace("—", "-").replace("–", "-")
+
+    rng = re.match(
+        r"^\s*\[?\s*(\d{1,4})\s*-\s*(\d{1,4})\s*\]?\s*$",
+        raw_norm,
+    )
+    if rng:
+        a, b = int(rng.group(1)), int(rng.group(2))
+        lo, hi = (a, b) if a <= b else (b, a)
+        if hi - lo > _MAX_INLINE_BIB_RANGE:
+            hi = lo + _MAX_INLINE_BIB_RANGE
+        return [str(i) for i in range(lo, hi + 1)]
+
+    solo = _canonical_bib_index(raw_norm)
+    return [solo] if solo else []
     m = re.search(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5}(?:v\d+)?)", blob, flags=re.I)
     if m:
         return m.group(1)
@@ -435,9 +458,10 @@ def merge_reference_summaries(entries: list[dict[str, Any]], summaries: Any) -> 
     for s in summaries:
         if not isinstance(s, dict):
             continue
-        k = _canonical_bib_index(str(s.get("bib_label") or ""))
         rel = str(s.get("relevance", "") or "").strip()
-        if k and rel:
+        if not rel:
+            continue
+        for k in expand_bib_label_to_canonical_keys(str(s.get("bib_label") or "")):
             by_label[k] = rel
     for e in entries:
         k = _canonical_bib_index(str(e.get("bib_label") or e.get("ref_id") or ""))
@@ -464,13 +488,15 @@ def bibliography_to_prior_work_entries(bib_text: str, *, max_items: int = 120) -
         blob = (chunks.get(key) or "").strip()
         if not blob:
             continue
-        condensed = " ".join(blob.split())
+        raw_lines = [ln.strip() for ln in blob.replace("\r\n", "\n").split("\n") if ln.strip()]
+        citation_display = "\n".join(raw_lines) if raw_lines else blob
+        condensed = " ".join(raw_lines) if raw_lines else " ".join(blob.split())
         out.append(
             {
                 "bib_label": key,
                 "ref_id": key,
                 "title": condensed[:480],
-                "citation_display": condensed,
+                "citation_display": citation_display,
                 "relevance": "",
                 "doi": "",
                 "arxiv": "",
@@ -479,3 +505,55 @@ def bibliography_to_prior_work_entries(bib_text: str, *, max_items: int = 120) -
             }
         )
     return out
+
+
+def build_prior_work_topics_from_clusters(rows: list[dict[str, Any]], clusters_in: Any) -> list[dict[str, Any]]:
+    """Turn optional model clusters into ``prior_work_topics`` (shared row dict refs)."""
+
+    if not isinstance(rows, list) or not rows:
+        return []
+    if not isinstance(clusters_in, list) or not clusters_in:
+        return []
+
+    by_bib: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        k = _canonical_bib_index(str(r.get("bib_label") or r.get("ref_id") or ""))
+        if k:
+            by_bib[k] = r
+
+    used: set[str] = set()
+    out_topics: list[dict[str, Any]] = []
+
+    for c in clusters_in:
+        if not isinstance(c, dict):
+            continue
+        theme = str(c.get("theme", "")).strip() or "References"
+        summary = str(c.get("summary", "") or "").strip()
+        labels_raw = c.get("bib_labels") if isinstance(c.get("bib_labels"), list) else []
+        items: list[dict[str, Any]] = []
+        for lab in labels_raw:
+            for k in expand_bib_label_to_canonical_keys(str(lab)):
+                if not k or k in used or k not in by_bib:
+                    continue
+                items.append(by_bib[k])
+                used.add(k)
+
+        items.sort(
+            key=lambda row: (
+                int(_canonical_bib_index(str(row.get("bib_label") or row.get("ref_id") or "")) or "99999")
+            ),
+        )
+        if items:
+            out_topics.append({"theme": theme, "summary": summary, "items": items})
+
+    if not out_topics:
+        return []
+
+    other_keys = [k for k in by_bib if k not in used]
+    if other_keys:
+        other_items = [by_bib[k] for k in sorted(other_keys, key=lambda x: int(x) if str(x).isdigit() else 10**9)]
+        out_topics.append({"theme": "Other references", "summary": "", "items": other_items})
+
+    return out_topics

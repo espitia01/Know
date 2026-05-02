@@ -8,43 +8,62 @@ import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SectionHeader } from "@/components/panel/SectionHeader";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
-import { priorWorkHref } from "@/lib/priorWorkLinks";
+import { scholarSearchHrefFromPriorWork } from "@/lib/priorWorkLinks";
 
 interface RelatedWorkPanelProps {
   paperId: string;
 }
 
+function citationAlreadyOpensWithBibKey(bibRaw: string, citation: string): boolean {
+  const n = bibRaw.replace(/\[|\]/g, "").trim();
+  if (!n) return false;
+  const t = citation.trimStart().slice(0, 140);
+  if (t.startsWith(`[${n}]`) || new RegExp(`^\\s*${n}\\.\\s`).test(t)) return true;
+  if (new RegExp(`^\\s*\\(${n}\\)\\s`).test(t)) return true;
+  return false;
+}
+
 function ReferenceRow({ p }: { p: PriorWork }) {
-  const href = priorWorkHref(p);
+  const scholarHref = scholarSearchHrefFromPriorWork(p);
   const bib = (p.bib_label || p.ref_id || "").trim();
   const display =
     (typeof p.citation_display === "string" && p.citation_display.trim()) ||
     p.title.trim() ||
     "Reference";
+  const showBibChip = Boolean(bib) && !citationAlreadyOpensWithBibKey(bib, display);
 
   return (
     <li className="border-b border-border/45 py-3 pl-1 last:border-b-0">
-      <div className="flex flex-wrap gap-x-2 gap-y-1">
-        {bib && (
-          <span className="shrink-0 rounded bg-muted/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+      <div className="flex flex-col gap-2">
+        {showBibChip && (
+          <span className="w-fit shrink-0 rounded bg-muted/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
             [{bib.replace(/^\[|\]$/g, "")}]
           </span>
         )}
-        {href ? (
-          <a
-            href={href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="min-w-0 flex-1 text-[var(--text-md)] font-medium leading-snug text-primary underline underline-offset-2 hover:opacity-90"
-          >
-            {display}
-          </a>
-        ) : (
-          <span className="min-w-0 flex-1 text-[var(--text-md)] font-medium leading-snug text-foreground/95">
-            {display}
-          </span>
-        )}
+        <div className="min-w-0">
+          {scholarHref ? (
+            <a
+              href={scholarHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[var(--text-md)] font-medium leading-snug text-primary underline underline-offset-2 hover:opacity-90 whitespace-pre-wrap"
+            >
+              {display}
+            </a>
+          ) : (
+            <span className="text-[var(--text-md)] font-medium leading-snug text-foreground/95 whitespace-pre-wrap">
+              {display}
+            </span>
+          )}
+        </div>
       </div>
+      {(p.doi || p.arxiv) ? (
+        <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground/60">
+          {p.doi && <span>{p.doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "")}</span>}
+          {p.doi && p.arxiv ? " · " : null}
+          {p.arxiv && <span>arXiv:{p.arxiv}</span>}
+        </p>
+      ) : null}
       {p.relevance ? (
         <div className="mt-2 text-[var(--text-sm)] leading-relaxed text-muted-foreground">
           <Md>{p.relevance}</Md>
@@ -93,8 +112,8 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
         title={preReading ? "No references parsed" : "References not generated"}
         body={
           preReading
-            ? "The PDF did not yield a clean numbered bibliography. Re-run Prepare after checking that the text layer includes the reference list."
-            : "Run Prepare to extract the paper’s bibliography and resolve journal links when available."
+            ? "The PDF did not yield a clean numbered bibliography. Re-run Prepare when the references block is selectable text."
+            : "Run Prepare to list references as in the paper; each opens a Google Scholar search for that citation text."
         }
         cta={{ label: "Run Prepare", onClick: handleRunPrepare }}
       />
@@ -109,11 +128,15 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
 
   return (
     <div className="space-y-6 motion-safe:animate-fade-in">
+      <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/85">
+        Each entry shows the bibliography line from the PDF. Click it to search that exact citation text on Google Scholar. Notes below summarise how this paper uses the source—not a substitute for the citation line.
+      </p>
+
       {topical?.length ? (
         <div className="space-y-8">
           {topical.map((sec, si) => (
             <section key={`${sec.theme}-${si}`} className="space-y-2">
-              <SectionHeader title={sec.theme || "Related work"} className="mb-0 text-[var(--text-sm)]" />
+              <SectionHeader title={sec.theme || "References"} className="mb-0 text-[var(--text-sm)]" />
               {sec.summary ? (
                 <div className="text-[var(--text-sm)] leading-relaxed text-muted-foreground">
                   <Md>{sec.summary}</Md>

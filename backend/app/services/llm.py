@@ -779,16 +779,28 @@ async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
 3. "concepts": array of {{"name": "...", "description": "...", "importance": "..."}} — key concepts.
 
 4. "reference_summaries": array explaining bibliography entries cited in THIS paper — REQUIRED whenever the REFERENCE excerpt below lists numbered references.
-   Each element MUST be {{ "bib_label": "single integer string like '17' matching that bibliography line", "relevance": "one factual sentence stating what this work established and why it matters for THIS paper"}}.
-   - Match bib_label ONLY to numbered lines in that excerpt — NEVER use citation ranges ('16–19'); emit separate rows for distinct numbers if multiple apply.
-   - Cover as many reference numbers as feasible (prioritise work highlighted in Introduction/Discussion), skipping only when you cannot summarise honestly.
+   Each element MUST be {{ "bib_label": "either one index ('17') or an inclusive hyphen span ('1-3') when the manuscript cites that range literally", "relevance": "one sentence on how THIS manuscript uses that source"}}.
+   - **relevance** must describe usage inside THIS manuscript (compare to prior experiments, methodological debt, motivational context …). NEVER repeat or paraphrase the bibliography entry as its own headline or title—the product UI already renders the verbatim reference line extracted from the PDF.
+   - When two indices need materially different wording, emit separate summaries instead of spanning them if possible.
    - If the bibliography excerpt is missing/unusable below, output [] instead.
 
-5. "prior_work_topics": use ONLY when the bibliography excerpt below is absent or unreadable (<2 usable numbered lines).
+5. "reference_clusters" (optional array): cluster bibliography indices by manuscript section AND/OR shared scientific idea — helps readers browse related sources together.
+   Each element MUST be {{
+     "theme": "concise heading, e.g. 'Introduction — historical quasicrystal work' or 'Theory — localization in quasiperiodic media'",
+     "summary": "one sentence tying this cluster of citations together for THIS paper",
+     "bib_labels": ["2","7","14"]
+   }}
+   Rules:
+   - bib_labels may be discrete indices ('7','21') OR a single inclusive hyphen span ('11-13'); downstream code expands spans to individual bibliography lines.
+   - Each bibliography number appears AT MOST ONCE across all clusters (first cluster wins conceptually — avoid duplicates entirely).
+   - Any bibliography numbers you omit remain listed by the UI under \"Other references\".
+   - If grouping is unreliable, output [] and the UI shows a flat list.
+
+6. "prior_work_topics": use ONLY when the bibliography excerpt below is absent or unreadable (<2 usable numbered lines).
    Follow the thematic schema from earlier versions with short 'theme','summary','items' (same item shape).
    Otherwise output [] exactly.
 
-6. "prior_work": always [] — the server builds the clickable list from bibliography text plus your reference_summaries.
+7. "prior_work": always [] — the server builds bibliography rows locally and merges your summaries + clusters above.
 
 Paper body (truncated):
 {paper_text}

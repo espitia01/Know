@@ -70,3 +70,13 @@ export function priorWorkHref(work: PriorWork): string | null {
 
   return null;
 }
+
+/** Open Google Scholar with this reference’s text (verbatim bibliography line when present). */
+export function scholarSearchHrefFromPriorWork(work: PriorWork): string | null {
+  const raw =
+    (typeof work.citation_display === "string" && work.citation_display.trim()) ||
+    (work.title || "").trim();
+  const q = raw.replace(/\s+/g, " ").trim();
+  if (q.length < 6) return null;
+  return `https://scholar.google.com/scholar?q=${encodeURIComponent(q.slice(0, 520))}`;
+}
