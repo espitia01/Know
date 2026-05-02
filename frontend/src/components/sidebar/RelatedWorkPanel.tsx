@@ -6,7 +6,6 @@ import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { SectionHeader } from "@/components/panel/SectionHeader";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
 import { scholarSearchHrefFromPriorWork } from "@/lib/priorWorkLinks";
 
@@ -14,62 +13,28 @@ interface RelatedWorkPanelProps {
   paperId: string;
 }
 
-function citationAlreadyOpensWithBibKey(bibRaw: string, citation: string): boolean {
-  const n = bibRaw.replace(/\[|\]/g, "").trim();
-  if (!n) return false;
-  const t = citation.trimStart().slice(0, 140);
-  if (t.startsWith(`[${n}]`) || new RegExp(`^\\s*${n}\\.\\s`).test(t)) return true;
-  if (new RegExp(`^\\s*\\(${n}\\)\\s`).test(t)) return true;
-  return false;
-}
-
-function ReferenceRow({ p }: { p: PriorWork }) {
-  const scholarHref = scholarSearchHrefFromPriorWork(p);
-  const bib = (p.bib_label || p.ref_id || "").trim();
+/** One bibliography line: hyperlink wraps the verbatim excerpt; Scholar searches that text. */
+function VerbatimCitationLink({ work }: { work: PriorWork }) {
+  const scholarHref = scholarSearchHrefFromPriorWork(work);
   const display =
-    (typeof p.citation_display === "string" && p.citation_display.trim()) ||
-    p.title.trim() ||
+    (typeof work.citation_display === "string" && work.citation_display.trim()) ||
+    work.title.trim() ||
     "Reference";
-  const showBibChip = Boolean(bib) && !citationAlreadyOpensWithBibKey(bib, display);
 
-  return (
-    <li className="border-b border-border/45 py-3 pl-1 last:border-b-0">
-      <div className="flex flex-col gap-2">
-        {showBibChip && (
-          <span className="w-fit shrink-0 rounded bg-muted/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-            [{bib.replace(/^\[|\]$/g, "")}]
-          </span>
-        )}
-        <div className="min-w-0">
-          {scholarHref ? (
-            <a
-              href={scholarHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[var(--text-md)] font-medium leading-snug text-primary underline underline-offset-2 hover:opacity-90 whitespace-pre-wrap"
-            >
-              {display}
-            </a>
-          ) : (
-            <span className="text-[var(--text-md)] font-medium leading-snug text-foreground/95 whitespace-pre-wrap">
-              {display}
-            </span>
-          )}
-        </div>
-      </div>
-      {(p.doi || p.arxiv) ? (
-        <p className="mt-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground/60">
-          {p.doi && <span>{p.doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "")}</span>}
-          {p.doi && p.arxiv ? " · " : null}
-          {p.arxiv && <span>arXiv:{p.arxiv}</span>}
-        </p>
-      ) : null}
-      {p.relevance ? (
-        <div className="mt-2 text-[var(--text-sm)] leading-relaxed text-muted-foreground">
-          <Md>{p.relevance}</Md>
-        </div>
-      ) : null}
-    </li>
+  const cls =
+    "whitespace-pre-wrap text-[var(--text-md)] font-medium leading-relaxed underline-offset-2";
+
+  return scholarHref ? (
+    <a
+      href={scholarHref}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`${cls} text-primary underline hover:opacity-90`}
+    >
+      {display}
+    </a>
+  ) : (
+    <span className={`${cls} text-foreground/95`}>{display}</span>
   );
 }
 
@@ -112,8 +77,8 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
         title={preReading ? "No references parsed" : "References not generated"}
         body={
           preReading
-            ? "The PDF did not yield a clean numbered bibliography. Re-run Prepare when the references block is selectable text."
-            : "Run Prepare to list references as in the paper; each opens a Google Scholar search for that citation text."
+            ? "Prepare could not find a numbered bibliography in this PDF text. Re-run Prepare when references are selectable as text."
+            : "Run Prepare to extract the bibliography from the manuscript."
         }
         cta={{ label: "Run Prepare", onClick: handleRunPrepare }}
       />
@@ -127,35 +92,32 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
       : null;
 
   return (
-    <div className="space-y-6 motion-safe:animate-fade-in">
-      <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/85">
-        Each entry shows the bibliography line from the PDF. Click it to search that exact citation text on Google Scholar. Notes below summarise how this paper uses the source—not a substitute for the citation line.
-      </p>
-
+    <div className="space-y-8 motion-safe:animate-fade-in">
       {topical?.length ? (
-        <div className="space-y-8">
-          {topical.map((sec, si) => (
-            <section key={`${sec.theme}-${si}`} className="space-y-2">
-              <SectionHeader title={sec.theme || "References"} className="mb-0 text-[var(--text-sm)]" />
-              {sec.summary ? (
-                <div className="text-[var(--text-sm)] leading-relaxed text-muted-foreground">
-                  <Md>{sec.summary}</Md>
-                </div>
-              ) : null}
-              <ol className="list-none space-y-0 pl-0 marker:text-muted-foreground/60">
-                {(sec.items || []).map((p, pi) => (
-                  <ReferenceRow key={`${p.bib_label ?? p.title}-${si}-${pi}`} p={p} />
-                ))}
-              </ol>
-            </section>
-          ))}
-        </div>
+        topical.map((sec, si) => (
+          <section key={`cluster-${si}`} className="space-y-3">
+            {(sec.summary || "").trim() ? (
+              <div className="text-[var(--text-sm)] leading-relaxed text-foreground">
+                <Md>{sec.summary}</Md>
+              </div>
+            ) : null}
+            <ul className="list-disc space-y-2.5 pl-5 marker:text-muted-foreground/70">
+              {(sec.items || []).map((p, pi) => (
+                <li key={`${p.bib_label ?? p.title}-${si}-${pi}`} className="pl-1">
+                  <VerbatimCitationLink work={p} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))
       ) : (
-        <ol className="list-none space-y-0 pl-0">
+        <ul className="list-disc space-y-2.5 pl-5 marker:text-muted-foreground/70">
           {preReading.prior_work.map((p, i) => (
-            <ReferenceRow key={`${p.bib_label ?? p.title}-${i}`} p={p} />
+            <li key={`${p.bib_label ?? p.title}-${i}`} className="pl-1">
+              <VerbatimCitationLink work={p} />
+            </li>
           ))}
-        </ol>
+        </ul>
       )}
 
       <div className="border-t border-border/50 pt-1">

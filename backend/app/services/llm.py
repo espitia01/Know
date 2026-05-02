@@ -784,21 +784,19 @@ async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
    - When two indices need materially different wording, emit separate summaries instead of spanning them if possible.
    - If the bibliography excerpt is missing/unusable below, output [] instead.
 
-5. "reference_clusters" (optional array): cluster bibliography indices by manuscript section AND/OR shared scientific idea — helps readers browse related sources together.
+5. "reference_clusters" (optional array): cluster bibliography indices by shared idea or where they enter the argument.
    Each element MUST be {{
-     "theme": "concise heading, e.g. 'Introduction — historical quasicrystal work' or 'Theory — localization in quasiperiodic media'",
-     "summary": "one sentence tying this cluster of citations together for THIS paper",
+     "theme": "optional short internal label (not shown in the References UI)",
+     "summary": "REQUIRED one sentence when you include this cluster—ties the grouped citations together for THIS paper (this paragraph appears above the verbatim bibliography bullets).",
      "bib_labels": ["2","7","14"]
    }}
    Rules:
    - bib_labels may be discrete indices ('7','21') OR a single inclusive hyphen span ('11-13'); downstream code expands spans to individual bibliography lines.
    - Each bibliography number appears AT MOST ONCE across all clusters (first cluster wins conceptually — avoid duplicates entirely).
-   - Any bibliography numbers you omit remain listed by the UI under \"Other references\".
-   - If grouping is unreliable, output [] and the UI shows a flat list.
+   - Any bibliography numbers you omit remain listed by the UI under \"Other references\" (no summary paragraph there—only verbatim citation bullets).
+   - If grouping is unreliable, output [] and the UI shows a flat bullet list of every bibliography line (no cluster prose).
 
-6. "prior_work_topics": use ONLY when the bibliography excerpt below is absent or unreadable (<2 usable numbered lines).
-   Follow the thematic schema from earlier versions with short 'theme','summary','items' (same item shape).
-   Otherwise output [] exactly.
+6. "prior_work_topics": ALWAYS output [] — the bibliography path builds everything server-side.
 
 7. "prior_work": always [] — the server builds bibliography rows locally and merges your summaries + clusters above.
 

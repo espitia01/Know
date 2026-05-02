@@ -193,9 +193,6 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
                       ) : (
                         <p className="mb-0.5 whitespace-pre-wrap font-medium text-[var(--text-md)]">{display}</p>
                       )}
-                      <div className="text-[var(--text-sm)] text-muted-foreground">
-                        <Md>{p.relevance}</Md>
-                      </div>
                     </div>
                   );
                 })}

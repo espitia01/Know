@@ -67,7 +67,6 @@ from ..services.citation_resolve import (
     build_prior_work_topics_from_clusters,
     enrich_prior_work_from_bibliography,
     merge_reference_summaries,
-    normalize_pre_reading_prior_work,
     normalize_prior_row_hydrated,
 )
 from ..services.reference_extract import extract_references_section
@@ -113,8 +112,8 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
             result["prior_work"] = hydrated
             result["prior_work_topics"] = topics
         else:
-            normalize_pre_reading_prior_work(result)
-            enrich_prior_work_from_bibliography(result.get("prior_work") or [], bib_blob)
+            result["prior_work"] = []
+            result["prior_work_topics"] = []
 
         analysis = PreReadingAnalysis(
             definitions=result.get("definitions", []),
