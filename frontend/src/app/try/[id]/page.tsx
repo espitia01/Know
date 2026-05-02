@@ -220,7 +220,7 @@ export default function TrialPaperView() {
 
   const handleSelectionAction = useCallback(
     async (action: SelectionAction, text: string) => {
-      if (action === "note" || action === "assumptions") return;
+      if (action === "note") return;
 
       setSelection(null);
       window.getSelection()?.removeAllRanges();
@@ -538,6 +538,10 @@ export default function TrialPaperView() {
                   history={selectionHistory}
                   onFollowUp={noopFollowUp}
                   allowFollowUp={false}
+                  onFocusHistoryRoot={(r) => {
+                    setSelectionResult(r);
+                    setActiveTab("selection");
+                  }}
                 />
               </div>
             </TabsContent>

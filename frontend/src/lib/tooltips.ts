@@ -43,7 +43,7 @@ export const FEATURE_TOOLTIPS: Record<string, string> = {
   "Up to 3 papers in your library": "Upload and keep up to three papers active in your library",
   "Structured AI summary for each paper": "Motivation, methods, results, limitations, and key equations in one pass",
   "5 Q&A turns per paper, grounded in the text": "Ask up to 5 questions per paper; answers cite the PDF",
-  "3 selection analyses per paper (explain, derive, and more)": "Highlight text for explanations, derivations, or assumption passes—up to 3 per paper",
+  "3 selection analyses per paper (explain incl. passage assumptions, derive)": "Highlight text for Explain (includes passage-local assumptions when relevant) or Derive—up to 3 per paper",
   "Claude Haiku for fast answers": "Fast, efficient model tuned for interactive reading",
   "Up to 25 papers": "Room for coursework, qualifiers, or a growing reading list",
   "Pre-reading prep & concept map": "Key definitions, questions, and context before you dive into the PDF",

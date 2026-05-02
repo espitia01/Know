@@ -8,6 +8,7 @@ import { ACTION_LABELS, normalizeSelectionAction, selectionKey } from "@/lib/sel
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { SectionHeader } from "@/components/panel/SectionHeader";
 import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
+import { useStore } from "@/lib/store";
 
 interface SelectionResultPanelProps {
   result: SelectionAnalysisResult | null;
@@ -16,6 +17,8 @@ interface SelectionResultPanelProps {
   onFollowUp: (question: string, context: string) => Promise<void>;
   /** When false, hides the follow-up composer (e.g. anonymous trial). */
   allowFollowUp?: boolean;
+  /** Overrides store `openSelectionFromHistory` (e.g. demo uses local React state). */
+  onFocusHistoryRoot?: (root: SelectionAnalysisResult) => void;
 }
 
 function FollowUpThreadList({ followups }: { followups: SelectionAnalysisResult[] }) {
@@ -75,8 +78,10 @@ export function SelectionResultPanel({
   history,
   onFollowUp,
   allowFollowUp = true,
+  onFocusHistoryRoot,
 }: SelectionResultPanelProps) {
-  const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
+  const openSelectionFromHistory = useStore((s) => s.openSelectionFromHistory);
+  const focusHistoryRoot = onFocusHistoryRoot ?? openSelectionFromHistory;
 
   if (loading && !result) {
     return (
@@ -177,10 +182,7 @@ export function SelectionResultPanel({
         </>
       )}
 
-      {/* History: every thread except the active one. Sorting + key
-          stability are deliberate — the previous implementation
-          re-keyed by index, which made the panel "shuffle" entries on
-          every store update because React mistook them for moves. */}
+      {/* History: every thread except the active one — click a row to focus it so follow-ups attach here. */}
       {threads.filter((t) => t !== activeThread).length > 0 && (
         <div className="space-y-2 border-t border-border/50 pt-6">
           <SectionHeader title="History" count={threads.filter((t) => t !== activeThread).length} />
@@ -188,15 +190,12 @@ export function SelectionResultPanel({
             {threads
               .filter((t) => t !== activeThread)
               .map((t) => {
-                const isExpanded = expandedHistory === t.rootKey;
                 const action = normalizeSelectionAction(t.root.action);
                 return (
                   <div key={t.rootKey}>
                     <button
                       type="button"
-                      onClick={() =>
-                        setExpandedHistory(isExpanded ? null : t.rootKey)
-                      }
+                      onClick={() => focusHistoryRoot(t.root)}
                       className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors duration-150 hover:bg-accent/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                     >
                       <span
@@ -220,19 +219,10 @@ export function SelectionResultPanel({
                           +{t.followups.length}
                         </span>
                       )}
-                      <svg
-                        className={`h-4 w-4 shrink-0 text-muted-foreground/40 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${isExpanded ? "rotate-180" : ""}`}
-                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
-                        aria-hidden
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                      </svg>
+                      <span className="shrink-0 text-[10px] font-medium tracking-wide text-muted-foreground/60">
+                        Open
+                      </span>
                     </button>
-                    {isExpanded && (
-                      <div className="border-t border-border/50 bg-muted/[0.03] px-3 pb-3 pt-2 dark:bg-muted/[0.05]">
-                        {renderThreadCard(t)}
-                      </div>
-                    )}
                   </div>
                 );
               })}

@@ -145,10 +145,11 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
     # don't 4xx.
     if action == "question":
         action = "explain"
-    if action not in ("explain", "assumptions", "derive", "followup"):
-        action = "explain"
     if action == "assumptions":
-        check_feature_access(user_id, "assumptions")
+        # Passage-level assumptions ride on Explain (paper-wide assumptions use `/assumptions`).
+        action = "explain"
+    if action not in ("explain", "derive", "followup"):
+        action = "explain"
     if not selected_text:
         raise HTTPException(status_code=400, detail="No text selected")
 
@@ -251,10 +252,10 @@ async def selection_analysis_stream(
     action = body.get("action", "explain")
     if action == "question":
         action = "explain"
-    if action not in ("explain", "assumptions", "derive", "followup"):
-        action = "explain"
     if action == "assumptions":
-        check_feature_access(user_id, "assumptions")
+        action = "explain"
+    if action not in ("explain", "derive", "followup"):
+        action = "explain"
     if not selected_text:
         raise HTTPException(status_code=400, detail="No text selected")
 
@@ -271,7 +272,7 @@ async def selection_analysis_stream(
         completed = False
         disconnected = False
         try:
-            async for chunk in provider.stream_complete(system, user_text, max_tokens=4096):
+            async for chunk in provider.stream_complete(system, user_text, max_tokens=6144):
                 if await request.is_disconnected():
                     # Abort upstream Anthropic call by exiting the async-for.
                     # The httpx.AsyncClient.stream() context manager cancels

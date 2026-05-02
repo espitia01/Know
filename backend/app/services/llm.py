@@ -522,14 +522,9 @@ async def analyze_selection(paper_text: str, selected_text: str, action: str, us
     selected_text = _sanitize_user_text(selected_text)
     paper_text = _sanitize_user_text(paper_text, max_chars=6000)
 
-    action_prompts = {
-        # Explain now absorbs the old "question/ask" intent: if the
-        # passage *is* a question, treat it as one and answer it; if
-        # it's a statement, explain it. Either way the output shape is
-        # the same — one rich `explanation` field — which lets the
-        # frontend collapse what used to be two separate buttons into
-        # one.
-        "explain": f"""Explain the following passage from an academic paper clearly and thoroughly.
+    paper_text = _sanitize_user_text(paper_text, max_chars=6000)
+
+    passage_explain_assumptions_json = f"""Explain the following passage from an academic paper clearly and thoroughly.
 
 If the selection looks like a question (ends with a question mark or
 otherwise asks something), ANSWER it directly using the paper as
@@ -539,17 +534,13 @@ including implications, connections to other concepts, and why this
 matters. Use LaTeX only for actual math ($...$ inline, $$...$$
 display).
 
-Selected text:
-\"\"\"{selected_text}\"\"\"
-
-Full paper context:
-{paper_text[:6000]}
-
-Return JSON:
-{{"explanation": "thorough, clear explanation OR direct answer. Use LaTeX math only where relevant."}}""",
-
-        "assumptions": f"""Identify the explicit and implicit assumptions underlying this passage.
-For each assumption, explain why it matters and what would change if it didn't hold.
+After the explanation, separately identify assumptions that THIS
+SELECTED excerpt explicitly states or unmistakably depends on —
+nothing else. Treat "passage-local" narrowly: each assumption must be
+something the reader needs to interpret or believe this excerpt, not a
+survey of tacit hypotheses from unrelated sections or the overall
+study. Prefer a short empty list when there are none. For each entry
+give significance (why it matters; what shifts if relaxed).
 
 Selected text:
 \"\"\"{selected_text}\"\"\"
@@ -558,7 +549,22 @@ Full paper context:
 {paper_text[:6000]}
 
 Return JSON:
-{{"assumptions": [{{"statement": "...", "type": "explicit|implicit", "significance": "..."}}]}}""",
+{{
+  "explanation": "thorough markdown explanation OR direct answer. Use LaTeX math only where relevant.",
+  "assumptions": [{{"statement": "...", "type": "explicit|implicit", "significance": "..."}}]
+}}"""
+
+    action_prompts = {
+        # Explain now absorbs the old "question/ask" intent: if the
+        # passage *is* a question, treat it as one and answer it; if
+        # it's a statement, explain it. Either way the output shape is
+        # the same — one rich `explanation` field — which lets the
+        # frontend collapse what used to be two separate buttons into
+        # one.
+        "explain": passage_explain_assumptions_json,
+
+        # Legacy callers may still POST action=assumptions; payloads match Explain.
+        "assumptions": passage_explain_assumptions_json,
 
         # "Derive" used to assume the paper was mathematical. For
         # humanities / literature / qualitative papers that meant
@@ -613,7 +619,11 @@ Return JSON:
     )
     raw = await provider.complete(system, prompt, max_tokens=8192)
     result = _safe_parse_json(raw)
-    result["action"] = action
+    # Explain and legacy assumptions payloads share one shape.
+    if action == "explain" or action == "assumptions":
+        result["action"] = "explain"
+    else:
+        result["action"] = action
     result["selected_text"] = selected_text
     return result
 
@@ -671,11 +681,7 @@ def _get_selection_prompt(paper_text: str, selected_text: str, action: str) -> t
         "Always reproduce equations correctly in LaTeX even if the selected text is mangled."
     )
 
-    prompts = {
-        # Explain folds in the old "Ask" button: if the selected text
-        # ends like a question, answer it directly; otherwise explain
-        # the passage. Same prompt shape either way.
-        "explain": f"""Explain the following passage from an academic paper clearly and thoroughly.
+    passage_explain_stream_md = f"""Explain the following passage from an academic paper clearly and thoroughly.
 
 If the selection looks like a question, ANSWER it directly. If it's a
 statement, EXPLAIN it — break down jargon, clarify logic, give context,
@@ -683,22 +689,27 @@ implications, and why it matters. Use LaTeX only for real math.
 Use markdown formatting.
 Note: The selected text is extracted from a PDF text layer and mathematical symbols may be garbled or missing. Interpret them using context.
 
-Selected text:
-\"\"\"{selected_text}\"\"\"
-
-Paper context:
-{paper_text[:6000]}""",
-
-        "assumptions": f"""Identify the explicit and implicit assumptions underlying this passage.
-For each assumption, explain why it matters and what would change if it didn't hold.
-Use markdown formatting with bullet points.
-Note: Mathematical symbols in the selection may be garbled from PDF extraction. Interpret using context.
+After that, append a markdown section titled exactly **## Passage-local assumptions**
+with bullet points grouped under **Explicit** and **Implicit** only for
+premises THIS excerpt states or unmistakably depends on to interpret
+that excerpt. Stay narrow: do not inventory assumptions for unrelated
+sections or the whole paper. If there are none, write "*(None obvious
+beyond ordinary reading.)"* under that heading.
 
 Selected text:
 \"\"\"{selected_text}\"\"\"
 
 Paper context:
-{paper_text[:6000]}""",
+{paper_text[:6000]}"""
+
+    prompts = {
+        # Explain folds in the old "Ask" button: if the selected text
+        # ends like a question, answer it directly; otherwise explain
+        # the passage. Same prompt shape either way.
+        "explain": passage_explain_stream_md,
+
+        # Legacy callers that still request streaming "assumptions" get the unified explain flow.
+        "assumptions": passage_explain_stream_md,
 
         "derive": f"""Reconstruct the derivation in this passage step-by-step.
 

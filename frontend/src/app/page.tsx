@@ -184,7 +184,7 @@ const tiers = [
       "Up to 3 papers in your library",
       "Structured AI summary for each paper",
       "5 Q&A turns per paper, grounded in the text",
-      "3 selection analyses per paper (explain, derive, and more)",
+      "3 selection analyses per paper (explain incl. passage assumptions, derive)",
       "Claude Haiku for fast answers",
     ],
   },
@@ -377,10 +377,13 @@ export default function LandingPage() {
             >
               <div className="landing-trust-marquee-track flex w-max items-center gap-12 py-2 sm:gap-14">
                 {[...TRUST_LOGOS, ...TRUST_LOGOS].map(({ name, file, className }, i) => (
-                  <img
+                  <Image
                     key={`${file}-${i}`}
                     src={trustPublicSrc(file)}
                     alt={name}
+                    width={280}
+                    height={80}
+                    unoptimized
                     className={cn(
                       className,
                       "shrink-0 opacity-[0.5] grayscale contrast-90",

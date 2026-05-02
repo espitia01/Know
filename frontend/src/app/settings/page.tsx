@@ -209,7 +209,7 @@ function SettingsContent() {
               <div className="space-y-2 pt-4 border-t border-border">
                 <label className="text-[12px] text-muted-foreground font-medium">
                   Selection Model
-                  <span className="text-muted-foreground/60 ml-1 font-normal">(Explain, Derive)</span>
+                  <span className="text-muted-foreground/60 ml-1 font-normal">(Explain + passage assumptions; Derive)</span>
                 </label>
                 <div className="space-y-1.5">
                   {models.map((m) => (
