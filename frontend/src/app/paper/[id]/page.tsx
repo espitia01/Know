@@ -32,6 +32,7 @@ import {
 } from "@/lib/analysisState";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { recordPaperOpened } from "@/lib/recentPapers";
+import { isPreReadingPopulated } from "@/lib/preReading";
 import { cn } from "@/lib/utils";
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
@@ -867,8 +868,8 @@ function PaperContent() {
       useStore.getState().setQAResults(allItems);
     }
 
-    if (cache.pre_reading && !snap.preReadingLoading) {
-      setPreReading(cache.pre_reading);
+    if (!snap.preReadingLoading && loadedPaperId && isPreReadingPopulated(cache.pre_reading)) {
+      setPreReading(loadedPaperId, cache.pre_reading);
     }
 
     const serverAssumptions = Array.isArray(cache.assumptions?.assumptions)
@@ -877,7 +878,7 @@ function PaperContent() {
     if (serverAssumptions && serverAssumptions.length > 0) {
       setAssumptions(serverAssumptions);
     }
-  }, [setAssumptions, setNotes, setPreReading, setSummary]);
+  }, [loadedPaperId, setAssumptions, setNotes, setPreReading, setSummary]);
 
   useEffect(() => {
     if (!loadedPaperId || loadedPaperId !== activePaperId) return;
@@ -904,11 +905,11 @@ function PaperContent() {
       Number(sessionCache.assumptions_cooldown_until || 0),
     );
     const assumptionsCoolingDown = cooldownUntil > Date.now() / 1000;
-    const hasPreReading = !!(
-      cache.pre_reading ||
-      sessionCache.pre_reading ||
-      storeSnap.preReading
-    );
+    const hasPreReading =
+      isPreReadingPopulated(cache.pre_reading) ||
+      isPreReadingPopulated(sessionCache.pre_reading) ||
+      (storeSnap.preReadingPaperId === pid &&
+        isPreReadingPopulated(storeSnap.preReading));
 
     if (
       !hasPreReading &&
@@ -916,13 +917,16 @@ function PaperContent() {
       !hasActiveRequest(pid, "preReading") &&
       !autoAnalyzedPapers.has(`${pid}:preReading`)
     ) {
-      autoAnalyzedPapers.add(`${pid}:preReading`);
       markRequestStart(pid, "preReading");
       setPreReadingLoading(true);
-      api.analyze(pid)
+      api
+        .analyze(pid)
         .then((r) => {
           const s = useStore.getState();
-          if (s.paper?.id === pid) setPreReading(r);
+          if (s.paper?.id !== pid) return;
+          s.setPreReading(pid, r);
+          s.updateCachedAnalysis(pid, { pre_reading: r });
+          autoAnalyzedPapers.add(`${pid}:preReading`);
         })
         .catch(() => {})
         .finally(() => {
@@ -953,13 +957,16 @@ function PaperContent() {
       !hasActiveRequest(pid, "assumptions") &&
       !autoAnalyzedPapers.has(`${pid}:assumptions`)
     ) {
-      autoAnalyzedPapers.add(`${pid}:assumptions`);
       markRequestStart(pid, "assumptions");
       setAssumptionsLoading(true);
-      api.getAssumptions(pid)
+      api
+        .getAssumptions(pid)
         .then((r) => {
           const s = useStore.getState();
-          if (s.paper?.id === pid) setAssumptions(r.assumptions);
+          if (s.paper?.id === pid) {
+            setAssumptions(r.assumptions);
+            autoAnalyzedPapers.add(`${pid}:assumptions`);
+          }
         })
         .catch(() => {})
         .finally(() => {

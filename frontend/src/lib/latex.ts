@@ -215,7 +215,11 @@ function containsLatex(s: string): boolean {
 
 const TEXT_COMMANDS = new Set([
   'textbf', 'textit', 'textrm', 'textsf', 'texttt', 'textsc',
-  'emph', 'underline', 'text', 'mathrm', 'cite', 'ref', 'label',
+  'emph', 'underline',
+  // `\text`, `\mathrm`, `\mathcal` are math-mode commands in KaTeX; if we pass
+  // them through as plain prose, `\text{…}` never reaches a math span and
+  // renders literally or breaks. Let `wrapBareLatex` fold them into `$…$`.
+  'cite', 'ref', 'label',
   'section', 'subsection', 'paragraph', 'item', 'caption', 'footnote',
   'href', 'url', 'title', 'author', 'date', 'documentclass',
   'usepackage', 'newcommand', 'renewcommand', 'input', 'include',

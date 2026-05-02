@@ -118,7 +118,10 @@ interface AppStore {
   removeSelectionFromHistory: (r: SelectionAnalysisResult) => void;
 
   preReading: PreReadingAnalysis | null;
-  setPreReading: (p: PreReadingAnalysis | null) => void;
+  /** Matches `paper.id` whenever `preReading` is non-null; prevents paper B showing paper A's Prepare. */
+  preReadingPaperId: string | null;
+  /** Pass the paper id for every prepare payload (use `null, null` to clear explicitly). */
+  setPreReading: (forPaperId: string | null, preReading: PreReadingAnalysis | null) => void;
   preReadingLoading: boolean;
   setPreReadingLoading: (l: boolean) => void;
 
@@ -183,6 +186,7 @@ export const useStore = create<AppStore>()(
           return {
             paper: p,
             preReading: null,
+            preReadingPaperId: null,
             assumptions: [],
             summary: null,
             notes: [],
@@ -337,7 +341,9 @@ export const useStore = create<AppStore>()(
         set({
           sessionPapers: [], crossPaperResults: [],
           papersById: {},
-          preReading: null, assumptions: [], summary: null, notes: [],
+          preReading: null,
+          preReadingPaperId: null,
+          assumptions: [], summary: null, notes: [],
           selectionHistory: [], selectionResult: null, qaResults: [], questions: [],
           exercise: null, searchResults: [],
         });
@@ -421,7 +427,12 @@ export const useStore = create<AppStore>()(
         }),
 
       preReading: null,
-      setPreReading: (p) => set({ preReading: p }),
+      preReadingPaperId: null,
+      setPreReading: (forPaperId, preReading) =>
+        set({
+          preReading,
+          preReadingPaperId: preReading && forPaperId ? forPaperId : null,
+        }),
       preReadingLoading: false,
       setPreReadingLoading: (l) => set({ preReadingLoading: l }),
 
@@ -469,7 +480,9 @@ export const useStore = create<AppStore>()(
       setSummaryLoading: (l) => set({ summaryLoading: l }),
 
       resetAnalysisState: () => set({
-        preReading: null, assumptions: [], summary: null, notes: [],
+        preReading: null,
+        preReadingPaperId: null,
+        assumptions: [], summary: null, notes: [],
         selectionHistory: [], selectionResult: null, qaResults: [], questions: [],
         exercise: null, searchResults: [],
         preReadingLoading: false, assumptionsLoading: false, summaryLoading: false,

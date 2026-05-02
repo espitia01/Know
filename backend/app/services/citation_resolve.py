@@ -40,6 +40,18 @@ def _doi_norm(s: str) -> str | None:
     return m.group(1).rstrip(",.;)") if m else None
 
 
+def _arxiv_from_blob(blob: str) -> str | None:
+    """Extract an arXiv id from a raw reference line or block."""
+    s = blob or ""
+    m = re.search(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})(v\d+)?", s, flags=re.I)
+    if m:
+        return _arxiv_norm(f"{m.group(1)}{m.group(2) or ''}")
+    m = re.search(r"(?:arXiv|arxiv)\s*[:\s#]+(\d{4}\.\d{4,5})(v\d+)?", s, flags=re.I)
+    if m:
+        return _arxiv_norm(f"{m.group(1)}{m.group(2) or ''}")
+    return None
+
+
 def hydrate_identifiers(entry: dict[str, Any]) -> dict[str, Any]:
     """Fill doi / arxiv / url columns from whichever fields are populated."""
     out = dict(entry)
@@ -347,11 +359,6 @@ def expand_bib_label_to_canonical_keys(fragment: Any) -> list[str]:
 
     solo = _canonical_bib_index(raw_norm)
     return [solo] if solo else []
-    m = re.search(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5}(?:v\d+)?)", blob, flags=re.I)
-    if m:
-        return m.group(1)
-    m = re.search(r"(?:arXiv|arxiv)\s*[:\s]+(\d{4}\.\d{4,5}(?:v\d+)?)", blob)
-    return m.group(1) if m else None
 
 
 def split_bibliography_chunks(bib: str) -> dict[str, str]:
@@ -361,19 +368,22 @@ def split_bibliography_chunks(bib: str) -> dict[str, str]:
     in PDF text dumps.
     """
     bib = (bib or "").replace("\r\n", "\n")
-    if not bib.strip():
+    bstrip = bib.strip()
+    if not bstrip:
         return {}
 
     markers: list[tuple[int, str]] = []
 
-    for m in re.finditer(r"(?:^|\n)\s*\[(\d{1,4})\]", bib):
+    for m in re.finditer(r"(?:^|\n)\s*\[\s*(\d{1,4})\s*\]", bib):
         markers.append((m.start(0), str(int(m.group(1)))))
 
-    for m in re.finditer(r"(?:^|\n)\s*(\d{1,4})\.\s+(?=[A-Za-z\"“„(\[{])", bib):
-        num = str(int(m.group(1)))
-        markers.append((m.start(0), num))
+    for m in re.finditer(r"(?:^|\n)\s*(\d{1,4})\.\s*(?=[A-Za-z\"“„(\[{0-9≤≥])", bib):
+        markers.append((m.start(0), str(int(m.group(1)))))
 
     for m in re.finditer(r"(?:^|\n)\s*\((\d{1,4})\)\s+(?=[A-Za-z\"“„])", bib):
+        markers.append((m.start(0), str(int(m.group(1)))))
+
+    for m in re.finditer(r"(?:^|\n)\s*(\d{1,4})\)\s+(?=[A-Za-z\"“„(\[{])", bib):
         markers.append((m.start(0), str(int(m.group(1)))))
 
     markers.sort(key=lambda item: item[0])
@@ -389,6 +399,18 @@ def split_bibliography_chunks(bib: str) -> dict[str, str]:
         blob = bib[start:end].strip()
         if blob:
             chunks[num] = blob
+
+    if not chunks and len(bstrip) >= 80:
+        if re.search(
+            r"\b(?:doi:\s*|10\.\d{4,9}/|arXiv:\s*|arxiv\.org/|https?://|"
+            r"Vol\.?\s*\d|pp\.\s*\d+|\d{4}\.\d{4,5}(?:v\d+)?|"
+            r"Springer|IEEE|ACM|Press|University|Journal)\b",
+            bstrip,
+            re.I,
+        ):
+            cap = 32000
+            return {"1": bstrip[:cap]}
+
     return chunks
 
 

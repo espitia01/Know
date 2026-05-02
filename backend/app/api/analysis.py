@@ -66,6 +66,7 @@ from ..services.citation_resolve import (
     bibliography_to_prior_work_entries,
     build_prior_work_topics_from_clusters,
     enrich_prior_work_from_bibliography,
+    finalize_pre_reading_urls,
     merge_reference_summaries,
     normalize_prior_row_hydrated,
 )
@@ -101,16 +102,34 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
     analysis_payload = None
     try:
         result = await analyze_paper(paper.raw_text, user_id=user_id)
-        bib_blob = extract_references_section(paper.raw_text or "", max_chars=22000)
-
+        raw_txt = paper.raw_text or ""
+        bib_blob = extract_references_section(raw_txt, max_chars=26000)
         bib_rows = bibliography_to_prior_work_entries(bib_blob)
-        if len(bib_rows) >= 2:
+        # Some PDFs place references only in the last pages; extracting from the tail
+        # recovers bibliography when an earlier "References" false positive trims wrong.
+        if len(bib_rows) <= 1 and len(raw_txt.strip()) > 8000:
+            tail = raw_txt[-min(len(raw_txt), 45000) :]
+            alt_blob = extract_references_section(tail, max_chars=26000)
+            if alt_blob.strip() and alt_blob.strip() != bib_blob.strip():
+                alt_rows = bibliography_to_prior_work_entries(alt_blob)
+                if len(alt_rows) > len(bib_rows):
+                    bib_blob, bib_rows = alt_blob, alt_rows
+
+        if len(bib_rows) >= 1:
             merge_reference_summaries(bib_rows, result.get("reference_summaries"))
             hydrated = [normalize_prior_row_hydrated(r) for r in bib_rows]
             enrich_prior_work_from_bibliography(hydrated, bib_blob)
             topics = build_prior_work_topics_from_clusters(hydrated, result.get("reference_clusters"))
             result["prior_work"] = hydrated
             result["prior_work_topics"] = topics
+            try:
+                await finalize_pre_reading_urls(result)
+            except Exception:
+                logger.warning(
+                    "finalize_pre_reading_urls failed for paper %s (links may be partial)",
+                    paper_id,
+                    exc_info=True,
+                )
         else:
             result["prior_work"] = []
             result["prior_work_topics"] = []

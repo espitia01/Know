@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
@@ -27,22 +27,37 @@ const rowItemClass =
   "border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out hover:bg-accent/40";
 
 export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
-  const { preReading, setPreReading, preReadingLoading, setPreReadingLoading } = useStore();
+  const preReading = useStore(
+    useCallback(
+      (s) => (s.preReadingPaperId === paperId ? s.preReading : null),
+      [paperId],
+    ),
+  );
+  const setPreReading = useStore((s) => s.setPreReading);
+  const updateCachedAnalysis = useStore((s) => s.updateCachedAnalysis);
+  const preReadingLoading = useStore((s) => s.preReadingLoading);
+  const setPreReadingLoading = useStore((s) => s.setPreReadingLoading);
   const currentPaperRef = useRef(paperId);
   currentPaperRef.current = paperId;
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const handleAnalyze = async () => {
     const targetId = paperId;
+    setLoadError(null);
     clearProgressStart(targetId, "preReading");
     markRequestStart(targetId, "preReading");
     setPreReadingLoading(true);
     try {
       const result = await api.analyze(targetId);
       if (currentPaperRef.current === targetId) {
-        setPreReading(result);
+        setPreReading(targetId, result);
+        updateCachedAnalysis(targetId, { pre_reading: result });
       }
     } catch (e) {
       console.error("Analysis failed:", e);
+      if (currentPaperRef.current === targetId) {
+        setLoadError(e instanceof Error ? e.message : "Prepare failed. Try again.");
+      }
     } finally {
       markRequestEnd(targetId, "preReading");
       clearProgressStart(targetId, "preReading");
@@ -67,13 +82,38 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
     return (
       <EmptyState
         title="Prepare this paper"
-        body="Extract definitions, research questions, prior work, and concepts before reading."
-        cta={{ label: "Analyze Paper", onClick: handleAnalyze }}
+        body={
+          loadError ||
+          "Extract definitions, research questions, prior work, and concepts before reading."
+        }
+        cta={{ label: loadError ? "Retry Prepare" : "Analyze Paper", onClick: handleAnalyze }}
       />
     );
   }
 
-  const { definitions, research_questions, prior_work, concepts } = preReading;
+  const definitions = preReading.definitions ?? [];
+  const research_questions = preReading.research_questions ?? [];
+  const prior_work = preReading.prior_work ?? [];
+  const concepts = preReading.concepts ?? [];
+
+  const hasAnySection =
+    definitions.length > 0 ||
+    research_questions.length > 0 ||
+    prior_work.length > 0 ||
+    concepts.length > 0;
+
+  if (!hasAnySection) {
+    return (
+      <EmptyState
+        title="Prepare didn't extract structure"
+        body={
+          loadError ||
+          "The analysis returned empty sections for this PDF. Retry, or confirm the PDF has a normal text layer."
+        }
+        cta={{ label: loadError ? "Retry Prepare" : "Analyze Paper again", onClick: handleAnalyze }}
+      />
+    );
+  }
 
   return (
     <div className="space-y-1 motion-safe:animate-fade-in">
