@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { api, type FigureInfo, type FigureAnalysis, type ParsedPaper } from "@/lib/api";
+import { capturePdfSelectionToPng } from "@/lib/pdfSelectionCapture";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
@@ -180,6 +181,12 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const prevPaperIdRef = useRef(paperId);
   const abortRef = useRef<AbortController | null>(null);
+  const [clipSaving, setClipSaving] = useState(false);
+  const [clipError, setClipError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setClipError(null);
+  }, [paperId]);
 
   useEffect(() => {
     if (prevPaperIdRef.current !== paperId) {
@@ -395,6 +402,39 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     [paperId]
   );
 
+  const handleCaptureFromPdf = useCallback(async () => {
+    setClipError(null);
+    try {
+      setClipSaving(true);
+      const blob = await capturePdfSelectionToPng();
+      if (!blob) {
+        setClipError(
+          "Drag to select a region over the PDF (text or graphic), then tap again.",
+        );
+        return;
+      }
+      const { figure, figures } = await api.uploadFigureFromSelection(paperId, blob);
+      const snap =
+        useStore.getState().papersById[paperId] ??
+        (useStore.getState().paper?.id === paperId ? useStore.getState().paper : null);
+      if (!snap || snap.id !== paperId) {
+        setClipError("Could not sync paper cache. Reload the library and try again.");
+        return;
+      }
+      const next = { ...snap, figures };
+      cachePaper(next);
+      if (useStore.getState().paper?.id === paperId) {
+        setPaper(next);
+      }
+      setSelected(figure);
+      void handleAnalyze(figure, "");
+    } catch (e) {
+      setClipError(e instanceof Error ? e.message : "Could not save selection as a figure.");
+    } finally {
+      setClipSaving(false);
+    }
+  }, [paperId, cachePaper, setPaper, handleAnalyze]);
+
   const handleAsk = useCallback(() => {
     if (!selected || !question.trim()) return;
     handleAnalyze(selected, question.trim());
@@ -430,12 +470,25 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         </div>
         <button
           type="button"
-          onClick={handleReextract}
-          disabled={reextracting}
+          onClick={handleCaptureFromPdf}
+          disabled={clipSaving || reextracting}
           className="btn-primary-glass rounded-lg px-4 py-2 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {clipSaving ? "Saving selection…" : "Add figure from PDF selection"}
+        </button>
+        <button
+          type="button"
+          onClick={handleReextract}
+          disabled={reextracting || clipSaving}
+          className="rounded-lg border border-border/70 px-4 py-2 text-[var(--text-sm)] font-medium text-foreground transition-colors hover:bg-accent/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
         >
           {reextracting ? "Re-extracting figures…" : "Re-extract figures"}
         </button>
+        {clipError && (
+          <p className="text-[var(--text-xs)] text-destructive/90 max-w-sm mx-auto leading-relaxed" role="alert">
+            {clipError}
+          </p>
+        )}
       </div>
     );
   }
@@ -558,7 +611,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               }}
               placeholder="Ask about this figure..."
               disabled={loading}
-              className="know-non-credential-input flex-1 text-[var(--text-sm)] min-h-[2.25rem] rounded-[var(--radius-md)] px-3 py-2 border border-border/80 bg-muted/15 placeholder:text-muted-foreground/45 focus-visible:outline-none shadow-none disabled:opacity-50 dark:bg-muted/20"
+              className="know-non-credential-input flex-1 text-[var(--text-sm)] min-h-[2.25rem] rounded-[var(--radius-md)] px-3 py-2 border border-input bg-muted/30 placeholder:text-muted-foreground/50 focus-visible:border-ring focus-visible:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 shadow-none disabled:opacity-50 dark:bg-muted/20"
             />
             <button
               onClick={handleAsk}
@@ -575,9 +628,25 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
   return (
     <div className="space-y-3.5">
-      <p className="text-[var(--text-xs)] text-muted-foreground/70">
-        Tap a figure to analyse &amp; ask questions.
-      </p>
+      <div className="flex flex-wrap items-start gap-2">
+        <p className="text-[var(--text-xs)] text-muted-foreground/70 flex-1 min-w-[12rem]">
+          Tap a figure to analyse &amp; ask questions. Missed one? Crop it from the PDF.
+        </p>
+        <button
+          type="button"
+          onClick={handleCaptureFromPdf}
+          disabled={clipSaving || reextracting || loading}
+          className="shrink-0 rounded-md border border-border/70 px-2.5 py-1 text-[var(--text-xs)] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-40"
+        >
+          {clipSaving ? "Saving…" : "From selection"}
+        </button>
+      </div>
+
+      {clipError && (
+        <p className="text-[var(--text-xs)] text-destructive/90" role="alert">
+          {clipError}
+        </p>
+      )}
 
       <div className="grid grid-cols-2 gap-2.5">
         {figures.map((fig) => {
@@ -619,7 +688,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         </p>
         <button
           onClick={handleReextract}
-          disabled={reextracting}
+          disabled={reextracting || clipSaving}
           className="text-[var(--text-xs)] font-medium px-2.5 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-40 shrink-0"
         >
           {reextracting ? "Re-extracting…" : "Re-extract"}

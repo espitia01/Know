@@ -7,11 +7,11 @@ import re
 import shutil
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Depends
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Depends, File, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from ..config import settings
-from ..models.schemas import ParsedPaper
+from ..models.schemas import ParsedPaper, FigureInfo
 from ..services.pdf_parser import (
     append_capped,
     extract_pdf,
@@ -19,6 +19,7 @@ from ..services.pdf_parser import (
     get_figure_path,
     get_paper,
     list_papers,
+    MAX_FIGURES_PER_PAPER,
     mutate_paper,
     save_paper,
     _forget_paper_lock,
@@ -240,6 +241,71 @@ async def get_figure(paper_id: str, fig_id: str, user_id: str = Depends(require_
         return Response(content=fig_bytes, media_type="image/png")
 
     raise HTTPException(status_code=404, detail="Figure not found")
+
+
+@router.post("/{paper_id}/figures/from-selection")
+async def upload_figure_from_selection(
+    paper_id: str,
+    user_id: str = Depends(require_auth),
+    file: UploadFile = File(...),
+):
+    """Save a PNG cut from an in-browser PDF selection as a synthetic figure."""
+
+    check_feature_access(user_id, "figures")
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+
+    content = await file.read()
+    png_magic = b"\x89PNG\r\n\x1a\n"
+    if len(content) < len(png_magic) + 64 or len(content) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Invalid PNG payload")
+    if not content.startswith(png_magic):
+        raise HTTPException(status_code=400, detail="PNG image required")
+
+    paper = get_paper(paper_id, user_id=user_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    if len(paper.figures) >= MAX_FIGURES_PER_PAPER:
+        raise HTTPException(status_code=400, detail="Figure limit reached")
+
+    fig_id = f"clip{uuid.uuid4().hex}"
+    _validate_id(fig_id, "fig_id")
+
+    info = FigureInfo(
+        id=fig_id,
+        url=f"/api/papers/{paper_id}/figures/{fig_id}",
+        caption="Selection from PDF",
+        page=0,
+    )
+
+    figures_dir = settings.papers_dir / paper_id / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    fig_path = figures_dir / f"{fig_id}.png"
+
+    def _apply(p: ParsedPaper) -> None:
+        p.figures = [*p.figures, info]
+
+    try:
+        fig_path.write_bytes(content)
+        updated = mutate_paper(paper_id, user_id, _apply)
+    except Exception:
+        fig_path.unlink(missing_ok=True)
+        raise
+
+    try:
+        cloud_storage.upload_file(
+            user_id,
+            f"{paper_id}/figures/{fig_id}.png",
+            content,
+            "image/png",
+        )
+    except Exception:
+        logger.warning("Cloud mirror failed for pasted figure %s/%s", paper_id, fig_id, exc_info=True)
+
+    return {
+        "figure": info.model_dump(),
+        "figures": [f.model_dump() for f in updated.figures],
+    }
 
 
 @router.delete("/{paper_id}")

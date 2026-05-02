@@ -292,10 +292,10 @@ function DashboardContent() {
         {/* Upload zone */}
         <div
           {...getRootProps()}
-          className={`cursor-pointer rounded-2xl border-2 border-dashed transition-all duration-300 ring-focus ${
+          className={`cursor-pointer rounded-xl border border-dashed transition-[border-color,background-color,box-shadow,transform] duration-200 ease-out ring-focus ${
             isDragActive
-              ? "border-ring/40 bg-accent/60 scale-[1.01] shadow-md"
-              : "border-border glass-subtle hover:bg-accent hover:border-border-strong"
+              ? "border-ring/50 bg-accent/45 shadow-md scale-[1.008]"
+              : "border-input bg-muted/25 hover:border-border-strong hover:bg-muted/38 shadow-[var(--shadow-xs)]"
           } ${loading ? "opacity-50 pointer-events-none" : ""}`}
         >
           <div className="flex flex-col items-center justify-center py-16 px-6">

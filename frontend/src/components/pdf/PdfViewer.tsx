@@ -5,6 +5,7 @@ import { Document, Page, pdfjs } from "react-pdf";
 import { api, getAuthHeadersSync, SelectionAnalysisResult } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { normalizeSelectionAction } from "@/lib/selectionActions";
+import { capturePdfSelectionFromContainer, registerPdfSelectionCapture } from "@/lib/pdfSelectionCapture";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 
@@ -1151,6 +1152,15 @@ export function PdfViewer({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onSelectionClear]);
 
+  useEffect(() => {
+    registerPdfSelectionCapture(async () => {
+      const root = containerRef.current;
+      if (!root) return null;
+      return capturePdfSelectionFromContainer(root);
+    });
+    return () => registerPdfSelectionCapture(null);
+  }, []);
+
   // Safari-style auto-scroll while dragging a selection. When the cursor
   // enters an "edge zone" near the top or bottom of the viewport, we
   // ease the container in that direction so the selection can keep
@@ -1336,7 +1346,7 @@ export function PdfViewer({
               onChange={(e) => setPageInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handlePageInputSubmit()}
               onBlur={handlePageInputSubmit}
-              className="w-10 h-6 text-center rounded-lg border border-border bg-background/60 text-[11px] backdrop-blur-sm"
+              className="w-11 tabular text-center rounded-md border border-input bg-background/95 text-[11px] text-foreground shadow-[var(--shadow-xs)] backdrop-blur-sm transition-colors focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35 py-1"
             />
             <span>/ {numPages}</span>
           </div>

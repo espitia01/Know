@@ -592,6 +592,18 @@ export const api = {
       { method: "POST" }
     ),
 
+  uploadFigureFromSelection: async (paperId: string, png: Blob) => {
+    const form = new FormData();
+    form.append("file", png, "selection.png");
+    return request<{ figure: FigureInfo; figures: FigureInfo[] }>(
+      `/api/papers/${paperId}/figures/from-selection`,
+      {
+        method: "POST",
+        body: form,
+      },
+    );
+  },
+
   getDerivationExercise: (id: string, section: string) =>
     request<DerivationExercise>(
       `/api/papers/${id}/derivation/exercise`,

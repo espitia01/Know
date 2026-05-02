@@ -405,16 +405,38 @@
   margin: 1.2em 0;
 }
 .paper-content .katex-display {
-  margin: 1.4em 0;
+  margin: 1.25em auto;
+  padding: 0.55rem 0.85rem;
   overflow-x: auto;
+  overflow-y: visible;
   text-align: center;
-  display: flex;
-  justify-content: center;
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  background: color-mix(in oklab, var(--muted) 88%, transparent);
+  border: 1px solid color-mix(in oklab, var(--border-strong) 58%, transparent);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
 }
-.paper-content .katex-display > .katex { text-align: center; }
-.paper-content .katex { font-size: 1.05em; }
-.paper-content p:has(.katex-display) { text-align: center; }
-.paper-content .katex-html { text-align: center; }
+.dark .paper-content .katex-display {
+  background: color-mix(in oklab, var(--muted) 52%, transparent);
+}
+.paper-content .katex-display > .katex {
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+.paper-content .katex {
+  font-size: 1.035em;
+  vertical-align: text-bottom;
+}
+.paper-content p:has(.katex-display),
+.paper-content li:has(.katex-display) {
+  text-align: center;
+}
+.paper-content .katex-html {
+  max-width: 100%;
+}
 .paper-content figure { margin: 1.5em 0; }
 .paper-content img { max-width: 100%; border-radius: 6px; }
 
@@ -609,109 +631,202 @@
      to tab chrome (`--text-sm` / `--text-xs`) without hurting legibility.
      `--analysis-font-scale` is set on `.analysis-pane-v2` / `.analysis-content`. */
   font-size: calc(13px * var(--analysis-font-scale, 1));
-  line-height: 1.55;
+  line-height: 1.62;
 }
+
+.analysis-content a {
+  font-weight: 500;
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklab, var(--muted-foreground) 82%, transparent);
+}
+.analysis-content a:hover {
+  text-decoration-color: color-mix(in oklab, var(--foreground) 72%, transparent);
+}
+
 .analysis-content .katex-display {
-  margin: 0.9em auto;
+  margin: 0.95em auto;
+  padding: 0.65rem 0.95rem;
   overflow-x: auto;
   overflow-y: visible;
   text-align: center;
   display: block;
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  background: color-mix(in oklab, var(--muted) 88%, transparent);
+  border: 1px solid color-mix(in oklab, var(--border-strong) 70%, transparent);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
 }
+
+.dark .analysis-content .katex-display {
+  background: color-mix(in oklab, var(--muted) 55%, transparent);
+  border-color: color-mix(in oklab, var(--border-strong) 50%, transparent);
+}
+
 .analysis-content .katex-display > .katex {
   margin-left: auto;
   margin-right: auto;
   text-align: center;
-  font-size: 1.12em;
+  font-size: 1.08em;
 }
-/* Inline math slightly above body so superscripts stay readable. */
+
+/* Inline math inherits compact sizing */
 .analysis-content .katex {
-  font-size: 1.06em;
+  font-size: 1.035em;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: visible;
   max-width: 100%;
+  vertical-align: text-bottom;
 }
+
 .analysis-content .katex-html {
   max-width: 100%;
 }
+
 .analysis-content p {
-  margin-bottom: 0.4em;
-  line-height: 1.55;
+  margin-bottom: 0.55em;
+  line-height: 1.62;
 }
-.analysis-content p:has(.katex-display) { text-align: center; }
-.analysis-content li:has(.katex-display) { text-align: center; }
-.analysis-content ul, .analysis-content ol {
-  margin-bottom: 0.4em;
-  padding-left: 1.2em;
-  line-height: 1.55;
+.analysis-content p:last-child {
+  margin-bottom: 0;
 }
-.analysis-content li { margin-bottom: 0.15em; }
-.analysis-content strong { font-weight: 600; }
+
+.analysis-content p:has(.katex-display),
+.analysis-content li:has(.katex-display) {
+  text-align: center;
+}
+
+.analysis-content ul,
+.analysis-content ol {
+  margin-bottom: 0.55em;
+  padding-left: 1.35em;
+  line-height: 1.62;
+}
+.analysis-content li {
+  margin-bottom: 0.22em;
+  padding-left: 0.08em;
+}
+.analysis-content ul {
+  list-style-type: disc;
+}
+.analysis-content ol {
+  list-style-type: decimal;
+}
+.analysis-content li::marker {
+  color: color-mix(in oklab, var(--muted-foreground), transparent 38%);
+}
+
+.analysis-content strong {
+  font-weight: 600;
+}
+
 .analysis-content blockquote {
-  border-left: 2px solid var(--border-strong);
-  padding-left: 0.8em;
-  margin: 0.5em 0;
-  color: var(--muted-foreground);
-  font-style: italic;
+  border-left: 3px solid color-mix(in oklab, var(--foreground), transparent 78%);
+  margin: 0.65em 0;
+  padding: 0.45em 0.85em 0.45em 1rem;
+  border-radius: 0 calc(var(--radius-sm)) calc(var(--radius-sm)) 0;
+  background: color-mix(in oklab, var(--muted), transparent 45%);
+  color: color-mix(in oklab, var(--foreground), var(--muted-foreground) 32%);
+  font-style: normal;
 }
+
 .analysis-content table {
   width: 100%;
   border-collapse: collapse;
-  margin: 0.8em 0;
-  font-size: 0.85em;
+  margin: 0.85em 0;
+  font-size: 0.885em;
+  border: 1px solid color-mix(in oklab, var(--border-strong), transparent 15%);
+  border-radius: calc(var(--radius-md) + 2px);
+  overflow: hidden;
 }
 .analysis-content thead th {
   text-align: left;
   font-weight: 600;
-  padding: 0.5em 0.75em;
+  padding: 0.52em 0.82em;
   border-bottom: 1px solid var(--border-strong);
-  background: var(--accent);
+  background: color-mix(in oklab, var(--accent), transparent 25%);
   color: var(--foreground);
 }
 .analysis-content tbody td {
-  padding: 0.45em 0.75em;
-  border-bottom: 1px solid var(--border);
+  padding: 0.48em 0.82em;
+  border-bottom: 1px solid color-mix(in oklab, var(--border), transparent 35%);
   vertical-align: top;
 }
 .analysis-content tbody tr:last-child td {
   border-bottom: none;
 }
+
 .analysis-content code {
   font-size: 0.88em;
-  background: var(--accent);
-  padding: 0.15em 0.35em;
-  border-radius: 0.25em;
+  background: color-mix(in oklab, var(--accent), transparent 42%);
+  border: 1px solid color-mix(in oklab, var(--border), transparent 52%);
+  padding: 0.12em 0.38em;
+  border-radius: 0.35em;
   font-family: var(--font-mono);
 }
+
 .analysis-content pre {
-  background: var(--accent);
-  padding: 0.75em 1em;
-  border-radius: 0.5em;
+  background: color-mix(in oklab, var(--muted), transparent 30%);
+  border: 1px solid color-mix(in oklab, var(--border), transparent 40%);
+  padding: 0.85em 1em;
+  border-radius: var(--radius-md);
   overflow-x: auto;
-  margin: 0.6em 0;
+  margin: 0.75em 0;
   font-family: var(--font-mono);
+  box-shadow: var(--shadow-xs);
 }
+
+.dark .analysis-content pre {
+  background: color-mix(in oklab, var(--muted), transparent 18%);
+}
+
 .analysis-content pre code {
+  border: none;
   background: none;
   padding: 0;
+  font-size: 0.9em;
 }
-.analysis-content h1, .analysis-content h2, .analysis-content h3,
-.analysis-content h4, .analysis-content h5, .analysis-content h6 {
+
+.analysis-content h1,
+.analysis-content h2,
+.analysis-content h3,
+.analysis-content h4,
+.analysis-content h5,
+.analysis-content h6 {
   font-weight: 600;
-  margin-top: 1em;
-  margin-bottom: 0.3em;
-  line-height: 1.3;
-  letter-spacing: -0.01em;
+  margin-top: 1.05em;
+  margin-bottom: 0.35em;
+  line-height: 1.28;
+  letter-spacing: -0.018em;
   color: var(--foreground);
 }
-.analysis-content h1 { font-size: 1.18em; }
-.analysis-content h2 { font-size: 1.1em; }
-.analysis-content h3 { font-size: 1.02em; }
+
+.analysis-content h1:first-child,
+.analysis-content h2:first-child,
+.analysis-content h3:first-child {
+  margin-top: 0;
+}
+
+.analysis-content h1 {
+  font-size: 1.2em;
+}
+.analysis-content h2 {
+  font-size: 1.1em;
+  padding-bottom: 0.2em;
+  border-bottom: 1px solid color-mix(in oklab, var(--border), transparent 22%);
+}
+
+.analysis-content h3 {
+  font-size: 1.02em;
+}
 .analysis-content hr {
   border: none;
-  border-top: 1px solid var(--border);
-  margin: 1em 0;
+  border-top: 1px solid color-mix(in oklab, var(--border-strong), transparent 30%);
+  margin: 1.15em 0;
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -1085,8 +1200,9 @@ body::before {
 
 .analysis-pane-v2 textarea[data-slot="textarea"],
 .analysis-pane-v2 input[type="search"].know-non-credential-input {
-  background-color: color-mix(in oklch, var(--card) 88%, transparent);
-  border-color: color-mix(in oklch, var(--border) 94%, var(--muted-foreground));
+  background-color: color-mix(in oklch, var(--card) 92%, transparent);
+  border-width: 1px;
+  border-color: color-mix(in oklch, var(--border-strong) 88%, var(--muted-foreground) 12%);
 }
 
 .analysis-pane-v2 textarea[data-slot="textarea"]:focus,
@@ -1095,8 +1211,8 @@ body::before {
 .analysis-pane-v2 input[type="search"].know-non-credential-input:focus-visible {
   outline: none !important;
   box-shadow: none !important;
-  border-color: color-mix(in oklch, var(--foreground) 18%, var(--border-strong));
-  background-color: color-mix(in oklch, var(--card) 94%, transparent);
+  border-color: color-mix(in oklch, var(--ring) 28%, var(--foreground) 22%);
+  background-color: color-mix(in oklch, var(--card) 97%, transparent);
   --tw-ring-width: 0px !important;
   --tw-ring-offset-width: 0px !important;
   --tw-ring-shadow: 0 0 #0000 !important;

@@ -261,23 +261,23 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      {/* Nav + hero share one surface so the fold isn&apos;t a hard seam */}
-      <div className="relative overflow-hidden border-b border-border/40">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-20%,color-mix(in_oklch,var(--foreground),transparent_94%),transparent)]" />
-        <header className="relative z-50 sticky top-0 border-0 bg-transparent backdrop-blur-md supports-[backdrop-filter]:bg-background/40">
+    <div className="min-h-screen bg-background text-foreground antialiased selection:bg-ring/20">
+      {/* Nav + hero share one surface */}
+      <div className="relative overflow-hidden border-b border-border/50">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_72%_52%_at_50%_-12%,color-mix(in_oklch,var(--foreground),transparent_96%),transparent)] opacity-90" />
+        <header className="relative z-50 sticky top-0 border-b border-transparent bg-background/75 backdrop-blur-xl supports-[backdrop-filter]:bg-background/62">
           <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-5 sm:px-8">
             <Link href="/" className="flex items-center gap-2.5 rounded-md ring-focus">
-              <Image src="/logo.png" alt="Know" width={24} height={24} className="rounded-md opacity-95" />
-              <span className="text-[15px] font-semibold tracking-[-0.04em] text-foreground">Know</span>
+              <Image src="/logo.png" alt="Know" width={24} height={24} className="rounded-md opacity-[0.97]" />
+              <span className="text-[14px] font-semibold tracking-[-0.03em] text-foreground">Know</span>
             </Link>
-            <nav className="flex items-center gap-1 sm:gap-6">
-              <div className="hidden items-center gap-8 text-[13px] tracking-tight text-muted-foreground sm:flex">
+            <nav className="flex items-center gap-1 sm:gap-5">
+              <div className="hidden items-center gap-7 text-[13px] tracking-[-0.01em] text-muted-foreground sm:flex">
                 <a href="#features" className="transition-colors hover:text-foreground">
                   Product
                 </a>
                 <a href="#pricing" className="transition-colors hover:text-foreground">
-                  Plans
+                  Pricing
                 </a>
                 <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">
                   Community
@@ -294,7 +294,7 @@ export default function LandingPage() {
                   </Link>
                   <Link
                     href="/sign-up"
-                    className="rounded-full bg-foreground px-4 py-2 text-[13px] font-medium text-background transition-opacity hover:opacity-90"
+                    className="rounded-full bg-foreground px-4 py-2 text-[13px] font-medium text-background shadow-sm transition-opacity hover:opacity-[0.92] active:opacity-100"
                   >
                     Get started
                   </Link>
@@ -319,37 +319,37 @@ export default function LandingPage() {
         <section
           ref={hero.ref}
           className={cn(
-            "relative z-10 px-5 pb-24 pt-12 sm:px-8 sm:pb-28 sm:pt-16",
-            "transition-[opacity,transform] duration-1000 ease-[cubic-bezier(0.16,1,0.3,1)]",
-            hero.visible ? "opacity-100" : "opacity-0 translate-y-4"
+            "relative z-10 px-5 pb-[5.5rem] pt-14 sm:px-8 sm:pb-24 sm:pt-[4.25rem]",
+            "transition-[opacity,transform] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            hero.visible ? "opacity-100" : "opacity-0 translate-y-3",
           )}
         >
           <div className="relative mx-auto max-w-3xl text-center">
-            <p className="mb-6 text-[13px] font-medium tracking-[0.02em] text-muted-foreground/90 sm:text-[14px]">
-              Thinking and Reasoning companion for serious papers
+            <p className="mb-5 text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground sm:text-[12px]">
+              Reading companion for technical work
             </p>
-            <h1 className="font-display text-[clamp(2.35rem,5.5vw,3.85rem)] font-semibold leading-[1.08] tracking-[-0.045em] text-foreground text-balance">
+            <h1 className="font-display text-[clamp(2.2rem,5.2vw,3.65rem)] font-semibold leading-[1.07] tracking-[-0.045em] text-foreground text-balance">
               Stay with the paper until it actually makes sense.
             </h1>
-            <p className="mx-auto mt-7 max-w-xl text-pretty text-[17px] leading-[1.65] text-muted-foreground sm:text-lg">
+            <p className="mx-auto mt-8 max-w-xl text-pretty text-[16px] leading-[1.62] text-muted-foreground sm:text-[17px]">
               Know keeps summaries, interrogations, and notes tied to the lines you&apos;re reading—so your effort compounds
               instead of evaporating when you close the tab.
             </p>
-            <div className="mt-12 flex flex-wrap items-center justify-center gap-3">
+            <div className="mt-11 flex flex-wrap items-center justify-center gap-3">
               <Link
                 href="/try"
-                className="rounded-full border border-border/70 bg-background px-6 py-3 text-[14px] font-medium text-foreground shadow-sm transition-colors hover:bg-accent/30"
+                className="rounded-full border border-border/80 bg-background px-6 py-[0.72rem] text-[14px] font-medium text-foreground shadow-[var(--shadow-xs)] transition-[background-color,border-color,box-shadow] duration-150 hover:border-border hover:bg-muted/40"
               >
                 Try the demo
               </Link>
               <Link
                 href="/sign-up"
-                className="rounded-full bg-foreground px-6 py-3 text-[14px] font-medium text-background transition-opacity hover:opacity-90"
+                className="rounded-full bg-foreground px-6 py-[0.72rem] text-[14px] font-medium text-background shadow-sm transition-opacity hover:opacity-[0.92]"
               >
                 Create an account
               </Link>
             </div>
-            <p className="mt-6 text-[13px] text-muted-foreground/75">No credit card to explore the Free plan.</p>
+            <p className="mt-6 text-[13px] tracking-[-0.01em] text-muted-foreground/80">No credit card to explore the Free plan.</p>
           </div>
         </section>
       </div>
@@ -359,14 +359,14 @@ export default function LandingPage() {
         <section
           ref={trust.ref}
           className={cn(
-            "border-b border-border/40 px-5 py-14 sm:px-8",
-            "transition-[opacity,transform] duration-1000 ease-[cubic-bezier(0.16,1,0.3,1)]",
-            trust.visible ? "opacity-100" : "opacity-0 translate-y-3"
+            "border-b border-border/50 bg-muted/[0.04] px-5 py-[3.25rem] sm:px-8 dark:bg-muted/[0.035]",
+            "transition-[opacity,transform] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            trust.visible ? "opacity-100" : "opacity-0 translate-y-3",
           )}
         >
           <div className="mx-auto max-w-5xl">
-            <p className="text-center text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground/80">
-              Loved by scholars &amp; researchers at
+            <p className="text-center text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+              Trusted by readers at leading institutions
             </p>
             <div
               className="mt-10 -mx-5 overflow-hidden sm:-mx-8"
@@ -391,9 +391,9 @@ export default function LandingPage() {
                     unoptimized
                     className={cn(
                       className,
-                      "shrink-0 opacity-[0.58] grayscale contrast-95",
-                      "dark:opacity-[0.82] dark:brightness-110 dark:contrast-90",
-                      "transition-opacity duration-500 hover:opacity-[0.78] dark:hover:opacity-[0.9]"
+                      "shrink-0 opacity-[0.52] grayscale contrast-[0.92]",
+                      "dark:opacity-[0.72] dark:brightness-105 dark:contrast-95",
+                      "transition-[opacity,filter] duration-300 hover:opacity-[0.72] hover:grayscale-[0.35] dark:hover:opacity-[0.88]",
                     )}
                     loading="lazy"
                     decoding="async"
@@ -405,27 +405,29 @@ export default function LandingPage() {
         </section>
 
         {/* How */}
-        <section ref={howItWorks.ref} className="px-5 py-24 sm:px-8 sm:py-28">
+        <section ref={howItWorks.ref} className="px-5 py-[5.25rem] sm:px-8 sm:py-28">
           <div className="mx-auto max-w-4xl">
-            <h2 className="text-center font-display text-[13px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-              How it works
-            </h2>
-            <p className="mx-auto mt-5 max-w-2xl text-center font-display text-[clamp(1.65rem,3.5vw,2.25rem)] font-semibold leading-tight tracking-[-0.035em] text-foreground text-balance">
-              A calmer loop: orient, read deeply, retain what mattered.
+            <p className="text-center font-display text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+              Workflow
             </p>
-            <div className="mt-20 grid gap-16 sm:gap-0 md:grid-cols-3 md:gap-8">
+            <h2 className="mx-auto mt-4 max-w-2xl text-center font-display text-[clamp(1.6rem,3.35vw,2.15rem)] font-semibold leading-[1.2] tracking-[-0.035em] text-foreground text-balance">
+              Orient deeply, retain what mattered.
+            </h2>
+            <div className="mx-auto mt-14 grid gap-14 md:grid-cols-3 md:gap-10">
               {steps.map((s, i) => (
                 <div
                   key={s.num}
                   className={cn(
-                    "relative transition-all duration-700",
-                    howItWorks.visible ? "translate-y-0 opacity-100" : "translate-y-5 opacity-0"
+                    "relative transition-[opacity,transform] duration-500 ease-out",
+                    howItWorks.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3",
                   )}
-                  style={{ transitionDelay: `${i * 90}ms` }}
+                  style={{ transitionDelay: `${i * 55}ms` }}
                 >
-                  <span className="font-mono text-[12px] tabular-nums text-muted-foreground/70">{s.num}</span>
-                  <h3 className="mt-4 font-display text-[18px] font-semibold tracking-[-0.02em] text-foreground">{s.title}</h3>
-                  <p className="mt-3 text-[14px] leading-relaxed text-muted-foreground text-pretty">{s.desc}</p>
+                  <div className="mb-5 inline-flex h-9 min-w-[2.75rem] items-center justify-center rounded-lg border border-border/70 bg-muted/35 px-2.5 font-mono text-[12px] font-semibold tabular-nums tracking-tight text-muted-foreground">
+                    {s.num}
+                  </div>
+                  <h3 className="font-display text-[17px] font-semibold tracking-[-0.02em] text-foreground">{s.title}</h3>
+                  <p className="mt-2.5 text-[14px] leading-relaxed text-muted-foreground text-pretty">{s.desc}</p>
                 </div>
               ))}
             </div>
@@ -436,28 +438,32 @@ export default function LandingPage() {
         <section
           ref={featuresSection.ref}
           id="features"
-          className="border-t border-border/40 bg-muted/[0.15] px-5 py-24 dark:bg-muted/[0.06] sm:px-8 sm:py-28"
+          className="border-t border-border/50 bg-muted/[0.12] px-5 py-[5.25rem] dark:bg-muted/[0.045] sm:px-8 sm:py-28"
         >
           <div className="mx-auto max-w-5xl">
-            <h2 className="text-center font-display text-[13px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-              Capabilities
-            </h2>
-            <p className="mx-auto mt-5 max-w-2xl text-center font-display text-[clamp(1.65rem,3.5vw,2.25rem)] font-semibold leading-tight tracking-[-0.035em] text-foreground text-balance">
-              Built for technical papers—not generic chat pasted on a upload box.
+            <p className="text-center font-display text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+              Product
             </p>
-            <div className="mt-16 grid gap-12 sm:grid-cols-2 lg:grid-cols-3 lg:gap-x-10 lg:gap-y-14">
+            <h2 className="mx-auto mt-4 max-w-2xl text-center font-display text-[clamp(1.6rem,3.35vw,2.12rem)] font-semibold leading-[1.2] tracking-[-0.035em] text-foreground text-balance">
+              Built for technical papers—not pasted chat on an upload box.
+            </h2>
+            <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-3 lg:gap-x-8 lg:gap-y-10">
               {features.map((f, i) => (
                 <div
                   key={f.title}
                   className={cn(
-                    "transition-all duration-700",
-                    featuresSection.visible ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"
+                    "rounded-xl border border-border/50 bg-background/70 p-[1.35rem] shadow-[var(--shadow-xs)] transition-[transform,opacity,border-color] duration-[480ms] ease-out hover:border-border dark:bg-background/[0.2]",
+                    featuresSection.visible
+                      ? "translate-y-0 opacity-100"
+                      : "translate-y-4 opacity-0",
                   )}
-                  style={{ transitionDelay: `${i * 60}ms` }}
+                  style={{ transitionDelay: `${i * 45}ms` }}
                 >
-                  <div className="text-muted-foreground">{f.icon}</div>
-                  <h3 className="mt-4 font-display text-[17px] font-semibold tracking-[-0.02em] text-foreground">{f.title}</h3>
-                  <p className="mt-2 text-[14px] leading-relaxed text-muted-foreground text-pretty">{f.desc}</p>
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border/55 bg-muted/35 text-muted-foreground">
+                    {f.icon}
+                  </div>
+                  <h3 className="mt-5 font-display text-[16px] font-semibold tracking-[-0.02em] text-foreground">{f.title}</h3>
+                  <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground text-pretty">{f.desc}</p>
                 </div>
               ))}
             </div>
@@ -465,61 +471,62 @@ export default function LandingPage() {
         </section>
 
         {/* Plans */}
-        <section ref={pricing.ref} id="pricing" className="scroll-mt-20 border-t border-border/40 px-5 py-24 sm:px-8 sm:py-28">
+        <section ref={pricing.ref} id="pricing" className="scroll-mt-20 border-t border-border/50 px-5 py-[5.25rem] sm:px-8 sm:py-28">
           <div className="mx-auto max-w-6xl">
-            <h2 className="text-center font-display text-[13px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-              Plans
+            <p className="text-center font-display text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+              Pricing
+            </p>
+            <h2 className="mx-auto mt-4 max-w-2xl text-center font-display text-[clamp(1.6rem,3.35vw,2.2rem)] font-semibold leading-[1.2] tracking-[-0.035em] text-foreground text-balance">
+              Simple tiers
             </h2>
-            <p className="mx-auto mt-5 max-w-2xl text-center font-display text-[clamp(1.65rem,3.5vw,2.35rem)] font-semibold leading-tight tracking-[-0.035em] text-foreground text-balance">
-              Choose a plan
-            </p>
             <p className="mx-auto mt-4 max-w-lg text-center text-[15px] leading-relaxed text-muted-foreground text-pretty">
-              Start free. Subscribe when you need higher caps, richer prep, or cross-paper workflows—we don&apos;t hide core
-              reading behind surprise limits.
+              Start free. Subscribe when you need higher caps or cross-paper workflows—core reading is never hidden behind surprise limits.
             </p>
-            <div className="mt-16 grid gap-6 lg:grid-cols-3 lg:items-stretch">
+            <div className="mx-auto mt-14 grid max-w-xl gap-6 sm:max-w-2xl md:max-w-none md:grid-cols-3 md:gap-6">
               {tiers.map((t, i) => (
                 <div
                   key={t.name}
                   className={cn(
-                    "flex flex-col rounded-2xl border px-7 pb-8 pt-8 transition-all duration-700",
+                    "flex flex-col rounded-xl border px-7 pb-8 pt-8 transition-[transform,opacity] duration-[520ms] ease-out",
                     t.highlight
-                      ? "border-foreground/20 bg-background shadow-[0_1px_0_0_color-mix(in_oklch,var(--foreground),transparent_92%)] dark:border-foreground/25"
-                      : "border-border/60 bg-background/80 dark:bg-background/40",
-                    pricing.visible ? "translate-y-0 opacity-100" : "translate-y-6 opacity-0"
+                      ? "border-foreground/[0.22] bg-background shadow-[var(--shadow-sm)] ring-1 ring-foreground/[0.06] dark:border-foreground/25"
+                      : "border-border/55 bg-background/70 dark:bg-background/35",
+                    pricing.visible ? "translate-y-0 opacity-100" : "translate-y-5 opacity-0",
                   )}
-                  style={{ transitionDelay: `${i * 100}ms` }}
+                  style={{ transitionDelay: `${i * 72}ms` }}
                 >
                   {t.highlight ? (
-                    <p className="mb-5 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Recommended</p>
+                    <p className="mb-5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                      Recommended
+                    </p>
                   ) : (
-                    <div className="mb-5 h-4" aria-hidden />
+                    <div className="mb-5 h-[18px]" aria-hidden />
                   )}
-                  <h3 className="font-display text-[20px] font-semibold tracking-[-0.03em] text-foreground">{t.name}</h3>
+                  <h3 className="font-display text-[19px] font-semibold tracking-[-0.03em] text-foreground">{t.name}</h3>
                   <p className="mt-3 text-[14px] leading-relaxed text-muted-foreground text-pretty">{t.summary}</p>
                   <p className="mt-4 text-[12px] font-medium text-muted-foreground/90">
-                    <span className="text-foreground/80">Best for · </span>
+                    <span className="text-foreground/75">Ideal for · </span>
                     {t.idealFor}
                   </p>
-                  <div className="mt-8 flex items-baseline gap-1 border-t border-border/50 pt-8">
-                    <span className="font-display text-[40px] font-semibold tracking-[-0.04em] text-foreground">{t.price}</span>
-                    <span className="text-[14px] text-muted-foreground">{t.period}</span>
+                  <div className="mt-8 flex items-baseline gap-1 border-t border-border/45 pt-8">
+                    <span className="font-display text-[38px] font-semibold tracking-[-0.04em] text-foreground">{t.price}</span>
+                    <span className="text-[13px] text-muted-foreground">{t.period}</span>
                   </div>
                   <button
                     type="button"
                     onClick={() => handleTierClick(t.tier)}
                     disabled={checkoutLoading !== null}
                     className={cn(
-                      "mt-8 w-full rounded-full py-3 text-[14px] font-medium transition-all disabled:opacity-50",
+                      "mt-8 w-full rounded-full py-[0.7rem] text-[14px] font-medium transition-[opacity,background-color,color] disabled:opacity-[0.42]",
                       t.highlight
-                        ? "bg-foreground text-background hover:opacity-95"
-                        : "border border-border/80 bg-transparent text-foreground hover:bg-accent/40",
-                      "ring-focus"
+                        ? "bg-foreground text-background shadow-sm hover:opacity-[0.95]"
+                        : "border border-border/75 bg-transparent text-foreground hover:bg-muted/35",
+                      "ring-focus",
                     )}
                   >
                     {checkoutLoading === t.tier ? "Redirecting…" : t.cta}
                   </button>
-                  <ul className="mt-10 space-y-3.5">
+                  <ul className="mt-9 space-y-3">
                     {t.features.map((feat) => (
                       <li
                         key={feat}
@@ -545,24 +552,24 @@ export default function LandingPage() {
         </section>
 
         {/* Closing */}
-        <section className="border-t border-border/40 bg-muted/[0.12] px-5 py-24 dark:bg-muted/[0.05] sm:px-8 sm:py-28">
+        <section className="border-t border-border/50 bg-muted/[0.1] px-5 py-[5rem] dark:bg-muted/[0.048] sm:px-8 sm:py-[5.75rem]">
           <div className="mx-auto max-w-2xl text-center">
-            <h2 className="font-display text-[clamp(1.5rem,3.2vw,2rem)] font-semibold leading-tight tracking-[-0.035em] text-foreground text-balance">
+            <h2 className="font-display text-[clamp(1.45rem,3.05vw,1.92rem)] font-semibold leading-[1.18] tracking-[-0.034em] text-foreground text-balance">
               Make the next paper the one you finish with clarity.
             </h2>
-            <p className="mt-5 text-[15px] leading-relaxed text-muted-foreground text-pretty">
-              Upload something intimidating. Let Know help you interrogate it on your terms.
+            <p className="mt-4 text-[15px] leading-relaxed text-muted-foreground text-pretty">
+              Upload something intimidating. Know helps you interrogate it—on your terms, line by line.
             </p>
-            <div className="mt-10 flex flex-wrap justify-center gap-3">
+            <div className="mt-9 flex flex-wrap justify-center gap-3">
               <Link
                 href="/try"
-                className="rounded-full border border-border/70 px-6 py-3 text-[14px] font-medium text-foreground transition-colors hover:bg-accent/35"
+                className="rounded-full border border-border/80 px-6 py-[0.72rem] text-[14px] font-medium text-foreground shadow-[var(--shadow-xs)] transition-colors hover:bg-muted/38"
               >
                 Try the demo
               </Link>
               <Link
                 href="/sign-up"
-                className="rounded-full bg-foreground px-6 py-3 text-[14px] font-medium text-background transition-opacity hover:opacity-90"
+                className="rounded-full bg-foreground px-6 py-[0.72rem] text-[14px] font-medium text-background shadow-sm transition-opacity hover:opacity-[0.92]"
               >
                 Create an account
               </Link>
@@ -579,7 +586,7 @@ export default function LandingPage() {
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-[12px] text-muted-foreground">
             <a href="#pricing" className="transition-colors hover:text-foreground">
-              Plans
+              Pricing
             </a>
             <Link href="/terms" className="transition-colors hover:text-foreground">
               Terms

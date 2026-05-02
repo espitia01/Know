@@ -400,7 +400,7 @@ function LibraryContent() {
             placeholder="Search papers..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="text-[13px] h-9 rounded-xl bg-card/50 border-border focus-visible:border-ring/40 backdrop-blur-sm"
+            className="text-[13px] h-9 rounded-md shadow-[var(--shadow-xs)] bg-card/60 border-input"
           />
 
           {/* Sidebar tabs */}
@@ -469,7 +469,7 @@ function LibraryContent() {
                   value={newFolderName}
                   onChange={(e) => setNewFolderName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleCreateFolder()}
-                  className="text-[12px] h-8 flex-1 rounded-lg bg-card border-border"
+                  className="text-[12px] h-9 flex-1 rounded-md bg-card border-input shadow-none"
                   autoFocus
                 />
                 <button
