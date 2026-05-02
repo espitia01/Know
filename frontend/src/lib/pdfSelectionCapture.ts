@@ -1,19 +1,61 @@
 /**
- * Bridges the PDF viewport and the Figures tab: PdfViewer registers a
- * screenshot implementation; FiguresPanel can trigger PNG capture from the
- * current browser selection overlaid on PDF.js canvases.
+ * PDF figure crop: composites intersecting `.react-pdf__Page__canvas`
+ * pixels for a viewport rectangle. Coordinates via pointer-drag mode
+ * (SciSpace-style) or legacy text selection union.
  */
+
+import { useStore } from "@/lib/store";
 
 export type PdfSelectionCaptureFn = () => Promise<Blob | null>;
 
 let captureImpl: PdfSelectionCaptureFn | null = null;
 
+/** @deprecated Kept for API compat; interactive flow uses {@link beginFigureScreenshotFlow}. */
 export function registerPdfSelectionCapture(fn: PdfSelectionCaptureFn | null): void {
   captureImpl = fn;
 }
 
+/** @deprecated */
 export function capturePdfSelectionToPng(): Promise<Blob | null> {
   return captureImpl ? captureImpl() : Promise.resolve(null);
+}
+
+let rectCaptureResolve: ((blob: Blob | null) => void) | null = null;
+
+/**
+ * Highlights the PDF and waits for the user to drag a rectangle + release,
+ * then returns PNG pixels for that viewport region (or null if cancelled /
+ * degenerate drag).
+ */
+export function beginFigureScreenshotFlow(): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    if (rectCaptureResolve) {
+      const prev = rectCaptureResolve;
+      rectCaptureResolve = null;
+      useStore.getState().setFigureScreenshotMode(false);
+      prev(null);
+    }
+    rectCaptureResolve = resolve;
+    useStore.getState().setFigureScreenshotMode(true);
+  });
+}
+
+export function resolveFigureScreenshot(blob: Blob | null): void {
+  const r = rectCaptureResolve;
+  rectCaptureResolve = null;
+  useStore.getState().setFigureScreenshotMode(false);
+  r?.(blob);
+}
+
+export function cancelFigureScreenshot(): void {
+  resolveFigureScreenshot(null);
+}
+
+/** Safe to call when leaving the reader — avoids dangling promises. */
+export function abortFigureScreenshotIfPending(): void {
+  if (rectCaptureResolve || useStore.getState().figureScreenshotMode) {
+    cancelFigureScreenshot();
+  }
 }
 
 /** Union of sensible client rects from a Range (fallback: single bbox). */
@@ -67,20 +109,15 @@ const MAX_CAPTURE_W = 2400;
 const MAX_CAPTURE_H = 3600;
 
 /**
- * Crop intersecting portions of `.react-pdf__Page__canvas` under `container`
- * to the viewport union of `window.getSelection()`.
+ * Crop PDF.js canvases to a **viewport-space** rectangle (client coordinates).
  */
-export function capturePdfSelectionFromContainer(containerEl: HTMLElement): Promise<Blob | null> {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
-    return Promise.resolve(null);
-  }
+export function capturePdfViewportUnionToBlob(
+  containerEl: HTMLElement,
+  union: DOMRectReadOnly,
+): Promise<Blob | null> {
+  if (union.width < 6 || union.height < 6) return Promise.resolve(null);
 
   try {
-    const range = sel.getRangeAt(0);
-    const union = unionSelectionRects(range);
-    if (!union || union.width < 6 || union.height < 6) return Promise.resolve(null);
-
     type Strip = {
       page: number;
       destTop: number;
@@ -155,17 +192,7 @@ export function capturePdfSelectionFromContainer(containerEl: HTMLElement): Prom
       const dw = Math.round(s.sw * scaleDown);
       const dx = Math.round((outW - dw) / 2);
 
-      ctx.drawImage(
-        s.canvas,
-        s.sx,
-        s.sy,
-        s.sw,
-        s.sh,
-        dx,
-        y,
-        dw,
-        dh,
-      );
+      ctx.drawImage(s.canvas, s.sx, s.sy, s.sw, s.sh, dx, y, dw, dh);
 
       y += dh + gapScaled;
     }
@@ -179,6 +206,23 @@ export function capturePdfSelectionFromContainer(containerEl: HTMLElement): Prom
         0.92,
       );
     });
+  } catch {
+    return Promise.resolve(null);
+  }
+}
+
+/** Text-selection path (viewport union from `window.getSelection()`). */
+export function capturePdfSelectionFromContainer(containerEl: HTMLElement): Promise<Blob | null> {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+    return Promise.resolve(null);
+  }
+
+  try {
+    const range = sel.getRangeAt(0);
+    const union = unionSelectionRects(range);
+    if (!union) return Promise.resolve(null);
+    return capturePdfViewportUnionToBlob(containerEl, union);
   } catch {
     return Promise.resolve(null);
   }

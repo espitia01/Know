@@ -5,13 +5,43 @@ import { Document, Page, pdfjs } from "react-pdf";
 import { api, getAuthHeadersSync, SelectionAnalysisResult } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { normalizeSelectionAction } from "@/lib/selectionActions";
-import { capturePdfSelectionFromContainer, registerPdfSelectionCapture } from "@/lib/pdfSelectionCapture";
+import {
+  capturePdfViewportUnionToBlob,
+  resolveFigureScreenshot,
+  cancelFigureScreenshot,
+  abortFigureScreenshotIfPending,
+} from "@/lib/pdfSelectionCapture";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 
 /** Stable key for double-tap detection on the same highlighted passage. */
 function highlightPointerKey(entry: SelectionAnalysisResult): string {
   return `${normalizeSelectionAction(entry.action)}::${(entry.selected_text || "").slice(0, 240)}`;
+}
+
+/** Viewport marquee clamped to the PDF scrollport; rejects tiny rectangles. */
+const MIN_FIGURE_CROP_PX = 14;
+
+function unionScrollViewportClamp(
+  scrollEl: HTMLElement,
+  cx0: number,
+  cy0: number,
+  cx1: number,
+  cy1: number,
+): DOMRect | null {
+  const br = scrollEl.getBoundingClientRect();
+  const rawL = Math.min(cx0, cx1);
+  const rawR = Math.max(cx0, cx1);
+  const rawT = Math.min(cy0, cy1);
+  const rawB = Math.max(cy0, cy1);
+  const left = Math.min(Math.max(rawL, br.left), br.right);
+  const right = Math.max(Math.min(rawR, br.right), br.left);
+  const top = Math.min(Math.max(rawT, br.top), br.bottom);
+  const bottom = Math.max(Math.min(rawB, br.bottom), br.top);
+  const w = right - left;
+  const h = bottom - top;
+  if (w < MIN_FIGURE_CROP_PX || h < MIN_FIGURE_CROP_PX) return null;
+  return new DOMRect(left, top, w, h);
 }
 
 // Bundle the PDF.js worker from node_modules via the URL constructor pattern
@@ -233,6 +263,21 @@ export function PdfViewer({
   const removeSelectionFromHistory = useStore((s) => s.removeSelectionFromHistory);
   const savedScrollByPaper = useStore((s) => s.uiPrefs.scrollByPaper);
   const setPdfScroll = useStore((s) => s.setPdfScroll);
+  const figureScreenshotMode = useStore((s) => s.figureScreenshotMode);
+
+  const [figureCropPreview, setFigureCropPreview] = useState<{
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  } | null>(null);
+  const figureCropSession = useRef<{
+    pointerId: number;
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  } | null>(null);
 
   const [retryKey, setRetryKey] = useState(0);
   // Whether we've already restored the persisted scroll for this paper. We
@@ -245,6 +290,19 @@ export function PdfViewer({
       selectionDeletePopoverCleanup?.();
     };
   }, []);
+
+  useEffect(() => () => abortFigureScreenshotIfPending(), []);
+
+  useEffect(() => {
+    if (!figureScreenshotMode) {
+      figureCropSession.current = null;
+      setFigureCropPreview(null);
+    }
+  }, [figureScreenshotMode]);
+
+  useEffect(() => {
+    abortFigureScreenshotIfPending();
+  }, [paperId]);
 
   // Hand the URL straight to PDF.js for the *first* load so HTTP range
   // requests can start rendering page 1 before the full document has
@@ -1106,6 +1164,7 @@ export function PdfViewer({
   }, [drawUnderlinesForPage]);
 
   const handleMouseUp = useCallback(() => {
+    if (useStore.getState().figureScreenshotMode) return;
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !sel.toString().trim()) {
       onSelectionClear?.();
@@ -1141,9 +1200,81 @@ export function PdfViewer({
     onTextSelected?.(text, rect);
   }, [onTextSelected, onSelectionClear]);
 
+  const figureCropPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!useStore.getState().figureScreenshotMode) return;
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (figureCropSession.current?.pointerId === e.pointerId) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    figureCropSession.current = {
+      pointerId: e.pointerId,
+      x0: e.clientX,
+      y0: e.clientY,
+      x1: e.clientX,
+      y1: e.clientY,
+    };
+    setFigureCropPreview({
+      x0: e.clientX,
+      y0: e.clientY,
+      x1: e.clientX,
+      y1: e.clientY,
+    });
+  }, []);
+
+  const figureCropPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const sess = figureCropSession.current;
+    if (!sess || sess.pointerId !== e.pointerId) return;
+    e.preventDefault();
+    sess.x1 = e.clientX;
+    sess.y1 = e.clientY;
+    setFigureCropPreview((prev) =>
+      prev ? { ...prev, x1: e.clientX, y1: e.clientY } : prev,
+    );
+  }, []);
+
+  const figureCropPointerEnd = useCallback(async (e: React.PointerEvent<HTMLDivElement>) => {
+    const sess = figureCropSession.current;
+    if (!sess || sess.pointerId !== e.pointerId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+    figureCropSession.current = null;
+    setFigureCropPreview(null);
+    const scroll = containerRef.current;
+    if (!scroll) {
+      resolveFigureScreenshot(null);
+      return;
+    }
+    const union = unionScrollViewportClamp(scroll, sess.x0, sess.y0, sess.x1, sess.y1);
+    if (!union) {
+      resolveFigureScreenshot(null);
+      return;
+    }
+    const blob = await capturePdfViewportUnionToBlob(scroll, union);
+    resolveFigureScreenshot(blob);
+  }, []);
+
+  const figureCropPointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const sess = figureCropSession.current;
+    if (!sess || sess.pointerId !== e.pointerId) return;
+    figureCropSession.current = null;
+    setFigureCropPreview(null);
+    resolveFigureScreenshot(null);
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (useStore.getState().figureScreenshotMode) {
+          e.preventDefault();
+          cancelFigureScreenshot();
+          return;
+        }
         window.getSelection()?.removeAllRanges();
         onSelectionClear?.();
       }
@@ -1151,15 +1282,6 @@ export function PdfViewer({
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onSelectionClear]);
-
-  useEffect(() => {
-    registerPdfSelectionCapture(async () => {
-      const root = containerRef.current;
-      if (!root) return null;
-      return capturePdfSelectionFromContainer(root);
-    });
-    return () => registerPdfSelectionCapture(null);
-  }, []);
 
   // Safari-style auto-scroll while dragging a selection. When the cursor
   // enters an "edge zone" near the top or bottom of the viewport, we
@@ -1354,8 +1476,15 @@ export function PdfViewer({
 
         <div className="flex-1" />
 
-        <span className="text-[10px] text-muted-foreground/50">
-          Select text to analyze
+        <span className="text-[10px] text-muted-foreground/85 text-right max-sm:hidden">
+          {figureScreenshotMode ? (
+            <>
+              <span className="font-medium text-foreground/90">Figure crop:</span>{" "}
+              drag a rectangle · Esc cancels
+            </>
+          ) : (
+            <span className="text-muted-foreground/50">Select text to analyze</span>
+          )}
         </span>
       </div>
 
@@ -1363,7 +1492,7 @@ export function PdfViewer({
       <div
         ref={containerRef}
         data-know-pdf-scroll
-        className="flex-1 overflow-auto bg-neutral-100 dark:bg-neutral-900"
+        className="relative flex-1 overflow-auto bg-neutral-100 dark:bg-neutral-900"
         onMouseUp={handleMouseUp}
       >
         {loadError ? (
@@ -1449,6 +1578,52 @@ export function PdfViewer({
             </div>
           </Document>
         )}
+
+        {figureScreenshotMode && fileData && !loadError ? (
+          <div
+            className="absolute inset-0 z-[25] touch-none overscroll-none"
+            style={{ cursor: "crosshair" }}
+            onPointerDown={figureCropPointerDown}
+            onPointerMove={figureCropPointerMove}
+            onPointerUp={figureCropPointerEnd}
+            onPointerCancel={figureCropPointerCancel}
+            aria-hidden={!figureScreenshotMode}
+          >
+            <div className="pointer-events-none absolute inset-0 bg-foreground/[0.06]" />
+            {figureCropPreview && containerRef.current
+              ? (() => {
+                  const wrap = containerRef.current;
+                  const br = wrap.getBoundingClientRect();
+                  const { x0, y0, x1, y1 } = figureCropPreview;
+                  const left = Math.min(x0, x1) - br.left;
+                  const top = Math.min(y0, y1) - br.top;
+                  const width = Math.abs(x1 - x0);
+                  const height = Math.abs(y1 - y0);
+                  if (width < 4 || height < 4) return null;
+                  return (
+                    <div
+                      className="pointer-events-none absolute rounded-[2px] shadow-sm"
+                      style={{
+                        left,
+                        top,
+                        width,
+                        height,
+                        borderWidth: "1.75px",
+                        borderStyle: "solid",
+                        borderColor: "rgb(var(--pdf-selection) / 0.92)",
+                        backgroundColor: "rgb(var(--pdf-selection) / 0.12)",
+                      }}
+                    />
+                  );
+                })()
+              : null}
+            <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center px-4">
+              <p className="max-w-[min(100%,20rem)] text-center rounded-full border border-border/70 bg-background/92 px-3.5 py-1.5 text-[11px] font-medium text-foreground shadow-md backdrop-blur-md">
+                Drag to crop the figure · release to capture · Esc to cancel
+              </p>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

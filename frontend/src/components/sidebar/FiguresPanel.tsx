@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { api, type FigureInfo, type FigureAnalysis, type ParsedPaper } from "@/lib/api";
-import { capturePdfSelectionToPng } from "@/lib/pdfSelectionCapture";
+import { beginFigureScreenshotFlow } from "@/lib/pdfSelectionCapture";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
@@ -406,10 +406,10 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     setClipError(null);
     try {
       setClipSaving(true);
-      const blob = await capturePdfSelectionToPng();
+      const blob = await beginFigureScreenshotFlow();
       if (!blob) {
         setClipError(
-          "Drag to select a region over the PDF (text or graphic), then tap again.",
+          "Drag on the PDF to draw a rectangle around the figure, then release—or press Esc to cancel.",
         );
         return;
       }
@@ -474,7 +474,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           disabled={clipSaving || reextracting}
           className="btn-primary-glass rounded-lg px-4 py-2 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {clipSaving ? "Saving selection…" : "Add figure from PDF selection"}
+          {clipSaving ? "Crop on PDF…" : "Add figure from PDF selection"}
         </button>
         <button
           type="button"
@@ -638,7 +638,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           disabled={clipSaving || reextracting || loading}
           className="shrink-0 rounded-md border border-border/70 px-2.5 py-1 text-[var(--text-xs)] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-40"
         >
-          {clipSaving ? "Saving…" : "From selection"}
+          {clipSaving ? "Cropping…" : "From selection"}
         </button>
       </div>
 
