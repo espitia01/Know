@@ -962,18 +962,24 @@ async def answer_questions(paper_text: str, questions: list[str], user_id: str |
     questions = [_sanitize_user_text(q, max_chars=2000) for q in questions]
 
     system = (
-        "You are an expert science educator. Answer questions about the paper thoroughly but accessibly. "
+        "You are an expert science educator. Answer each question helpfully whether or not every detail appears in "
+        "the manuscript. When relevant, ground claims in this paper's text, methods, or results and indicate that basis. "
+        "If the PDF does not address the topic—or does so only indirectly—say so briefly, then answer using reliable "
+        "general knowledge clearly labeled as such, and propose concrete Google Scholar-style search phrases or keywords "
+        "the reader could try next. Do not refuse solely because wording is absent from the excerpts. "
         "Return ONLY valid JSON.\n\n" + LATEX_FORMAT_INSTRUCTIONS
     )
 
     q_list = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
 
-    user = f"""Answer these questions about the paper. For each, provide a clear, educational answer using the paper content.
+    user = f"""Answer these questions.
+
+Prioritize citing or paraphrasing the paper below when it is on-point. When the paper is insufficient, unclear, or the question asks for background, definitions, comparisons, or context beyond this PDF, complement with general-domain knowledge you can stand behind—and state when you are drawing on that rather than the manuscript. Include suggested search queries when extra retrieval would materially help.
 
 Questions:
 {q_list}
 
-Paper content:
+Paper text (possibly truncated excerpts):
 {paper_text[:6000]}
 
 Return JSON:
@@ -981,7 +987,7 @@ Return JSON:
   "items": [
     {{
       "question": "the original question",
-      "answer": "thorough answer using LaTeX for math (e.g., $E = mc^2$)"
+      "answer": "paper-grounded summary when relevant; labeled general background when useful; Scholar-style queries if more sources help; LaTeX for math (e.g., $E = mc^2$)"
     }}
   ]
 }}"""
@@ -1007,8 +1013,10 @@ async def answer_questions_multi(paper_texts: list[tuple[str, str]], questions: 
 
     system = (
         "You are an expert science educator. You have access to multiple papers in a reading session. "
-        "Answer questions by synthesizing information across all provided papers. "
-        "Reference specific papers by title when citing information. Return ONLY valid JSON.\n\n"
+        "Synthesize what the provided PDFs support when relevant. If a question is not fully covered in these texts, "
+        "say so briefly, then answer with well-scoped general knowledge (clearly distinguished) and suggest search "
+        "queries or follow-up reading. Do not refuse solely because a fact is missing from the excerpts. "
+        "Reference specific papers by title when citing them. Return ONLY valid JSON.\n\n"
         + LATEX_FORMAT_INSTRUCTIONS
     )
 
@@ -1022,7 +1030,7 @@ async def answer_questions_multi(paper_texts: list[tuple[str, str]], questions: 
         safe_text = _sanitize_user_text(text or "", max_chars=chars_per_paper)
         papers_context += f"\n--- Paper {i+1}: {safe_title} ---\n{safe_text}\n"
 
-    user = f"""Answer these questions using all the papers in the session. Synthesize across papers where relevant.
+    user = f"""Answer these questions. Use synthesis across papers when helpful. When the session materials are silent or incomplete on a point, note the gap, answer with labeled general knowledge where appropriate, and suggest search phrases or papers to look up.
 
 Questions:
 {q_list}
@@ -1034,7 +1042,7 @@ Return JSON:
   "items": [
     {{
       "question": "the original question",
-      "answer": "thorough answer synthesizing across papers, referencing paper titles when citing specific information"
+      "answer": "synthesize across papers when apt; cite by title where specific; labeled general knowledge gap-fills; search phrases when materials are thin; LaTeX for math"
     }}
   ]
 }}"""

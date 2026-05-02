@@ -15,7 +15,7 @@ interface RelatedWorkPanelProps {
 
 /** Shown beneath the Related tab chrome; explains bib-extracted citations + Scholar. */
 const RELATED_TAB_INTRO =
-  "Works cited via this manuscript’s bibliography—line breaks are normalized only. Themes group citations when Prepare can infer a thread; tap a citation to search it on Google Scholar.";
+  "Click a citation link to search Google Scholar for that related work. Lines come from this paper’s bibliography where we could extract them.";
 
 /** One bibliography line: hyperlink wraps the verbatim excerpt; Scholar searches that text. */
 function VerbatimCitationLink({ work }: { work: PriorWork }) {
