@@ -10,7 +10,7 @@ const TAB_KEYS: Record<string, string> = {
   "4": "qa",
   "5": "figures",
   "6": "notes",
-  "7": "compare",
+  "7": "sources",
 };
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -96,7 +96,7 @@ export function KeyboardShortcuts() {
       <div className="pt-2 space-y-1.5 text-[var(--text-xs)]">
         <Shortcut keys="⌘/Ctrl + \\" label="Toggle analysis pane" />
         <Shortcut keys="⌘/Ctrl + ⇧ + F" label="Focus mode" />
-        <Shortcut keys="1–7" label="Switch analysis tabs" />
+        <Shortcut keys="1–7" label="Switch analysis tabs (7 = Related)" />
         <Shortcut keys="J / K" label="Scroll the PDF" />
         <Shortcut keys="?" label="Show / hide this help" />
       </div>

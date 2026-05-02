@@ -110,7 +110,7 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
         <NoteMarkdownEditor value={input} onChange={setInput} minHeight={180} />
         <div className="flex items-center justify-between gap-3">
           <p className="text-[var(--text-xs)] text-muted-foreground/80 shrink-0">
-            Markdown + LaTeX · save from toolbar
+            Markdown + LaTeX preview below · save when ready
           </p>
           <button
             type="button"
@@ -163,7 +163,7 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
                 ) : (
                   <>
                     <div className="text-[var(--text-md)] leading-relaxed [&_.analysis-content]:text-[var(--text-md)]">
-                      <Md>{note.text}</Md>
+                      <Md className="analysis-content note-markdown-preview">{note.text}</Md>
                     </div>
                     <div className="mt-1.5 flex items-center justify-between">
                       <span className="font-mono text-[0.7rem] font-light tabular-nums text-muted-foreground/70">

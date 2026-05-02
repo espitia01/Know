@@ -15,7 +15,7 @@ interface RelatedWorkPanelProps {
 
 /** Shown beneath the Related tab chrome; explains bib-extracted citations + Scholar. */
 const RELATED_TAB_INTRO =
-  "Click a citation link to search Google Scholar for that related work. Lines come from this paper’s bibliography where we could extract them.";
+  "Tap a citation to search Google Scholar. Reference lines come from this paper’s bibliography when we can extract them.";
 
 /** One bibliography line: hyperlink wraps the verbatim excerpt; Scholar searches that text. */
 function VerbatimCitationLink({ work }: { work: PriorWork }) {
@@ -26,19 +26,19 @@ function VerbatimCitationLink({ work }: { work: PriorWork }) {
     "Reference";
 
   const cls =
-    "whitespace-pre-wrap text-[var(--text-md)] font-medium leading-relaxed underline-offset-2";
+    "related-citation-display block whitespace-pre-wrap text-[var(--text-sm)] leading-[1.55] underline-offset-[3px]";
 
   return scholarHref ? (
     <a
       href={scholarHref}
       target="_blank"
       rel="noopener noreferrer"
-      className={`${cls} text-primary underline hover:opacity-90`}
+      className={`${cls} font-medium text-primary underline decoration-primary/35 hover:decoration-primary`}
     >
       {display}
     </a>
   ) : (
-    <span className={`${cls} text-foreground/95`}>{display}</span>
+    <span className={`${cls} font-medium text-foreground/95`}>{display}</span>
   );
 }
 
@@ -121,37 +121,70 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
       ? preReading.prior_work_topics!.filter((t) => (t.items?.length ?? 0) > 0)
       : null;
 
+  const showThemeHeading = (t: string) => {
+    const s = (t || "").trim();
+    if (!s) return false;
+    if (/^other\s+references?$/i.test(s)) return false;
+    return true;
+  };
+
   return (
-    <div className="space-y-8 motion-safe:animate-fade-in">
+    <div className="space-y-6 motion-safe:animate-fade-in">
       <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground">{RELATED_TAB_INTRO}</p>
       {topical?.length ? (
-        topical.map((sec, si) => (
-          <section key={`cluster-${si}`} className="space-y-3">
-            {(sec.summary || "").trim() ? (
-              <div className="text-[var(--text-sm)] leading-relaxed text-foreground">
-                <Md>{sec.summary}</Md>
-              </div>
-            ) : null}
-            <ul className="list-disc space-y-2.5 pl-5 marker:text-muted-foreground/70">
-              {(sec.items || []).map((p, pi) => (
-                <li key={`${p.bib_label ?? p.title}-${si}-${pi}`} className="pl-1">
-                  <VerbatimCitationLink work={p} />
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))
+        <div className="space-y-5">
+          {topical.map((sec, si) => (
+            <section
+              key={`cluster-${si}`}
+              className="rounded-xl border border-border/55 bg-card/35 px-4 py-3.5 shadow-sm shadow-black/[0.03] md:px-5 dark:bg-card/25 dark:shadow-black/25"
+            >
+              {showThemeHeading(sec.theme ?? "") ? (
+                <p className="mb-2.5 border-b border-border/45 pb-2 text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground/90">
+                  {sec.theme!.trim()}
+                </p>
+              ) : null}
+              {(sec.summary || "").trim() ? (
+                <div className="related-cluster-summary mb-4 [&_.analysis-content]:text-[var(--text-sm)] [&_.analysis-content]:leading-relaxed [&_.analysis-content_*]:text-foreground/92">
+                  <Md>{sec.summary!}</Md>
+                </div>
+              ) : null}
+              <ul className="flex flex-col gap-3">
+                {(sec.items || []).map((p, pi) => (
+                  <li key={`${p.bib_label ?? p.title}-${si}-${pi}`} className="flex gap-3">
+                    <span
+                      className="mt-0.5 flex h-6 min-w-[1.5rem] shrink-0 items-center justify-center rounded-md bg-muted/85 text-[10px] font-semibold tabular-nums leading-none text-muted-foreground shadow-[inset_0_1px_0_rgb(255_255_255/8%)]"
+                      aria-hidden
+                    >
+                      {pi + 1}
+                    </span>
+                    <div className="min-w-0 flex-1 pt-px">
+                      <VerbatimCitationLink work={p} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
       ) : (
-        <ul className="list-disc space-y-2.5 pl-5 marker:text-muted-foreground/70">
+        <ul className="flex flex-col gap-3">
           {priorList.map((p, i) => (
-            <li key={`${p.bib_label ?? p.title}-${i}`} className="pl-1">
-              <VerbatimCitationLink work={p} />
+            <li key={`${p.bib_label ?? p.title}-${i}`} className="flex gap-3">
+              <span
+                className="mt-0.5 flex h-6 min-w-[1.5rem] shrink-0 items-center justify-center rounded-md bg-muted/85 text-[10px] font-semibold tabular-nums leading-none text-muted-foreground shadow-[inset_0_1px_0_rgb(255_255_255/8%)]"
+                aria-hidden
+              >
+                {i + 1}
+              </span>
+              <div className="min-w-0 flex-1 pt-px">
+                <VerbatimCitationLink work={p} />
+              </div>
             </li>
           ))}
         </ul>
       )}
 
-      <div className="border-t border-border/50 pt-1">
+      <div className="border-t border-border/50 pt-3">
         <button
           type="button"
           onClick={handleRunPrepare}

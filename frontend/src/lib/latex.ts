@@ -434,6 +434,41 @@ function consumeBracketed(s: string, i: number, end: number, depth: number): num
   return i;
 }
 
+/** KaTeX is pickier about `\\text{…}` nested in scripts; `\\mathrm` is reliable for short labels. */
+function textCommandToMathrmInMathSegment(inner: string): string {
+  return inner.replace(
+    /\\text(?:rm)?(?![a-zA-Z])\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g,
+    (_m, body: string) => {
+      const b = String(body).trim();
+      if (!b || /[\s\\]/.test(b)) return _m;
+      return `\\mathrm{${body}}`;
+    },
+  );
+}
+
+function normalizeTextCommandsInMathRegions(s: string): string {
+  const out: string[] = [];
+  let last = 0;
+  MATH_REGION.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = MATH_REGION.exec(s)) !== null) {
+    if (m.index > last) out.push(s.slice(last, m.index));
+    const chunk = m[0];
+    if (chunk.startsWith("$$")) {
+      const body = chunk.slice(2, -2);
+      out.push(`$$${textCommandToMathrmInMathSegment(body)}$$`);
+    } else if (chunk.startsWith("$")) {
+      const body = chunk.slice(1, -1);
+      out.push(`$${textCommandToMathrmInMathSegment(body)}$`);
+    } else {
+      out.push(chunk);
+    }
+    last = m.index + chunk.length;
+  }
+  if (last < s.length) out.push(s.slice(last));
+  return out.join("");
+}
+
 export function preprocessLatex(text: string): string {
   if (!text) return text;
 
@@ -486,6 +521,7 @@ export function preprocessLatex(text: string): string {
   let result = parts.join("");
   result = wrapLikelyDisplayEquations(result);
   result = result.replace(/\n{3,}/g, "\n\n");
+  result = normalizeTextCommandsInMathRegions(result);
 
   return result;
 }

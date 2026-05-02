@@ -16,7 +16,6 @@ import { AssumptionsPanel } from "../sidebar/AssumptionsPanel";
 import { NotesPanel } from "../sidebar/NotesPanel";
 import { SummaryPanel } from "../sidebar/SummaryPanel";
 import { FiguresPanel } from "../sidebar/FiguresPanel";
-import { CrossPaperPanel } from "../sidebar/CrossPaperPanel";
 
 export type PanelPosition = "right" | "left" | "bottom";
 
@@ -61,7 +60,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
     activeTab, setActiveTab,
     selectionResult, selectionLoading, selectionHistory,
     setSelectionResult, setSelectionLoading, upsertSelectionInHistory,
-    sessionPapers, bumpUsageRefresh,
+    bumpUsageRefresh,
     analysisFontScale, bumpAnalysisFontScale, setAnalysisFontScale,
   } = useStore();
   const { user } = useUserTier();
@@ -76,9 +75,12 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
   // streaming.
   const showSelectionTab =
     selectionLoading || selectionResult !== null || selectionHistory.length > 0;
-  const hasMultiplePapers = sessionPapers.length > 1;
-
-  const effectiveTab = activeTab === "selection" && !showSelectionTab ? "summary" : activeTab;
+  const effectiveTab =
+    activeTab === "compare"
+      ? "summary"
+      : activeTab === "selection" && !showSelectionTab
+        ? "summary"
+        : activeTab;
   const [mountedTabs, setMountedTabs] = useState<Set<string>>(
     () => new Set([effectiveTab]),
   );
@@ -346,25 +348,6 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
                 </TabsTrigger>
               );
             })}
-            {hasMultiplePapers && canAccess(tier, "multi-qa") && (
-              <TabsTrigger
-                value="compare"
-                className={`${TAB_STYLE} data-active:[&>svg]:opacity-100`}
-                title="Compare and ask questions across all papers in this session"
-              >
-                <svg
-                  className="mr-0.5 h-3 w-3 shrink-0 opacity-70"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={1.5}
-                  aria-hidden
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
-                </svg>
-                Compare
-              </TabsTrigger>
-            )}
           </TabsList>
         </div>
 
@@ -511,9 +494,6 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
           )}
           {mountedTabs.has("sources") && (
             <TabsContent value="sources" className="mt-0"><RelatedWorkPanel paperId={paperId} /></TabsContent>
-          )}
-          {hasMultiplePapers && canAccess(tier, "multi-qa") && mountedTabs.has("compare") && (
-            <TabsContent value="compare" className="mt-0"><CrossPaperPanel /></TabsContent>
           )}
         </div>
       </div>

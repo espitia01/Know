@@ -1110,10 +1110,10 @@ body::before {
   --tw-ring-offset-shadow: 0 0 #0000 !important;
 }
 
-/* Notes editor (@uiw/react-md-editor): kill default emerald/cyan focus glow */
-.analysis-pane-v2 .note-md-editor textarea,
-.analysis-pane-v2 .note-md-editor textarea:focus,
-.analysis-pane-v2 .note-md-editor textarea:focus-visible {
+/* Notes: editor + Markdown/LaTeX preview (no fullscreen / preview-only trap) */
+.analysis-pane-v2 .note-md-stack .note-md-textarea,
+.analysis-pane-v2 .note-md-stack .note-md-textarea:focus,
+.analysis-pane-v2 .note-md-stack .note-md-textarea:focus-visible {
   outline: none !important;
   box-shadow: none !important;
   --tw-ring-width: 0px !important;
@@ -1121,9 +1121,22 @@ body::before {
   --tw-ring-offset-shadow: 0 0 #0000 !important;
 }
 
-.analysis-pane-v2 .note-md-editor textarea:focus,
-.analysis-pane-v2 .note-md-editor textarea:focus-visible {
+.analysis-pane-v2 .note-md-stack .note-md-textarea:focus,
+.analysis-pane-v2 .note-md-stack .note-md-textarea:focus-visible {
   border-color: color-mix(in oklch, var(--foreground) 14%, var(--border-strong)) !important;
+}
+
+.analysis-pane-v2 .note-markdown-preview .analysis-content ul,
+.analysis-pane-v2 .note-markdown-preview .analysis-content ol {
+  margin-bottom: 0.5em;
+}
+
+.analysis-pane-v2 .note-markdown-preview .analysis-content li {
+  margin-bottom: 0.22em;
+}
+
+.related-cluster-summary .analysis-content .katex {
+  font-size: 1.02em;
 }
 
 .dark .analysis-pane-v2 textarea[data-slot="textarea"],

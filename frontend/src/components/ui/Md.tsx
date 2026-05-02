@@ -55,7 +55,8 @@ export const Md = memo(function Md({ children, className }: MdProps) {
   return (
     <div className={className ?? "analysis-content"}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
+        // Parse math before GFM so underscores inside $…$ are not eaten as emphasis.
+        remarkPlugins={[remarkMath, remarkGfm]}
         rehypePlugins={[[rehypeKatex, katexOptions]]}
         components={{
           a: ({ href, children: linkChildren }) => (
