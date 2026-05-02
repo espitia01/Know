@@ -50,6 +50,72 @@ const BASELINE_SCALE = 1.4;
 const MIN_ZOOM_SCALE = 0.5;
 const MAX_ZOOM_SCALE = 3;
 
+let selectionDeletePopoverCleanup: (() => void) | null = null;
+
+/** Double-click on a saved highlight: offer delete in a small floating menu. */
+function openSelectionDeletePopover(clientX: number, clientY: number, onDelete: () => void) {
+  selectionDeletePopoverCleanup?.();
+  selectionDeletePopoverCleanup = null;
+
+  const backdrop = document.createElement("div");
+  backdrop.setAttribute("data-know-selection-popover", "");
+  backdrop.className = "fixed inset-0 z-[120] bg-transparent";
+  backdrop.style.pointerEvents = "auto";
+
+  const panel = document.createElement("div");
+  panel.className =
+    "rounded-xl border border-border bg-popover text-popover-foreground shadow-lg shadow-black/15 dark:shadow-black/40 p-2 min-w-[11rem]";
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-label", "Selection options");
+  const pad = 8;
+  const w = typeof window !== "undefined" ? window.innerWidth : 400;
+  const h = typeof window !== "undefined" ? window.innerHeight : 600;
+  const left = Math.max(pad, Math.min(clientX - 12, w - 200 - pad));
+  const top = Math.max(pad, Math.min(clientY + 10, h - 100 - pad));
+  panel.style.position = "fixed";
+  panel.style.left = `${left}px`;
+  panel.style.top = `${top}px`;
+  panel.style.pointerEvents = "auto";
+  panel.style.margin = "0";
+
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className =
+    "w-full text-left px-3 py-2 rounded-lg text-[13px] font-medium text-destructive hover:bg-destructive/10 active:scale-[0.99] transition";
+  del.textContent = "Delete selection";
+
+  const close = () => {
+    backdrop.remove();
+    document.removeEventListener("keydown", onEscape);
+    if (selectionDeletePopoverCleanup === teardown) selectionDeletePopoverCleanup = null;
+  };
+  function teardown() {
+    close();
+  }
+  selectionDeletePopoverCleanup = teardown;
+
+  function onEscape(e: KeyboardEvent) {
+    if (e.key === "Escape") close();
+  }
+  document.addEventListener("keydown", onEscape);
+
+  del.addEventListener("click", (e) => {
+    e.stopPropagation();
+    onDelete();
+    close();
+  });
+
+  backdrop.addEventListener("mousedown", (e) => {
+    if (e.target === backdrop) close();
+  });
+
+  panel.addEventListener("mousedown", (e) => e.stopPropagation());
+
+  panel.appendChild(del);
+  backdrop.appendChild(panel);
+  document.body.appendChild(backdrop);
+}
+
 function usePdfCanvasDeviceRatio() {
   const [ratio, setRatio] = useState(1);
   useEffect(() => {
@@ -114,6 +180,12 @@ export function PdfViewer({
   // restore exactly once per (paperId, retryKey) pair, on the first page
   // that renders — before any user scrolling writes new values.
   const scrollRestoredRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      selectionDeletePopoverCleanup?.();
+    };
+  }, []);
 
   // Hand the URL straight to PDF.js for the *first* load so HTTP range
   // requests can start rendering page 1 before the full document has
@@ -598,135 +670,119 @@ export function PdfViewer({
       }
       pageHits.push({ entry, rects: localRects });
 
-      // Small "open" hint anchored to the end of the last rect.
-      // Keeps the behaviour visually discoverable — users can see
-      // there's *something* actionable — and carries the rich hover
-      // tooltip. The indicator itself doesn't need to intercept
-      // clicks (the delegated handler does), but we keep
-      // `pointer-events: auto` on it so the CSS tooltip fires on
-      // hover and screen readers hit a real button for keyboard
-      // access.
-      const lastRect = rects[rects.length - 1];
-      const pill = document.createElement("button");
-      pill.type = "button";
-      pill.className = "know-selection-action";
-      pill.setAttribute("data-action", action);
-      const tip = "Click the highlight to open saved analysis\nShift-click or right-click to delete";
-      pill.setAttribute("data-tooltip", tip);
-      pill.title = tip;
-      pill.setAttribute("aria-label", "Open saved selection analysis — shift-click to delete");
-      pill.style.left = `${lastRect.right - pageRect.left + 2}px`;
-      pill.style.top = `${lastRect.top - pageRect.top}px`;
-      pill.style.height = `${lastRect.height}px`;
-      pill.innerHTML = `
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M7 17L17 7M9 7h8v8"/>
-        </svg>
-      `;
-      // Track the entry this pill belongs to so the delegated
-      // handler can treat a click on the pill the same as a click on
-      // the underline without any per-pill listeners.
-      (pill as HTMLElement & { __knowEntry?: SelectionAnalysisResult }).__knowEntry = entry;
-      overlay.appendChild(pill);
-
       painted++;
     }
 
-    // Delegated click + contextmenu on pageEl — the whole highlight
-    // region and the end-of-line pill all route through this one
-    // handler. Crucially, we bind on `pageEl` (not on the overlay or
-    // the underline div) so pdf.js's own mousedown-based text
-    // selection on the .textLayer is never intercepted: `click`
-    // naturally doesn't fire when the user is drag-selecting text,
-    // which is exactly what we want. Without delegation, the per-pill
-    // listeners were "not doing anything" because users were
-    // clicking on the underline body rather than the 16px pill.
-    const hostEl = pageEl as HTMLElement & {
+    // Delegated click / double-click / contextmenu on pageEl —
+    // geometric hit-testing against underline rects only (no overlay
+    // pill). Single-click opens after a short delay so double-click can
+    // show delete UI without opening the sidebar first.
+    type KnowPageHost = HTMLElement & {
       __knowClickAttached?: boolean;
       __knowHighlights?: Array<{
         entry: SelectionAnalysisResult;
         rects: Array<{ x: number; y: number; w: number; h: number }>;
       }>;
-      __knowDispatch?: (
-        ev: MouseEvent,
-        mode: "open" | "delete",
-      ) => boolean;
+      __knowResolveHighlight?: (ev: MouseEvent) => SelectionAnalysisResult | null;
+      __knowPendingOpenTimer?: ReturnType<typeof setTimeout> | null;
     };
+    const hostEl = pageEl as KnowPageHost;
     hostEl.__knowHighlights = pageHits;
     if (!hostEl.__knowClickAttached) {
       hostEl.__knowClickAttached = true;
-      hostEl.__knowDispatch = (ev, mode) => {
-        // Path 1: the click landed directly on a pill (which has
-        // pointer-events: auto and a `__knowEntry` property attached
-        // at draw time). Resolving the entry from the target DOM node
-        // is more reliable than coordinate math, since the pill is
-        // painted *past* the underline's right edge.
-        let entry: SelectionAnalysisResult | null = null;
-        const tgt = ev.target as (Element & { __knowEntry?: SelectionAnalysisResult }) | null;
-        if (tgt) {
-          const actionEl = tgt.closest?.(".know-selection-action") as
-            | (HTMLElement & { __knowEntry?: SelectionAnalysisResult })
-            | null;
-          if (actionEl && actionEl.__knowEntry) entry = actionEl.__knowEntry;
-        }
+      hostEl.__knowPendingOpenTimer = null;
 
-        // Path 2: geometric hit test against the stored underline
-        // rects. This is what makes the *whole highlighted passage*
-        // clickable, not just the end-of-line pill — the main reason
-        // users reported "nothing happens when I click".
-        if (!entry) {
-          const hits = hostEl.__knowHighlights;
-          if (hits && hits.length > 0) {
-            const r = hostEl.getBoundingClientRect();
-            // A little padding (particularly vertical) so a click
-            // that lands a pixel off the underline still registers.
-            const pad = 3;
-            const x = ev.clientX - r.left;
-            const y = ev.clientY - r.top;
-            outer: for (const h of hits) {
-              for (const rr of h.rects) {
-                if (
-                  x >= rr.x - pad &&
-                  x <= rr.x + rr.w + pad &&
-                  y >= rr.y - pad &&
-                  y <= rr.y + rr.h + pad
-                ) {
-                  entry = h.entry;
-                  break outer;
-                }
-              }
+      hostEl.__knowResolveHighlight = (ev: MouseEvent): SelectionAnalysisResult | null => {
+        const hits = hostEl.__knowHighlights;
+        if (!hits || hits.length === 0) return null;
+        const r = hostEl.getBoundingClientRect();
+        const pad = 3;
+        const x = ev.clientX - r.left;
+        const y = ev.clientY - r.top;
+        for (const h of hits) {
+          for (const rr of h.rects) {
+            if (
+              x >= rr.x - pad &&
+              x <= rr.x + rr.w + pad &&
+              y >= rr.y - pad &&
+              y <= rr.y + rr.h + pad
+            ) {
+              return h.entry;
             }
           }
         }
+        return null;
+      };
 
-        if (!entry) return false;
+      const deleteHighlightEntry = (entry: SelectionAnalysisResult) => {
+        removeSelectionFromHistory(entry);
+        if (paperId) {
+          void api
+            .deleteSelection(paperId, entry.selected_text ?? "", entry.action ?? "explain")
+            .catch(() => {});
+        }
+      };
+
+      hostEl.addEventListener("click", (ev) => {
+        const resolve = hostEl.__knowResolveHighlight;
+        if (!resolve) return;
+        const entry = resolve(ev);
+        if (!entry) return;
+
+        if (ev.shiftKey) {
+          if (hostEl.__knowPendingOpenTimer != null) {
+            clearTimeout(hostEl.__knowPendingOpenTimer);
+            hostEl.__knowPendingOpenTimer = null;
+          }
+          ev.stopPropagation();
+          ev.preventDefault();
+          deleteHighlightEntry(entry);
+          return;
+        }
+
+        if (ev.detail >= 2) {
+          if (hostEl.__knowPendingOpenTimer != null) {
+            clearTimeout(hostEl.__knowPendingOpenTimer);
+            hostEl.__knowPendingOpenTimer = null;
+          }
+          ev.stopPropagation();
+          ev.preventDefault();
+          return;
+        }
+
         ev.stopPropagation();
         ev.preventDefault();
-        if (mode === "delete") {
-          removeSelectionFromHistory(entry);
-          if (paperId) {
-            void api
-              .deleteSelection(
-                paperId,
-                entry.selected_text ?? "",
-                entry.action ?? "explain",
-              )
-              .catch(() => {});
-          }
-        } else {
+        if (hostEl.__knowPendingOpenTimer != null) clearTimeout(hostEl.__knowPendingOpenTimer);
+        hostEl.__knowPendingOpenTimer = setTimeout(() => {
+          hostEl.__knowPendingOpenTimer = null;
           openSelectionFromHistory(entry);
-        }
-        return true;
-      };
-      hostEl.addEventListener("click", (ev) => {
-        const dispatch = hostEl.__knowDispatch;
-        if (!dispatch) return;
-        dispatch(ev, ev.shiftKey ? "delete" : "open");
+        }, 280);
       });
+
+      hostEl.addEventListener("dblclick", (ev) => {
+        const resolve = hostEl.__knowResolveHighlight;
+        if (!resolve) return;
+        const entry = resolve(ev);
+        if (!entry) return;
+        if (hostEl.__knowPendingOpenTimer != null) {
+          clearTimeout(hostEl.__knowPendingOpenTimer);
+          hostEl.__knowPendingOpenTimer = null;
+        }
+        ev.preventDefault();
+        ev.stopPropagation();
+        openSelectionDeletePopover(ev.clientX, ev.clientY, () => {
+          deleteHighlightEntry(entry);
+        });
+      });
+
       hostEl.addEventListener("contextmenu", (ev) => {
-        const dispatch = hostEl.__knowDispatch;
-        if (!dispatch) return;
-        dispatch(ev, "delete");
+        const resolve = hostEl.__knowResolveHighlight;
+        if (!resolve) return;
+        const entry = resolve(ev);
+        if (!entry) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        deleteHighlightEntry(entry);
       });
 
       // Visual cursor affordance: swap to `pointer` while the
