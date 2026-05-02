@@ -41,9 +41,13 @@ const PdfViewer = dynamic(
   () => import("@/components/pdf/PdfViewer").then((m) => m.PdfViewer),
   {
     ssr: false,
-      loading: () => (
-      <div className="flex items-center justify-center h-full bg-background">
-        <div className="w-5 h-5 border-2 border-border border-t-foreground rounded-full animate-spin" />
+    loading: () => (
+      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background">
+        <div
+          className="h-5 w-5 rounded-full border-2 border-border border-t-foreground motion-safe:animate-spin"
+          aria-hidden
+        />
+        <p className="text-[var(--text-sm)] text-muted-foreground">Loading PDF…</p>
       </div>
     ),
   }

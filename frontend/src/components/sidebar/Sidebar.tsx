@@ -22,20 +22,35 @@ export function Sidebar({ paperId }: SidebarProps) {
       onValueChange={setActiveTab}
       className="flex flex-col h-full"
     >
-      <TabsList className="grid grid-cols-5 mx-3 mt-3 shrink-0">
-        <TabsTrigger value="preread" className="text-xs">
+      <TabsList className="mx-3 mt-3 grid h-10 shrink-0 grid-cols-5 gap-0.5 rounded-xl border border-border/55 bg-muted/45 p-[3px] shadow-[var(--shadow-xs)] backdrop-blur-sm">
+        <TabsTrigger
+          value="preread"
+          className="min-w-0 px-1 py-1 text-[11px] font-medium tracking-tight data-active:font-semibold motion-safe:transition-[color,box-shadow] motion-safe:duration-150"
+        >
           Prepare
         </TabsTrigger>
-        <TabsTrigger value="derive" className="text-xs">
+        <TabsTrigger
+          value="derive"
+          className="min-w-0 px-1 py-1 text-[11px] font-medium tracking-tight data-active:font-semibold motion-safe:transition-[color,box-shadow] motion-safe:duration-150"
+        >
           Derive
         </TabsTrigger>
-        <TabsTrigger value="assume" className="text-xs">
+        <TabsTrigger
+          value="assume"
+          className="min-w-0 px-1 py-1 text-[11px] font-medium tracking-tight data-active:font-semibold motion-safe:transition-[color,box-shadow] motion-safe:duration-150"
+        >
           Assume
         </TabsTrigger>
-        <TabsTrigger value="qa" className="text-xs">
+        <TabsTrigger
+          value="qa"
+          className="min-w-0 px-1 py-1 text-[11px] font-medium tracking-tight data-active:font-semibold motion-safe:transition-[color,box-shadow] motion-safe:duration-150"
+        >
           Q&A
         </TabsTrigger>
-        <TabsTrigger value="search" className="text-xs">
+        <TabsTrigger
+          value="search"
+          className="min-w-0 px-1 py-1 text-[11px] font-medium tracking-tight data-active:font-semibold motion-safe:transition-[color,box-shadow] motion-safe:duration-150"
+        >
           Search
         </TabsTrigger>
       </TabsList>

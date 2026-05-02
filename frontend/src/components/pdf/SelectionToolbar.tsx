@@ -173,7 +173,7 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
       <div
         role="toolbar"
         aria-label="Selection actions"
-        className="pointer-events-auto flex items-center gap-0.5 rounded-2xl border border-border/80 bg-popover/95 backdrop-blur-md shadow-xl shadow-black/10 dark:shadow-black/40 px-1 py-1"
+        className="pointer-events-auto flex items-center gap-0.5 rounded-2xl border border-border/80 bg-popover/95 backdrop-blur-md px-1 py-1 shadow-xl shadow-black/8 ring-1 ring-black/[0.04] motion-safe:transition-shadow dark:shadow-black/35 dark:ring-white/[0.06]"
       >
         {visibleActions.map((a, i) => (
           <button
@@ -193,7 +193,7 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
             data-tooltip={quotaBlocked ? "Demo selection limit reached — create a free account for more." : a.hint}
             title={quotaBlocked ? "Demo selection limit reached — create a free account for more." : a.hint}
             aria-label={quotaBlocked ? "Demo selection limit reached" : `${a.label} — ${a.hint}`}
-            className={`know-toolbar-btn group flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[12px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/70 active:scale-[0.97] transition-all whitespace-nowrap ${
+            className={`know-toolbar-btn group flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[12px] font-medium text-muted-foreground whitespace-nowrap hover:bg-accent/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/55 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent active:scale-[0.97] motion-safe:transition-[color,background-color,transform] motion-safe:duration-150 ${
               i === 0 ? "" : "ml-px"
             } ${quotaBlocked ? "opacity-40 cursor-not-allowed hover:bg-transparent hover:text-muted-foreground" : ""}`}
           >

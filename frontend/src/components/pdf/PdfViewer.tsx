@@ -547,9 +547,10 @@ export function PdfViewer({
     }
 
     // Produce the normalized view + the index mapping back to the raw
-    // string. We walk char-by-char so normalization never shifts offset
-    // alignment (apart from characters we intentionally strip, whose
-    // raw offsets simply don't appear in the map).
+    // string index in `combined`. Each raw unit's NFKC expansion (e.g.
+    // ﬁ → fi) shares the same raw index so Range boundaries still sit on
+    // the original text nodes; this matches `normalizeForSearch` on the
+    // stored `selected_text`, which is already NFKC-normalized.
     const zapRe = /[\u00AD\u200B-\u200D\uFEFF]/;
     const quoteMap: Record<string, string> = { "\u201C": "'", "\u201D": "'", "\u2018": "'", "\u2019": "'", "`": "'", "\"": "'" };
     const dashMap: Record<string, string> = { "\u2013": "-", "\u2014": "-", "\u2212": "-" };
@@ -558,19 +559,24 @@ export function PdfViewer({
     for (let i = 0; i < combined.length; i++) {
       const ch = combined[i];
       if (zapRe.test(ch)) continue;
-      let out = ch;
-      if (quoteMap[ch]) out = quoteMap[ch];
-      else if (dashMap[ch]) out = dashMap[ch];
-      else if (/\s/.test(ch)) {
-        // Collapse runs of whitespace in the normalized view so a
-        // single " " in the needle matches any whitespace run in the
-        // haystack. We still record the mapping back to the *first*
-        // whitespace char's raw offset so ranges start/end cleanly.
-        if (normalized.endsWith(" ")) continue;
-        out = " ";
+      const expandedChunk = ch.normalize("NFKC");
+      for (let k = 0; k < expandedChunk.length; k++) {
+        const ech = expandedChunk[k];
+        if (zapRe.test(ech)) continue;
+        let out = ech;
+        if (quoteMap[out]) out = quoteMap[out];
+        else if (dashMap[out]) out = dashMap[out];
+        else if (/\s/.test(ech)) {
+          // Collapse runs of whitespace in the normalized view so a
+          // single " " in the needle matches any whitespace run in the
+          // haystack. We still record the mapping back to the *first*
+          // whitespace char's raw offset so ranges start/end cleanly.
+          if (normalized.endsWith(" ")) continue;
+          out = " ";
+        }
+        normalized += out.toLowerCase();
+        normIdxToRawIdx.push(i);
       }
-      normalized += out.toLowerCase();
-      normIdxToRawIdx.push(i);
     }
     if (!normalized) {
       pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
