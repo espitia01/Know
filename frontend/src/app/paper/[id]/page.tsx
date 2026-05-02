@@ -576,10 +576,10 @@ function PaperContent() {
   }, [activePaperId, setFocusMode]);
 
   useEffect(() => {
-    if (paper?.id && paper.id === activePaperId) {
+    if (paper?.id && paper.id === paperId) {
       recordPaperOpened(paper.id);
     }
-  }, [paper?.id, activePaperId]);
+  }, [paper?.id, paperId]);
 
   useEffect(() => {
     if (paperId !== activePaperId) {

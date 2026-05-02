@@ -888,6 +888,12 @@ export function PdfViewer({
   // react-pdf re-rendering a virtualized page) so new underlines
   // appear without waiting on the next explicit render cycle.
   //
+  // IMPORTANT: `drawUnderlinesForPage` appends `.know-selection-overlay`
+  // inside each `.react-pdf__Page`. Observers on the page subtree must
+  // ignore those mutations — otherwise remove+append each frame fires
+  // another mutation → rAF redraw → infinite main-thread loop (tab
+  // switches that resize the pane make this very noticeable).
+  //
   // Why both the container observer AND per-page observers:
   //   • pdfjs inserts the ``.textLayer`` container first and then
   //     streams spans into it over the next few animation frames.
@@ -899,6 +905,28 @@ export function PdfViewer({
   //   • The container observer handles page re-mounts that happen
   //     during scroll virtualisation; it arms a per-page observer as
   //     soon as the text layer appears.
+  const isUnderSelectionOverlay = (node: Node | null | undefined): boolean => {
+    const el =
+      node?.nodeType === Node.ELEMENT_NODE
+        ? (node as Element)
+        : node?.parentElement ?? null;
+    return !!(el && el.closest(".know-selection-overlay"));
+  };
+
+  const mutationAffectsPdfTextLayer = (muts: readonly MutationRecord[]): boolean => {
+    for (const m of muts) {
+      if (isUnderSelectionOverlay(m.target)) continue;
+      if (m.type === "characterData") return true;
+      if (m.type === "attributes" && !(m.target instanceof Element && m.target.closest(".know-selection-overlay"))) {
+        return true;
+      }
+      for (const n of [...m.addedNodes, ...m.removedNodes]) {
+        if (!isUnderSelectionOverlay(n)) return true;
+      }
+    }
+    return false;
+  };
+
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -925,12 +953,16 @@ export function PdfViewer({
 
     const armPage = (pageEl: HTMLElement) => {
       if (pageObservers.has(pageEl)) return;
-      const inner = () => schedulePage(pageEl);
+      const inner = () => {
+        schedulePage(pageEl);
+      };
       // Observe the entire page element — text layer gets appended
       // later, so a subtree-level observer is the only way to catch
       // both the initial insertion and every subsequent span update.
-      const mo = new MutationObserver(() => inner());
-      mo.observe(pageEl, { subtree: true, childList: true });
+      const mo = new MutationObserver((recs) => {
+        if (mutationAffectsPdfTextLayer(recs)) inner();
+      });
+      mo.observe(pageEl, { subtree: true, childList: true, characterData: true });
       pageObservers.set(pageEl, mo);
       schedulePage(pageEl);
     };

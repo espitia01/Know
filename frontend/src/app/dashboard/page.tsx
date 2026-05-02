@@ -15,7 +15,10 @@ import { FeedbackModal } from "@/components/FeedbackModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { FullscreenToggle } from "@/components/FullscreenToggle";
 import { DISCORD_URL } from "@/lib/constants";
-import { getRecentPaperOpenOrder } from "@/lib/recentPapers";
+import {
+  KNOW_RECENT_PAPERS_CHANGED,
+  getRecentPaperOpenOrder,
+} from "@/lib/recentPapers";
 
 const STUDY_HEADLINES = [
   "Turn a hard PDF into real understanding.",
@@ -72,12 +75,31 @@ function DashboardContent() {
   const { user: tierUser, refresh: refreshTier } = useUserTier();
   const { user: clerkUser } = useUser();
   const [papers, setPapers] = useState<PaperListEntry[]>([]);
+  /** Bumps whenever localStorage recent-open order changes (same tab event or visibility return). */
+  const [recentOrderEpoch, setRecentOrderEpoch] = useState(0);
   const [error, setError] = useState("");
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const isMobile = useIsMobile();
 
   const studyHeadline = getStudyHeadline(clerkUser?.firstName);
+
+  useEffect(() => {
+    const bump = () => setRecentOrderEpoch((n) => n + 1);
+    window.addEventListener(KNOW_RECENT_PAPERS_CHANGED, bump);
+    window.addEventListener("storage", bump);
+    const onVis = () => {
+      if (document.visibilityState === "visible") bump();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", bump);
+    return () => {
+      window.removeEventListener(KNOW_RECENT_PAPERS_CHANGED, bump);
+      window.removeEventListener("storage", bump);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", bump);
+    };
+  }, []);
 
   const dashboardPapersOrdered = useMemo(() => {
     const order = getRecentPaperOpenOrder();
@@ -86,7 +108,7 @@ function DashboardContent() {
       return idx >= 0 ? idx : 10_000;
     };
     return [...papers].sort((a, b) => rank(a.id) - rank(b.id));
-  }, [papers]);
+  }, [papers, recentOrderEpoch]);
 
   useEffect(() => {
     api.listPapers()

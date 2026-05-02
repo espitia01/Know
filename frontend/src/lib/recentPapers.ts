@@ -5,19 +5,31 @@
 const STORAGE_KEY = "know-recent-paper-opens";
 const MAX_IDS = 30;
 
+/** Dispatched after localStorage updates so the dashboard can re-sort without a full remount. */
+export const KNOW_RECENT_PAPERS_CHANGED = "know-recent-papers-changed";
+
+function sanitizeIdList(xs: unknown): string[] {
+  if (!Array.isArray(xs)) return [];
+  return xs.filter((x): x is string => {
+    if (typeof x !== "string") return false;
+    const t = x.trim();
+    if (!t || t.length > 200) return false;
+    // Allow canonical ids from the backend (UUID, hex blobs, trial_*, etc.);
+    // only reject obviously broken control characters.
+    if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(t)) return false;
+    return true;
+  });
+}
+
 export function recordPaperOpened(paperId: string): void {
   if (!paperId || typeof window === "undefined") return;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     let ids: string[] = [];
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      ids = Array.isArray(parsed)
-        ? parsed.filter((x) => typeof x === "string" && /^[a-zA-Z0-9_-]+$/.test(x))
-        : [];
-    }
+    if (raw) ids = sanitizeIdList(JSON.parse(raw));
     ids = [paperId, ...ids.filter((id) => id !== paperId)].slice(0, MAX_IDS);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(ids));
+    window.dispatchEvent(new CustomEvent(KNOW_RECENT_PAPERS_CHANGED));
   } catch {
     /* quota / privacy mode */
   }
@@ -29,9 +41,7 @@ export function getRecentPaperOpenOrder(): string[] {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed)
-      ? parsed.filter((x) => typeof x === "string" && /^[a-zA-Z0-9_-]+$/.test(x))
-      : [];
+    return sanitizeIdList(parsed);
   } catch {
     return [];
   }
