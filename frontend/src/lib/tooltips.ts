@@ -6,7 +6,11 @@ export const FEATURE_TOOLTIPS: Record<string, string> = {
   "Pre-Reading Prep":
     "AI extracts definitions, key concepts, research questions, and prior work before you start reading",
   "Related":
-    "Prior work cited by this paper. Each bullet links out when URLs or citation ids (DOI / arXiv / PubMed) are known",
+    "Prior work cited by this paper; each citation opens Google Scholar when available",
+  "References":
+    "Bibliography as in the paper; click to search that reference on Google Scholar",
+  "Prepare":
+    "Definitions, concepts, research questions, and references before reading",
   "Assumption Analysis":
     "Uncover the implicit and explicit assumptions underlying the paper's methodology and conclusions",
   "Assumptions":

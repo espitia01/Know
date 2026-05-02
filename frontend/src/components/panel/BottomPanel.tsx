@@ -315,11 +315,11 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
             <TabsTrigger value="summary" className={TAB_STYLE} title={FEATURE_TOOLTIPS["Summary"]}>Summary</TabsTrigger>
             {([
               { value: "preread", feature: "prepare", label: "Prepare" },
-              { value: "sources", feature: "prepare", label: "References" },
               { value: "assume", feature: "assumptions", label: "Assumptions" },
               { value: "qa", feature: "qa", label: "Q&A" },
               { value: "figures", feature: "figures", label: "Figures" },
               { value: "notes", feature: "notes", label: "Notes" },
+              { value: "sources", feature: "prepare", label: "References" },
             ] as const).map((tab) => {
               const locked = !canAccess(tier, tab.feature);
               return (
@@ -497,9 +497,6 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
           {mountedTabs.has("preread") && (
             <TabsContent value="preread" className="mt-0"><PreReadingPanel paperId={paperId} /></TabsContent>
           )}
-          {mountedTabs.has("sources") && (
-            <TabsContent value="sources" className="mt-0"><RelatedWorkPanel paperId={paperId} /></TabsContent>
-          )}
           {mountedTabs.has("assume") && (
             <TabsContent value="assume" className="mt-0"><AssumptionsPanel paperId={paperId} /></TabsContent>
           )}
@@ -511,6 +508,9 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
           )}
           {mountedTabs.has("notes") && (
             <TabsContent value="notes" className="mt-0"><NotesPanel paperId={paperId} /></TabsContent>
+          )}
+          {mountedTabs.has("sources") && (
+            <TabsContent value="sources" className="mt-0"><RelatedWorkPanel paperId={paperId} /></TabsContent>
           )}
           {hasMultiplePapers && canAccess(tier, "multi-qa") && mountedTabs.has("compare") && (
             <TabsContent value="compare" className="mt-0"><CrossPaperPanel /></TabsContent>
