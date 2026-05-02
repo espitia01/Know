@@ -150,14 +150,6 @@ function DashboardContent() {
               Upgrade
             </Link>
           )}
-          <Link
-            href="/library"
-            title="Open your library"
-            aria-label="Open your library"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border/70 bg-background/90 text-foreground transition-colors hover:bg-accent hover:border-border-strong"
-          >
-            <Library className="h-[18px] w-[18px] text-foreground/85" strokeWidth={1.75} aria-hidden />
-          </Link>
           <FullscreenToggle />
           <ThemeToggle />
           <UserButton
@@ -240,15 +232,6 @@ function DashboardContent() {
             Upgrade
           </Link>
         )}
-        <Link
-          href="/library"
-          title="Your library — all papers and folders"
-          aria-label="Open your library"
-            className="inline-flex h-9 items-center gap-2 rounded-xl border border-border/70 bg-background/90 px-3 text-[12px] font-semibold text-foreground/90 transition-colors hover:bg-accent hover:border-border-strong hover:text-foreground ring-focus"
-        >
-          <Library className="h-[17px] w-[17px] shrink-0 text-foreground/80" strokeWidth={1.75} aria-hidden />
-          <span className="hidden min-[380px]:inline">Library</span>
-        </Link>
         <FullscreenToggle />
         <ThemeToggle />
         <UserButton
