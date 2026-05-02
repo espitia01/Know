@@ -8,63 +8,48 @@ import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SectionHeader } from "@/components/panel/SectionHeader";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
-import { priorWorkHref, scholarSearchHref } from "@/lib/priorWorkLinks";
+import { priorWorkHref } from "@/lib/priorWorkLinks";
 
 interface RelatedWorkPanelProps {
   paperId: string;
 }
 
-function WorkBullet({ p }: { p: PriorWork }) {
-  const canonical = priorWorkHref(p);
-  const scholarHref = scholarSearchHref(p.title);
-  const href = canonical ?? scholarHref ?? null;
-  const titleDisplay = p.title.trim() || "Untitled reference";
+function ReferenceRow({ p }: { p: PriorWork }) {
+  const href = priorWorkHref(p);
   const bib = (p.bib_label || p.ref_id || "").trim();
+  const display =
+    (typeof p.citation_display === "string" && p.citation_display.trim()) ||
+    p.title.trim() ||
+    "Reference";
 
   return (
-    <li className="pl-1">
-      <div className="space-y-1.5">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          {bib && (
-            <span className="shrink-0 rounded bg-muted/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-              [{bib.replace(/^\[|\]$/g, "")}]
-            </span>
-          )}
-          {href ? (
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={
-                canonical
-                  ? "text-[var(--text-md)] font-medium text-primary underline underline-offset-2 hover:opacity-90"
-                  : "text-[var(--text-md)] font-medium text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
-              }
-            >
-              {titleDisplay}
-            </a>
-          ) : (
-            <span className="text-[var(--text-md)] font-medium text-foreground/90">{titleDisplay}</span>
-          )}
-        </div>
-        {!canonical && scholarHref ? (
-          <p className="text-[var(--text-xs)] text-muted-foreground/70">
-            No publisher link from the bibliography — opens Google Scholar with this title.
-          </p>
-        ) : null}
-        {(p.doi || p.arxiv) && (
-          <p className="text-[10px] font-mono leading-relaxed text-muted-foreground/65">
-            {p.doi && <span>{p.doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, "")}</span>}
-            {p.doi && p.arxiv ? " · " : null}
-            {p.arxiv && <span>arXiv:{p.arxiv}</span>}
-          </p>
+    <li className="border-b border-border/45 py-3 pl-1 last:border-b-0">
+      <div className="flex flex-wrap gap-x-2 gap-y-1">
+        {bib && (
+          <span className="shrink-0 rounded bg-muted/80 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+            [{bib.replace(/^\[|\]$/g, "")}]
+          </span>
         )}
-        {p.relevance && (
-          <div className="text-[var(--text-sm)] leading-relaxed text-muted-foreground">
-            <Md>{p.relevance}</Md>
-          </div>
+        {href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="min-w-0 flex-1 text-[var(--text-md)] font-medium leading-snug text-primary underline underline-offset-2 hover:opacity-90"
+          >
+            {display}
+          </a>
+        ) : (
+          <span className="min-w-0 flex-1 text-[var(--text-md)] font-medium leading-snug text-foreground/95">
+            {display}
+          </span>
         )}
       </div>
+      {p.relevance ? (
+        <div className="mt-2 text-[var(--text-sm)] leading-relaxed text-muted-foreground">
+          <Md>{p.relevance}</Md>
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -97,7 +82,7 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
         <div className="w-full max-w-xs">
           <AnalysisProgress kind="preReading" paperId={paperId} />
         </div>
-        <p className="text-[var(--text-sm)] text-muted-foreground">Extracting references…</p>
+        <p className="text-[var(--text-sm)] text-muted-foreground">Parsing references…</p>
       </div>
     );
   }
@@ -105,11 +90,11 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
   if (!preReading || preReading.prior_work.length === 0) {
     return (
       <EmptyState
-        title={preReading ? "No linked sources yet" : "Related work not generated"}
+        title={preReading ? "No references parsed" : "References not generated"}
         body={
           preReading
-            ? "Prepare did not capture related references for this PDF. Try re-running Prepare—the bibliography prints best when the PDF text layer is clean."
-            : "Run Prepare once — we map each theme to bibliography entries and resolve outbound links."
+            ? "The PDF did not yield a clean numbered bibliography. Re-run Prepare after checking that the text layer includes the reference list."
+            : "Run Prepare to extract the paper’s bibliography and resolve journal links when available."
         }
         cta={{ label: "Run Prepare", onClick: handleRunPrepare }}
       />
@@ -124,35 +109,30 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
 
   return (
     <div className="space-y-6 motion-safe:animate-fade-in">
-      <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/85">
-        Entries are clustered by thematic role in this paper whenever the model identifies clear groupings.
-        Each title links to a DOI, arXiv, publisher, or Semantic Scholar match when possible; otherwise to a Scholar search for that title.
-      </p>
-
       {topical?.length ? (
         <div className="space-y-8">
           {topical.map((sec, si) => (
-            <section key={`${sec.theme}-${si}`} className="space-y-3">
+            <section key={`${sec.theme}-${si}`} className="space-y-2">
               <SectionHeader title={sec.theme || "Related work"} className="mb-0 text-[var(--text-sm)]" />
               {sec.summary ? (
                 <div className="text-[var(--text-sm)] leading-relaxed text-muted-foreground">
                   <Md>{sec.summary}</Md>
                 </div>
               ) : null}
-              <ul className="list-disc space-y-4 pl-4 marker:text-muted-foreground/60">
+              <ol className="list-none space-y-0 pl-0 marker:text-muted-foreground/60">
                 {(sec.items || []).map((p, pi) => (
-                  <WorkBullet key={`${p.title}-${si}-${pi}`} p={p} />
+                  <ReferenceRow key={`${p.bib_label ?? p.title}-${si}-${pi}`} p={p} />
                 ))}
-              </ul>
+              </ol>
             </section>
           ))}
         </div>
       ) : (
-        <ul className="list-disc space-y-4 pl-4 marker:text-muted-foreground/60">
+        <ol className="list-none space-y-0 pl-0">
           {preReading.prior_work.map((p, i) => (
-            <WorkBullet key={`${p.title}-${i}`} p={p} />
+            <ReferenceRow key={`${p.bib_label ?? p.title}-${i}`} p={p} />
           ))}
-        </ul>
+        </ol>
       )}
 
       <div className="border-t border-border/50 pt-1">

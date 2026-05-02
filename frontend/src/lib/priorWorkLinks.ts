@@ -70,10 +70,3 @@ export function priorWorkHref(work: PriorWork): string | null {
 
   return null;
 }
-
-/** Fallback when no canonical DOI / arXiv / publisher URL exists. */
-export function scholarSearchHref(title: string): string | null {
-  const t = title.trim();
-  if (t.length < 6) return null;
-  return `https://scholar.google.com/scholar?q=${encodeURIComponent(t.slice(0, 400))}`;
-}

@@ -167,7 +167,7 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
             <AccordionTrigger className="py-2.5 hover:no-underline">
               <SectionHeader
                 className="mb-0"
-                title="Prior work"
+                title="References"
                 count={prior_work.length}
               />
             </AccordionTrigger>
@@ -175,7 +175,10 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
               <div className={rowListClass}>
                 {prior_work.map((p, i) => {
                   const href = priorWorkHref(p);
-                  const t = p.title.trim() || "Untitled reference";
+                  const display =
+                    (typeof p.citation_display === "string" && p.citation_display.trim()) ||
+                    p.title.trim() ||
+                    "Untitled reference";
                   return (
                     <div key={i} className={rowItemClass}>
                       {href ? (
@@ -185,10 +188,10 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
                           rel="noopener noreferrer"
                           className="mb-0.5 block font-medium text-[var(--text-md)] text-primary underline underline-offset-2 hover:opacity-90"
                         >
-                          {t}
+                          {display}
                         </a>
                       ) : (
-                        <p className="mb-0.5 font-medium text-[var(--text-md)]">{t}</p>
+                        <p className="mb-0.5 font-medium text-[var(--text-md)]">{display}</p>
                       )}
                       <div className="text-[var(--text-sm)] text-muted-foreground">
                         <Md>{p.relevance}</Md>

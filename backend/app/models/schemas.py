@@ -48,6 +48,7 @@ class PriorWork(BaseModel):
     doi: str = ""
     arxiv: str = ""
     theme: str = ""
+    citation_display: str = ""
 
 
 class PriorWorkTopic(BaseModel):

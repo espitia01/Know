@@ -282,6 +282,8 @@ export interface PriorWork {
   title: string;
   relevance: string;
   ref_id: string;
+  /** Full bibliography line extracted from PDF when available — shown instead of ``title``. */
+  citation_display?: string;
   /** Model-extracted canonical https link when confidently known */
   url?: string;
   bib_label?: string;

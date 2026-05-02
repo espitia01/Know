@@ -14,6 +14,9 @@ logger = logging.getLogger(__name__)
 _S2_SEARCH = "https://api.semanticscholar.org/graph/v1/paper/search"
 _S2_TIMEOUT = 12.0
 _MAX_S2_LOOKUPS = 40
+_CROSSREF_SEARCH = "https://api.crossref.org/works"
+_MAX_CROSSREF_LOOKUPS = 36
+_CROSSREF_USER_AGENT = "KnowPaperReader/1.0 (https://github.com/espitia01/Know; mailto:dev@know.app)"
 
 
 def _arxiv_norm(s: str) -> str | None:
@@ -40,7 +43,6 @@ def _doi_norm(s: str) -> str | None:
 def hydrate_identifiers(entry: dict[str, Any]) -> dict[str, Any]:
     """Fill doi / arxiv / url columns from whichever fields are populated."""
     out = dict(entry)
-
     doi = (out.get("doi") or "").strip()
     arx_raw = (out.get("arxiv") or "").strip()
     url = (out.get("url") or "").strip()
@@ -132,13 +134,30 @@ def _title_overlap_ok(a: str, b: str) -> bool:
     return len(wa & wb) >= min(3, max(2, len(wa) // 3))
 
 
+def _snippet_for_semantic_search(it: dict[str, Any]) -> str:
+    raw = ""
+    cd = str(it.get("citation_display") or "").strip()
+    if cd:
+        raw = cd
+    else:
+        raw = str(it.get("title") or "").strip()
+    s = " ".join(raw.split())
+    s = re.sub(r"^[\[\d\]\s.)]+\s*", "", s)
+    return s[:520].strip()
+
+
+def normalize_prior_row_hydrated(d: dict[str, Any]) -> dict[str, Any]:
+    """Normalise mixed LLM/server rows and hydrate doi / URL fields."""
+    return hydrate_identifiers(_prior_row(d))
+
+
 async def enrich_urls_with_semantic_scholar(items: list[dict[str, Any]]) -> None:
     """Mutate items in place: fill ``url`` when empty using S2 (bounded)."""
     need: list[tuple[int, str]] = []
     for i, it in enumerate(items):
         if (it.get("url") or "").strip():
             continue
-        ttl = (it.get("title") or "").strip()
+        ttl = _snippet_for_semantic_search(it)
         if ttl:
             need.append((i, ttl))
     if not need:
@@ -163,6 +182,7 @@ def _prior_row(it: dict, *, theme: str = "") -> dict[str, Any]:
     rid = str(it.get("ref_id") or "").strip()
     return {
         "title": str(it.get("title", "")),
+        "citation_display": str(it.get("citation_display", "")),
         "relevance": str(it.get("relevance", "")),
         "ref_id": rid if rid else bib,
         "bib_label": bib if bib else rid,
@@ -209,9 +229,91 @@ def normalize_pre_reading_prior_work(raw: dict) -> None:
     raw["prior_work_topics"] = []
 
 
+async def _crossref_bibliographic_doi(query: str) -> str | None:
+    q = " ".join((query or "").split()).strip()
+    if len(q) < 42:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=14.0) as client:
+            r = await client.get(
+                _CROSSREF_SEARCH,
+                params={"query.bibliographic": q[:980], "rows": 8},
+                headers={"User-Agent": _CROSSREF_USER_AGENT},
+            )
+            if r.status_code != 200:
+                return None
+            data = r.json()
+    except Exception as e:
+        logger.debug("Crossref lookup failed: %s", e)
+        return None
+
+    works = (((data.get("message") or {}) if isinstance(data, dict) else {}) or {}).get("items") or []
+    works = [w for w in works if isinstance(w, dict)]
+    if not works:
+        return None
+    ql_strip = re.sub(r"^[\[\]\d\s\).]+", "", q.lower()).strip()
+
+    for w in works:
+        titles = (w.get("title") or []) if isinstance(w.get("title"), list) else []
+        ttl_raw = titles[0] if titles else str(w.get("title") or "")
+        ttl_lc = ttl_raw.strip().lower() if ttl_raw else ""
+        doi_raw = str(w.get("DOI") or "").strip()
+        if not doi_raw or not ttl_lc:
+            continue
+        if _title_overlap_ok(ql_strip, ttl_lc):
+            return doi_raw.lower()
+
+    if len(works) == 1:
+        w = works[0]
+        titles = (w.get("title") or []) if isinstance(w.get("title"), list) else []
+        ttl_raw = titles[0] if titles else str(w.get("title") or "")
+        ttl_lc = ttl_raw.strip().lower() if ttl_raw else ""
+        doi_raw = str(w.get("DOI") or "").strip()
+        if doi_raw and ttl_lc:
+            head = ttl_lc[: min(72, len(ttl_lc))]
+            if _title_overlap_ok(ql_strip, ttl_lc) or (len(head) > 16 and head in ql_strip):
+                return doi_raw.lower()
+
+    return None
+
+
+async def enrich_dois_via_crossref(items: list[dict[str, Any]]) -> None:
+    """Fill missing DOIs via Crossref ``query.bibliographic``."""
+
+    need: list[tuple[int, str]] = []
+    for i, it in enumerate(items):
+        if (str(it.get("doi") or "")).strip():
+            continue
+        q = _snippet_for_semantic_search(it)
+        if len(q) >= 42:
+            need.append((i, q[:980]))
+
+    need = need[:_MAX_CROSSREF_LOOKUPS]
+    if not need:
+        return
+
+    sem = asyncio.Semaphore(3)
+
+    async def one(idx: int, query: str) -> tuple[int, str | None]:
+        async with sem:
+            doi = await _crossref_bibliographic_doi(query)
+            return idx, doi
+
+    out = await asyncio.gather(*[one(i, q) for i, q in need])
+    for idx, doi_raw in out:
+        if not doi_raw:
+            continue
+        it = items[idx]
+        if (str(it.get("doi") or "")).strip():
+            continue
+        it["doi"] = doi_raw
+        it.update(hydrate_identifiers(it))
+
+
 async def finalize_pre_reading_urls(raw: dict) -> None:
     items = raw.get("prior_work")
     if isinstance(items, list) and items:
+        await enrich_dois_via_crossref(items)
         await enrich_urls_with_semantic_scholar(items)
 
 
@@ -322,3 +424,58 @@ def enrich_prior_work_from_bibliography(items: list[dict[str, Any]], bib_text: s
 
         if touched:
             it.update(hydrate_identifiers(it))
+
+
+def merge_reference_summaries(entries: list[dict[str, Any]], summaries: Any) -> None:
+    """Attach model-written one-line notes keyed by bibliography index."""
+
+    if not isinstance(summaries, list) or not entries:
+        return
+    by_label: dict[str, str] = {}
+    for s in summaries:
+        if not isinstance(s, dict):
+            continue
+        k = _canonical_bib_index(str(s.get("bib_label") or ""))
+        rel = str(s.get("relevance", "") or "").strip()
+        if k and rel:
+            by_label[k] = rel
+    for e in entries:
+        k = _canonical_bib_index(str(e.get("bib_label") or e.get("ref_id") or ""))
+        if k and k in by_label:
+            e["relevance"] = by_label[k]
+
+
+def bibliography_to_prior_work_entries(bib_text: str, *, max_items: int = 120) -> list[dict[str, Any]]:
+    """Build flat prior-work rows from raw bibliography text — order-preserving."""
+
+    chunks = split_bibliography_chunks(bib_text or "")
+    if not chunks:
+        return []
+
+    def num_key(idx: str) -> int:
+        try:
+            return int(idx)
+        except ValueError:
+            return 10**9
+
+    keys = sorted(chunks.keys(), key=num_key)[:max_items]
+    out: list[dict[str, Any]] = []
+    for key in keys:
+        blob = (chunks.get(key) or "").strip()
+        if not blob:
+            continue
+        condensed = " ".join(blob.split())
+        out.append(
+            {
+                "bib_label": key,
+                "ref_id": key,
+                "title": condensed[:480],
+                "citation_display": condensed,
+                "relevance": "",
+                "doi": "",
+                "arxiv": "",
+                "url": "",
+                "theme": "",
+            }
+        )
+    return out

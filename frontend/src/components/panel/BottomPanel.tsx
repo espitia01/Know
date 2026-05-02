@@ -315,7 +315,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
             <TabsTrigger value="summary" className={TAB_STYLE} title={FEATURE_TOOLTIPS["Summary"]}>Summary</TabsTrigger>
             {([
               { value: "preread", feature: "prepare", label: "Prepare" },
-              { value: "sources", feature: "prepare", label: "Related" },
+              { value: "sources", feature: "prepare", label: "References" },
               { value: "assume", feature: "assumptions", label: "Assumptions" },
               { value: "qa", feature: "qa", label: "Q&A" },
               { value: "figures", feature: "figures", label: "Figures" },

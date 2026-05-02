@@ -19,6 +19,35 @@ function normalizeUnicodeMath(s: string): string {
     .replace(/\u00a0/g, " ");
 }
 
+/** Greek capitals commonly emitted as Unicode instead of $\\Gamma$-style macros. */
+function unicodeCapGreekToLatex(s: string): string {
+  let t = s;
+  const map: Record<string, string> = {
+    Γ: "\\Gamma ",
+    Δ: "\\Delta ",
+    Θ: "\\Theta ",
+    Λ: "\\Lambda ",
+    Ξ: "\\Xi ",
+    Π: "\\Pi ",
+    Σ: "\\Sigma ",
+    Φ: "\\Phi ",
+    Ψ: "\\Psi ",
+    Ω: "\\Omega ",
+  };
+  for (const [k, v] of Object.entries(map)) {
+    if (t.includes(k)) t = t.split(k).join(v);
+  }
+  return t;
+}
+
+function hasEquationFragmentSignature(text: string): boolean {
+  if (/\\/.test(text)) return true;
+  const greekOrSymbol = /[\u0393-\u03C9]|[ΓΔΘΛΣΦΨΩ\u03BC]/.test(text);
+  if (greekOrSymbol && (/[=<>|]/.test(text) || /\d/.test(text))) return true;
+  if (/[|‖∣]/.test(text) && (/[=<>≈≤≥\-]/.test(text) || /[A-Za-z]/.test(text))) return true;
+  return false;
+}
+
 /** Collapse LLM / PDF-paste line breaks that split one LaTeX expression across many short lines. */
 function collapseBrokenDisplayMath(s: string): string {
   const lines = s.split(/\r?\n/);
@@ -42,7 +71,8 @@ function collapseBrokenDisplayMath(s: string): string {
     }
     const slice = lines.slice(i, j);
     const joined = slice.join("\n");
-    if (j - i >= 5 && /\\/.test(joined)) {
+    const n = j - i;
+    if ((n >= 5 && /\\/.test(joined)) || (n >= 4 && hasEquationFragmentSignature(joined))) {
       out.push(slice.map((l) => l.trim()).join(" "));
       i = j;
     } else {
@@ -51,6 +81,75 @@ function collapseBrokenDisplayMath(s: string): string {
     }
   }
   return out.join("\n");
+}
+
+/** Lines that are Unicode-heavy equation fragments without backslashes yet. */
+function collapseUnicodeEquationLines(s: string): string {
+  const lines = s.split(/\r?\n/);
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].trim() === "") {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < lines.length) {
+      const t = lines[j].trim();
+      if (t === "") break;
+      if (t.length > 22) break;
+      if (/^\d+\.[\s)]/.test(t)) break;
+      if (/^[-*•]\s/.test(t)) break;
+      if (/^#{1,6}\s/.test(t)) break;
+      if (!/^[\s\d.|A-Za-z\u0391-\u03C9_^²³⁺⁴⁵⁻+=<>≤≥≈≠Å\u00C5å\u2212µ∣‖°·]+$/.test(t)) break;
+      j++;
+    }
+    const slice = lines.slice(i, j);
+    const joined = slice.join("\n");
+    const n = j - i;
+    if (n >= 4 && hasEquationFragmentSignature(joined)) {
+      out.push(slice.map((l) => l.trim()).join(" "));
+      i = j;
+    } else {
+      out.push(lines[i]);
+      i++;
+    }
+  }
+  return out.join("\n");
+}
+
+function repairBracketDollarSubscripts(s: string): string {
+  return s.replace(
+    /\[\s*\$\s*([^$\n]+?)\s*\$\s*\]\s*_\{((?:[^{}]|\{[^{}]*\})*)\}/g,
+    (_m, inner: string, subRaw: string) => {
+      const subClean = String(subRaw)
+        .replace(/\$/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      return `\n$$\\left[${String(inner).trim()}\\right]_{${subClean}}\n$$\n`;
+    },
+  );
+}
+
+function repairAngstromSuperscriptOutsideMath(s: string): string {
+  return s.replace(/\u00C5\s*\$\^\{-1\}\$/g, "$\\mathrm{\\AA}^{-1}$");
+}
+
+function promoteHeavyInlineMathToDisplay(s: string): string {
+  return s.replace(/\$(?!\$)((?:\\.|\$\$|[^$\n])+?)\$(?!\$)/g, (full, inner: string) => {
+    const t = String(inner).trim();
+    if (!t || /\n/.test(t)) return full;
+    const heavy =
+      /\\(?:left|right|frac|dfrac|sum|prod|mathcal|mathrm|Gamma|Omega|Xi|Theta|Sigma|Lambda|Pi)|\\text\s*\{/.test(
+        t,
+      ) ||
+      /\\left\[|\\right]/.test(t) ||
+      (/\|/.test(t) && /[=<>]/.test(t)) ||
+      t.length >= 72;
+    if (!heavy) return full;
+    return `\n$$\n${t}\n$$\n`;
+  });
 }
 
 function wrapLikelyDisplayEquations(body: string): string {
@@ -63,6 +162,13 @@ function wrapLikelyDisplayEquations(body: string): string {
         return `\n$$\n${t}\n$$\n`;
       }
       if (/\\text\s*\{/.test(t) && /[_^]/.test(t) && /[<>≤≥≈≠=]/.test(t)) {
+        return `\n$$\n${t}\n$$\n`;
+      }
+      if (
+        /\\(?:Gamma|Delta|Omega|Sigma|Lambda|Pi|Theta|Xi|Psi|Phi)/.test(t) &&
+        /\|/.test(t) &&
+        /[=<>]/.test(t)
+      ) {
         return `\n$$\n${t}\n$$\n`;
       }
       if (
@@ -302,7 +408,12 @@ export function preprocessLatex(text: string): string {
   if (!text) return text;
 
   let s = normalizeUnicodeMath(text);
+  s = unicodeCapGreekToLatex(s);
   s = collapseBrokenDisplayMath(s);
+  s = collapseUnicodeEquationLines(s);
+  s = repairBracketDollarSubscripts(s);
+  s = repairAngstromSuperscriptOutsideMath(s);
+  s = promoteHeavyInlineMathToDisplay(s);
 
   s = s.replace(/\\\(/g, "$").replace(/\\\)/g, "$");
   s = s.replace(/\\\[/g, "\n$$\n").replace(/\\\]/g, "\n$$\n");

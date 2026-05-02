@@ -40,11 +40,11 @@ LATEX_FORMAT_INSTRUCTIONS = """LATEX FORMATTING RULES (STRICT — follow exactly
 - Use $$...$$ for display math (any equation with \\frac, \\sum, \\int, \\prod, \\lim, matrices, multi-line expressions, or anything longer than a few tokens)
 - Put each display equation on its own line with a blank line before and after the $$...$$ block
 - NEVER use \\( \\) or \\[ \\] delimiters — always $ or $$
-- NEVER output Unicode math characters (e.g. σ, μ, ∑, ∫, ², ₙ, subscripts, superscripts, fractions as separate characters). ALWAYS write them in LaTeX: \\sigma, \\mu, \\sum, \\int, x^2, x_n, \\frac{a}{b}
+- NEVER output Unicode math characters (e.g. σ, μ, ∑, ∫, Γ, Δ, Ω, superscripts/subscripts-as-Unicode…). ALWAYS write them in LaTeX: \\sigma, \\mu, \\sum, \\int, \\Gamma, \\Omega, etc.
 - NEVER mix bare/raw symbols and LaTeX in the same expression. If an equation has ANY math, wrap the ENTIRE equation in $...$ or $$...$$
 - For matrices use \\begin{pmatrix}...\\end{pmatrix} (or bmatrix/vmatrix) inside $$...$$
 - For multi-character function names use \\operatorname{name} or \\text{name}
-- Use \\cdot for multiplication, \\left( \\right) for auto-sized parens around large expressions
+- Use \\left| \\right| for norms / magnitudes over multi-symbol expressions — never vertically split '|' glyphs across lines outside math
 - Do not break a single equation into multiple $...$ fragments — keep it as one continuous math expression
 - NEVER insert line breaks between individual characters, tokens, or short lines inside one equation (no 'one token per line' formatting)
 - For numbered multi-line alignments use $$\n\\begin{aligned} … \\end{aligned}\n$$ (centered display); NEVER split one equation across multiple paragraphs or lines of plain text."""
@@ -778,30 +778,17 @@ async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
 2. "research_questions": array of {{"question": "...", "context": "..."}}.
 3. "concepts": array of {{"name": "...", "description": "...", "importance": "..."}} — key concepts.
 
-4. "prior_work_topics": array of thematic groups (REQUIRED). Each element:
-   {{
-     "theme": "short label for a line of research / idea (e.g. 'Quasicrystal band structure')",
-     "summary": "1–2 sentences on why this cluster matters for THIS paper.",
-     "items": [
-       {{
-         "title": "EXACT bibliography title substring when possible",
-         "relevance": "one concise sentence tying the citation to the paper",
-         "bib_label": "single bibliography index as cited in-text, e.g. '17' or '[17]' — NEVER use ranges like '16–19'",
-         "doi": "",
-         "arxiv": "",
-         "url": "",
-         "ref_id": "same as bib_label or DOI/arXiv id string"
-       }}
-     ]
-   }}
-   Rules:
-   - Every item MUST map to REAL entries in the REFERENCE LIST excerpt below when that list exists.
-     Copy titles verbatim from that list whenever you can recognise the match — do NOT invent titles.
-   - NEVER merge multiple bibliography entries into one row. If the paper cites [16]–[19], emit up to four separate items (or choose the strongest single bib index and one item only — prefer covering each distinct foundational thread with one concrete entry each).
-   - Extract "doi", "arxiv" (bare id like 2301.00001), and "url" ONLY when they explicitly appear next to THAT reference line. Otherwise leave empty strings — downstream tooling will infer links.
-   - If the reference list is missing or unusable, still return 3–8 best-effort items with accurate titles from the manuscript text, empty identifiers, and honest relevance.
+4. "reference_summaries": array explaining bibliography entries cited in THIS paper — REQUIRED whenever the REFERENCE excerpt below lists numbered references.
+   Each element MUST be {{ "bib_label": "single integer string like '17' matching that bibliography line", "relevance": "one factual sentence stating what this work established and why it matters for THIS paper"}}.
+   - Match bib_label ONLY to numbered lines in that excerpt — NEVER use citation ranges ('16–19'); emit separate rows for distinct numbers if multiple apply.
+   - Cover as many reference numbers as feasible (prioritise work highlighted in Introduction/Discussion), skipping only when you cannot summarise honestly.
+   - If the bibliography excerpt is missing/unusable below, output [] instead.
 
-5. "prior_work": leave as [] (an empty array). The server will flatten "prior_work_topics" into this field.
+5. "prior_work_topics": use ONLY when the bibliography excerpt below is absent or unreadable (<2 usable numbered lines).
+   Follow the thematic schema from earlier versions with short 'theme','summary','items' (same item shape).
+   Otherwise output [] exactly.
+
+6. "prior_work": always [] — the server builds the clickable list from bibliography text plus your reference_summaries.
 
 Paper body (truncated):
 {paper_text}

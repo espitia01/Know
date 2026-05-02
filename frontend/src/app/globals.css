@@ -710,6 +710,7 @@
   line-height: 1.55;
 }
 .analysis-content p:has(.katex-display) { text-align: center; }
+.analysis-content li:has(.katex-display) { text-align: center; }
 .analysis-content ul, .analysis-content ol {
   margin-bottom: 0.4em;
   padding-left: 1.2em;
