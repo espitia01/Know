@@ -163,7 +163,9 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
                 ) : (
                   <>
                     <div className="text-[var(--text-md)] leading-relaxed [&_.analysis-content]:text-[var(--text-md)]">
-                      <Md className="analysis-content note-markdown-preview">{note.text}</Md>
+                      <Md className="analysis-content note-markdown-preview" latexMode="note">
+                        {note.text}
+                      </Md>
                     </div>
                     <div className="mt-1.5 flex items-center justify-between">
                       <span className="font-mono text-[0.7rem] font-light tabular-nums text-muted-foreground/70">

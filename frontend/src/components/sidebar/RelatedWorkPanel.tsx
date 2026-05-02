@@ -8,6 +8,7 @@ import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
 import { scholarSearchHrefFromPriorWork } from "@/lib/priorWorkLinks";
+import { normalizeBibliographyCitationLine } from "@/lib/formatBibliography";
 
 interface RelatedWorkPanelProps {
   paperId: string;
@@ -20,13 +21,14 @@ const RELATED_TAB_INTRO =
 /** One bibliography line: hyperlink wraps the verbatim excerpt; Scholar searches that text. */
 function VerbatimCitationLink({ work }: { work: PriorWork }) {
   const scholarHref = scholarSearchHrefFromPriorWork(work);
-  const display =
+  const raw =
     (typeof work.citation_display === "string" && work.citation_display.trim()) ||
     work.title.trim() ||
     "Reference";
+  const display = normalizeBibliographyCitationLine(raw);
 
   const cls =
-    "related-citation-display block whitespace-pre-wrap text-[var(--text-sm)] leading-[1.55] underline-offset-[3px]";
+    "related-citation-display block text-[var(--text-sm)] leading-relaxed underline-offset-[3px] text-pretty hyphens-auto [overflow-wrap:anywhere]";
 
   return scholarHref ? (
     <a
@@ -148,9 +150,9 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
                   <Md>{sec.summary!}</Md>
                 </div>
               ) : null}
-              <ul className="flex flex-col gap-3">
+              <ul className="flex flex-col gap-4">
                 {(sec.items || []).map((p, pi) => (
-                  <li key={`${p.bib_label ?? p.title}-${si}-${pi}`} className="flex gap-3">
+                  <li key={`${p.bib_label ?? p.title}-${si}-${pi}`} className="flex gap-3.5 items-start">
                     <span
                       className="mt-0.5 flex h-6 min-w-[1.5rem] shrink-0 items-center justify-center rounded-md bg-muted/85 text-[10px] font-semibold tabular-nums leading-none text-muted-foreground shadow-[inset_0_1px_0_rgb(255_255_255/8%)]"
                       aria-hidden
@@ -167,9 +169,9 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
           ))}
         </div>
       ) : (
-        <ul className="flex flex-col gap-3">
+        <ul className="flex flex-col gap-4">
           {priorList.map((p, i) => (
-            <li key={`${p.bib_label ?? p.title}-${i}`} className="flex gap-3">
+            <li key={`${p.bib_label ?? p.title}-${i}`} className="flex gap-3.5 items-start">
               <span
                 className="mt-0.5 flex h-6 min-w-[1.5rem] shrink-0 items-center justify-center rounded-md bg-muted/85 text-[10px] font-semibold tabular-nums leading-none text-muted-foreground shadow-[inset_0_1px_0_rgb(255_255_255/8%)]"
                 aria-hidden

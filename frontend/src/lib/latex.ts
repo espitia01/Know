@@ -7,6 +7,35 @@
  * 4. Bare LaTeX commands/expressions not inside $ → wrapped in $ or $$.
  */
 
+/** Note authoring: `$$$$…$$$$` = display (block), `$$…$$` = inline. Maps to remark-math (`$$` / `$`). */
+export function remapNoteMathDelimiters(raw: string): string {
+  const displays: string[] = [];
+  let s = raw.replace(/\$\$\$\$([\s\S]*?)\$\$\$\$/g, (_m, body: string) => {
+    displays.push(String(body).trim());
+    return `\0NM_D${displays.length - 1}\0`;
+  });
+  const inlines: string[] = [];
+  s = s.replace(/\$\$([\s\S]*?)\$\$/g, (_m, body: string) => {
+    inlines.push(String(body).trim());
+    return `\0NM_I${inlines.length - 1}\0`;
+  });
+  for (let i = 0; i < displays.length; i++) {
+    s = s.replace(`\0NM_D${i}\0`, `\n$$\n${displays[i]}\n$$\n`);
+  }
+  for (let i = 0; i < inlines.length; i++) {
+    s = s.replace(`\0NM_I${i}\0`, `$${inlines[i]}$`);
+  }
+  return s;
+}
+
+export type PreprocessLatexOpts = {
+  /**
+   * Notes: remap `$$$$`→display / `$$`→inline first, and skip heuristics that
+   * promote inline `$…$` into display blocks (would fight author intent).
+   */
+  noteMode?: boolean;
+};
+
 const MATH_REGION =
   /(\$\$[\s\S]*?\$\$|\$(?!\$)(?:\\.|[^$])*?\$)/g;
 
@@ -469,11 +498,15 @@ function normalizeTextCommandsInMathRegions(s: string): string {
   return out.join("");
 }
 
-export function preprocessLatex(text: string): string {
+export function preprocessLatex(text: string, opts?: PreprocessLatexOpts): string {
   if (!text) return text;
+  const noteMode = Boolean(opts?.noteMode);
 
   let s = normalizeUnicodeMath(text);
   s = unicodeCapGreekToLatex(s);
+  if (noteMode) {
+    s = remapNoteMathDelimiters(s);
+  }
   s = stripOrphanEquationIndexLine(s);
   s = softenLeadingPipeBeforeMath(s);
   s = collapseBrokenDisplayMath(s);
@@ -481,7 +514,9 @@ export function preprocessLatex(text: string): string {
   s = repairBracketDollarSubscripts(s);
   s = repairSubscriptEmbeddedDollars(s);
   s = repairAngstromSuperscriptOutsideMath(s);
-  s = promoteHeavyInlineMathToDisplay(s);
+  if (!noteMode) {
+    s = promoteHeavyInlineMathToDisplay(s);
+  }
 
   s = s.replace(/\\\(/g, "$").replace(/\\\)/g, "$");
   s = s.replace(/\\\[/g, "\n$$\n").replace(/\\\]/g, "\n$$\n");
@@ -499,8 +534,8 @@ export function preprocessLatex(text: string): string {
     },
   );
 
-  s = s.replace(/(?<!\n)\$\$(?!\$)/g, '\n$$');
-  s = s.replace(/\$\$(?!\n)/g, '$$\n');
+  s = s.replace(/(?<!\n)\$\$(?!\$)/g, "\n$$");
+  s = s.replace(/\$\$(?!\n)/g, "$$\n");
 
   const parts: string[] = [];
   let lastIndex = 0;
@@ -519,7 +554,9 @@ export function preprocessLatex(text: string): string {
   }
 
   let result = parts.join("");
-  result = wrapLikelyDisplayEquations(result);
+  if (!noteMode) {
+    result = wrapLikelyDisplayEquations(result);
+  }
   result = result.replace(/\n{3,}/g, "\n\n");
   result = normalizeTextCommandsInMathRegions(result);
 

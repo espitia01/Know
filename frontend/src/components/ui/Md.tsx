@@ -6,10 +6,16 @@ import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
 import rehypeKatex from "rehype-katex";
 import { preprocessLatex } from "@/lib/latex";
+import { rehypeKatexEquationCards } from "@/lib/rehypeKatexEquationCard";
 
 interface MdProps {
   children: string;
   className?: string;
+  /**
+   * `note` remaps `$$$$`→display and `$$`→inline, and skips aggressive
+   * display promotion heuristics used for LLM analysis text.
+   */
+  latexMode?: "analysis" | "note";
 }
 
 // Allow only schemes safe to render in-app. In particular, block
@@ -36,11 +42,14 @@ function sanitizeHref(raw: string | undefined): string {
   return "#";
 }
 
-export const Md = memo(function Md({ children, className }: MdProps) {
+export const Md = memo(function Md({ children, className, latexMode = "analysis" }: MdProps) {
   // Per audit §6.2: preprocessing was running on every parent
   // re-render (notably every streamed summary chunk). Memoizing on
   // `children` avoids thousands of repeated regex passes.
-  const processed = useMemo(() => preprocessLatex(children), [children]);
+  const processed = useMemo(
+    () => preprocessLatex(children, { noteMode: latexMode === "note" }),
+    [children, latexMode],
+  );
 
   const katexOptions = useMemo(
     () => ({
@@ -57,7 +66,7 @@ export const Md = memo(function Md({ children, className }: MdProps) {
       <ReactMarkdown
         // Parse math before GFM so underscores inside $…$ are not eaten as emphasis.
         remarkPlugins={[remarkMath, remarkGfm]}
-        rehypePlugins={[[rehypeKatex, katexOptions]]}
+        rehypePlugins={[[rehypeKatex, katexOptions], rehypeKatexEquationCards]}
         components={{
           a: ({ href, children: linkChildren }) => (
             <a

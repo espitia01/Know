@@ -405,22 +405,37 @@
   margin: 1.2em 0;
 }
 .paper-content .katex-display {
-  margin: 1.25em auto;
-  padding: 0.55rem 0.85rem;
+  margin: 1.05em auto;
+  padding: 0;
   overflow-x: auto;
   overflow-y: visible;
   text-align: center;
   display: block;
   width: fit-content;
   max-width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.dark .paper-content .katex-display {
+  background: transparent;
+}
+
+.paper-content span.katex-display.know-eq-card {
+  margin: 1.2em auto;
+  padding: 0.52rem 0.85rem;
   background: color-mix(in oklab, var(--muted) 88%, transparent);
   border: 1px solid color-mix(in oklab, var(--border-strong) 58%, transparent);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-xs);
 }
-.dark .paper-content .katex-display {
+
+.dark .paper-content span.katex-display.know-eq-card {
   background: color-mix(in oklab, var(--muted) 52%, transparent);
 }
+
 .paper-content .katex-display > .katex {
   margin-left: auto;
   margin-right: auto;
@@ -647,8 +662,8 @@
 }
 
 .analysis-content .katex-display {
-  margin: 0.95em auto;
-  padding: 0.65rem 0.95rem;
+  margin: 0.85em auto;
+  padding: 0;
   overflow-x: auto;
   overflow-y: visible;
   text-align: center;
@@ -656,13 +671,28 @@
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.dark .analysis-content .katex-display {
+  background: transparent;
+  border-color: transparent;
+}
+
+/* Centered inset card only when the formula includes a relational sign (=, ≈, …) */
+.analysis-content span.katex-display.know-eq-card {
+  margin: 1em auto;
+  padding: 0.62rem 0.92rem;
   background: color-mix(in oklab, var(--muted) 88%, transparent);
   border: 1px solid color-mix(in oklab, var(--border-strong) 70%, transparent);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-xs);
 }
 
-.dark .analysis-content .katex-display {
+.dark .analysis-content span.katex-display.know-eq-card {
   background: color-mix(in oklab, var(--muted) 55%, transparent);
   border-color: color-mix(in oklab, var(--border-strong) 50%, transparent);
 }
