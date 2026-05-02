@@ -295,7 +295,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       onValueChange={setActiveTab}
       className="analysis-panel-tabs flex h-full flex-col"
     >
-      <div className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-border/50 bg-muted/10 px-3 dark:bg-muted/[0.06]">
+      <div className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-border/55 bg-transparent px-3">
         {/* min-w-0 + overflow-x-auto: side panels stay narrow; tab row scrolls
             horizontally. Tab triggers must stay flex-none (see TAB_STYLE) or
             labels collapse. Light scrollbar so the strip is discoverable. */}

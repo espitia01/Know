@@ -31,6 +31,8 @@ import {
   autoAnalyzedPapers,
 } from "@/lib/analysisState";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
+import { recordPaperOpened } from "@/lib/recentPapers";
+import { cn } from "@/lib/utils";
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
@@ -62,7 +64,7 @@ function mergeCachedAnalysis(current: ParsedPaper, previous?: ParsedPaper): Pars
   // Per F-HYDRATION: a background Supabase rebuild can be slimmer than the
   // session cache. Preserve already-populated artifacts instead of flipping
   // the pane back to empty states on paper switch/refetch.
-  for (const key of ["pre_reading", "summary", "selections", "qa_sessions"] as const) {
+  for (const key of ["pre_reading", "summary", "selections", "qa_sessions", "figure_analyses"] as const) {
     const incomingValue = incoming[key];
     const priorValue = prior[key];
     const incomingEmpty = Array.isArray(incomingValue)
@@ -568,9 +570,20 @@ function PaperContent() {
   const initialLoadDone = useRef(false);
 
   useEffect(() => {
+    if (typeof document !== "undefined" && document.fullscreenElement) {
+      setFocusMode(true);
+    }
+  }, [activePaperId, setFocusMode]);
+
+  useEffect(() => {
+    if (paper?.id && paper.id === activePaperId) {
+      recordPaperOpened(paper.id);
+    }
+  }, [paper?.id, activePaperId]);
+
+  useEffect(() => {
     if (paperId !== activePaperId) {
       sseAbortRef.current?.abort();
-      hydratedForRef.current = null;
       resetAnalysisState();
       // If a background fetch for the incoming paper is still in flight,
       // re-show its loading state so the UI doesn't flash "Analyze Paper".
@@ -774,43 +787,89 @@ function PaperContent() {
   const loadedPaperCache = paper?.cached_analysis;
   const loadedPaperNotes = paper?.notes;
 
-  const hydratedForRef = useRef<string | null>(null);
+  // Rehydrate whenever the merged server cache meaningfully updates.
+  // A one-shot ref-based guard missed second-pass `getPaper` payloads
+  // (dashboard → reopen) and left the analysis slices empty until refresh.
+  const cacheHydrateSig = useMemo(() => {
+    const c = loadedPaperCache;
+    const n = loadedPaperNotes;
+    if (!loadedPaperId || loadedPaperId !== activePaperId) return "";
+    const qaItemCount =
+      Array.isArray(c?.qa_sessions)
+        ? (c!.qa_sessions as { items?: { question: string; answer: string }[] }[]).reduce(
+            (acc, s) => acc + (s.items?.length ?? 0),
+            0,
+          )
+        : 0;
+    const figCount = Array.isArray(c?.figure_analyses) ? c!.figure_analyses!.length : 0;
+    let summaryBytes = 0;
+    let preReadBytes = 0;
+    if (c?.summary != null && typeof c.summary === "object") {
+      try {
+        summaryBytes = JSON.stringify(c.summary).length;
+      } catch {
+        summaryBytes = 1;
+      }
+    }
+    if (c?.pre_reading != null && typeof c.pre_reading === "object") {
+      try {
+        preReadBytes = JSON.stringify(c.pre_reading).length;
+      } catch {
+        preReadBytes = 1;
+      }
+    }
+    return [
+      loadedPaperId,
+      preReadBytes,
+      summaryBytes,
+      c?.selections?.length ?? 0,
+      c?.qa_sessions?.length ?? 0,
+      qaItemCount,
+      c?.assumptions?.assumptions?.length ?? 0,
+      figCount,
+      n?.length ?? 0,
+    ].join("|");
+  }, [loadedPaperId, activePaperId, loadedPaperCache, loadedPaperNotes]);
+
   const hydrateFromCachedAnalysis = useCallback((cache: NonNullable<typeof paper>["cached_analysis"], notes: NonNullable<typeof paper>["notes"]) => {
+    const snap = useStore.getState();
     // Per audit §11.3: server hydration must be additive for selections.
     // Replacing the live list can erase in-flight follow-ups that have not
     // been flushed to cached_analysis yet.
     if (notes) setNotes(notes);
 
     if (Array.isArray(cache.selections)) {
-      const store = useStore.getState();
       const serverSelections = cache.selections as SelectionAnalysisResult[];
       const serverNewestFirst = [...serverSelections].reverse();
-      const liveKeys = new Set(store.selectionHistory.map(selectionKey));
+      const liveKeys = new Set(snap.selectionHistory.map(selectionKey));
       const additions = serverNewestFirst.filter((s) => !liveKeys.has(selectionKey(s)));
-      const merged = additions.length > 0
-        ? [...store.selectionHistory, ...additions].slice(0, 50)
-        : store.selectionHistory;
+      const merged =
+        additions.length > 0
+          ? [...snap.selectionHistory, ...additions].slice(0, 50)
+          : snap.selectionHistory;
       if (additions.length > 0) {
         useStore.setState({ selectionHistory: merged });
       }
-      if (!store.selectionResult && !store.selectionLoading && merged.length > 0) {
-        useStore.setState({ selectionResult: merged[0] });
+      const after = additions.length > 0 ? merged : snap.selectionHistory;
+      if (!snap.selectionResult && !snap.selectionLoading && after.length > 0) {
+        useStore.setState({ selectionResult: after[0] });
       }
     }
 
-    if (cache.summary) setSummary(cache.summary);
+    if (cache.summary && !snap.summaryLoading) {
+      setSummary(cache.summary);
+    }
 
     if (cache.qa_sessions && cache.qa_sessions.length > 0) {
       const allItems = cache.qa_sessions.flatMap(
-        (session: { items?: { question: string; answer: string }[] }) => session.items || []
+        (session: { items?: { question: string; answer: string }[] }) => session.items || [],
       );
-      const liveCount = useStore.getState().qaResults.length;
-      if (allItems.length >= liveCount) {
-        useStore.getState().setQAResults(allItems);
-      }
+      useStore.getState().setQAResults(allItems);
     }
 
-    if (cache.pre_reading) setPreReading(cache.pre_reading);
+    if (cache.pre_reading && !snap.preReadingLoading) {
+      setPreReading(cache.pre_reading);
+    }
 
     const serverAssumptions = Array.isArray(cache.assumptions?.assumptions)
       ? cache.assumptions.assumptions
@@ -820,15 +879,18 @@ function PaperContent() {
     }
   }, [setAssumptions, setNotes, setPreReading, setSummary]);
 
-  // Hydrate display-only artifacts once per paper id. Auto-analysis lives
-  // in the separate tier-aware effect below so usage/tier refreshes no longer
-  // re-run the full hydration pass and clobber live selection threads.
   useEffect(() => {
     if (!loadedPaperId || loadedPaperId !== activePaperId) return;
-    if (hydratedForRef.current === loadedPaperId) return;
-    hydratedForRef.current = loadedPaperId;
+    if (!cacheHydrateSig) return;
     hydrateFromCachedAnalysis(loadedPaperCache || {}, loadedPaperNotes || []);
-  }, [loadedPaperId, activePaperId, loadedPaperCache, loadedPaperNotes, hydrateFromCachedAnalysis]);
+  }, [loadedPaperId, activePaperId, cacheHydrateSig, loadedPaperCache, loadedPaperNotes, hydrateFromCachedAnalysis]);
+
+  // Clearing auto-analyze guards on every paper mount lets dashboard → reopen
+  // retry a failed Prepare pass (`paperId === activePaperId` skips the guard
+  // in the URL effect above). Duplicate work is still blocked by `hasActiveRequest`.
+  useEffect(() => {
+    allowAutoAnalyzeRetry(activePaperId);
+  }, [activePaperId]);
 
   useEffect(() => {
     if (!loadedPaperId || loadedPaperId !== activePaperId || tierLoading) return;
@@ -836,12 +898,17 @@ function PaperContent() {
     const pid = activePaperId;
     const cache = loadedPaperCache || {};
     const sessionCache = useStore.getState().papersById[pid]?.cached_analysis || {};
+    const storeSnap = useStore.getState();
     const cooldownUntil = Math.max(
       Number(cache.assumptions_cooldown_until || 0),
       Number(sessionCache.assumptions_cooldown_until || 0),
     );
     const assumptionsCoolingDown = cooldownUntil > Date.now() / 1000;
-    const hasPreReading = !!(cache.pre_reading || sessionCache.pre_reading);
+    const hasPreReading = !!(
+      cache.pre_reading ||
+      sessionCache.pre_reading ||
+      storeSnap.preReading
+    );
 
     if (
       !hasPreReading &&
@@ -875,7 +942,8 @@ function PaperContent() {
       : null;
     const hasUsableAssumptions = !!(
       (serverAssumptions && serverAssumptions.length > 0) ||
-      (sessionAssumptions && sessionAssumptions.length > 0)
+      (sessionAssumptions && sessionAssumptions.length > 0) ||
+      storeSnap.assumptions.length > 0
     );
     if (
       !hasUsableAssumptions &&
@@ -909,8 +977,6 @@ function PaperContent() {
     sseAbortRef.current?.abort();
     setSelection(null);
     setSelectionResult(null);
-    hydratedForRef.current = null;
-
     resetAnalysisState();
     if (hasActiveRequest(id, "preReading")) setPreReadingLoading(true);
     if (hasActiveRequest(id, "assumptions")) setAssumptionsLoading(true);
@@ -1146,10 +1212,16 @@ function PaperContent() {
       setPanelVisible(true);
       setActiveTab("notes");
       try {
-        const note = await api.addNote(startedFor, text, "PDF Selection");
-        if (stillOnStartedPaper()) {
-          useStore.getState().addNote(note);
-        }
+        const note = await api.addNote(startedFor, text, "PDF Selection", true);
+        if (!stillOnStartedPaper()) return;
+        useStore.getState().addNote(note);
+        upsertSelectionInHistory({
+          action: "note",
+          selected_text: text,
+          explanation: note.text,
+          streaming: false,
+          clientKey: note.id,
+        });
       } catch (e) {
         console.error("Failed to save note:", e);
       }
@@ -1847,7 +1919,14 @@ function PaperContent() {
           // its overlays. Without this, figures and equations in the
           // reader column could be painted *over* the pane in focus
           // mode, which looked like a rendering bug.
-          className={`shrink-0 relative z-20 overflow-hidden bg-background ${isBottom ? "" : "border-l border-r border-t border-border"}`}
+          className={cn(
+            "shrink-0 relative z-20 overflow-hidden",
+            isBottom && "bg-background rounded-t-xl",
+            !isBottom && chromeHidden && "border-l border-r border-t border-border bg-background",
+            !isBottom && !chromeHidden && "know-reader-analysis-shell",
+            !isBottom && !chromeHidden && panelPos === "right" && "know-reader-analysis-shell-right",
+            !isBottom && !chromeHidden && panelPos === "left" && "know-reader-analysis-shell-left",
+          )}
           style={{
             ...(isBottom ? { height: panelSize } : { width: panelSize }),
             order: panelPos === "left" ? 1 : 3,

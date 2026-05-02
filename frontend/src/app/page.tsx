@@ -375,7 +375,12 @@ export default function LandingPage() {
                 WebkitMaskImage: "linear-gradient(to right, transparent, black 10%, black 90%, transparent)",
               }}
             >
-              <div className="landing-trust-marquee-track flex w-max items-center gap-12 py-2 sm:gap-14">
+              <div
+                className={cn(
+                  "landing-trust-marquee-track flex w-max items-center gap-12 py-2 sm:gap-14",
+                  trust.visible && "landing-trust-marquee-track--running",
+                )}
+              >
                 {[...TRUST_LOGOS, ...TRUST_LOGOS].map(({ name, file, className }, i) => (
                   <Image
                     key={`${file}-${i}`}
@@ -386,8 +391,9 @@ export default function LandingPage() {
                     unoptimized
                     className={cn(
                       className,
-                      "shrink-0 opacity-[0.5] grayscale contrast-90",
-                      "transition-opacity duration-500 hover:opacity-[0.72]"
+                      "shrink-0 opacity-[0.58] grayscale contrast-95",
+                      "dark:opacity-[0.82] dark:brightness-110 dark:contrast-90",
+                      "transition-opacity duration-500 hover:opacity-[0.78] dark:hover:opacity-[0.9]"
                     )}
                     loading="lazy"
                     decoding="async"

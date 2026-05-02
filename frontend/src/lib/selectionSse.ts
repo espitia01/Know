@@ -17,9 +17,23 @@ export async function consumeSelectionSse(
   let accumulated = "";
   let buffer = "";
   let finished = false;
+  /** Coalesce ultra-frequent SSE chunk events → one UI update per frame (avoids main-thread stalls). */
+  let chunkRaf: number | null = null;
+
+  const cancelChunkRaf = () => {
+    if (chunkRaf != null && typeof window !== "undefined") {
+      window.cancelAnimationFrame(chunkRaf);
+      chunkRaf = null;
+    }
+  };
+
+  const emitAccumulatedChunk = () => {
+    handlers.onChunk(accumulated);
+  };
 
   while (true) {
     if (signal?.aborted) {
+      cancelChunkRaf();
       await reader.cancel();
       break;
     }
@@ -41,13 +55,24 @@ export async function consumeSelectionSse(
         };
         if (event.type === "chunk" && typeof event.text === "string") {
           accumulated += event.text;
-          handlers.onChunk(accumulated);
+          if (typeof window === "undefined") {
+            emitAccumulatedChunk();
+          } else if (chunkRaf == null) {
+            chunkRaf = window.requestAnimationFrame(() => {
+              chunkRaf = null;
+              emitAccumulatedChunk();
+            });
+          }
         } else if (event.type === "done") {
           finished = true;
+          cancelChunkRaf();
+          emitAccumulatedChunk();
           handlers.onDone(typeof event.full_text === "string" ? event.full_text : accumulated);
           return;
         } else if (event.type === "error") {
           finished = true;
+          cancelChunkRaf();
+          emitAccumulatedChunk();
           handlers.onError(typeof event.message === "string" ? event.message : "Unknown error");
           return;
         }
@@ -58,6 +83,8 @@ export async function consumeSelectionSse(
   }
 
   if (!finished && accumulated.length > 0) {
+    cancelChunkRaf();
+    emitAccumulatedChunk();
     handlers.onDone(accumulated);
   }
 }

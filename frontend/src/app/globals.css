@@ -563,7 +563,8 @@
 [data-action="assumptions"] { --highlight-rgb: 234 158 25;  /* amber  */ }
 [data-action="followup"]    { --highlight-rgb: 16  185 129; /* teal   */ }
 [data-action="question"]    { --highlight-rgb: 16  185 129; /* legacy alias of followup */ }
-[data-action="note"]        { --highlight-rgb: 71  85 105;  /* slate — saved PDF notes */ }
+/* Saved-note highlights: vivid enough on both light PDF and dark overlays */
+[data-action="note"]        { --highlight-rgb: 251 146 60; /* orange-400 */ }
 /* Selection toolbar tooltips — anchored below buttons so they don’t cover fresh selections. */
 .know-toolbar-btn { position: relative; }
 .know-toolbar-btn::after {
@@ -636,6 +637,10 @@
   font-size: 1.06em;
   overflow-x: auto;
   overflow-y: hidden;
+  max-width: 100%;
+}
+.analysis-content .katex-html {
+  max-width: 100%;
 }
 .analysis-content p {
   margin-bottom: 0.4em;
@@ -1075,6 +1080,71 @@ body::before {
   letter-spacing: -0.01em;
 }
 
+/*
+ * Flat, editor-style controls (no halo ring / glow): matches the quieter
+ * reader chrome instead of generic shadcn "search field" halo.
+ */
+.analysis-pane-v2 textarea,
+.analysis-pane-v2 input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="reset"]):not([type="hidden"]) {
+  box-shadow: none !important;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.analysis-pane-v2 textarea[data-slot="textarea"],
+.analysis-pane-v2 input[type="search"].know-non-credential-input {
+  background-color: color-mix(in oklch, var(--card) 88%, transparent);
+  border-color: color-mix(in oklch, var(--border) 94%, var(--muted-foreground));
+}
+
+.analysis-pane-v2 textarea[data-slot="textarea"]:focus,
+.analysis-pane-v2 textarea[data-slot="textarea"]:focus-visible,
+.analysis-pane-v2 input[type="search"].know-non-credential-input:focus,
+.analysis-pane-v2 input[type="search"].know-non-credential-input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  border-color: color-mix(in oklch, var(--foreground) 18%, var(--border-strong));
+  background-color: color-mix(in oklch, var(--card) 94%, transparent);
+  --tw-ring-width: 0px !important;
+  --tw-ring-offset-width: 0px !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+}
+
+/* Notes editor (@uiw/react-md-editor): kill default emerald/cyan focus glow */
+.analysis-pane-v2 .note-md-editor textarea,
+.analysis-pane-v2 .note-md-editor textarea:focus,
+.analysis-pane-v2 .note-md-editor textarea:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+  --tw-ring-width: 0px !important;
+  --tw-ring-shadow: 0 0 #0000 !important;
+  --tw-ring-offset-shadow: 0 0 #0000 !important;
+}
+
+.analysis-pane-v2 .note-md-editor textarea:focus,
+.analysis-pane-v2 .note-md-editor textarea:focus-visible {
+  border-color: color-mix(in oklch, var(--foreground) 14%, var(--border-strong)) !important;
+}
+
+.dark .analysis-pane-v2 textarea[data-slot="textarea"],
+.dark .analysis-pane-v2 input[type="search"].know-non-credential-input {
+  background-color: color-mix(in oklch, var(--card) 72%, transparent);
+}
+
+/* Reader shell: visually join the navbar + side analysis column (non-focus). */
+.know-reader-analysis-shell {
+  background: rgb(var(--surface-tint) / 0.82);
+  backdrop-filter: blur(24px) saturate(1.12);
+  -webkit-backdrop-filter: blur(24px) saturate(1.12);
+  border-top: none;
+}
+.know-reader-analysis-shell-right {
+  border-left: 1px solid rgb(var(--surface-line) / 0.07);
+}
+.know-reader-analysis-shell-left {
+  border-right: 1px solid rgb(var(--surface-line) / 0.07);
+}
+
 /* Notes row actions: show on row hover for fine pointers; always show on touch. */
 @media (hover: hover) and (pointer: fine) {
   .analysis-note-row .analysis-note-actions {
@@ -1089,10 +1159,10 @@ body::before {
 /* Landing: trust logos marquee — translate left → right (seamless loop with duplicated row). */
 @keyframes landing-trust-marquee-ltr {
   from {
-    transform: translateX(-50%);
+    transform: translate3d(-50%, 0, 0);
   }
   to {
-    transform: translateX(0);
+    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -1100,12 +1170,21 @@ body::before {
   display: flex;
   align-items: center;
   width: max-content;
+  transform: translate3d(-50%, 0, 0);
+  animation: none;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+.landing-trust-marquee-track--running {
   animation: landing-trust-marquee-ltr 52s linear infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .landing-trust-marquee-track {
+  .landing-trust-marquee-track--running {
     animation: none;
-    transform: translateX(0);
+  }
+  .landing-trust-marquee-track {
+    transform: translate3d(0, 0, 0);
   }
 }

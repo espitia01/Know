@@ -20,6 +20,26 @@ const rowListClass =
 const rowItemClass =
   "border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out hover:bg-accent/40";
 
+/** Strip redundant type labels often echoed by the model now that tabs split explicit vs implicit. */
+function assumptionStatementDisplay(statement: string, type: string): string {
+  let t = statement.trim();
+  /* Model sometimes emits `\dot Implicit` / `\. Implicit` scraps before prose. */
+  t = t.replace(/\\dot\s*\{?\s*Implicit\s*\}?\.?/gi, "").trim();
+  t = t.replace(/\\dot\s*\{?\s*Explicit\s*\}?\.?/gi, "").trim();
+  t = t.replace(/\\\.\s*[Ii]mplicit\b[\s.:)]*/gi, "").trim();
+  t = t.replace(/\\\.\s*[Ee]xplicit\b[\s.:)]*/gi, "").trim();
+  t = t.replace(/^[\s.,;:]*[Ii]mplicit\b\.?\s*[:.)-]?\s*/i, "").trim();
+  t = t.replace(/^[\s.,;:]*[Ee]xplicit\b\.?\s*[:.)-]?\s*/i, "").trim();
+  t = t.replace(/^(explicit|implicit)\s*assumption\s*:\s*/i, "").trim();
+  t = t.replace(/^(explicit|implicit)\s*:\s*/i, "").trim();
+  if (type === "implicit") {
+    t = t.replace(/^implicit\s+/i, "").trim();
+  } else if (type === "explicit") {
+    t = t.replace(/^explicit\s+/i, "").trim();
+  }
+  return t;
+}
+
 export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
   const { assumptions, setAssumptions, assumptionsLoading, setAssumptionsLoading, paper } = useStore();
   const currentPaperRef = useRef(paperId);
@@ -108,7 +128,7 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
             {explicit.map((a, i) => (
               <div key={i} className={rowItemClass}>
                 <div className="text-[var(--text-md)] leading-relaxed">
-                  <Md>{a.statement}</Md>
+                  <Md>{assumptionStatementDisplay(a.statement, a.type)}</Md>
                 </div>
                 {a.section && (
                   <Badge variant="soft" className="mt-2">
@@ -127,13 +147,8 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
           <div className={rowListClass}>
             {implicit.map((a, i) => (
               <div key={i} className={rowItemClass}>
-                <div className="mb-1.5">
-                  <Badge variant="dot" className="font-medium normal-case">
-                    Implicit
-                  </Badge>
-                </div>
                 <div className="text-[var(--text-md)] leading-relaxed">
-                  <Md>{a.statement}</Md>
+                  <Md>{assumptionStatementDisplay(a.statement, a.type)}</Md>
                 </div>
                 {a.section && (
                   <Badge variant="soft" className="mt-2">

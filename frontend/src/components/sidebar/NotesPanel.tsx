@@ -1,10 +1,12 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import { Textarea } from "@/components/ui/textarea";
+import { Md } from "@/components/ui/Md";
 import { SectionHeader } from "@/components/panel/SectionHeader";
+import { NoteMarkdownEditor } from "@/components/notes/NoteMarkdownEditor";
+import { normalizeSelectionAction } from "@/lib/selectionActions";
 
 interface NotesPanelProps {
   paperId: string;
@@ -18,6 +20,20 @@ function formatNoteDate(ts: number) {
     return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(d);
   }
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(d);
+}
+
+function stripPdfHistoryForNote(noteId: string) {
+  useStore.setState((s) => ({
+    selectionHistory: s.selectionHistory.filter(
+      (h) => !(normalizeSelectionAction(h.action) === "note" && h.clientKey === noteId),
+    ),
+    selectionResult:
+      s.selectionResult &&
+      normalizeSelectionAction(s.selectionResult.action) === "note" &&
+      s.selectionResult.clientKey === noteId
+        ? null
+        : s.selectionResult,
+  }));
 }
 
 export function NotesPanel({ paperId }: NotesPanelProps) {
@@ -37,7 +53,7 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
     setSaving(true);
     setError(null);
     try {
-      const note = await api.addNote(targetId, text);
+      const note = await api.addNote(targetId, text, "", false);
       if (currentPaperRef.current === targetId) {
         addNote(note);
         setInput("");
@@ -52,14 +68,24 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
   const handleUpdate = async (noteId: string) => {
     const text = editText.trim();
     if (!text) return;
-    // Optimistic update: reflect the edit immediately and roll back if the
-    // request fails. Previously the UI waited on the network round-trip
-    // before closing the editor, which felt laggy on slow connections.
     const prev = useStore.getState().notes;
     updateNote(noteId, text);
     setEditing(null);
     try {
       await api.updateNote(paperId, noteId, text);
+      useStore.setState((s) => ({
+        selectionHistory: s.selectionHistory.map((h) =>
+          normalizeSelectionAction(h.action) === "note" && h.clientKey === noteId
+            ? { ...h, explanation: text }
+            : h,
+        ),
+        selectionResult:
+          s.selectionResult &&
+          normalizeSelectionAction(s.selectionResult.action) === "note" &&
+          s.selectionResult.clientKey === noteId
+            ? { ...s.selectionResult, explanation: text }
+            : s.selectionResult,
+      }));
     } catch (e) {
       setNotes(prev);
       setError(e instanceof Error ? e.message : "Failed to update note.");
@@ -69,6 +95,7 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
   const handleDelete = async (noteId: string) => {
     const prev = useStore.getState().notes;
     removeNote(noteId);
+    stripPdfHistoryForNote(noteId);
     try {
       await api.deleteNote(paperId, noteId);
     } catch (e) {
@@ -80,23 +107,16 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
   return (
     <div className="space-y-3">
       <div className="space-y-2">
-        <Textarea
-          placeholder="Write a thought, annotation, or note..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); handleAdd(); }
-          }}
-          rows={2}
-          className="text-[var(--text-md)] resize-none"
-        />
-        <div className="flex items-center justify-between">
-          <p className="text-[var(--text-xs)] text-muted-foreground/80">Ctrl+Enter to save</p>
+        <NoteMarkdownEditor value={input} onChange={setInput} minHeight={180} />
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[var(--text-xs)] text-muted-foreground/80 shrink-0">
+            Markdown + LaTeX · save from toolbar
+          </p>
           <button
             type="button"
             onClick={handleAdd}
             disabled={!input.trim() || saving}
-            className="btn-primary-glass h-9 rounded-lg px-4 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+            className="btn-primary-glass h-9 rounded-lg px-4 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40 shrink-0"
           >
             {saving ? "Saving…" : "Save Note"}
           </button>
@@ -117,11 +137,10 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
               >
                 {editing === note.id ? (
                   <div className="space-y-2">
-                    <Textarea
+                    <NoteMarkdownEditor
                       value={editText}
-                      onChange={(e) => setEditText(e.target.value)}
-                      rows={2}
-                      className="text-[var(--text-md)] resize-none"
+                      onChange={setEditText}
+                      minHeight={220}
                       autoFocus
                     />
                     <div className="flex gap-2">
@@ -143,9 +162,9 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
                   </div>
                 ) : (
                   <>
-                    <p className="whitespace-pre-wrap text-[var(--text-md)] leading-relaxed">
-                      {note.text}
-                    </p>
+                    <div className="text-[var(--text-md)] leading-relaxed [&_.analysis-content]:text-[var(--text-md)]">
+                      <Md>{note.text}</Md>
+                    </div>
                     <div className="mt-1.5 flex items-center justify-between">
                       <span className="font-mono text-[0.7rem] font-light tabular-nums text-muted-foreground/70">
                         {formatNoteDate(note.created_at)}
@@ -153,7 +172,10 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
                       <div className="analysis-note-actions flex gap-2 opacity-100 motion-safe:transition-opacity">
                         <button
                           type="button"
-                          onClick={() => { setEditing(note.id); setEditText(note.text); }}
+                          onClick={() => {
+                            setEditing(note.id);
+                            setEditText(note.text);
+                          }}
                           className="text-[var(--text-xs)] font-medium text-muted-foreground hover:text-foreground focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                         >
                           Edit

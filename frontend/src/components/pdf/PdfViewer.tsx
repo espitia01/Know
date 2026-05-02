@@ -8,6 +8,11 @@ import { normalizeSelectionAction } from "@/lib/selectionActions";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 
+/** Stable key for double-tap detection on the same highlighted passage. */
+function highlightPointerKey(entry: SelectionAnalysisResult): string {
+  return `${normalizeSelectionAction(entry.action)}::${(entry.selected_text || "").slice(0, 240)}`;
+}
+
 // Bundle the PDF.js worker from node_modules via the URL constructor pattern
 // Next.js/Webpack understands. Previously we pulled it from unpkg.com on
 // every load, which (a) breaks the app if unpkg is down, (b) leaks the
@@ -218,15 +223,20 @@ export function PdfViewer({
     const controller = new AbortController();
     const timer = setTimeout(() => {
       const headers = getAuthHeadersSync();
-      fetch(url, { method: "HEAD", headers, signal: controller.signal })
-        .then((head) => {
-          const size = Number(head.headers.get("content-length") || 0);
-          if (head.ok && size > 25 * 1024 * 1024) return null;
-          // Per F-SPEED: only prefetch once the user settles in, and avoid
-          // caching huge PDFs that would consume memory/bandwidth.
-          return fetch(url, { headers, signal: controller.signal });
+      fetch(url, { headers, signal: controller.signal })
+        .then(async (res) => {
+          if (!res.ok) return null;
+          const size = Number(res.headers.get("content-length") || 0);
+          if (size > 25 * 1024 * 1024) {
+            try {
+              await res.body?.cancel();
+            } catch {
+              /* ignore */
+            }
+            return null;
+          }
+          return res.blob();
         })
-        .then((r) => (r && r.ok ? r.blob() : null))
         .then((blob) => {
           if (!blob || cancelled) return;
           const objUrl = URL.createObjectURL(blob);
@@ -683,8 +693,12 @@ export function PdfViewer({
         entry: SelectionAnalysisResult;
         rects: Array<{ x: number; y: number; w: number; h: number }>;
       }>;
-      __knowResolveHighlight?: (ev: MouseEvent) => SelectionAnalysisResult | null;
+      __knowResolveHighlight?: (
+        ev: Pick<PointerEvent | MouseEvent, "clientX" | "clientY">,
+      ) => SelectionAnalysisResult | null;
       __knowPendingOpenTimer?: ReturnType<typeof setTimeout> | null;
+      __knowPdKey?: string;
+      __knowPdTs?: number;
     };
     const hostEl = pageEl as KnowPageHost;
     hostEl.__knowHighlights = pageHits;
@@ -692,7 +706,7 @@ export function PdfViewer({
       hostEl.__knowClickAttached = true;
       hostEl.__knowPendingOpenTimer = null;
 
-      hostEl.__knowResolveHighlight = (ev: MouseEvent): SelectionAnalysisResult | null => {
+      hostEl.__knowResolveHighlight = (ev): SelectionAnalysisResult | null => {
         const hits = hostEl.__knowHighlights;
         if (!hits || hits.length === 0) return null;
         const r = hostEl.getBoundingClientRect();
@@ -719,9 +733,53 @@ export function PdfViewer({
         if (paperId) {
           void api
             .deleteSelection(paperId, entry.selected_text ?? "", entry.action ?? "explain")
+            .then((res) => {
+              const ids = res.removed_note_ids;
+              if (!ids?.length) return;
+              for (const nid of ids) {
+                useStore.getState().removeNote(nid);
+              }
+            })
             .catch(() => {});
         }
       };
+
+      hostEl.addEventListener(
+        "pointerdown",
+        (ev: PointerEvent) => {
+          if (ev.pointerType !== "mouse" || ev.button !== 0) return;
+          const resolve = hostEl.__knowResolveHighlight;
+          if (!resolve) return;
+          const entry = resolve(ev);
+          if (!entry) {
+            hostEl.__knowPdKey = "";
+            return;
+          }
+          const key = highlightPointerKey(entry);
+          const now = performance.now();
+          if (
+            key === hostEl.__knowPdKey &&
+            typeof hostEl.__knowPdTs === "number" &&
+            now - hostEl.__knowPdTs < 450
+          ) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (hostEl.__knowPendingOpenTimer != null) {
+              clearTimeout(hostEl.__knowPendingOpenTimer);
+              hostEl.__knowPendingOpenTimer = null;
+            }
+            hostEl.__knowPdKey = "";
+            hostEl.__knowPdTs = undefined;
+            openSelectionDeletePopover(ev.clientX, ev.clientY, () => {
+              deleteHighlightEntry(entry);
+            });
+            return;
+          }
+          hostEl.__knowPdKey = key;
+          hostEl.__knowPdTs = now;
+        },
+        true,
+      );
 
       hostEl.addEventListener("click", (ev) => {
         const resolve = hostEl.__knowResolveHighlight;

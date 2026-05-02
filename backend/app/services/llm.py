@@ -518,6 +518,47 @@ Return JSON: ["question 1", "question 2", ...]
 # Selection-based analysis (triggered by highlighting text in the PDF)
 # ---------------------------------------------------------------------------
 
+async def polish_note_from_selection(
+    paper_text: str, selected_text: str, user_id: str | None = None,
+) -> str:
+    """Turn a PDF text-layer excerpt into concise markdown with valid LaTeX.
+
+    Used when the user saves a note from a highlight; the stored note text is
+    only this cleaned output (not the raw selection).
+    """
+    provider = get_fast_provider(user_id)
+    selected_text = _sanitize_user_text(selected_text, max_chars=10000)
+    paper_text = _sanitize_user_text(paper_text or "", max_chars=5000)
+
+    system = (
+        "You convert PDF text-layer excerpts into clear personal study notes.\n"
+        "Output markdown only — no preamble, no JSON, and do not wrap the entire answer in a markdown code fence.\n"
+        + LATEX_FORMAT_INSTRUCTIONS
+        + "\nThe excerpt may be mangled (split lines, wrong Unicode, missing math delimiters). "
+        "Use the paper context to infer correct equations and symbol names. "
+        "Keep the note compact (a few short paragraphs or bullets unless the excerpt truly needs more).\n"
+        "If the excerpt already includes valid Markdown (headings, bullets) or math with $...$ / $$...$$ delimiters, "
+        "preserve those delimiters and equations—only fix mangled line breaks or inconsistent math style; do not strip dollar signs.\n"
+    )
+
+    user = (
+        "Write the note as polished markdown + LaTeX.\n\n"
+        f'Excerpt from the PDF text layer:\n"""\n{selected_text}\n"""\n\n'
+        f'Nearby paper text for context:\n"""\n{paper_text[:5000]}\n"""'
+    )
+
+    raw = await provider.complete(system, user, max_tokens=4096)
+    cleaned = (raw or "").strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        if len(lines) >= 2 and lines[0].startswith("```"):
+            if lines[-1].strip() == "```":
+                cleaned = "\n".join(lines[1:-1]).strip()
+            else:
+                cleaned = "\n".join(lines[1:]).strip()
+    return cleaned[:10000]
+
+
 async def analyze_selection(paper_text: str, selected_text: str, action: str, user_id: str | None = None) -> dict:
     """Analyze a user-highlighted selection from the PDF using the fast provider."""
     provider = get_fast_provider(user_id)

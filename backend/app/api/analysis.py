@@ -230,22 +230,38 @@ async def delete_selection(
     if not selected_text:
         raise HTTPException(status_code=400, detail="selected_text is required")
 
+    holder: dict = {"ids": []}
+
     def _apply(p):
         items = p.cached_analysis.get("selections") or []
+        removed_ids = {
+            s.get("clientKey")
+            for s in items
+            if isinstance(s, dict)
+            and (s.get("selected_text") or "").strip() == selected_text
+            and (s.get("action") or "explain") == action
+            and isinstance(s.get("clientKey"), str)
+            and str(s.get("clientKey", "")).startswith("note_")
+        }
         p.cached_analysis["selections"] = [
-            s for s in items
+            s
+            for s in items
             if not (
                 isinstance(s, dict)
                 and (s.get("selected_text") or "").strip() == selected_text
                 and (s.get("action") or "explain") == action
             )
         ]
+        if removed_ids:
+            idset = {i for i in removed_ids if isinstance(i, str)}
+            p.notes = [n for n in p.notes if n.get("id") not in idset]
+        holder["ids"] = [i for i in removed_ids if isinstance(i, str)]
 
     try:
         mutate_paper(paper_id, user_id, _apply)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Paper not found")
-    return {"ok": True}
+    return {"ok": True, "removed_note_ids": holder["ids"]}
 
 
 @router.post("/{paper_id}/selection-stream")

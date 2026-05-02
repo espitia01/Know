@@ -455,11 +455,11 @@ export const api = {
       },
     ),
 
-  addNote: (id: string, text: string, section: string = "") =>
+  addNote: (id: string, text: string, section: string = "", refine = false) =>
     request<Note>(`/api/papers/${id}/notes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, section }),
+      body: JSON.stringify({ text, section, refine }),
     }),
 
   updateNote: (paperId: string, noteId: string, text: string) =>
@@ -487,7 +487,7 @@ export const api = {
     }),
 
   deleteSelection: (id: string, selectedText: string, action: string) =>
-    request<{ ok: boolean }>(`/api/papers/${id}/selection`, {
+    request<{ ok: boolean; removed_note_ids?: string[] }>(`/api/papers/${id}/selection`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ selected_text: selectedText, action }),

@@ -263,7 +263,7 @@ function FollowUpInput({ context, onSubmit }: { context: string; onSubmit: (q: s
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
         placeholder="Ask a follow-up question…"
         disabled={submitting}
-        className="know-non-credential-input min-h-9 flex-1 rounded-lg border border-border/65 bg-background/85 px-3 py-2 text-[var(--text-sm)] shadow-none placeholder:text-muted-foreground/55 focus:outline-none focus:ring-2 focus:ring-ring/30 disabled:opacity-50 dark:bg-card/28"
+        className="know-non-credential-input min-h-9 flex-1 rounded-[var(--radius-md)] border border-border/65 bg-muted/15 px-3 py-2 text-[var(--text-sm)] shadow-none placeholder:text-muted-foreground/50 focus-visible:outline-none disabled:opacity-50 dark:bg-muted/20"
       />
       <button
         type="button"

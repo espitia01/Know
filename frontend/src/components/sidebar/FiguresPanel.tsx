@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { api, type FigureInfo } from "@/lib/api";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { api, type FigureInfo, type FigureAnalysis, type ParsedPaper } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
@@ -14,6 +14,44 @@ interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   streaming?: boolean;
+}
+
+function chatsFromFigureAnalyses(analyses: FigureAnalysis[] | undefined): Record<string, ChatMessage[]> {
+  if (!analyses?.length) return {};
+  const out: Record<string, ChatMessage[]> = {};
+  for (const a of analyses) {
+    const fid = a.figure_id;
+    if (!out[fid]) out[fid] = [];
+    const q = (a.question || "").trim();
+    out[fid].push({ role: "user", text: q || "Analyze this figure" });
+    const body = ((a.description || a.answer) || "").trim();
+    out[fid].push({ role: "assistant", text: body });
+  }
+  return out;
+}
+
+function appendFigureAnalysisToCaches(paperId: string, entry: FigureAnalysis) {
+  const s = useStore.getState();
+  const bump = (p: ParsedPaper | null): ParsedPaper | null => {
+    if (!p || p.id !== paperId) return p;
+    const prev = p.cached_analysis?.figure_analyses ?? [];
+    return {
+      ...p,
+      cached_analysis: {
+        ...p.cached_analysis,
+        figure_analyses: [...prev, entry],
+      },
+    };
+  };
+  const cached = s.papersById[paperId];
+  if (cached) {
+    const n = bump(cached);
+    if (n) s.cachePaper(n);
+  }
+  if (s.paper?.id === paperId) {
+    const n = bump(s.paper);
+    if (n) s.setPaper(n);
+  }
 }
 
 function AuthImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
@@ -147,10 +185,23 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     if (prevPaperIdRef.current !== paperId) {
       abortRef.current?.abort();
       setSelected(null);
-      setConversations({});
       prevPaperIdRef.current = paperId;
     }
   }, [paperId]);
+
+  const figureAnalysesSig = useMemo(() => {
+    const list =
+      effectivePaper?.id === paperId ? effectivePaper.cached_analysis?.figure_analyses : undefined;
+    if (!list?.length) return "0";
+    const tail = list[list.length - 1];
+    return `${list.length}:${tail.figure_id}:${(tail.question || "").length}:${(tail.description || tail.answer || "").length}`;
+  }, [paperId, effectivePaper?.id, effectivePaper?.cached_analysis?.figure_analyses]);
+
+  useEffect(() => {
+    if (!paperId || effectivePaper?.id !== paperId) return;
+    const list = effectivePaper.cached_analysis?.figure_analyses;
+    setConversations(chatsFromFigureAnalyses(list));
+  }, [paperId, effectivePaper?.id, figureAnalysesSig, effectivePaper?.cached_analysis?.figure_analyses]);
 
   // Abort any in-flight figure stream when the panel unmounts so we don't
   // keep a dangling LLM request alive after navigation.
@@ -187,7 +238,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         setPaper(next);
       }
       setSelected(null);
-      setConversations({});
+      setConversations(chatsFromFigureAnalyses(next.cached_analysis?.figure_analyses));
     } catch (e) {
       console.error("Re-extraction failed:", e);
     } finally {
@@ -222,6 +273,30 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         const decoder = new TextDecoder();
         let accumulated = "";
         let buffer = "";
+        let chunkRaf: number | null = null;
+
+        const flushFigureChunk = () => {
+          chunkRaf = null;
+          const current = accumulated;
+          setConversations((prev) => {
+            const msgs = [...(prev[figId] || [])];
+            const lastIdx = msgs.length - 1;
+            if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
+              msgs[lastIdx] = { ...msgs[lastIdx], text: current };
+            }
+            return { ...prev, [figId]: msgs };
+          });
+        };
+
+        const scheduleFigureChunk = () => {
+          if (typeof window === "undefined") {
+            flushFigureChunk();
+            return;
+          }
+          if (chunkRaf == null) {
+            chunkRaf = window.requestAnimationFrame(flushFigureChunk);
+          }
+        };
 
         // Add a streaming assistant message
         setConversations((prev) => ({
@@ -244,17 +319,20 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               const event = JSON.parse(line.slice(6));
               if (event.type === "chunk") {
                 accumulated += event.text;
-                const current = accumulated;
-                setConversations((prev) => {
-                  const msgs = [...(prev[figId] || [])];
-                  const lastIdx = msgs.length - 1;
-                  if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
-                    msgs[lastIdx] = { ...msgs[lastIdx], text: current };
-                  }
-                  return { ...prev, [figId]: msgs };
-                });
+                scheduleFigureChunk();
               } else if (event.type === "done") {
+                if (chunkRaf != null && typeof window !== "undefined") {
+                  window.cancelAnimationFrame(chunkRaf);
+                  chunkRaf = null;
+                }
                 const final = event.full_text || accumulated;
+                appendFigureAnalysisToCaches(paperId, {
+                  figure_id: figId,
+                  question: q,
+                  description: final,
+                  key_observations: [],
+                  relation_to_paper: "",
+                });
                 setConversations((prev) => {
                   const msgs = [...(prev[figId] || [])];
                   const lastIdx = msgs.length - 1;
@@ -264,6 +342,10 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
                   return { ...prev, [figId]: msgs };
                 });
               } else if (event.type === "error") {
+                if (chunkRaf != null && typeof window !== "undefined") {
+                  window.cancelAnimationFrame(chunkRaf);
+                  chunkRaf = null;
+                }
                 setConversations((prev) => {
                   const msgs = [...(prev[figId] || [])];
                   const lastIdx = msgs.length - 1;
@@ -277,6 +359,15 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               // ignore malformed events
             }
           }
+        }
+
+        /* Stream ended without a terminal SSE event — flush partial text once. */
+        if (chunkRaf != null && typeof window !== "undefined") {
+          window.cancelAnimationFrame(chunkRaf);
+          chunkRaf = null;
+        }
+        if (accumulated.length > 0) {
+          flushFigureChunk();
         }
       } catch (e) {
         if (controller.signal.aborted) return;
@@ -376,7 +467,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           <button
             type="button"
             onClick={() => setLightboxFig(selected)}
-            className="block w-full cursor-zoom-in overflow-hidden rounded-lg border border-border/60 bg-card/20 transition-colors hover:bg-accent/40 focus:outline-none focus:ring-2 focus:ring-ring/40"
+            className="block w-full cursor-zoom-in overflow-hidden rounded-lg border border-border/60 bg-card/20 transition-colors hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             title="Click to expand"
             aria-label="Expand figure"
           >
@@ -467,7 +558,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               }}
               placeholder="Ask about this figure..."
               disabled={loading}
-              className="know-non-credential-input flex-1 text-[var(--text-sm)] px-3 py-2 rounded-xl border border-border glass-subtle placeholder:text-muted-foreground/40 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+              className="know-non-credential-input flex-1 text-[var(--text-sm)] min-h-[2.25rem] rounded-[var(--radius-md)] px-3 py-2 border border-border/80 bg-muted/15 placeholder:text-muted-foreground/45 focus-visible:outline-none shadow-none disabled:opacity-50 dark:bg-muted/20"
             />
             <button
               onClick={handleAsk}

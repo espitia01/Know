@@ -136,10 +136,36 @@ function repairAngstromSuperscriptOutsideMath(s: string): string {
   return s.replace(/\u00C5\s*\$\^\{-1\}\$/g, "$\\mathrm{\\AA}^{-1}$");
 }
 
+function repairSubscriptEmbeddedDollars(s: string): string {
+  return s.replace(/\]\s*_\{([^}]*)\}/g, (_full, inner: string) => {
+    if (!inner || typeof inner !== "string" || !inner.includes("$")) return _full;
+    const flat = inner
+      .replace(/\$\s*/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!flat) return _full;
+    return `]_{${flat}}`;
+  });
+}
+
+/** Lines like "|$\Gamma..." confuse GFM table parsing — drop a leading pipe before math. */
+function softenLeadingPipeBeforeMath(s: string): string {
+  return s.replace(/(^|\n)(\s*)\|(\s*\$)/g, "$1$2$3");
+}
+
+/** Orphan enumerated equation row prior to messy math (e.g. summary key_equations). */
+function stripOrphanEquationIndexLine(s: string): string {
+  return s.replace(/^\s*\d{1,2}\s*[\.)]\s*\n(?=\s*\|?\$)/gm, "");
+}
+
+
 function promoteHeavyInlineMathToDisplay(s: string): string {
   return s.replace(/\$(?!\$)((?:\\.|\$\$|[^$\n])+?)\$(?!\$)/g, (full, inner: string) => {
     const t = String(inner).trim();
     if (!t || /\n/.test(t)) return full;
+    const textUnit =
+      /^\\text(?:rm)?\{[^}]{0,48}\}(\s*\^(?:\{[^}]+\}|\w+))?$/i.test(t) && !/\\frac|\\sum|\\prod|\\left|\\right|\\int/.test(t);
+    if (textUnit && t.length < 100) return full;
     const heavy =
       /\\(?:left|right|frac|dfrac|sum|prod|mathcal|mathrm|Gamma|Omega|Xi|Theta|Sigma|Lambda|Pi)|\\text\s*\{/.test(
         t,
@@ -409,9 +435,12 @@ export function preprocessLatex(text: string): string {
 
   let s = normalizeUnicodeMath(text);
   s = unicodeCapGreekToLatex(s);
+  s = stripOrphanEquationIndexLine(s);
+  s = softenLeadingPipeBeforeMath(s);
   s = collapseBrokenDisplayMath(s);
   s = collapseUnicodeEquationLines(s);
   s = repairBracketDollarSubscripts(s);
+  s = repairSubscriptEmbeddedDollars(s);
   s = repairAngstromSuperscriptOutsideMath(s);
   s = promoteHeavyInlineMathToDisplay(s);
 

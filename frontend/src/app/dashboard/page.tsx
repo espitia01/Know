@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useState, useEffect } from "react";
+import { Suspense, useCallback, useState, useEffect, useMemo } from "react";
 import { useDropzone } from "react-dropzone";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
@@ -15,6 +15,7 @@ import { FeedbackModal } from "@/components/FeedbackModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { FullscreenToggle } from "@/components/FullscreenToggle";
 import { DISCORD_URL } from "@/lib/constants";
+import { getRecentPaperOpenOrder } from "@/lib/recentPapers";
 
 const STUDY_HEADLINES = [
   "Turn a hard PDF into real understanding.",
@@ -77,6 +78,15 @@ function DashboardContent() {
   const isMobile = useIsMobile();
 
   const studyHeadline = getStudyHeadline(clerkUser?.firstName);
+
+  const dashboardPapersOrdered = useMemo(() => {
+    const order = getRecentPaperOpenOrder();
+    const rank = (id: string) => {
+      const idx = order.indexOf(id);
+      return idx >= 0 ? idx : 10_000;
+    };
+    return [...papers].sort((a, b) => rank(a.id) - rank(b.id));
+  }, [papers]);
 
   useEffect(() => {
     api.listPapers()
@@ -326,7 +336,7 @@ function DashboardContent() {
             </div>
 
             <div className="rounded-2xl border border-border bg-card divide-y divide-border overflow-hidden">
-              {papers.slice(0, 3).map((p) => (
+              {dashboardPapersOrdered.slice(0, 3).map((p) => (
                 <button
                   key={p.id}
                   onClick={() => router.push(`/paper/${p.id}`)}

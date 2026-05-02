@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 import uuid
@@ -12,20 +13,30 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 from ..config import settings
 from ..models.schemas import ParsedPaper
 from ..services.pdf_parser import (
+    append_capped,
     extract_pdf,
     extract_figures,
     get_figure_path,
     get_paper,
     list_papers,
+    mutate_paper,
     save_paper,
     _forget_paper_lock,
 )
-from ..services.llm import extract_metadata
+from ..services.llm import extract_metadata, polish_note_from_selection
 from ..services import storage as cloud_storage
 from ..auth import require_auth
-from ..gating import check_paper_limit, check_feature_access, reserve_usage, release_usage
+from ..gating import (
+    check_paper_limit,
+    check_feature_access,
+    reserve_usage,
+    release_usage,
+    resolve_fast_model,
+)
 
 router = APIRouter(prefix="/api/papers", tags=["papers"])
+
+logger = logging.getLogger(__name__)
 
 _SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -323,16 +334,82 @@ async def add_note(paper_id: str, body: dict, user_id: str = Depends(require_aut
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
+    raw = body.get("text", "")
+    if not isinstance(raw, str):
+        raise HTTPException(status_code=400, detail="text must be a string")
+    trimmed = raw.strip()
+    if not trimmed:
+        raise HTTPException(status_code=400, detail="note text cannot be empty")
+
+    refine = bool(body.get("refine"))
     import time
-    note_text = body.get("text", "")[:10000]
+
+    token = None
+    if refine:
+        token = reserve_usage(
+            user_id, paper_id, "api_call", model=resolve_fast_model(user_id)
+        )
+        try:
+            note_text = await polish_note_from_selection(
+                paper.raw_text or "", trimmed, user_id=user_id
+            )
+            if not note_text.strip():
+                raise ValueError("empty polish result")
+        except ValueError as exc:
+            if token:
+                release_usage(token)
+            logger.warning("Note polish 503 for paper %s: %s", paper_id, exc)
+            raise HTTPException(
+                status_code=503, detail="Notes service temporarily unavailable."
+            ) from exc
+        except HTTPException:
+            if token:
+                release_usage(token)
+            raise
+        except Exception:
+            if token:
+                release_usage(token)
+            logger.exception("Note polish failed for paper %s", paper_id)
+            raise HTTPException(
+                status_code=500, detail="Failed to polish note."
+            ) from None
+    else:
+        note_text = trimmed[:10000]
+
+    note_id = f"note_{int(time.time() * 1000)}"
     note = {
-        "id": f"note_{int(time.time()*1000)}",
-        "text": note_text,
-        "section": body.get("section", "")[:500],
+        "id": note_id,
+        "text": note_text.strip()[:10000],
+        "section": (body.get("section") or "")[:500]
+        if isinstance(body.get("section"), str)
+        else "",
         "created_at": time.time(),
     }
-    paper.notes.append(note)
-    save_paper(paper, user_id=user_id)
+
+    entry = {
+        "action": "note",
+        "selected_text": trimmed[:10000],
+        "explanation": note["text"],
+        "streaming": False,
+        "clientKey": note_id,
+    }
+
+    def _apply(p):
+        p.notes.append(note)
+        if refine:
+            append_capped(p.cached_analysis, "selections", entry)
+
+    try:
+        mutate_paper(paper_id, user_id, _apply)
+    except FileNotFoundError:
+        if token:
+            release_usage(token)
+        raise HTTPException(status_code=404, detail="Paper not found") from None
+    except Exception:
+        if token:
+            release_usage(token)
+        raise
+
     return note
 
 
@@ -341,17 +418,44 @@ async def update_note(paper_id: str, note_id: str, body: dict, user_id: str = De
     check_feature_access(user_id, "notes")
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
-    paper = get_paper(paper_id, user_id=user_id)
-    if not paper:
+
+    raw_new = body.get("text")
+    if raw_new is not None and not isinstance(raw_new, str):
+        raise HTTPException(status_code=400, detail="text must be a string")
+
+    holder: dict = {}
+
+    def _apply_put(p):
+        for n in p.notes:
+            if n["id"] != note_id:
+                continue
+            if isinstance(raw_new, str):
+                n["text"] = raw_new.strip()[:10000]
+            items = p.cached_analysis.get("selections") or []
+            synced = []
+            for s in items:
+                if not isinstance(s, dict):
+                    synced.append(s)
+                    continue
+                if s.get("clientKey") == note_id and s.get("action") == "note":
+                    u = dict(s)
+                    u["explanation"] = n["text"]
+                    u["streaming"] = False
+                    synced.append(u)
+                    continue
+                synced.append(s)
+            p.cached_analysis["selections"] = synced
+            holder["note"] = dict(n)
+            return
+        return
+
+    try:
+        mutate_paper(paper_id, user_id, _apply_put)
+    except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Paper not found")
-
-    for n in paper.notes:
-        if n["id"] == note_id:
-            n["text"] = body.get("text", n["text"])[:10000]
-            save_paper(paper, user_id=user_id)
-            return n
-
-    raise HTTPException(status_code=404, detail="Note not found")
+    if "note" not in holder:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return holder["note"]
 
 
 @router.delete("/{paper_id}/notes/{note_id}")
@@ -359,12 +463,32 @@ async def delete_note(paper_id: str, note_id: str, user_id: str = Depends(requir
     check_feature_access(user_id, "notes")
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
-    paper = get_paper(paper_id, user_id=user_id)
-    if not paper:
-        raise HTTPException(status_code=404, detail="Paper not found")
 
-    paper.notes = [n for n in paper.notes if n["id"] != note_id]
-    save_paper(paper, user_id=user_id)
+    ok_holder: dict = {"ok": False}
+
+    def _apply_del(p):
+        before = len(p.notes)
+        p.notes = [n for n in p.notes if n["id"] != note_id]
+        if len(p.notes) == before:
+            return
+        items = p.cached_analysis.get("selections") or []
+        p.cached_analysis["selections"] = [
+            s
+            for s in items
+            if not (
+                isinstance(s, dict)
+                and s.get("clientKey") == note_id
+                and s.get("action") == "note"
+            )
+        ]
+        ok_holder["ok"] = True
+
+    try:
+        mutate_paper(paper_id, user_id, _apply_del)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    if not ok_holder["ok"]:
+        raise HTTPException(status_code=404, detail="Note not found")
     return {"status": "deleted"}
 
 
