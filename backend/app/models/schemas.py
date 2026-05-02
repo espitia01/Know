@@ -43,7 +43,18 @@ class PriorWork(BaseModel):
     title: str
     relevance: str
     ref_id: str = ""
+    bib_label: str = ""
     url: str = ""
+    doi: str = ""
+    arxiv: str = ""
+    theme: str = ""
+
+
+class PriorWorkTopic(BaseModel):
+    theme: str = ""
+    summary: str = ""
+    items: list[PriorWork] = []
+
 
 class Concept(BaseModel):
     name: str
@@ -55,6 +66,7 @@ class PreReadingAnalysis(BaseModel):
     definitions: list[Definition] = []
     research_questions: list[ResearchQuestion] = []
     prior_work: list[PriorWork] = []
+    prior_work_topics: list[PriorWorkTopic] = []
     concepts: list[Concept] = []
 
 

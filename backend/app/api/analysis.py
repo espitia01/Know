@@ -62,6 +62,12 @@ from ..services.pdf_parser import (
     get_figure_path,
     mutate_paper,
 )
+from ..services.citation_resolve import (
+    enrich_prior_work_from_bibliography,
+    finalize_pre_reading_urls,
+    normalize_pre_reading_prior_work,
+)
+from ..services.reference_extract import extract_references_section
 from ..services.db import append_selection as append_selection_db
 from ..services.db import append_qa_session as append_qa_session_db
 from ..auth import require_auth
@@ -93,10 +99,15 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
     analysis_payload = None
     try:
         result = await analyze_paper(paper.raw_text, user_id=user_id)
+        normalize_pre_reading_prior_work(result)
+        bib_blob = extract_references_section(paper.raw_text or "", max_chars=16000)
+        enrich_prior_work_from_bibliography(result.get("prior_work") or [], bib_blob)
+        await finalize_pre_reading_urls(result)
         analysis = PreReadingAnalysis(
             definitions=result.get("definitions", []),
             research_questions=result.get("research_questions", []),
             prior_work=result.get("prior_work", []),
+            prior_work_topics=result.get("prior_work_topics", []),
             concepts=result.get("concepts", []),
         )
         analysis_payload = analysis.model_dump()

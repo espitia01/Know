@@ -16,6 +16,7 @@ import certifi
 from fastapi import HTTPException
 
 from ..config import settings
+from .reference_extract import extract_references_section
 
 logger = logging.getLogger(__name__)
 _warned_missing_key = False
@@ -44,8 +45,9 @@ LATEX_FORMAT_INSTRUCTIONS = """LATEX FORMATTING RULES (STRICT — follow exactly
 - For matrices use \\begin{pmatrix}...\\end{pmatrix} (or bmatrix/vmatrix) inside $$...$$
 - For multi-character function names use \\operatorname{name} or \\text{name}
 - Use \\cdot for multiplication, \\left( \\right) for auto-sized parens around large expressions
-- Do not break a single equation into multiple $...$ fragments — keep it as one continuous math expression"""
-
+- Do not break a single equation into multiple $...$ fragments — keep it as one continuous math expression
+- NEVER insert line breaks between individual characters, tokens, or short lines inside one equation (no 'one token per line' formatting)
+- For numbered multi-line alignments use $$\n\\begin{aligned} … \\end{aligned}\n$$ (centered display); NEVER split one equation across multiple paragraphs or lines of plain text."""
 
 
 def _ssl_context():
@@ -758,7 +760,11 @@ Paper context:
 async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
     """Run pre-reading analysis on paper content."""
     provider = get_provider(user_id)
-    paper_text = _sanitize_user_text(paper_text, max_chars=15000)
+    paper_text_full = _sanitize_user_text(paper_text, max_chars=200_000)
+    paper_text = paper_text_full[:15000]
+
+    bib_excerpt = extract_references_section(paper_text_full, max_chars=14000)
+    bib_for_prompt = bib_excerpt[-12000:] if len(bib_excerpt) > 12000 else bib_excerpt
 
     system = (
         "You are an expert science educator. Analyze the given academic paper and extract structured information "
@@ -768,22 +774,41 @@ async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
 
     user = f"""Analyze this paper and return a JSON object with these fields:
 
-1. "definitions": array of {{"term": "...", "definition": "...", "source": "..."}} - key technical terms and their definitions. Use LaTeX notation for math (e.g., $E = mc^2$).
-2. "research_questions": array of {{"question": "...", "context": "..."}} - the main questions this paper tries to answer
-3. "prior_work": array of {{"title": "...", "relevance": "...", "ref_id": "...", "url": "..."}}
-   Important prior external sources this paper builds on. Cross-check titles with the bibliography / reference list when present.
+1. "definitions": array of {{"term": "...", "definition": "...", "source": "..."}} — key technical terms. Use LaTeX in strings as needed ($...$ / $$...$$).
+2. "research_questions": array of {{"question": "...", "context": "..."}}.
+3. "concepts": array of {{"name": "...", "description": "...", "importance": "..."}} — key concepts.
 
-   Field rules:
-   - "ref_id": stable handle when obvious — e.g. arXiv id "2312.02901", bare DOI tail "10.1103/...", "PMID:12345678", or the bibliography label "[12]".
-   - "url": a single clickable https URL when you can cite it cleanly from the paper or standard patterns:
-     • DOIs → "https://doi.org/<doi>"
-     • arXiv ids → "https://arxiv.org/abs/<id>"
-     • PubMed → "https://pubmed.ncbi.nlm.nih.gov/<PMID>/"
-     If unsure, leave "url" as "" rather than guessing.
-4. "concepts": array of {{"name": "...", "description": "...", "importance": "..."}} - key scientific/physics concepts the reader should understand. Use LaTeX for math.
+4. "prior_work_topics": array of thematic groups (REQUIRED). Each element:
+   {{
+     "theme": "short label for a line of research / idea (e.g. 'Quasicrystal band structure')",
+     "summary": "1–2 sentences on why this cluster matters for THIS paper.",
+     "items": [
+       {{
+         "title": "EXACT bibliography title substring when possible",
+         "relevance": "one concise sentence tying the citation to the paper",
+         "bib_label": "single bibliography index as cited in-text, e.g. '17' or '[17]' — NEVER use ranges like '16–19'",
+         "doi": "",
+         "arxiv": "",
+         "url": "",
+         "ref_id": "same as bib_label or DOI/arXiv id string"
+       }}
+     ]
+   }}
+   Rules:
+   - Every item MUST map to REAL entries in the REFERENCE LIST excerpt below when that list exists.
+     Copy titles verbatim from that list whenever you can recognise the match — do NOT invent titles.
+   - NEVER merge multiple bibliography entries into one row. If the paper cites [16]–[19], emit up to four separate items (or choose the strongest single bib index and one item only — prefer covering each distinct foundational thread with one concrete entry each).
+   - Extract "doi", "arxiv" (bare id like 2301.00001), and "url" ONLY when they explicitly appear next to THAT reference line. Otherwise leave empty strings — downstream tooling will infer links.
+   - If the reference list is missing or unusable, still return 3–8 best-effort items with accurate titles from the manuscript text, empty identifiers, and honest relevance.
 
-Paper content:
-{paper_text[:15000]}"""
+5. "prior_work": leave as [] (an empty array). The server will flatten "prior_work_topics" into this field.
+
+Paper body (truncated):
+{paper_text}
+
+REFERENCE LIST excerpt (ground truth for citations — use for matching titles and DOIs):
+{bib_for_prompt if bib_for_prompt else "(no isolated reference block detected — infer carefully from the body above)"}
+"""
 
     raw = await provider.complete(system, user, max_tokens=8192)
     return _safe_parse_json(raw)

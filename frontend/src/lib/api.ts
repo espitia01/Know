@@ -284,6 +284,11 @@ export interface PriorWork {
   ref_id: string;
   /** Model-extracted canonical https link when confidently known */
   url?: string;
+  bib_label?: string;
+  doi?: string;
+  arxiv?: string;
+  /** Denormalized theme when flattened from topic groups */
+  theme?: string;
 }
 
 export interface Concept {
@@ -292,10 +297,17 @@ export interface Concept {
   importance: string;
 }
 
+export interface PriorWorkTopic {
+  theme: string;
+  summary: string;
+  items: PriorWork[];
+}
+
 export interface PreReadingAnalysis {
   definitions: Definition[];
   research_questions: ResearchQuestion[];
   prior_work: PriorWork[];
+  prior_work_topics?: PriorWorkTopic[];
   concepts: Concept[];
 }
 

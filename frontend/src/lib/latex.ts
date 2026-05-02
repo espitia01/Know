@@ -12,6 +12,71 @@ const MATH_REGION =
 
 const MAX_WRAP_LENGTH = 4000;
 
+function normalizeUnicodeMath(s: string): string {
+  return s
+    .replace(/\u2212/g, "-")
+    .replace(/\u2013|\u2014/g, "-")
+    .replace(/\u00a0/g, " ");
+}
+
+/** Collapse LLM / PDF-paste line breaks that split one LaTeX expression across many short lines. */
+function collapseBrokenDisplayMath(s: string): string {
+  const lines = s.split(/\r?\n/);
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].trim() === "") {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < lines.length) {
+      const t = lines[j].trim();
+      if (t === "") break;
+      if (t.length > 14) break;
+      if (/^\d+\.[\s)]/.test(t)) break;
+      if (/^[-*•]\s/.test(t)) break;
+      if (/^#{1,6}\s/.test(t)) break;
+      j++;
+    }
+    const slice = lines.slice(i, j);
+    const joined = slice.join("\n");
+    if (j - i >= 5 && /\\/.test(joined)) {
+      out.push(slice.map((l) => l.trim()).join(" "));
+      i = j;
+    } else {
+      out.push(lines[i]);
+      i++;
+    }
+  }
+  return out.join("\n");
+}
+
+function wrapLikelyDisplayEquations(body: string): string {
+  const paras = body.split(/\n\n+/);
+  return paras
+    .map((para) => {
+      const t = para.trim();
+      if (!t || /\$\$/.test(t) || t.length > 900) return para;
+      if (/\\begin\{aligned|\\begin\{equation|\\begin\{gather/.test(t)) {
+        return `\n$$\n${t}\n$$\n`;
+      }
+      if (/\\text\s*\{/.test(t) && /[_^]/.test(t) && /[<>≤≥≈≠=]/.test(t)) {
+        return `\n$$\n${t}\n$$\n`;
+      }
+      if (
+        /]_{/.test(t) &&
+        /[<>≤≥≈≠=]/.test(t) &&
+        (/\\(?:text|mathrm|mathcal|left|right)/.test(t) || /\^|_/.test(t))
+      ) {
+        return `\n$$\n${t}\n$$\n`;
+      }
+      return para;
+    })
+    .join("\n\n");
+}
+
 function containsLatex(s: string): boolean {
   return /\\[A-Za-z]/.test(s) || /[_^]\{/.test(s) || /[_^][A-Za-z0-9]/.test(s);
 }
@@ -236,7 +301,8 @@ function consumeBracketed(s: string, i: number, end: number, depth: number): num
 export function preprocessLatex(text: string): string {
   if (!text) return text;
 
-  let s = text;
+  let s = normalizeUnicodeMath(text);
+  s = collapseBrokenDisplayMath(s);
 
   s = s.replace(/\\\(/g, "$").replace(/\\\)/g, "$");
   s = s.replace(/\\\[/g, "\n$$\n").replace(/\\\]/g, "\n$$\n");
@@ -274,6 +340,7 @@ export function preprocessLatex(text: string): string {
   }
 
   let result = parts.join("");
+  result = wrapLikelyDisplayEquations(result);
   result = result.replace(/\n{3,}/g, "\n\n");
 
   return result;
