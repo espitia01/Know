@@ -25,21 +25,30 @@ function FollowUpThreadList({ followups }: { followups: SelectionAnalysisResult[
   const prevCount = useRef(0);
   const [openKey, setOpenKey] = useState<string | null>(null);
 
+  /** Stable digest for effect deps — `followups` array identity churns each parent render. */
+  const followSig = `${followups.length}\x1f${followups.map((f) => selectionKey(f)).join("\x1e")}`;
+
   useEffect(() => {
     const n = followups.length;
-    const last = n ? selectionKey(followups[n - 1]) : null;
-    if (n > prevCount.current && last) {
-      setOpenKey(last);
-    } else if (n === 0) {
+    const lastKey = n > 0 ? selectionKey(followups[n - 1]) : null;
+    if (n === 0) {
       setOpenKey(null);
-    } else {
-      setOpenKey((k) => {
-        if (!k) return k;
-        return followups.some((f) => selectionKey(f) === k) ? k : last;
-      });
+      prevCount.current = 0;
+      return;
+    }
+    if (n > prevCount.current && lastKey) {
+      setOpenKey(lastKey);
+      prevCount.current = n;
+      return;
     }
     prevCount.current = n;
-  }, [followups]);
+    setOpenKey((k) => {
+      if (!lastKey) return k;
+      if (!k || !followups.some((f) => selectionKey(f) === k)) return lastKey;
+      return k;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- followSig encodes followups identities
+  }, [followSig]);
 
   if (followups.length === 0) return null;
 

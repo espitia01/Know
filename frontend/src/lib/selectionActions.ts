@@ -24,13 +24,18 @@ export function normalizeSelectionAction(action: string | undefined): SelectionA
   return "explain";
 }
 
+/** Max chars folded into fallback keys — avoids multi‑MB payloads in React keys/maps. */
+const MAX_FALLBACK_ID = 4_096;
+
 export function selectionKey(r: SelectionAnalysisResult): string {
-  if (r.clientKey) return r.clientKey;
-  const head = (r.explanation || r.elaboration || r.answer || "").slice(0, 64);
+  if (typeof r.clientKey === "string" && r.clientKey.length > 0) return r.clientKey;
   const norm = normalizeSelectionAction(r.action);
   const identityText =
     norm === "followup"
-      ? (r.question || r.selected_text || "")
-      : (r.selected_text || "");
-  return `${norm}::${identityText.trim()}::${head}`;
+      ? `${r.question ?? ""}\n${r.selected_text ?? ""}`
+      : (r.selected_text ?? "");
+  // IMPORTANT: Never mix in explanation/elaboration/answer — those mutate on every streamed
+  // SSE chunk without clientKey, which would churn React keys and re-run accordion effects on
+  // every token (freezing the page when Selection tab mounts or a highlight opens the pane).
+  return `${norm}::${identityText.trim().slice(0, MAX_FALLBACK_ID)}`;
 }
