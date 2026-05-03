@@ -130,10 +130,14 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
         <div>
           <SectionHeader title="Notes" count={notes.length} />
           <div className="overflow-hidden rounded-lg border border-border/60 bg-card/30">
-            {[...notes].reverse().map((note) => (
+            {[...notes].reverse().map((note) => {
+              const isPending = note.id.startsWith("pending-note-");
+              return (
               <div
                 key={note.id}
-                className="analysis-note-row group/note border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40"
+                className={`analysis-note-row group/note border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40 relative ${
+                  isPending ? "opacity-90" : ""
+                }`}
               >
                 {editing === note.id ? (
                   <div className="space-y-2">
@@ -162,18 +166,28 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
                   </div>
                 ) : (
                   <>
-                    <div className="text-[var(--text-md)] leading-relaxed [&_.analysis-content]:text-[var(--text-md)]">
+                    <div className={`text-[var(--text-md)] leading-relaxed [&_.analysis-content]:text-[var(--text-md)] relative ${isPending ? "know-note-pending" : ""}`}>
+                      {isPending && (
+                        <div
+                          aria-hidden
+                          className="absolute right-3 top-0 flex items-center gap-1.5 text-[var(--text-xs)] text-muted-foreground/90"
+                        >
+                          <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground/25 border-t-muted-foreground/70" />
+                          <span className="font-medium">Saving…</span>
+                        </div>
+                      )}
                       <Md className="analysis-content note-markdown-preview" latexMode="note">
                         {note.text}
                       </Md>
                     </div>
                     <div className="mt-1.5 flex items-center justify-between">
                       <span className="font-mono text-[0.7rem] font-light tabular-nums text-muted-foreground/70">
-                        {formatNoteDate(note.created_at)}
+                        {!isPending && formatNoteDate(note.created_at)}
                       </span>
                       <div className="analysis-note-actions flex gap-2 opacity-100 motion-safe:transition-opacity">
                         <button
                           type="button"
+                          disabled={isPending}
                           onClick={() => {
                             setEditing(note.id);
                             setEditText(note.text);
@@ -184,8 +198,9 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
                         </button>
                         <button
                           type="button"
+                          disabled={isPending}
                           onClick={() => handleDelete(note.id)}
-                          className="text-[var(--text-xs)] font-medium text-muted-foreground hover:text-destructive focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                          className="text-[var(--text-xs)] font-medium text-muted-foreground hover:text-destructive focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-40 disabled:pointer-events-none"
                         >
                           Delete
                         </button>
@@ -194,7 +209,8 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
                   </>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

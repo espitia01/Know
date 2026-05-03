@@ -77,6 +77,35 @@ function hasEquationFragmentSignature(text: string): boolean {
   return false;
 }
 
+/**
+ * Lines collapsed into glyph salad broke legitimate prose (`h \\n e \\n a \\n d`).
+ */
+function looksLikeBrokenWrappedProseGlyphs(lines: readonly string[]): boolean {
+  const t = lines.map((l) => l.trim()).filter(Boolean);
+  if (t.length < 6) return false;
+  let singleGlyphs = 0;
+  let veryShort = 0;
+  for (const row of t) {
+    const len = row.length;
+    if (len <= 1) singleGlyphs++;
+    if (len <= 2) veryShort++;
+  }
+  const g = singleGlyphs / t.length;
+  const vs = veryShort / t.length;
+  return g >= 0.38 || (t.length >= 8 && vs >= 0.65);
+}
+
+/** Collapse `"$ $"` and `"$ $\\mathrm"` artefacts from pasted PDF text. */
+function tightenStrayAdjacentDollarDelimiters(s: string): string {
+  let t = s;
+  for (let depth = 0; depth < 8; depth++) {
+    const n = t.replace(/\$\s+(?=\$)/g, "");
+    if (n === t) break;
+    t = n;
+  }
+  return t;
+}
+
 /** Collapse LLM / PDF-paste line breaks that split one LaTeX expression across many short lines. */
 function collapseBrokenDisplayMath(s: string): string {
   const lines = s.split(/\r?\n/);
@@ -101,7 +130,10 @@ function collapseBrokenDisplayMath(s: string): string {
     const slice = lines.slice(i, j);
     const joined = slice.join("\n");
     const n = j - i;
-    if ((n >= 5 && /\\/.test(joined)) || (n >= 4 && hasEquationFragmentSignature(joined))) {
+    if (
+      !looksLikeBrokenWrappedProseGlyphs(slice) &&
+      ((n >= 5 && /\\/.test(joined)) || (n >= 4 && hasEquationFragmentSignature(joined)))
+    ) {
       out.push(slice.map((l) => l.trim()).join(" "));
       i = j;
     } else {
@@ -137,7 +169,11 @@ function collapseUnicodeEquationLines(s: string): string {
     const slice = lines.slice(i, j);
     const joined = slice.join("\n");
     const n = j - i;
-    if (n >= 4 && hasEquationFragmentSignature(joined)) {
+    if (
+      !looksLikeBrokenWrappedProseGlyphs(slice) &&
+      n >= 4 &&
+      hasEquationFragmentSignature(joined)
+    ) {
       out.push(slice.map((l) => l.trim()).join(" "));
       i = j;
     } else {
@@ -194,6 +230,7 @@ function stripOrphanEquationIndexLine(s: string): string {
 function repairFracturedDollarCommaPatterns(s: string): string {
   let t = s;
   t = t.replace(/([A-Za-z0-9)\]}])\$\s*,\s*/g, "$1, ");
+  t = t.replace(/([A-Za-z])\$\s*,(?=\s*[A-Za-z])/g, "$1,");
   t = t.replace(/\$\s+where\s+\$\$/gi, "\n$$\nwhere\n$$\n");
   return t;
 }
@@ -544,6 +581,7 @@ export function preprocessLatex(text: string, opts?: PreprocessLatexOpts): strin
   const noteMode = Boolean(opts?.noteMode);
 
   let s = stripInferenceAngleTags(text);
+  s = tightenStrayAdjacentDollarDelimiters(s);
   s = normalizeUnicodeMath(s);
   s = unicodeCapGreekToLatex(s);
   s = repairCommonTransformerMathFractures(s);

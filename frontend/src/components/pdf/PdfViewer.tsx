@@ -5,6 +5,7 @@ import { Document, Page, pdfjs } from "react-pdf";
 import { api, getAuthHeadersSync, SelectionAnalysisResult } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { normalizeSelectionAction } from "@/lib/selectionActions";
+import { snapshotDomRect } from "@/lib/domRect";
 
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -1214,7 +1215,7 @@ export function PdfViewer({
     // Re-read the rect from the (possibly snapped) range so the toolbar
     // anchors to the new selection, not the pre-snap drag endpoint.
     const range = sel.getRangeAt(0);
-    const rect = unionBoundingRectFromRange(range);
+    const rect = snapshotDomRect(unionBoundingRectFromRange(range));
     onTextSelected?.(text, rect);
   }, [onTextSelected, onSelectionClear]);
 

@@ -78,12 +78,21 @@ export function sanitizeRelatedClusterSummaryMarkdown(raw: string): string {
   const kept = lines.filter((line) => {
     const t = line.trim();
     if (!t) return true;
-    if (/^(?:\d{1,4}[.)]?|(?:19|20)\d{2}\.)$/u.test(t)) return false;
+    /** Footnote bleed: bare index digits or stray years alone on a line */
+    if (/^\d{1,4}(?:\.(?!\d))?$/u.test(t)) return false;
+    if (/^(?:19|20)\d{2}\.?$/u.test(t)) return false;
+    if (/^\[(?:19|20)\d{2}\]$/u.test(t)) return false;
+    if (/^(?:\d{1,3}[.)]?|(?:19|20)\d{2}\.)$/u.test(t)) return false;
     if (/^\d{1,3}\s+(?:19|20)\d{2}\.$/u.test(t)) return false;
     return true;
   });
   let body = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   body = body.replace(MODEL_ANGLE_TAGS, " ").replace(/\s{2,}/g, " ").trim();
+  /** Paragraphs consisting only of year/index tokens slipped through normalization */
+  body = body.replace(
+    /\n\s*(?:(?:\d{1,4}\.(?:\s+\d{1,4}\.)*|(?:19|20)\d{2}\.)+\s*\n)+\s*/g,
+    "\n\n",
+  );
   return body;
 }
 
@@ -91,6 +100,18 @@ export function sanitizeRelatedClusterSummaryMarkdown(raw: string): string {
  * Full pipeline for showing a single reference line in the UI (Related tab,
  * reader references list, etc.).
  */
+/** Footnote bleed: ". 18 2006. 19 2017." after a real concluding year clause. */
+function stripCitationIndexYearBleed(input: string): string {
+  if (input.length < 92) return input;
+  let t = input.trimEnd();
+  for (let i = 0; i < 10; i++) {
+    const next = t.replace(/(?:\.(?:\s+\d{1,3})+\s+(?:19|20)\d{2}\.)+$/u, ".");
+    if (next === t) break;
+    t = next.trimEnd();
+  }
+  return t;
+}
+
 export function sanitizeCitationForDisplay(raw: string): string {
   let s = normalizeBibliographyCitationLine(raw);
   s = s.replace(MODEL_ANGLE_TAGS, " ");
@@ -98,6 +119,8 @@ export function sanitizeCitationForDisplay(raw: string): string {
   s = truncateAfterBibliographyBleed(s);
   s = collapseDuplicateSentenceRuns(s);
   s = stripTrailingOrphanIndexTail(s);
+  s = stripCitationIndexYearBleed(s);
+  s = collapseDuplicateSentenceRuns(s);
   s = s.replace(/\s{2,}/g, " ").trim();
   return s;
 }

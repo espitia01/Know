@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { selectionLooksLikeEquationSnippet } from "@/lib/selectionMathHeuristic";
@@ -12,9 +12,10 @@ import { selectionLooksLikeEquationSnippet } from "@/lib/selectionMathHeuristic"
 // directly into the follow-up box on the resulting card.
 export type SelectionAction = "explain" | "derive" | "note";
 
+/** Snapshot only — live `DOMRect` from callers can mutate before React paints. */
 interface SelectionToolbarProps {
   text: string;
-  rect: DOMRect;
+  rect: DOMRectReadOnly;
   onAction: (action: SelectionAction, text: string) => void;
   onDismiss: () => void;
   /** Demo / quota: when `used &gt;= limit`, actions are disabled. */
@@ -74,9 +75,27 @@ const actions: {
   },
 ];
 
+const TOOLBAR_FALLBACK_W = 260;
+const TOOLBAR_FALLBACK_H = 44;
+
 export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuota }: SelectionToolbarProps) {
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  /** Avoid a one-frame `(0,0)` flash once portaled — seed from viewport + selection geometry. */
+  const [pos, setPos] = useState<{ top: number; left: number }>(() => {
+    const GAP = 12;
+    const EDGE = 8;
+    let top = rect.top - TOOLBAR_FALLBACK_H - GAP;
+    if (top < EDGE) top = rect.bottom + GAP;
+    let left = rect.left + rect.width / 2 - TOOLBAR_FALLBACK_W / 2;
+    left = Math.max(
+      EDGE,
+      Math.min(left, typeof window !== "undefined" ? window.innerWidth - TOOLBAR_FALLBACK_W - EDGE : left),
+    );
+    if (typeof window !== "undefined" && top + TOOLBAR_FALLBACK_H > window.innerHeight - EDGE) {
+      top = Math.max(EDGE, window.innerHeight - TOOLBAR_FALLBACK_H - EDGE);
+    }
+    return { top: Math.max(EDGE, top), left };
+  });
   const [portalReady, setPortalReady] = useState(false);
   const mountedAt = useRef(Date.now());
   const { user } = useUserTier();
@@ -95,8 +114,12 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
     const toolbar = toolbarRef.current;
     if (!toolbar) return;
 
-    const tw = toolbar.offsetWidth;
-    const th = toolbar.offsetHeight;
+    let tw = toolbar.offsetWidth;
+    let th = toolbar.offsetHeight;
+    if (tw < 8 || th < 8) {
+      tw = TOOLBAR_FALLBACK_W;
+      th = TOOLBAR_FALLBACK_H;
+    }
     const GAP = 12;
     const EDGE = 8;
 
@@ -122,9 +145,27 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
     setPortalReady(true);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (!portalReady) return;
     updatePosition();
-  }, [updatePosition]);
+  }, [portalReady, updatePosition]);
+
+  useLayoutEffect(() => {
+    if (!portalReady) return;
+    const toolbar = toolbarRef.current;
+    if (!toolbar || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      updatePosition();
+    });
+    ro.observe(toolbar);
+    const raf = requestAnimationFrame(() => {
+      updatePosition();
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, [portalReady, updatePosition]);
 
   // Keep the toolbar anchored to the selection as the user scrolls, resizes,
   // or zooms the PDF. Without this, the pill visibly drifts (or ends up

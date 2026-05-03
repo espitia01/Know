@@ -1234,10 +1234,24 @@ function PaperContent() {
     if (action === "note") {
       setPanelVisible(true);
       setActiveTab("notes");
+      const pendingId =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? `pending-note-${crypto.randomUUID()}`
+          : `pending-note-${Date.now()}`;
+      const provisionalNote = {
+        id: pendingId,
+        text,
+        section: "PDF Selection",
+        created_at: Math.floor(Date.now() / 1000),
+      };
+      useStore.getState().addNote(provisionalNote);
+
       try {
         const note = await api.addNote(startedFor, text, "PDF Selection", true);
         if (!stillOnStartedPaper()) return;
-        useStore.getState().addNote(note);
+        useStore.setState((s) => ({
+          notes: s.notes.map((n) => (n.id === pendingId ? note : n)),
+        }));
         setSelectionResult(null);
         upsertSelectionInHistory({
           action: "note",
@@ -1248,6 +1262,9 @@ function PaperContent() {
         });
       } catch (e) {
         console.error("Failed to save note:", e);
+        if (stillOnStartedPaper()) {
+          useStore.getState().removeNote(pendingId);
+        }
       }
       return;
     }
