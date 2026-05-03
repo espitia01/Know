@@ -101,14 +101,18 @@ function DashboardContent() {
     };
   }, []);
 
+  const recentPaperOrder = useMemo(
+    () => getRecentPaperOpenOrder(),
+    [recentOrderEpoch],
+  );
+
   const dashboardPapersOrdered = useMemo(() => {
-    const order = getRecentPaperOpenOrder();
     const rank = (id: string) => {
-      const idx = order.indexOf(id);
+      const idx = recentPaperOrder.indexOf(id);
       return idx >= 0 ? idx : 10_000;
     };
     return [...papers].sort((a, b) => rank(a.id) - rank(b.id));
-  }, [papers, recentOrderEpoch]);
+  }, [papers, recentPaperOrder]);
 
   useEffect(() => {
     api.listPapers()

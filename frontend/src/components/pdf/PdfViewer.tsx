@@ -44,6 +44,27 @@ function unionScrollViewportClamp(
   return new DOMRect(left, top, w, h);
 }
 
+/** MutationObserver helper: overlays must not participate in repaint loops */
+function isUnderSelectionOverlay(node: Node | null | undefined): boolean {
+  const el =
+    node?.nodeType === Node.ELEMENT_NODE ? (node as Element) : (node?.parentElement ?? null);
+  return !!(el && el.closest(".know-selection-overlay"));
+}
+
+function mutationAffectsPdfTextLayer(muts: readonly MutationRecord[]): boolean {
+  for (const m of muts) {
+    if (isUnderSelectionOverlay(m.target)) continue;
+    if (m.type === "characterData") return true;
+    if (m.type === "attributes" && !(m.target instanceof Element && m.target.closest(".know-selection-overlay"))) {
+      return true;
+    }
+    for (const n of [...m.addedNodes, ...m.removedNodes]) {
+      if (!isUnderSelectionOverlay(n)) return true;
+    }
+  }
+  return false;
+}
+
 // Bundle the PDF.js worker from node_modules via the URL constructor pattern
 // Next.js/Webpack understands. Previously we pulled it from unpkg.com on
 // every load, which (a) breaks the app if unpkg is down, (b) leaks the
@@ -1023,29 +1044,6 @@ export function PdfViewer({
   //   • The container observer handles page re-mounts that happen
   //     during scroll virtualisation; it arms a per-page observer as
   //     soon as the text layer appears.
-  const isUnderSelectionOverlay = (node: Node | null | undefined): boolean => {
-    const el =
-      node?.nodeType === Node.ELEMENT_NODE
-        ? (node as Element)
-        : node?.parentElement ?? null;
-    return !!(el && el.closest(".know-selection-overlay"));
-  };
-
-  const mutationAffectsPdfTextLayer = (muts: readonly MutationRecord[]): boolean => {
-    for (const m of muts) {
-      if (isUnderSelectionOverlay(m.target)) continue;
-      if (m.type === "characterData") return true;
-      if (m.type === "attributes" && !(m.target instanceof Element && m.target.closest(".know-selection-overlay"))) {
-        return true;
-      }
-      for (const n of [...m.addedNodes, ...m.removedNodes]) {
-        if (!isUnderSelectionOverlay(n)) return true;
-      }
-    }
-    return false;
-  };
-
-  useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 

@@ -62,7 +62,7 @@ export function BibtexModal({ open, onClose, paperIds, folder, workspaceId, labe
       abortRef.current?.abort();
     }
     return () => { abortRef.current?.abort(); };
-  }, [open, paperIds, folder, workspaceId]);
+  }, [open, paperIds, folder, workspaceId, bibtex]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(bibtex).then(() => {

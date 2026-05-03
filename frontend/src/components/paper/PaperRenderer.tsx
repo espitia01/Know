@@ -26,6 +26,12 @@ function parseAffiliationNumber(aff: string): { num: number | null; text: string
   return { num: null, text: aff.trim() };
 }
 
+/** Authenticated PNG from API — next/image remotePatterns vary per deployment. */
+function FigurePreview({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={src} alt={alt} className={className} loading="lazy" />;
+}
+
 interface PaperRendererProps {
   paperId: string;
   title: string;
@@ -193,11 +199,10 @@ export function PaperRenderer({
                   {figureInsertPoints.get(idx)!.map((fig) => (
                     <figure key={fig.id} className="rounded-lg overflow-hidden border bg-card shadow-sm">
                       <div className="p-3">
-                        <img
+                        <FigurePreview
                           src={api.getFigureUrl(paperId, fig.id)}
                           alt={`Figure ${figureNumberMap.get(fig.id) ?? ""}`}
                           className="max-w-full mx-auto rounded"
-                          loading="lazy"
                         />
                       </div>
                       <figcaption className="px-4 py-2.5 text-[12px] text-muted-foreground border-t bg-accent/30" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
