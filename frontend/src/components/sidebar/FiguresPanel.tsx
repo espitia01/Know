@@ -485,23 +485,23 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   if (figures.length === 0) {
     return (
       <div className="mx-auto flex max-w-lg flex-col gap-6 rounded-2xl border border-border/45 bg-gradient-to-b from-card/35 to-card/[0.08] px-6 py-9 text-center shadow-[var(--shadow-sm)] backdrop-blur-[2px] motion-safe:animate-fade-in dark:from-card/20 dark:to-transparent">
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-border/40 bg-background/50 text-muted-foreground/60 shadow-inner">
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
             </svg>
           </div>
           <p className="text-[var(--text-md)] font-semibold tracking-tight text-foreground/95">No figures yet</p>
-          <p className="mx-auto max-w-md text-[var(--text-xs)] leading-relaxed text-muted-foreground/88">
-            Draw a region on the PDF, use the browser picker, or grab a screenshot with your OS tool and paste here.
+          <p className="mx-auto max-w-sm text-[var(--text-xs)] leading-snug text-muted-foreground/88">
+            Add one from the PDF, screen capture, or clipboard. Figures are saved per paper automatically.
           </p>
         </div>
-        <div className="flex flex-col gap-2.5">
+        <div className="flex flex-col gap-2">
           <button
             type="button"
             onClick={handleScreenCapture}
             disabled={clipSaving || reextracting}
-            className="btn-primary-glass inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-[var(--text-sm)] font-semibold text-background shadow-md transition-[opacity,transform] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
+            className="btn-primary-glass inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[var(--text-sm)] font-semibold text-background shadow-md transition-[opacity,transform] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
           >
             <svg className="h-4 w-4 shrink-0 opacity-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
@@ -513,7 +513,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
             title="Draw a rectangle on the PDF to capture a region"
             onClick={() => setMarqueeMode(true)}
             disabled={marqueeMode || clipSaving || reextracting}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border/65 bg-background/70 px-4 py-3 text-[var(--text-sm)] font-medium text-foreground/90 backdrop-blur-sm transition-colors hover:border-border-strong hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border/65 bg-background/70 px-4 py-2.5 text-[var(--text-sm)] font-medium text-foreground/90 backdrop-blur-sm transition-colors hover:border-border-strong hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
           >
             <svg className="h-4 w-4 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5M20.25 16.5V18A2.25 2.25 0 0 1 18 20.25h-1.5M3.75 16.5V18A2.25 2.25 0 0 0 6 20.25h1.5" />
@@ -524,7 +524,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
             type="button"
             onClick={handlePasteFromClipboard}
             disabled={clipSaving || reextracting}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border/65 bg-background/70 px-4 py-3 text-[var(--text-sm)] font-medium text-foreground/90 backdrop-blur-sm transition-colors hover:border-border-strong hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border/65 bg-background/70 px-4 py-2.5 text-[var(--text-sm)] font-medium text-foreground/90 backdrop-blur-sm transition-colors hover:border-border-strong hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
           >
             <svg className="h-4 w-4 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.65}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.398.084.612v9.75c0 .414-.336.75-.75.75H4.5a.75.75 0 0 1-.75-.75v-9.75c0-.214.03-.418.084-.612m7.336 0c.653.734 1.693 1.164 2.744 1.323.31.067.627.097.956.097h3.073a2.25 2.25 0 0 0 2.227-1.932m-11.964-11.962L4.744 15.058A75.846 75.846 0 0 1 12 21.75a75.837 75.837 0 0 1-7.893-11.962Z" />
@@ -684,17 +684,18 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-border/45 bg-card/25 px-3.5 py-3 shadow-[var(--shadow-xs)]">
-        <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/85">
-          Open a figure to analyze. Use <strong className="font-semibold text-foreground/85">Select region</strong> to outline the PDF, capture the screen or window, paste from the clipboard, or re-run PDF extraction.
+      <div className="rounded-xl border border-border/50 bg-muted/25 px-3.5 py-3 shadow-[var(--shadow-xs)] backdrop-blur-[2px] dark:bg-muted/15">
+        <p className="text-[11px] font-medium text-foreground/90 tracking-tight">Add or capture</p>
+        <p className="mt-1 text-[10px] leading-snug text-muted-foreground/90">
+          Marquee on the PDF, browser capture, paste an image, or re-run extraction.
         </p>
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap gap-1.5 rounded-[10px] border border-border/40 bg-background/35 p-1 dark:bg-background/25">
           <button
             type="button"
             title="Opens your browser's screen / window picker"
             onClick={handleScreenCapture}
             disabled={clipSaving || reextracting || loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-background/55 px-2.5 py-1.5 text-[11px] font-semibold text-foreground/90 transition-colors hover:border-border-strong hover:bg-accent/40 disabled:opacity-40"
+            className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-md border border-border/55 bg-background/80 px-2.5 py-1.5 text-[11px] font-semibold text-foreground/92 shadow-sm shadow-black/[0.02] transition-colors hover:border-border-strong hover:bg-accent/35 disabled:opacity-40 dark:shadow-black/20"
           >
             <svg className="h-3.5 w-3.5 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
@@ -706,7 +707,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
             title="Draw a rectangle on the PDF to capture a region"
             onClick={() => setMarqueeMode(true)}
             disabled={marqueeMode || clipSaving || reextracting || loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-background/55 px-2.5 py-1.5 text-[11px] font-semibold text-foreground/90 transition-colors hover:border-border-strong hover:bg-accent/40 disabled:opacity-40"
+            className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-md border border-border/55 bg-background/80 px-2.5 py-1.5 text-[11px] font-semibold text-foreground/92 shadow-sm shadow-black/[0.02] transition-colors hover:border-border-strong hover:bg-accent/35 disabled:opacity-40 dark:shadow-black/20"
           >
             <svg className="h-3.5 w-3.5 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5M20.25 16.5V18A2.25 2.25 0 0 1 18 20.25h-1.5M3.75 16.5V18A2.25 2.25 0 0 0 6 20.25h1.5" />
@@ -718,7 +719,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
             title="Clipboard image after system screenshot"
             onClick={handlePasteFromClipboard}
             disabled={clipSaving || reextracting || loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-background/55 px-2.5 py-1.5 text-[11px] font-semibold text-foreground/90 transition-colors hover:border-border-strong hover:bg-accent/40 disabled:opacity-40"
+            className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-md border border-border/55 bg-background/80 px-2.5 py-1.5 text-[11px] font-semibold text-foreground/92 shadow-sm shadow-black/[0.02] transition-colors hover:border-border-strong hover:bg-accent/35 disabled:opacity-40 dark:shadow-black/20"
           >
             <svg className="h-3.5 w-3.5 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.65}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.398.084.612v9.75c0 .414-.336.75-.75.75H4.5a.75.75 0 0 1-.75-.75v-9.75c0-.214.03-.418.084-.612m7.336 0c.653.734 1.693 1.164 2.744 1.323.31.067.627.097.956.097h3.073a2.25 2.25 0 0 0 2.227-1.932m-11.964-11.962L4.744 15.058A75.846 75.846 0 0 1 12 21.75a75.837 75.837 0 0 1-7.893-11.962Z" />
@@ -727,9 +728,10 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           </button>
           <button
             type="button"
+            title="Try built-in detection again after changing the PDF"
             onClick={handleReextract}
             disabled={reextracting || clipSaving || loading}
-            className="rounded-lg border border-transparent px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground/90 transition-colors hover:bg-accent/45 hover:text-foreground disabled:opacity-40"
+            className="inline-flex min-h-8 items-center rounded-md px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground/95 transition-colors hover:bg-accent/45 hover:text-foreground disabled:opacity-40"
           >
             {reextracting ? "…" : "Re-extract PDF"}
           </button>

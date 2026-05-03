@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { api, type PriorWork } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
@@ -86,6 +86,25 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
     }
   };
 
+  const topicalClusters = useMemo(() => {
+    if (!preReading) return null;
+    const pts = preReading.prior_work_topics;
+    const hasItems =
+      Array.isArray(pts) && pts.some((t) => (t.items?.length ?? 0) > 0);
+    return hasItems ? pts!.filter((t) => (t.items?.length ?? 0) > 0) : null;
+  }, [preReading]);
+
+  /** Starting index per themed cluster so chips show one global bibliography order */
+  const clusterGlobalStarts = useMemo(() => {
+    if (!topicalClusters?.length) return [];
+    let acc = 0;
+    return topicalClusters.map((sec) => {
+      const base = acc;
+      acc += sec.items?.length ?? 0;
+      return base;
+    });
+  }, [topicalClusters]);
+
   if (preReadingLoading) {
     return (
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-8 motion-safe:animate-fade-in md:max-w-none">
@@ -120,12 +139,6 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
     );
   }
 
-  const topical =
-    Array.isArray(preReading.prior_work_topics) &&
-    preReading.prior_work_topics.some((t) => (t.items?.length ?? 0) > 0)
-      ? preReading.prior_work_topics!.filter((t) => (t.items?.length ?? 0) > 0)
-      : null;
-
   const showThemeHeading = (t: string) => {
     const s = (t || "").trim();
     if (!s) return false;
@@ -136,9 +149,9 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
   return (
     <div className="space-y-6 motion-safe:animate-fade-in">
       <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground">{RELATED_TAB_INTRO}</p>
-      {topical?.length ? (
+      {topicalClusters?.length ? (
         <div className="space-y-5">
-          {topical.map((sec, si) => (
+          {topicalClusters.map((sec, si) => (
             <section
               key={`cluster-${si}`}
               className="rounded-xl border border-border/55 bg-card/35 px-4 py-3.5 shadow-sm shadow-black/[0.03] md:px-5 dark:bg-card/25 dark:shadow-black/25"
@@ -160,7 +173,7 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
                       className="mt-0.5 flex h-6 min-w-[1.5rem] shrink-0 items-center justify-center rounded-md bg-muted/85 text-[10px] font-semibold tabular-nums leading-none text-muted-foreground shadow-[inset_0_1px_0_rgb(255_255_255/8%)]"
                       aria-hidden
                     >
-                      {pi + 1}
+                      {(clusterGlobalStarts[si] ?? 0) + pi + 1}
                     </span>
                     <div className="min-w-0 flex-1 pt-px">
                       <VerbatimCitationLink work={p} />

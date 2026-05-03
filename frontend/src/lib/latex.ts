@@ -106,7 +106,19 @@ function tightenStrayAdjacentDollarDelimiters(s: string): string {
   return t;
 }
 
-/** Reassemble PDF/LLM glyph-per-line dumps: ≥4 short lines with ≥50% single-char → one line + boundary regexes */
+/** PDF extractors sneak ZW joins / BOM into “single-glyph” lines — normalize before counting length */
+function normalizeGlyphReflowLine(raw: string): string {
+  return raw
+    .replace(/\uFEFF|[\u200B-\u200D\u2060]/g, "")
+    .replace(/\u00a0/g, " ")
+    .trim();
+}
+
+/**
+ * Glue consecutive ≤2-character lines after PDF glyph-per-span reflow (≥4 rows).
+ * The old “≥50% single-character” heuristic failed when extracts emit many 2‑glyph
+ * rows (pairs like “th”), which is common in condensed fonts.
+ */
 function joinDegenerateGlyphPerLineReflow(s: string): string {
   const lines = s.split(/\r?\n/);
   const out: string[] = [];
@@ -119,7 +131,7 @@ function joinDegenerateGlyphPerLineReflow(s: string): string {
       continue;
     }
 
-    const t0 = lines[i].trim();
+    const t0 = normalizeGlyphReflowLine(lines[i]);
     if (
       /^#{1,6}\s/.test(t0) ||
       /^[-*•]\s/.test(t0) ||
@@ -133,20 +145,16 @@ function joinDegenerateGlyphPerLineReflow(s: string): string {
     }
 
     let j = i;
-    let singleCount = 0;
     while (j < lines.length) {
-      const tj = lines[j].trim();
+      const tj = normalizeGlyphReflowLine(lines[j]);
       if (tj === "") break;
       if (tj.length > 2) break;
       if (/^[-*•]\s/.test(tj) || /^\d+\.[\s)]/.test(tj) || /^#{1,6}\s/.test(tj)) break;
-      if (tj.length <= 1) singleCount++;
       j++;
     }
 
     const runLen = j - i;
-    const isSingleCharDominant = runLen >= 4 && singleCount / runLen >= 0.5;
-
-    if (!isSingleCharDominant) {
+    if (runLen < 4) {
       out.push(lines[i]);
       i++;
       continue;
@@ -154,13 +162,18 @@ function joinDegenerateGlyphPerLineReflow(s: string): string {
 
     let joined = "";
     for (let k = i; k < j; k++) {
-      joined += lines[k].trim();
+      joined += normalizeGlyphReflowLine(lines[k]);
     }
 
     joined = joined.replace(/([a-z])([A-Z])/g, "$1 $2");
     joined = joined.replace(/([.!?:;,)])([A-Za-z0-9])/g, "$1 $2");
     joined = joined.replace(/([a-zA-Z])(\d)/g, "$1 $2");
     joined = joined.replace(/(\d)([a-zA-Z])/g, "$1 $2");
+    /** Glue like “Theresearch” right after headings when “The…” was concatenated */
+    joined = joined.replace(
+      /^(The|A|An|In|On|At|By|If|Is|Or|So|As|Dr|Fig|Via|Versus|[Vv]s)([a-z])/gi,
+      "$1 $2",
+    );
 
     out.push(joined);
     i = j;
