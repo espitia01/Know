@@ -74,25 +74,39 @@ function stripTrailingOrphanIndexTail(s: string): string {
  * Trim those before rendering as markdown.
  */
 export function sanitizeRelatedClusterSummaryMarkdown(raw: string): string {
-  const lines = raw.replace(/\r\n/g, "\n").split("\n");
+  let pre = raw.replace(/\r\n/g, "\n").trim();
+  /** Citation footnote counters between “…year.” blocks and next “[\d+]” excerpt */
+  pre = pre.replace(/\.\s*\n+\s*\d{1,3}\.{0,2}\s*\n+(?=\s*\[)/gu, ".\n\n");
+  /** Chains “17 ⇥ 2006.” / “17 ⇥ 2006..” leaked on their own lines (PDF footnotes). */
+  for (let pass = 0; pass < 10; pass++) {
+    const n = pre.replace(/\n\s*\d{1,3}\.{0,2}\s*\n\s*(?:19|20)\d{2}\.+/g, "\n");
+    if (n === pre) break;
+    pre = n;
+  }
+
+  const lines = pre.split("\n");
   const kept = lines.filter((line) => {
     const t = line.trim();
     if (!t) return true;
     /** Footnote bleed: bare index digits or stray years alone on a line */
     if (/^\d{1,4}(?:\.(?!\d))?$/u.test(t)) return false;
-    if (/^(?:19|20)\d{2}\.?$/u.test(t)) return false;
+    if (/^(?:19|20)\d{2}\.+\.?$/u.test(t)) return false;
     if (/^\[(?:19|20)\d{2}\]$/u.test(t)) return false;
     if (/^(?:\d{1,3}[.)]?|(?:19|20)\d{2}\.)$/u.test(t)) return false;
     if (/^\d{1,3}\s+(?:19|20)\d{2}\.$/u.test(t)) return false;
+    /** “2017..” style double punctuation */
+    if (/^(?:19|20)\d{2}\.{2,4}$/.test(t)) return false;
     return true;
   });
   let body = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   body = body.replace(MODEL_ANGLE_TAGS, " ").replace(/\s{2,}/g, " ").trim();
   /** Paragraphs consisting only of year/index tokens slipped through normalization */
   body = body.replace(
-    /\n\s*(?:(?:\d{1,4}\.(?:\s+\d{1,4}\.)*|(?:19|20)\d{2}\.)+\s*\n)+\s*/g,
+    /\n\s*(?:(?:\d{1,4}\.(?:\s+\d{1,4}\.)*|(?:19|20)\d{2}\.(?:\.?))+\s*\n)+\s*/g,
     "\n\n",
   );
+  /** After newlines were collapsed: “2016. 16 [40]” footnote counter */
+  body = body.replace(/\.\s+(?:\d{1,3}\.{0,2}\s+){1,3}(?=\s*\[)/g, ". ");
   return body;
 }
 
@@ -120,6 +134,8 @@ export function sanitizeCitationForDisplay(raw: string): string {
   s = collapseDuplicateSentenceRuns(s);
   s = stripTrailingOrphanIndexTail(s);
   s = stripCitationIndexYearBleed(s);
+  /** Collapsed-line footnote junk: “…2016. 16 [37]” */
+  s = s.replace(/\.\s+(?:\d{1,3}\.{0,2}\s+){1,3}(?=\s*\[)/g, ". ");
   s = collapseDuplicateSentenceRuns(s);
   s = s.replace(/\s{2,}/g, " ").trim();
   return s;

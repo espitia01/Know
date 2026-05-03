@@ -106,6 +106,90 @@ function tightenStrayAdjacentDollarDelimiters(s: string): string {
   return t;
 }
 
+/**
+ * LLM/PDF dumps sometimes put every character on its own line. Join those
+ * rows back into words *before* equation-collapse heuristics run (otherwise
+ * short-line logic misfires and KaTeX sees impossible fragments).
+ */
+function joinDegenerateGlyphPerLineReflow(s: string): string {
+  const lines = s.split(/\r?\n/);
+  const out: string[] = [];
+  let buf = "";
+
+  const flushBuf = () => {
+    if (buf.length > 0) {
+      out.push(buf);
+      buf = "";
+    }
+  };
+
+  const appendCh = (ch: string) => {
+    if (!buf) {
+      buf = ch;
+      return;
+    }
+    const last = buf.slice(-1);
+    if (/[.!?:;,)]/.test(last) && /[A-Za-z0-9]/.test(ch)) {
+      buf += ` ${ch}`;
+      return;
+    }
+    if (/[a-z]/.test(last) && /[A-Z]/.test(ch)) {
+      buf += ` ${ch}`;
+      return;
+    }
+    if (/[a-zA-Z]/.test(last) && /[a-zA-Z]/.test(ch) && last.toLowerCase() === ch.toLowerCase()) {
+      buf += ` ${ch}`;
+      return;
+    }
+    buf += ch;
+  };
+
+  for (const raw of lines) {
+    const trimmed = raw.trim();
+
+    if (
+      trimmed === "" ||
+      /^#{1,6}\s/.test(trimmed) ||
+      /^[-*•]\s/.test(trimmed) ||
+      /^\d+\.[\s)]/.test(trimmed) ||
+      trimmed.startsWith("```") ||
+      trimmed.includes("|") ||
+      trimmed.length > 1
+    ) {
+      flushBuf();
+      out.push(raw);
+      continue;
+    }
+
+    const ch = trimmed;
+
+    if (/^\d$/.test(ch)) {
+      if (buf === "" || /^\d+$/.test(buf)) appendCh(ch);
+      else {
+        flushBuf();
+        appendCh(ch);
+      }
+      continue;
+    }
+
+    if (
+      /^[a-zA-Z]$/.test(ch) ||
+      /^[_^]$/.test(ch) ||
+      /^[.,;:]$/.test(ch) ||
+      /^[+\-=]$/.test(ch)
+    ) {
+      if (/^\d+$/.test(buf)) flushBuf();
+      appendCh(ch);
+      continue;
+    }
+
+    flushBuf();
+    out.push(raw);
+  }
+  flushBuf();
+  return out.join("\n");
+}
+
 /** Collapse LLM / PDF-paste line breaks that split one LaTeX expression across many short lines. */
 function collapseBrokenDisplayMath(s: string): string {
   const lines = s.split(/\r?\n/);
@@ -230,7 +314,14 @@ function stripOrphanEquationIndexLine(s: string): string {
 function repairFracturedDollarCommaPatterns(s: string): string {
   let t = s;
   t = t.replace(/([A-Za-z0-9)\]}])\$\s*,\s*/g, "$1, ");
+  /** “K$, V)” style fractures inside `\mathrm{…}(…)`. */
+  t = t.replace(/([A-Za-z])\$\s*,\s*([A-Za-z])/g, "$1, $2");
   t = t.replace(/([A-Za-z])\$\s*,(?=\s*[A-Za-z])/g, "$1,");
+  /** “,$$ d_k …” glued display delimiter */
+  t = t.replace(/\$\$\s*,\s*(d_[a-z]+\b)/gi, (_, dim: string) => `, $${dim}$,`);
+  t = t.replace(/,\$\$\s*(d_[a-z]+\b)/gi, (_, dim: string) => `, $${dim}$,`);
+  /** “…) $$- dimensional” fracture */
+  t = t.replace(/([A-Za-z0-9)\]}])\$\s*\$\s*(?=\s*-\s*[a-z])/gi, "$1$ ");
   t = t.replace(/\$\s+where\s+\$\$/gi, "\n$$\nwhere\n$$\n");
   return t;
 }
@@ -581,6 +672,7 @@ export function preprocessLatex(text: string, opts?: PreprocessLatexOpts): strin
   const noteMode = Boolean(opts?.noteMode);
 
   let s = stripInferenceAngleTags(text);
+  s = joinDegenerateGlyphPerLineReflow(s);
   s = tightenStrayAdjacentDollarDelimiters(s);
   s = normalizeUnicodeMath(s);
   s = unicodeCapGreekToLatex(s);
