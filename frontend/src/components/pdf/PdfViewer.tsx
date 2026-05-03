@@ -275,9 +275,30 @@ function snapRangeToWordsViaIntl(range: Range): Range | null {
   return next;
 }
 
-/** Native extend-by-word first; Intl fallback inside each TEXT_NODE. */
+/** Native extend-by-word first; Intl fallback inside each TEXT_NODE — never shrink coverage. */
 function snapRangeToWords(range: Range): Range | null {
-  return snapRangeUsingSelectionModify(range) ?? snapRangeToWordsViaIntl(range);
+  const a = snapRangeUsingSelectionModify(range);
+  if (a) return a;
+  const b = snapRangeToWordsViaIntl(range);
+  if (b && snappedRangeDoesNotShrink(range, b)) return b;
+  return null;
+}
+
+/** Strong union of every caret rect (multi-line selections collapse badly with `getBoundingClientRect`). */
+function unionBoundingRectFromRange(range: Range): DOMRect {
+  const rects = [...range.getClientRects()].filter((r) => r.width > 0.5 && r.height > 0.5);
+  if (rects.length === 0) return range.getBoundingClientRect();
+  let left = Infinity;
+  let top = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const r of rects) {
+    left = Math.min(left, r.left);
+    top = Math.min(top, r.top);
+    right = Math.max(right, r.right);
+    bottom = Math.max(bottom, r.bottom);
+  }
+  return new DOMRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
 }
 
 export function PdfViewer({
@@ -1237,9 +1258,32 @@ export function PdfViewer({
     // Re-read the rect from the (possibly snapped) range so the toolbar
     // anchors to the new selection, not the pre-snap drag endpoint.
     const range = sel.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
+    const rect = unionBoundingRectFromRange(range);
     onTextSelected?.(text, rect);
   }, [onTextSelected, onSelectionClear]);
+
+  const runFigureMarqueeToBlob = useCallback(
+    async (sess: { pointerId: number; x0: number; y0: number; x1: number; y1: number }) => {
+      const scroll = containerRef.current;
+      if (!scroll) {
+        resolveFigureScreenshot(null);
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve());
+        });
+      });
+      const union = unionScrollViewportClamp(scroll, sess.x0, sess.y0, sess.x1, sess.y1);
+      if (!union) {
+        resolveFigureScreenshot(null);
+        return;
+      }
+      const blob = await capturePdfViewportUnionToBlob(scroll, union);
+      resolveFigureScreenshot(blob);
+    },
+    [],
+  );
 
   const figureCropPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!useStore.getState().figureScreenshotMode) return;
@@ -1247,7 +1291,11 @@ export function PdfViewer({
     e.preventDefault();
     e.stopPropagation();
     if (figureCropSession.current?.pointerId === e.pointerId) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* non-fatal */
+    }
     figureCropSession.current = {
       pointerId: e.pointerId,
       x0: e.clientX,
@@ -1274,37 +1322,34 @@ export function PdfViewer({
     );
   }, []);
 
-  const figureCropPointerEnd = useCallback(async (e: React.PointerEvent<HTMLDivElement>) => {
-    const sess = figureCropSession.current;
-    if (!sess || sess.pointerId !== e.pointerId) return;
-    e.preventDefault();
-    e.stopPropagation();
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      /* already released */
-    }
-    figureCropSession.current = null;
-    setFigureCropPreview(null);
-    const scroll = containerRef.current;
-    if (!scroll) {
-      resolveFigureScreenshot(null);
-      return;
-    }
-    const union = unionScrollViewportClamp(scroll, sess.x0, sess.y0, sess.x1, sess.y1);
-    if (!union) {
-      resolveFigureScreenshot(null);
-      return;
-    }
-    const blob = await capturePdfViewportUnionToBlob(scroll, union);
-    resolveFigureScreenshot(blob);
-  }, []);
+  const figureCropPointerEnd = useCallback(
+    async (e: React.PointerEvent<HTMLDivElement>) => {
+      const sess = figureCropSession.current;
+      if (!sess || sess.pointerId !== e.pointerId) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* already released */
+      }
+      figureCropSession.current = null;
+      setFigureCropPreview(null);
+      await runFigureMarqueeToBlob(sess);
+    },
+    [runFigureMarqueeToBlob],
+  );
 
   const figureCropPointerCancel = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     const sess = figureCropSession.current;
     if (!sess || sess.pointerId !== e.pointerId) return;
     figureCropSession.current = null;
     setFigureCropPreview(null);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
     resolveFigureScreenshot(null);
   }, []);
 
@@ -1659,8 +1704,8 @@ export function PdfViewer({
                 })()
               : null}
             <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center px-4">
-              <p className="max-w-[min(100%,20rem)] text-center rounded-full border border-border/70 bg-background/92 px-3.5 py-1.5 text-[11px] font-medium text-foreground shadow-md backdrop-blur-md">
-                Drag to crop the figure · release to capture · Esc to cancel
+              <p className="max-w-[min(100%,20rem)] text-center rounded-full border border-border/70 bg-background/92 px-3.5 py-1.5 text-[11px] font-medium text-foreground shadow-md backdrop-blur-md"              >
+                Drag on the PDF · release · Esc cancels · Mac: Ctrl+⌘+Shift+4 saves region to clipboard, then Paste in Figures
               </p>
             </div>
           </div>

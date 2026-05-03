@@ -526,14 +526,13 @@ function PaperContent() {
   const {
     setPreReading, setPreReadingLoading,
     setAssumptions, setAssumptionsLoading,
-    setNotes, setSummary, setSummaryLoading,
+    setSummary, setSummaryLoading,
   } = useStore(
     useShallow((s) => ({
       setPreReading: s.setPreReading,
       setPreReadingLoading: s.setPreReadingLoading,
       setAssumptions: s.setAssumptions,
       setAssumptionsLoading: s.setAssumptionsLoading,
-      setNotes: s.setNotes,
       setSummary: s.setSummary,
       setSummaryLoading: s.setSummaryLoading,
     })),
@@ -838,11 +837,24 @@ function PaperContent() {
 
   const hydrateFromCachedAnalysis = useCallback((cache: NonNullable<typeof paper>["cached_analysis"], notes: NonNullable<typeof paper>["notes"]) => {
     const snap = useStore.getState();
+    // Replacing notes wholesale can erase PDF/Manually-added notes whose ids
+    // have not synced into `parsedPaper.notes` yet (fresh addNote vs slow refetch).
+    if (notes) {
+      useStore.setState((s) => {
+        const ids = new Set(notes!.map((n) => n.id));
+        const onlyLocal = s.notes.filter((n) => !ids.has(n.id));
+        const merged = [...notes!, ...onlyLocal];
+        merged.sort((a, b) => {
+          const d = Number(a.created_at) - Number(b.created_at);
+          return d !== 0 ? d : a.id.localeCompare(b.id);
+        });
+        return { notes: merged };
+      });
+    }
+
     // Per audit §11.3: server hydration must be additive for selections.
     // Replacing the live list can erase in-flight follow-ups that have not
     // been flushed to cached_analysis yet.
-    if (notes) setNotes(notes);
-
     if (Array.isArray(cache.selections)) {
       const serverSelections = cache.selections as SelectionAnalysisResult[];
       const serverNewestFirst = [...serverSelections].reverse();
@@ -882,7 +894,7 @@ function PaperContent() {
     if (serverAssumptions && serverAssumptions.length > 0) {
       setAssumptions(serverAssumptions);
     }
-  }, [loadedPaperId, setAssumptions, setNotes, setPreReading, setSummary]);
+  }, [loadedPaperId, setAssumptions, setPreReading, setSummary]);
 
   useEffect(() => {
     if (!loadedPaperId || loadedPaperId !== activePaperId) return;
@@ -1226,6 +1238,7 @@ function PaperContent() {
         const note = await api.addNote(startedFor, text, "PDF Selection", true);
         if (!stillOnStartedPaper()) return;
         useStore.getState().addNote(note);
+        setSelectionResult(null);
         upsertSelectionInHistory({
           action: "note",
           selected_text: text,

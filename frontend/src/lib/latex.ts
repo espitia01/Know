@@ -187,6 +187,39 @@ function stripOrphanEquationIndexLine(s: string): string {
   return s.replace(/^\s*\d{1,2}\s*[\.)]\s*\n(?=\s*\|?\$)/gm, "");
 }
 
+/**
+ * PDF extraction / LLM echoes often splice `$` mid-token (`K$, V`) or repeat
+ * single-letter wraps inside Attention-style calls — KaTeX then sees unbalanced `$`.
+ */
+function repairFracturedDollarCommaPatterns(s: string): string {
+  let t = s;
+  t = t.replace(/([A-Za-z0-9)\]}])\$\s*,\s*/g, "$1, ");
+  t = t.replace(/\$\s+where\s+\$\$/gi, "\n$$\nwhere\n$$\n");
+  return t;
+}
+
+/** Repair `\\mathrm{Name}(…)` bodies only — first closing `)` ends arguments. */
+function repairRsfsParenBlock(s: string, macro: string): string {
+  const escMacro = macro.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp("(\\\\mathrm\\{" + escMacro + "\\})\\(([^)]*)\\)", "g");
+  return s.replace(re, (_full, head: string, inner: string) => {
+    const body = inner
+      .replace(/([A-Za-z0-9)\]}])\$\s*,\s*/g, "$1, ")
+      .replace(/\$([A-Za-z])\$\s*/g, "$1 ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+    return `${head}(${body})`;
+  });
+}
+
+function repairCommonTransformerMathFractures(s: string): string {
+  let t = repairFracturedDollarCommaPatterns(s);
+  for (const macro of ["Attention", "MultiHead", "Concat"] as const) {
+    t = repairRsfsParenBlock(t, macro);
+  }
+  return t;
+}
+
 
 function promoteHeavyInlineMathToDisplay(s: string): string {
   return s.replace(/\$(?!\$)((?:\\.|\$\$|[^$\n])+?)\$(?!\$)/g, (full, inner: string) => {
@@ -513,6 +546,7 @@ export function preprocessLatex(text: string, opts?: PreprocessLatexOpts): strin
   let s = stripInferenceAngleTags(text);
   s = normalizeUnicodeMath(s);
   s = unicodeCapGreekToLatex(s);
+  s = repairCommonTransformerMathFractures(s);
   if (noteMode) {
     s = remapNoteMathDelimiters(s);
   }

@@ -55,17 +55,36 @@ function truncateAfterBibliographyBleed(s: string): string {
   return s;
 }
 
-/** e.g. "… 15 15 2006." hangers after garbled merges */
+/** e.g. "… 15 15 2006.", " … 15 2006." hangers after garbled merges */
 function stripTrailingOrphanIndexTail(s: string): string {
-  const re = /\s+(?:\d{1,3}[.)]?\s+){2,}(?:19|20)\d{2}\.\s*$/;
+  const tailPairWithYear =
+    /\s+(?:\d{1,3}[.)]?\s+){2,}(?:19|20)\d{2}\.\s*$|\s+\d{1,3}[.)]\s+(?:19|20)\d{2}\.\s*$/u;
   let t = s;
-  for (let i = 0; i < 4; i++) {
-    const next = t.replace(re, "").trim();
+  for (let i = 0; i < 6; i++) {
+    const next = t.replace(tailPairWithYear, "").trim();
     if (next === t) break;
     if (next.length < 72) break;
     t = next;
   }
   return t;
+}
+
+/**
+ * Themed cluster summaries in Related sometimes echo bare index/year lines.
+ * Trim those before rendering as markdown.
+ */
+export function sanitizeRelatedClusterSummaryMarkdown(raw: string): string {
+  const lines = raw.replace(/\r\n/g, "\n").split("\n");
+  const kept = lines.filter((line) => {
+    const t = line.trim();
+    if (!t) return true;
+    if (/^(?:\d{1,4}[.)]?|(?:19|20)\d{2}\.)$/u.test(t)) return false;
+    if (/^\d{1,3}\s+(?:19|20)\d{2}\.$/u.test(t)) return false;
+    return true;
+  });
+  let body = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  body = body.replace(MODEL_ANGLE_TAGS, " ").replace(/\s{2,}/g, " ").trim();
+  return body;
 }
 
 /**

@@ -217,10 +217,13 @@ export function capturePdfViewportUnionToBlob(
     };
 
     const strips: Strip[] = [];
-    const canvases = [...containerEl.querySelectorAll("canvas")] as HTMLCanvasElement[];
+    const canvases = [
+      ...containerEl.querySelectorAll(
+        ".react-pdf__Page[data-page-number] canvas.react-pdf__Page__canvas",
+      ),
+    ] as HTMLCanvasElement[];
 
     for (const canvas of canvases) {
-      if (!canvas.classList.contains("react-pdf__Page__canvas")) continue;
       const cR = canvas.getBoundingClientRect();
       const inter = intersectRects(union, cR);
       if (!inter) continue;

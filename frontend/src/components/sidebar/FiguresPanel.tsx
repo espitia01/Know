@@ -488,7 +488,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           </div>
           <p className="text-[var(--text-md)] font-medium text-foreground/90">No figures yet</p>
           <p className="mx-auto max-w-md text-[var(--text-xs)] leading-relaxed text-muted-foreground/85">
-            Crop inside the PDF, capture this tab/window when the browser asks, or paste a screenshot you took with the OS shortcut—then we analyze it.
+            Web apps cannot start macOS ⌘⇧4/⌘⇧5 automatically. For a region screenshot to the clipboard on Mac press <kbd className="font-mono">Ctrl&nbsp;⌘&nbsp;Shift&nbsp;4</kbd>; then use Paste screenshot in Figures or follow the on-PDF marquee below.
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center">

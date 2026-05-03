@@ -8,7 +8,10 @@ import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
 import { scholarSearchHrefFromPriorWork } from "@/lib/priorWorkLinks";
-import { sanitizeCitationForDisplay } from "@/lib/formatBibliography";
+import {
+  sanitizeCitationForDisplay,
+  sanitizeRelatedClusterSummaryMarkdown,
+} from "@/lib/formatBibliography";
 
 interface RelatedWorkPanelProps {
   paperId: string;
@@ -147,7 +150,7 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
               ) : null}
               {(sec.summary || "").trim() ? (
                 <div className="related-cluster-summary mb-4 [&_.analysis-content]:text-[var(--text-sm)] [&_.analysis-content]:leading-relaxed [&_.analysis-content_*]:text-foreground/92">
-                  <Md>{sec.summary!}</Md>
+                  <Md>{sanitizeRelatedClusterSummaryMarkdown(sec.summary!)}</Md>
                 </div>
               ) : null}
               <ul className="flex flex-col gap-4">
