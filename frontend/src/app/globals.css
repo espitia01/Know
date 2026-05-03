@@ -77,6 +77,7 @@
   --text-sm: 12.5px;
   --text-md: 14px;
   --text-lg: 16px;
+  --text-2xs: 10.5px;
 
   --background: oklch(0.99 0.006 88);
   --foreground: oklch(0.22 0.022 55);
@@ -97,7 +98,7 @@
   --secondary-foreground: oklch(0.26 0.024 55);
 
   --muted: oklch(0.95 0.008 88);
-  --muted-foreground: oklch(0.44 0.02 75);
+  --muted-foreground: oklch(0.42 0.021 73);
 
   --accent: oklch(0.94 0.012 95);
   --accent-foreground: oklch(0.26 0.024 55);
@@ -106,8 +107,8 @@
   --warning: oklch(0.72 0.14 72);
   --success: oklch(0.58 0.14 155);
 
-  --border: oklch(0.89 0.01 85 / 78%);
-  --border-strong: oklch(0.82 0.012 80 / 92%);
+  --border: oklch(0.87 0.009 82 / 84%);
+  --border-strong: oklch(0.8 0.011 78 / 92%);
   --input: oklch(0.89 0.01 85 / 78%);
   --ring: oklch(0.48 0.06 195);
 
@@ -258,7 +259,7 @@
     @apply bg-background text-foreground;
     font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.575;
     /* cv11: single-storey a. ss01: alt letters. ss03: stylistic curl.
        tabular nums on body so tier prices / counters never reflow. */
     font-feature-settings: "cv11", "ss01", "ss03";
@@ -932,8 +933,10 @@
   background: rgb(var(--surface-tint) / 0.82);
   backdrop-filter: blur(24px) saturate(1.12);
   -webkit-backdrop-filter: blur(24px) saturate(1.12);
-  border-bottom: 1px solid rgb(var(--surface-line) / 0.07);
-  box-shadow: 0 1px 0 0 rgb(var(--surface-line) / 0.04);
+  border-bottom: 1px solid rgb(var(--surface-line) / 0.08);
+  box-shadow:
+    var(--shadow-xs),
+    inset 0 -1px 0 rgb(var(--surface-line) / 0.03);
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -1108,7 +1111,11 @@ body::before {
   color: var(--surface-foreground);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgb(var(--surface-tint) / 0.12);
+}
+
+.dark .surface-card {
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgb(var(--surface-line) / 0.06);
 }
 
 /* Subtle pulse used for "live" indicators without the jittery bouncing. */
@@ -1137,10 +1144,6 @@ body::before {
 }
 
 /* Analysis-pane v2 — minimalist panel chrome (additions only) */
-:root {
-  --text-2xs: 10.5px;
-}
-
 /* Tab indicator: short pill under label; motion only when not reduced. */
 @media (prefers-reduced-motion: no-preference) {
   .analysis-panel-tabs [data-slot="tabs-trigger"]::after {
@@ -1300,10 +1303,10 @@ body::before {
   border-top: none;
 }
 .know-reader-analysis-shell-right {
-  border-left: 1px solid rgb(var(--surface-line) / 0.07);
+  border-left: 1px solid rgb(var(--surface-line) / 0.09);
 }
 .know-reader-analysis-shell-left {
-  border-right: 1px solid rgb(var(--surface-line) / 0.07);
+  border-right: 1px solid rgb(var(--surface-line) / 0.09);
 }
 
 /* Notes row actions: show on row hover for fine pointers; always show on touch. */

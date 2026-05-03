@@ -647,10 +647,9 @@ function PaperContent() {
 
   // Register the URL paper as the first session paper
   useEffect(() => {
-    if (paper && paper.id === paperId) {
-      addSessionPaper({ id: paper.id, title: paper.title });
-    }
-  }, [paper, paperId, addSessionPaper]);
+    if (!paper?.id || paper.id !== paperId) return;
+    addSessionPaper({ id: paper.id, title: paper.title });
+  }, [paper?.id, paper?.title, paperId, addSessionPaper]);
 
   const handleMoveToFolder = useCallback(async (folder: string) => {
     if (!paper) return;

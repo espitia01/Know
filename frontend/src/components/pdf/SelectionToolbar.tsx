@@ -138,7 +138,9 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
     if (left < EDGE) left = EDGE;
     if (left + tw > window.innerWidth - EDGE) left = window.innerWidth - tw - EDGE;
 
-    setPos({ top, left });
+    setPos((prev) =>
+      prev.top === top && prev.left === left ? prev : { top, left },
+    );
   }, [rect]);
 
   useEffect(() => {

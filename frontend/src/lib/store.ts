@@ -272,10 +272,19 @@ export const useStore = create<AppStore>()(
         })),
       setQADraft: (paperId, draft) =>
         set((s) => {
-          const drafts = { ...s.uiPrefs.qaDraftByPaper };
-          if (draft.trim()) drafts[paperId] = draft;
-          else delete drafts[paperId];
-          return { uiPrefs: { ...s.uiPrefs, qaDraftByPaper: drafts } };
+          const prevMap = s.uiPrefs.qaDraftByPaper;
+          const cur = prevMap[paperId];
+          const trimmedNew = draft.trim();
+          /** Bail out when unchanged — cloning `qaDraftByPaper` on every render caused Zustand churn (and QA panel effects re-firing unnecessarily). */
+          if (trimmedNew === "") {
+            if (cur === undefined) return s;
+          } else if (cur === draft) {
+            return s;
+          }
+          const qaDraftByPaper = { ...prevMap };
+          if (trimmedNew) qaDraftByPaper[paperId] = draft;
+          else delete qaDraftByPaper[paperId];
+          return { uiPrefs: { ...s.uiPrefs, qaDraftByPaper } };
         }),
       clearPaperUiPrefs: (paperId) =>
         set((s) => {

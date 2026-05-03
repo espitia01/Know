@@ -263,9 +263,9 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background text-foreground antialiased selection:bg-ring/20">
       {/* Nav + hero share one surface */}
-      <div className="relative overflow-hidden border-b border-border/50">
+      <div className="relative overflow-hidden border-b border-border/40">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_72%_52%_at_50%_-12%,color-mix(in_oklch,var(--foreground),transparent_96%),transparent)] opacity-90" />
-        <header className="relative z-50 sticky top-0 border-b border-transparent bg-background/75 backdrop-blur-xl supports-[backdrop-filter]:bg-background/62">
+        <header className="relative z-50 sticky top-0 border-b border-border/35 bg-background/80 shadow-[var(--shadow-xs)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/58">
           <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-5 sm:px-8">
             <Link href="/" className="flex items-center gap-2.5 rounded-md ring-focus">
               <Image src="/logo.png" alt="Know" width={24} height={24} className="rounded-md opacity-[0.97]" />
