@@ -1044,6 +1044,7 @@ export function PdfViewer({
   //   • The container observer handles page re-mounts that happen
   //     during scroll virtualisation; it arms a per-page observer as
   //     soon as the text layer appears.
+  useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
