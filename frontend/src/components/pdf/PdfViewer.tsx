@@ -78,6 +78,115 @@ const BASELINE_SCALE = 1.4;
 const MIN_ZOOM_SCALE = 0.5;
 const MAX_ZOOM_SCALE = 3;
 
+/**
+ * Blink picks stable Selection.modify on pdf.js spans; Safari/WebKit drifts
+ * across glyph spans. iOS uses WebKit for every browser (Chrome, Firefox, etc.).
+ */
+function preferIntlWordSnapFirstForPdf(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  if (/(iPhone|iPad|iPod)/i.test(ua)) return true;
+  if (/Firefox\//i.test(ua)) return false;
+  if (/Chrome|Chromium|CriOS|Edg|OPR|Brave/i.test(ua)) return false;
+  if (/Safari/i.test(ua)) return true;
+  if (/Macintosh.*AppleWebKit/i.test(ua)) return true;
+  return false;
+}
+
+function deepestFirstText(n: Node | null): Text | null {
+  if (!n) return null;
+  if (n.nodeType === Node.TEXT_NODE) return n as Text;
+  for (let i = 0; i < n.childNodes.length; i++) {
+    const d = deepestFirstText(n.childNodes[i]);
+    if (d) return d;
+  }
+  return null;
+}
+
+function deepestLastText(n: Node | null): Text | null {
+  if (!n) return null;
+  if (n.nodeType === Node.TEXT_NODE) return n as Text;
+  for (let i = n.childNodes.length - 1; i >= 0; i--) {
+    const d = deepestLastText(n.childNodes[i]);
+    if (d) return d;
+  }
+  return null;
+}
+
+/**
+ * WebKit reports many PDF.js selection endpoints on ELEMENT boundaries; Chrome
+ * often pins TEXT_NODE endpoints. Normalizing avoids null Intl snaps + reduces
+ * offset drift from modify().
+ */
+function resolveTextPoint(node: Node, offset: number, boundary: "start" | "end"): { node: Text; offset: number } | null {
+  if (node.nodeType === Node.TEXT_NODE) {
+    const t = node as Text;
+    const o = Math.min(Math.max(0, offset), t.length);
+    return { node: t, offset: o };
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return null;
+
+  const kids = node.childNodes;
+  if (kids.length === 0) return null;
+
+  /** Boundary after last child → end of subtree of last child */
+  if (offset >= kids.length) {
+    for (let i = kids.length - 1; i >= 0; i--) {
+      const last = deepestLastText(kids[i]);
+      if (last) return { node: last, offset: last.length };
+    }
+    return null;
+  }
+
+  if (boundary === "start") {
+    /** Boundary before kids[offset]: first text inside that subtree / after empties */
+    const firstDeep = deepestFirstText(kids[offset]);
+    if (firstDeep) return { node: firstDeep, offset: 0 };
+    for (let i = offset + 1; i < kids.length; i++) {
+      const t = deepestFirstText(kids[i]);
+      if (t) return { node: t, offset: 0 };
+    }
+    for (let i = offset - 1; i >= 0; i--) {
+      const t = deepestLastText(kids[i]);
+      if (t) return { node: t, offset: t.length };
+    }
+    return null;
+  }
+
+  /** end: RANGE_END before kids[offset] — last included text sits in prior siblings */
+  for (let i = offset - 1; i >= 0; i--) {
+    const t = deepestLastText(kids[i]);
+    if (t) return { node: t, offset: t.length };
+  }
+  return null;
+}
+
+function normalizeRangeEndpointsToText(range: Range): Range | null {
+  try {
+    const next = range.cloneRange();
+    const ss = resolveTextPoint(next.startContainer, next.startOffset, "start");
+    const ee = resolveTextPoint(next.endContainer, next.endOffset, "end");
+    if (!ss || !ee) return null;
+    next.setStart(ss.node, ss.offset);
+    next.setEnd(ee.node, ee.offset);
+    return next.collapsed ? null : next;
+  } catch {
+    return null;
+  }
+}
+
+function stabilizeSelectionAnchors(sel: Selection, range: Range) {
+  sel.removeAllRanges();
+  sel.addRange(range.cloneRange());
+  try {
+    if (typeof sel.setBaseAndExtent === "function") {
+      sel.setBaseAndExtent(range.startContainer, range.startOffset, range.endContainer, range.endOffset);
+    }
+  } catch {
+    /* Safari may throw until layout settles — single addRange fallback is OK */
+  }
+}
+
 let selectionDeletePopoverCleanup: (() => void) | null = null;
 
 /** Double-click on a saved highlight: offer delete in a small floating menu. */
@@ -194,8 +303,7 @@ function snapRangeUsingSelectionModify(origin: Range): Range | null {
     }
   };
   try {
-    sel.removeAllRanges();
-    sel.addRange(origin.cloneRange());
+    stabilizeSelectionAnchors(sel, origin.cloneRange());
     mod.call(sel, "extend", "backward", "word");
     mod.call(sel, "extend", "forward", "word");
     if (sel.rangeCount === 0 || sel.isCollapsed) {
@@ -261,12 +369,27 @@ function snapRangeToWordsViaIntl(range: Range): Range | null {
   return next;
 }
 
-/** Native extend-by-word first; Intl fallback inside each TEXT_NODE — never shrink coverage. */
-function snapRangeToWords(range: Range): Range | null {
-  const a = snapRangeUsingSelectionModify(range);
-  if (a) return a;
-  const b = snapRangeToWordsViaIntl(range);
-  if (b && snappedRangeDoesNotShrink(range, b)) return b;
+/** Word snap — never shrink the user drag. WebKit prefers Intl first; Blink modify first. */
+function snapRangeToWords(origin: Range): Range | null {
+  const originClone = origin.cloneRange();
+  if (originClone.collapsed) return null;
+
+  const normalized = normalizeRangeEndpointsToText(origin.cloneRange());
+  const work = normalized ?? origin.cloneRange();
+
+  const webkitFirst = preferIntlWordSnapFirstForPdf();
+  const intl = snapRangeToWordsViaIntl(work);
+  const intlOk = intl !== null && snappedRangeDoesNotShrink(originClone, intl);
+  const mod = snapRangeUsingSelectionModify(work);
+  const modOk = mod !== null;
+
+  if (webkitFirst) {
+    if (intlOk) return intl;
+    if (modOk) return mod;
+    return null;
+  }
+  if (modOk) return mod;
+  if (intlOk) return intl;
   return null;
 }
 
@@ -1183,7 +1306,7 @@ export function PdfViewer({
     drawUnderlinesForPage(el, useStore.getState().selectionHistory);
   }, [drawUnderlinesForPage]);
 
-  const handleMouseUp = useCallback(() => {
+  const finalizeTextSelectionToolbar = useCallback(() => {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !sel.toString().trim()) {
       onSelectionClear?.();
@@ -1196,8 +1319,7 @@ export function PdfViewer({
     const liveRange = sel.getRangeAt(0);
     const snapped = snapRangeToWords(liveRange);
     if (snapped) {
-      sel.removeAllRanges();
-      sel.addRange(snapped);
+      stabilizeSelectionAnchors(sel, snapped);
     }
 
     let text = sel.toString().trim();
@@ -1219,6 +1341,14 @@ export function PdfViewer({
     onTextSelected?.(text, rect);
   }, [onTextSelected, onSelectionClear]);
 
+  const handleMouseUp = useCallback(() => {
+    if (preferIntlWordSnapFirstForPdf()) {
+      requestAnimationFrame(() => finalizeTextSelectionToolbar());
+      return;
+    }
+    finalizeTextSelectionToolbar();
+  }, [finalizeTextSelectionToolbar]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -1230,12 +1360,11 @@ export function PdfViewer({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onSelectionClear]);
 
-  // Safari-style auto-scroll while dragging a selection. When the cursor
-  // enters an "edge zone" near the top or bottom of the viewport, we
-  // ease the container in that direction so the selection can keep
-  // growing without the user having to release and re-drag. The native
-  // selection engine picks up the new geometry each frame automatically.
+  // Safari-style auto-scroll while dragging a selection (Chromium). WebKit
+  // PDF selection fights our RAF scroll (visible “jumping”), so we skip it.
   useEffect(() => {
+    if (preferIntlWordSnapFirstForPdf()) return undefined;
+
     const container = containerRef.current;
     if (!container) return;
 
