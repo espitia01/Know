@@ -43,11 +43,28 @@ LATEX_FORMAT_INSTRUCTIONS = """LATEX FORMATTING RULES (STRICT — follow exactly
 - NEVER output Unicode math characters (e.g. σ, μ, ∑, ∫, Γ, Δ, Ω, superscripts/subscripts-as-Unicode…). ALWAYS write them in LaTeX: \\sigma, \\mu, \\sum, \\int, \\Gamma, \\Omega, etc.
 - NEVER mix bare/raw symbols and LaTeX in the same expression. If an equation has ANY math, wrap the ENTIRE equation in $...$ or $$...$$
 - For matrices use \\begin{pmatrix}...\\end{pmatrix} (or bmatrix/vmatrix) inside $$...$$
-- For multi-character function names use \\operatorname{name} or \\text{name}
+- For multi-character function names use \\operatorname{name} or \\text{name}; for word-like subscripts use \\mathrm{} (e.g. $d_{\\mathrm{DW}}$, $\\Delta V_{\\mathrm{S}}$)
+- Use \\mathbf{R} or \\boldsymbol{r} for vectors when \\mathbf{} is clearer than bare italic
+- Ratios stacked vertically MUST use \\frac{…}{…} inside math — never imitate fractions with glyphs split across lines (e.g. write $\\frac{P(\\mathbf{R})}{2\\epsilon_0}$, not prose lines with P, then denominator, then e^{-G|z|} scattered)
 - Use \\left| \\right| for norms / magnitudes over multi-symbol expressions — never vertically split '|' glyphs across lines outside math
 - Do not break a single equation into multiple $...$ fragments — keep it as one continuous math expression
-- NEVER insert line breaks between individual characters, tokens, or short lines inside one equation (no 'one token per line' formatting)
-- For numbered multi-line alignments use $$\n\\begin{aligned} … \\end{aligned}\n$$ (centered display); NEVER split one equation across multiple paragraphs or lines of plain text."""
+- NEVER insert line breaks between individual characters, tokens, or short lines inside prose OR inside math (absolutely forbid 'one glyph per line' columns that spell English or LaTeX)
+- For numbered multi-line alignments use $$\n\\begin{aligned} … \\end{aligned}\n$$ (centered display); NEVER split one equation across multiple paragraphs or lines of plain text
+
+PROSE AND READABILITY (same priority as math):
+- Write normal English: spaces between every word — NEVER concatenate sentences (wrong: Theresearchcombines… ; right: The research combines …)
+- Paragraphs flow as full sentences or bullet lines; lists use markdown `-` or numbering with each item readable on one screen line where possible
+
+DEFINITION AND "RECOGNIZE PARAMETERS" STYLE:
+- Prefer `- **Symbol / name** ($expression$):` one-line description OR two lines max (definition, then intuition) — NOT a vertical stack of isolated letters/Greek/plus/parens
+- For each physical quantity: introduce it with concise inline math (e.g. $P(\\mathbf{R})$, $G$); optionally add ONE display equation for the defining relation instead of repeating the same relation in three broken forms
+
+BAD OUTPUT PATTERNS (never produce these):
+- A block that lists one Latin letter per line spelling a sentence ("Electrostatic surface potential…") or repeating the same caption under garbled typography
+- Stray `$`/`$$` in prose: every display block opens and closes with `$$`; never leave orphan `$$` glued to trailing math (invalid: "... $2\\epsilon_0$$ continues" outside a complete display block — use $\\frac{\\cdots}{2\\epsilon_0}$ inline or rewrite as a standalone $$ block)
+- Duplicating identical content as (1) glued run-on text, (2) vertical-character salad, AND (3) proper math — pick ONE concise prose paragraph plus ONE canonical $ or $$ formulation
+
+RENDERER NOTES (KaTeX): favor standard AMS-style constructs (\\begin{aligned}, \\frac, \\sqrt, \\int, \\mathrm) and environments already listed above — avoid obscure packages or TikZ."""
 
 
 def _ssl_context():
@@ -720,7 +737,9 @@ def _get_selection_prompt(paper_text: str, selected_text: str, action: str) -> t
         + LATEX_FORMAT_INSTRUCTIONS
         + "\n\nIMPORTANT: The selected text comes from a PDF text layer. Mathematical equations may appear garbled, "
         "with symbols like subscripts, superscripts, Greek letters, or operators rendered as incorrect Unicode characters "
-        "or missing entirely. Use the paper context to infer the correct equations and symbols. "
+        "or missing entirely. Layout may look like one character per line or words glued together without spaces — NEVER "
+        "preserve that artifact; reconstruct normal flowing prose and cleanly delimited LaTeX. "
+        "Use the paper context to infer the correct equations and symbols. "
         "Always reproduce equations correctly in LaTeX even if the selected text is mangled."
     )
 
