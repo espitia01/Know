@@ -101,10 +101,10 @@ function DashboardContent() {
     };
   }, []);
 
-  const recentPaperOrder = useMemo(
-    () => getRecentPaperOpenOrder(),
-    [recentOrderEpoch],
-  );
+  const recentPaperOrder = useMemo(() => {
+    void recentOrderEpoch;
+    return getRecentPaperOpenOrder();
+  }, [recentOrderEpoch]);
 
   const dashboardPapersOrdered = useMemo(() => {
     const rank = (id: string) => {
