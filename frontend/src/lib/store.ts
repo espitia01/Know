@@ -76,6 +76,10 @@ interface AppStore {
   activeTab: string;
   setActiveTab: (t: string) => void;
 
+  /** Viewer hands off marquee captures; FiguresPanel uploads then clears — not persisted */
+  pendingFigureBlob: Blob | null;
+  setPendingFigureBlob: (b: Blob | null) => void;
+
   panelVisible: boolean;
   setPanelVisible: (v: boolean) => void;
   togglePanel: () => void;
@@ -185,6 +189,7 @@ export const useStore = create<AppStore>()(
           }
           return {
             paper: p,
+            pendingFigureBlob: null,
             preReading: null,
             preReadingPaperId: null,
             assumptions: [],
@@ -350,6 +355,7 @@ export const useStore = create<AppStore>()(
         set({
           sessionPapers: [], crossPaperResults: [],
           papersById: {},
+          pendingFigureBlob: null,
           preReading: null,
           preReadingPaperId: null,
           assumptions: [], summary: null, notes: [],
@@ -377,6 +383,9 @@ export const useStore = create<AppStore>()(
 
       activeTab: "summary",
       setActiveTab: (t) => set({ activeTab: t }),
+
+      pendingFigureBlob: null,
+      setPendingFigureBlob: (b) => set({ pendingFigureBlob: b }),
 
       panelVisible: true,
       setPanelVisible: (v) => set({ panelVisible: v }),

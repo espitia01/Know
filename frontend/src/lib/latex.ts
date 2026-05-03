@@ -7,6 +7,8 @@
  * 4. Bare LaTeX commands/expressions not inside $ → wrapped in $ or $$.
  */
 
+import { stripOrphanCitationCounters } from "@/lib/formatBibliography";
+
 /** Note authoring: `$$$$…$$$$` = display (block), `$$…$$` = inline. Maps to remark-math (`$$` / `$`). */
 export function remapNoteMathDelimiters(raw: string): string {
   const displays: string[] = [];
@@ -107,86 +109,40 @@ function tightenStrayAdjacentDollarDelimiters(s: string): string {
 }
 
 /**
- * LLM/PDF dumps sometimes put every character on its own line. Join those
- * rows back into words *before* equation-collapse heuristics run (otherwise
- * short-line logic misfires and KaTeX sees impossible fragments).
+ * LLM/PDF dumps sometimes put every character on its own line. Join long
+ * glyph-per-line runs only (≥4); short runs stay as-is (avoid splitting
+ * doubled letters inside normal words vs the old heuristic).
  */
 function joinDegenerateGlyphPerLineReflow(s: string): string {
   const lines = s.split(/\r?\n/);
+  const isAtomicGlyphLine = (raw: string): boolean => {
+    const t = raw.trim();
+    if (t.length !== 1) return false;
+    return /^[A-Za-z0-9.,;:'"_^+\-=]$/.test(t);
+  };
+
   const out: string[] = [];
-  let buf = "";
-
-  const flushBuf = () => {
-    if (buf.length > 0) {
-      out.push(buf);
-      buf = "";
-    }
-  };
-
-  const appendCh = (ch: string) => {
-    if (!buf) {
-      buf = ch;
-      return;
-    }
-    const last = buf.slice(-1);
-    if (/[.!?:;,)]/.test(last) && /[A-Za-z0-9]/.test(ch)) {
-      buf += ` ${ch}`;
-      return;
-    }
-    if (/[a-z]/.test(last) && /[A-Z]/.test(ch)) {
-      buf += ` ${ch}`;
-      return;
-    }
-    if (/[a-zA-Z]/.test(last) && /[a-zA-Z]/.test(ch) && last.toLowerCase() === ch.toLowerCase()) {
-      buf += ` ${ch}`;
-      return;
-    }
-    buf += ch;
-  };
-
-  for (const raw of lines) {
-    const trimmed = raw.trim();
-
-    if (
-      trimmed === "" ||
-      /^#{1,6}\s/.test(trimmed) ||
-      /^[-*•]\s/.test(trimmed) ||
-      /^\d+\.[\s)]/.test(trimmed) ||
-      trimmed.startsWith("```") ||
-      trimmed.includes("|") ||
-      trimmed.length > 1
-    ) {
-      flushBuf();
-      out.push(raw);
+  let i = 0;
+  while (i < lines.length) {
+    if (!isAtomicGlyphLine(lines[i])) {
+      out.push(lines[i]);
+      i++;
       continue;
     }
-
-    const ch = trimmed;
-
-    if (/^\d$/.test(ch)) {
-      if (buf === "" || /^\d+$/.test(buf)) appendCh(ch);
-      else {
-        flushBuf();
-        appendCh(ch);
-      }
+    let j = i;
+    while (j < lines.length && isAtomicGlyphLine(lines[j])) j++;
+    const runLen = j - i;
+    if (runLen < 4) {
+      for (let k = i; k < j; k++) out.push(lines[k]);
+      i = j;
       continue;
     }
-
-    if (
-      /^[a-zA-Z]$/.test(ch) ||
-      /^[_^]$/.test(ch) ||
-      /^[.,;:]$/.test(ch) ||
-      /^[+\-=]$/.test(ch)
-    ) {
-      if (/^\d+$/.test(buf)) flushBuf();
-      appendCh(ch);
-      continue;
-    }
-
-    flushBuf();
-    out.push(raw);
+    let joined = lines.slice(i, j).map((l) => l.trim()).join("");
+    joined = joined.replace(/([a-z])([A-Z])/g, "$1 $2");
+    joined = joined.replace(/([.!?:;,)])([A-Za-z0-9])/g, "$1 $2");
+    out.push(joined);
+    i = j;
   }
-  flushBuf();
   return out.join("\n");
 }
 
@@ -322,8 +278,39 @@ function repairFracturedDollarCommaPatterns(s: string): string {
   t = t.replace(/,\$\$\s*(d_[a-z]+\b)/gi, (_, dim: string) => `, $${dim}$,`);
   /** “…) $$- dimensional” fracture */
   t = t.replace(/([A-Za-z0-9)\]}])\$\s*\$\s*(?=\s*-\s*[a-z])/gi, "$1$ ");
+  /** "X$$-dim" — close math, hyphen stays prose */
+  t = t.replace(/([A-Za-z0-9)\]}_])\$\$\s*-\s*([a-z])/g, "$1$ -$2");
+  /** Stray `$` inside `\\mathrm{…}(…)`-style macro argument lists */
+  t = t.replace(
+    /(\\(?:mathrm|mathcal|mathbf|operatorname)\{[A-Za-z]+\})\(([^)]*?)\)/g,
+    (_full, head: string, args: string) => {
+      const cleaned = args
+        .replace(/\$/g, "")
+        .replace(/\s+,/g, ",")
+        .replace(/\s{2,}/g, " ")
+        .trim();
+      return `${head}(${cleaned})`;
+    },
+  );
+  /** Delimiter-only lines: "$ $" / "$$ $$" */
+  t = t.replace(/(?:^|\n)\s*\$+\s*\$+\s*(?=\n|$)/g, "");
+  /** "$a$, $b$, $c$" runs collapse into one inline span */
+  t = t.replace(
+    /\$([^$\n]{1,40})\$\s*,\s*\$([^$\n]{1,40})\$\s*,\s*\$([^$\n]{1,40})\$/g,
+    (_full, a: string, b: string, c: string) => `$${a}, ${b}, ${c}$`,
+  );
   t = t.replace(/\$\s+where\s+\$\$/gi, "\n$$\nwhere\n$$\n");
   return t;
+}
+
+/** Macro/dollar fractures so severe local rules can't recover lines → display block */
+function repairWholeLineMacroSalad(s: string): string {
+  return s.replace(/^(\s*)((?:[^\n$]*\$){6,}[^\n]*)$/gm, (full, lead: string, line: string) => {
+    if (!/\\(?:mathrm|mathcal|text|frac|sum|left|right|operatorname)/.test(line)) return full;
+    const cleaned = line.replace(/\$/g, "").trim();
+    if (cleaned.length < 6) return full;
+    return `${lead}\n$$\n${cleaned}\n$$\n`;
+  });
 }
 
 /** Repair `\\mathrm{Name}(…)` bodies only — first closing `)` ends arguments. */
@@ -345,6 +332,7 @@ function repairCommonTransformerMathFractures(s: string): string {
   for (const macro of ["Attention", "MultiHead", "Concat"] as const) {
     t = repairRsfsParenBlock(t, macro);
   }
+  t = repairWholeLineMacroSalad(t);
   return t;
 }
 
@@ -659,7 +647,6 @@ function normalizeTextCommandsInMathRegions(s: string): string {
   return out.join("");
 }
 
-/** Strip seq2seq inference tags that break KaTeX/markdown when pasted from PDFs */
 function stripInferenceAngleTags(text: string): string {
   return text.replace(
     /<\/?(?:eos|pad|unk|sep|cls|s|\/s|mask|bos)\b[^>]*>|<EOS>|<PAD>|<UNK>/gi,
@@ -672,6 +659,7 @@ export function preprocessLatex(text: string, opts?: PreprocessLatexOpts): strin
   const noteMode = Boolean(opts?.noteMode);
 
   let s = stripInferenceAngleTags(text);
+  s = stripOrphanCitationCounters(s);
   s = joinDegenerateGlyphPerLineReflow(s);
   s = tightenStrayAdjacentDollarDelimiters(s);
   s = normalizeUnicodeMath(s);

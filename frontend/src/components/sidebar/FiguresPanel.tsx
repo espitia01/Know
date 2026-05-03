@@ -435,6 +435,18 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     [paperId, cachePaper, setPaper, handleAnalyze],
   );
 
+  const pendingFigureBlob = useStore((s) => s.pendingFigureBlob);
+  const setPendingFigureBlobStore = useStore((s) => s.setPendingFigureBlob);
+
+  useEffect(() => {
+    if (!pendingFigureBlob) return;
+    const blob = pendingFigureBlob;
+    setPendingFigureBlobStore(null);
+    void ingestFigureBlob(blob, "Could not save the captured region. Try again.");
+    // ingestFigureBlob is stable per paperId — only re-run when a new blob is queued.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingFigureBlob]);
+
   const handleScreenCapture = useCallback(async () => {
     await ingestFigureBlob(
       await captureScreenTabToPng(),
@@ -481,7 +493,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           </div>
           <p className="text-[var(--text-md)] font-semibold tracking-tight text-foreground/95">No figures yet</p>
           <p className="mx-auto max-w-md text-[var(--text-xs)] leading-relaxed text-muted-foreground/88">
-            Add a snapshot with the browser picker (whole screen, a window, or a tab)—or grab a region with your OS screenshot tool, copy the image, then paste here. Websites cannot invoke the system marquee for you.
+            Use <strong className="font-semibold text-foreground/85">Capture</strong> in the PDF toolbar to drag a region of any page. Or paste an image from your clipboard, or share your screen.
           </p>
         </div>
         <div className="flex flex-col gap-2.5">
@@ -662,7 +674,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     <div className="space-y-4">
       <div className="rounded-xl border border-border/45 bg-card/25 px-3.5 py-3 shadow-[var(--shadow-xs)]">
         <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/85">
-          Open a figure to analyze. Add images with capture (browser picker), paste after an OS screenshot, or re-run PDF extraction.
+          Open a figure to analyze. Use <strong className="font-semibold text-foreground/85">Capture</strong> in the PDF toolbar, paste from the clipboard, use screen share, or re-run PDF extraction.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <button

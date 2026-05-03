@@ -55,6 +55,43 @@ function truncateAfterBibliographyBleed(s: string): string {
   return s;
 }
 
+/** Remove standalone footnote-counter / year tokens (e.g. lines that contain
+ *  only "21" or "2006." or pairs like "21\n2006.") that PDF bibliographies
+ *  leak into LLM output. Safe to apply to any analysis markdown — only matches
+ *  standalone tokens, never inline numbers in prose. */
+export function stripOrphanCitationCounters(raw: string): string {
+  let pre = raw.replace(/\r\n/g, "\n");
+
+  for (let pass = 0; pass < 10; pass++) {
+    const next = pre.replace(
+      /(^|\n)\s*\d{1,3}\.{0,2}\s*\n\s*(?:19|20)\d{2}\.+/g,
+      "$1",
+    );
+    if (next === pre) break;
+    pre = next;
+  }
+
+  const lines = pre.split("\n");
+  const kept = lines.filter((line) => {
+    const t = line.trim();
+    if (!t) return true;
+    if (/^\d{1,4}(?:\.(?!\d))?$/u.test(t)) return false;
+    if (/^(?:19|20)\d{2}\.+\.?$/u.test(t)) return false;
+    if (/^\[(?:19|20)\d{2}\]$/u.test(t)) return false;
+    if (/^(?:\d{1,3}[.)]?|(?:19|20)\d{2}\.)$/u.test(t)) return false;
+    if (/^\d{1,3}\s+(?:19|20)\d{2}\.$/u.test(t)) return false;
+    if (/^(?:19|20)\d{2}\.{2,4}$/.test(t)) return false;
+    return true;
+  });
+  let body = kept.join("\n").replace(/\n{3,}/g, "\n\n");
+  body = body.replace(
+    /\n\s*(?:(?:\d{1,4}\.(?:\s+\d{1,4}\.)*|(?:19|20)\d{2}\.(?:\.?))+\s*\n)+\s*/g,
+    "\n\n",
+  );
+  body = body.replace(/\.\s+(?:\d{1,3}\.{0,2}\s+){1,3}(?=\s*\[)/g, ". ");
+  return body;
+}
+
 /** e.g. "… 15 15 2006.", " … 15 2006." hangers after garbled merges */
 function stripTrailingOrphanIndexTail(s: string): string {
   const tailPairWithYear =
@@ -77,37 +114,9 @@ export function sanitizeRelatedClusterSummaryMarkdown(raw: string): string {
   let pre = raw.replace(/\r\n/g, "\n").trim();
   /** Citation footnote counters between “…year.” blocks and next “[\d+]” excerpt */
   pre = pre.replace(/\.\s*\n+\s*\d{1,3}\.{0,2}\s*\n+(?=\s*\[)/gu, ".\n\n");
-  /** Chains “17 ⇥ 2006.” / “17 ⇥ 2006..” leaked on their own lines (PDF footnotes). */
-  for (let pass = 0; pass < 10; pass++) {
-    const n = pre.replace(/\n\s*\d{1,3}\.{0,2}\s*\n\s*(?:19|20)\d{2}\.+/g, "\n");
-    if (n === pre) break;
-    pre = n;
-  }
-
-  const lines = pre.split("\n");
-  const kept = lines.filter((line) => {
-    const t = line.trim();
-    if (!t) return true;
-    /** Footnote bleed: bare index digits or stray years alone on a line */
-    if (/^\d{1,4}(?:\.(?!\d))?$/u.test(t)) return false;
-    if (/^(?:19|20)\d{2}\.+\.?$/u.test(t)) return false;
-    if (/^\[(?:19|20)\d{2}\]$/u.test(t)) return false;
-    if (/^(?:\d{1,3}[.)]?|(?:19|20)\d{2}\.)$/u.test(t)) return false;
-    if (/^\d{1,3}\s+(?:19|20)\d{2}\.$/u.test(t)) return false;
-    /** “2017..” style double punctuation */
-    if (/^(?:19|20)\d{2}\.{2,4}$/.test(t)) return false;
-    return true;
-  });
-  let body = kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  body = body.replace(MODEL_ANGLE_TAGS, " ").replace(/\s{2,}/g, " ").trim();
-  /** Paragraphs consisting only of year/index tokens slipped through normalization */
-  body = body.replace(
-    /\n\s*(?:(?:\d{1,4}\.(?:\s+\d{1,4}\.)*|(?:19|20)\d{2}\.(?:\.?))+\s*\n)+\s*/g,
-    "\n\n",
-  );
-  /** After newlines were collapsed: “2016. 16 [40]” footnote counter */
-  body = body.replace(/\.\s+(?:\d{1,3}\.{0,2}\s+){1,3}(?=\s*\[)/g, ". ");
-  return body;
+  pre = stripOrphanCitationCounters(pre).trim();
+  pre = pre.replace(MODEL_ANGLE_TAGS, " ").replace(/\s{2,}/g, " ").trim();
+  return pre;
 }
 
 /**
