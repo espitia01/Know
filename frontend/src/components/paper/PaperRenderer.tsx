@@ -7,6 +7,7 @@ import rehypeKatex from "rehype-katex";
 import type { FigureInfo, PaperReference } from "@/lib/api";
 import { api } from "@/lib/api";
 import { DefinitionPopover } from "./DefinitionPopover";
+import { sanitizeCitationForDisplay } from "@/lib/formatBibliography";
 
 function parseAuthorNumbers(author: string): { name: string; nums: number[] } {
   const match = author.match(/^(.+?)\s*([\d,\s*†‡§¶]+)$/);
@@ -250,7 +251,9 @@ export function PaperRenderer({
                     <span className="text-foreground/40 shrink-0 w-6 text-right tabular-nums font-medium" style={{ fontFamily: "'Inter', system-ui, sans-serif" }}>
                       {ref.id}.
                     </span>
-                    <span>{ref.text}</span>
+                    <span className="min-w-0 text-pretty [overflow-wrap:anywhere] text-foreground/88">
+                      {sanitizeCitationForDisplay(ref.text)}
+                    </span>
                   </li>
                 ))}
               </ol>

@@ -20,7 +20,7 @@ function highlightPointerKey(entry: SelectionAnalysisResult): string {
 }
 
 /** Viewport marquee clamped to the PDF scrollport; rejects tiny rectangles. */
-const MIN_FIGURE_CROP_PX = 14;
+const MIN_FIGURE_CROP_PX = 8;
 
 function unionScrollViewportClamp(
   scrollEl: HTMLElement,

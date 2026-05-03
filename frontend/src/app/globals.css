@@ -443,6 +443,9 @@
 }
 .paper-content .katex {
   font-size: 1.035em;
+  overflow-x: auto;
+  overflow-y: visible;
+  max-width: 100%;
   vertical-align: text-bottom;
 }
 .paper-content p:has(.katex-display),

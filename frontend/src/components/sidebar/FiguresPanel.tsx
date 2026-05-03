@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { api, type FigureInfo, type FigureAnalysis, type ParsedPaper } from "@/lib/api";
-import { beginFigureScreenshotFlow } from "@/lib/pdfSelectionCapture";
+import { beginFigureScreenshotFlow, captureScreenTabToPng, readClipboardImageBlob } from "@/lib/pdfSelectionCapture";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
@@ -208,7 +208,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     if (!paperId || effectivePaper?.id !== paperId) return;
     const list = effectivePaper.cached_analysis?.figure_analyses;
     setConversations(chatsFromFigureAnalyses(list));
-  }, [paperId, effectivePaper?.id, figureAnalysesSig, effectivePaper?.cached_analysis?.figure_analyses]);
+  }, [paperId, effectivePaper?.id, figureAnalysesSig]); // eslint-disable-line react-hooks/exhaustive-deps -- synced via compact figureAnalysesSig
 
   // Abort any in-flight figure stream when the panel unmounts so we don't
   // keep a dangling LLM request alive after navigation.
@@ -402,38 +402,59 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     [paperId]
   );
 
-  const handleCaptureFromPdf = useCallback(async () => {
-    setClipError(null);
-    try {
-      setClipSaving(true);
-      const blob = await beginFigureScreenshotFlow();
+  const ingestFigureBlob = useCallback(
+    async (blob: Blob | null, cancelHint: string) => {
+      setClipError(null);
       if (!blob) {
-        setClipError(
-          "Drag on the PDF to draw a rectangle around the figure, then release—or press Esc to cancel.",
-        );
+        setClipError(cancelHint);
         return;
       }
-      const { figure, figures } = await api.uploadFigureFromSelection(paperId, blob);
-      const snap =
-        useStore.getState().papersById[paperId] ??
-        (useStore.getState().paper?.id === paperId ? useStore.getState().paper : null);
-      if (!snap || snap.id !== paperId) {
-        setClipError("Could not sync paper cache. Reload the library and try again.");
-        return;
+      try {
+        setClipSaving(true);
+        const { figure, figures } = await api.uploadFigureFromSelection(paperId, blob);
+        const snap =
+          useStore.getState().papersById[paperId] ??
+          (useStore.getState().paper?.id === paperId ? useStore.getState().paper : null);
+        if (!snap || snap.id !== paperId) {
+          setClipError("Could not sync paper cache. Reload the library and try again.");
+          return;
+        }
+        const next = { ...snap, figures };
+        cachePaper(next);
+        if (useStore.getState().paper?.id === paperId) {
+          setPaper(next);
+        }
+        setSelected(figure);
+        void handleAnalyze(figure, "");
+      } catch (e) {
+        setClipError(e instanceof Error ? e.message : "Could not save figure image.");
+      } finally {
+        setClipSaving(false);
       }
-      const next = { ...snap, figures };
-      cachePaper(next);
-      if (useStore.getState().paper?.id === paperId) {
-        setPaper(next);
-      }
-      setSelected(figure);
-      void handleAnalyze(figure, "");
-    } catch (e) {
-      setClipError(e instanceof Error ? e.message : "Could not save selection as a figure.");
-    } finally {
-      setClipSaving(false);
-    }
-  }, [paperId, cachePaper, setPaper, handleAnalyze]);
+    },
+    [paperId, cachePaper, setPaper, handleAnalyze],
+  );
+
+  const handleCaptureFromPdf = useCallback(async () => {
+    await ingestFigureBlob(
+      await beginFigureScreenshotFlow(),
+      "Drag on the PDF to box the figure, then release—or press Esc to cancel.",
+    );
+  }, [ingestFigureBlob]);
+
+  const handleScreenCapture = useCallback(async () => {
+    await ingestFigureBlob(
+      await captureScreenTabToPng(),
+      "Screen capture was cancelled or not supported. Allow sharing when the browser asks, then try again.",
+    );
+  }, [ingestFigureBlob]);
+
+  const handlePasteFromClipboard = useCallback(async () => {
+    await ingestFigureBlob(
+      await readClipboardImageBlob(),
+      "No image on the clipboard. Take a system screenshot (e.g. ⌘⇧4 on Mac, Win+Shift+S on Windows), copy the image, then tap Paste again.",
+    );
+  }, [ingestFigureBlob]);
 
   const handleAsk = useCallback(() => {
     if (!selected || !question.trim()) return;
@@ -458,34 +479,54 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
   if (figures.length === 0) {
     return (
-      <div className="text-center py-10 space-y-4">
+      <div className="mx-auto flex max-w-lg flex-col gap-5 rounded-xl border border-border/50 bg-card/25 px-6 py-10 text-center shadow-[var(--shadow-xs)] motion-safe:animate-fade-in">
         <div className="space-y-2">
-          <svg className="w-10 h-10 mx-auto text-muted-foreground/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-          </svg>
-          <p className="text-[var(--text-md)] text-muted-foreground/70">No figures detected yet.</p>
-          <p className="text-[var(--text-xs)] text-muted-foreground/50 max-w-xs mx-auto leading-relaxed">
-            Extraction can miss figures on scanned or unusually laid-out PDFs. Try re-extracting — the updated pipeline often finds them on a second pass.
+          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full border border-border/50 bg-muted/30 text-muted-foreground/55">
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+            </svg>
+          </div>
+          <p className="text-[var(--text-md)] font-medium text-foreground/90">No figures yet</p>
+          <p className="mx-auto max-w-md text-[var(--text-xs)] leading-relaxed text-muted-foreground/85">
+            Crop inside the PDF, capture this tab/window when the browser asks, or paste a screenshot you took with the OS shortcut—then we analyze it.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleCaptureFromPdf}
-          disabled={clipSaving || reextracting}
-          className="btn-primary-glass rounded-lg px-4 py-2 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {clipSaving ? "Crop on PDF…" : "Add figure from PDF selection"}
-        </button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center">
+          <button
+            type="button"
+            onClick={handleCaptureFromPdf}
+            disabled={clipSaving || reextracting}
+            className="btn-primary-glass rounded-lg px-4 py-2.5 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {clipSaving ? "Working…" : "Crop on PDF"}
+          </button>
+          <button
+            type="button"
+            onClick={handleScreenCapture}
+            disabled={clipSaving || reextracting}
+            className="rounded-lg border border-border/60 bg-background/60 px-4 py-2.5 text-[var(--text-sm)] font-medium text-foreground/90 backdrop-blur-sm transition-colors hover:bg-accent/45 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Screen capture
+          </button>
+          <button
+            type="button"
+            onClick={handlePasteFromClipboard}
+            disabled={clipSaving || reextracting}
+            className="rounded-lg border border-border/60 bg-background/60 px-4 py-2.5 text-[var(--text-sm)] font-medium text-foreground/90 backdrop-blur-sm transition-colors hover:bg-accent/45 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Paste screenshot
+          </button>
+        </div>
         <button
           type="button"
           onClick={handleReextract}
           disabled={reextracting || clipSaving}
-          className="rounded-lg border border-border/70 px-4 py-2 text-[var(--text-sm)] font-medium text-foreground transition-colors hover:bg-accent/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+          className="text-[var(--text-xs)] font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:opacity-40"
         >
-          {reextracting ? "Re-extracting figures…" : "Re-extract figures"}
+          {reextracting ? "Re-extracting from PDF…" : "Re-run PDF figure extraction"}
         </button>
         {clipError && (
-          <p className="text-[var(--text-xs)] text-destructive/90 max-w-sm mx-auto leading-relaxed" role="alert">
+          <p className="text-left text-[var(--text-xs)] text-destructive/90" role="alert">
             {clipError}
           </p>
         )}
@@ -627,19 +668,45 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   }
 
   return (
-    <div className="space-y-3.5">
-      <div className="flex flex-wrap items-start gap-2">
-        <p className="text-[var(--text-xs)] text-muted-foreground/70 flex-1 min-w-[12rem]">
-          Tap a figure to analyse &amp; ask questions. Missed one? Crop it from the PDF.
+    <div className="space-y-4">
+      <div className="rounded-xl border border-border/50 bg-card/20 px-3.5 py-3 shadow-[var(--shadow-xs)]">
+        <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/80">
+          Tap a card to analyze. Add more via crop, screen capture, paste, or re-extract from the PDF.
         </p>
-        <button
-          type="button"
-          onClick={handleCaptureFromPdf}
-          disabled={clipSaving || reextracting || loading}
-          className="shrink-0 rounded-md border border-border/70 px-2.5 py-1 text-[var(--text-xs)] font-medium text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-40"
-        >
-          {clipSaving ? "Cropping…" : "From selection"}
-        </button>
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={handleCaptureFromPdf}
+            disabled={clipSaving || reextracting || loading}
+            className="rounded-md border border-border/55 bg-background/50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:border-border-strong hover:bg-accent/45 hover:text-foreground disabled:opacity-40"
+          >
+            {clipSaving ? "…" : "Crop"}
+          </button>
+          <button
+            type="button"
+            onClick={handleScreenCapture}
+            disabled={clipSaving || reextracting || loading}
+            className="rounded-md border border-border/55 bg-background/50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:border-border-strong hover:bg-accent/45 hover:text-foreground disabled:opacity-40"
+          >
+            Screen
+          </button>
+          <button
+            type="button"
+            onClick={handlePasteFromClipboard}
+            disabled={clipSaving || reextracting || loading}
+            className="rounded-md border border-border/55 bg-background/50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:border-border-strong hover:bg-accent/45 hover:text-foreground disabled:opacity-40"
+          >
+            Paste
+          </button>
+          <button
+            type="button"
+            onClick={handleReextract}
+            disabled={reextracting || clipSaving || loading}
+            className="rounded-md border border-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/85 transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-40"
+          >
+            {reextracting ? "…" : "Re-extract"}
+          </button>
+        </div>
       </div>
 
       {clipError && (
@@ -648,7 +715,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         </p>
       )}
 
-      <div className="grid grid-cols-2 gap-2.5">
+      <div className="grid grid-cols-2 gap-2.5 md:gap-3">
         {figures.map((fig) => {
           const convoCount = conversations[fig.id]?.length ?? 0;
           const captionShort = fig.caption
@@ -658,41 +725,26 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
             <button
               key={fig.id}
               onClick={() => setSelected(fig)}
-              className="group relative overflow-hidden rounded-lg border border-border/60 bg-card/20 text-left ring-focus transition-[border-color,box-shadow] motion-safe:duration-150 hover:border-border hover:shadow-sm"
+              className="group relative overflow-hidden rounded-xl border border-border/50 bg-card/15 text-left ring-focus transition-[border-color,transform] motion-safe:duration-150 hover:-translate-y-px hover:border-border-strong hover:shadow-[var(--shadow-sm)]"
             >
-              <div className="aspect-[4/3] overflow-hidden bg-muted/30 relative">
+              <div className="relative aspect-[4/3] overflow-hidden bg-muted/25">
                 <AuthImage
                   src={api.getFigureUrl(paperId, fig.id)}
                   alt={fig.caption || fig.id}
                   className="h-full w-full object-cover"
                 />
                 {convoCount > 0 && (
-                  <div className="absolute top-1.5 right-1.5 bg-foreground text-background text-[9px] font-semibold leading-none min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center shadow-sm">
+                  <div className="absolute top-1.5 right-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-foreground px-1 text-[9px] font-semibold leading-none text-background shadow-sm">
                     {Math.floor(convoCount / 2)}
                   </div>
                 )}
               </div>
-              <div className="px-2.5 py-1.5">
-                <p className="text-[var(--text-xs)] font-medium text-foreground/90 truncate">
-                  {captionShort}
-                </p>
+              <div className="px-2.5 py-2">
+                <p className="truncate text-[var(--text-xs)] font-medium text-foreground/90">{captionShort}</p>
               </div>
             </button>
           );
         })}
-      </div>
-
-      <div className="pt-2 flex items-center justify-between gap-3 border-t border-border/60">
-        <p className="text-[var(--text-xs)] text-muted-foreground/60">
-          Missing a figure?
-        </p>
-        <button
-          onClick={handleReextract}
-          disabled={reextracting || clipSaving}
-          className="text-[var(--text-xs)] font-medium px-2.5 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-40 shrink-0"
-        >
-          {reextracting ? "Re-extracting…" : "Re-extract"}
-        </button>
       </div>
     </div>
   );

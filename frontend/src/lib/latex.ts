@@ -498,11 +498,20 @@ function normalizeTextCommandsInMathRegions(s: string): string {
   return out.join("");
 }
 
+/** Strip seq2seq inference tags that break KaTeX/markdown when pasted from PDFs */
+function stripInferenceAngleTags(text: string): string {
+  return text.replace(
+    /<\/?(?:eos|pad|unk|sep|cls|s|\/s|mask|bos)\b[^>]*>|<EOS>|<PAD>|<UNK>/gi,
+    "",
+  );
+}
+
 export function preprocessLatex(text: string, opts?: PreprocessLatexOpts): string {
   if (!text) return text;
   const noteMode = Boolean(opts?.noteMode);
 
-  let s = normalizeUnicodeMath(text);
+  let s = stripInferenceAngleTags(text);
+  s = normalizeUnicodeMath(s);
   s = unicodeCapGreekToLatex(s);
   if (noteMode) {
     s = remapNoteMathDelimiters(s);

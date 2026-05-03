@@ -8,7 +8,6 @@ import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/anal
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SectionHeader } from "@/components/panel/SectionHeader";
-import { scholarSearchHrefFromPriorWork } from "@/lib/priorWorkLinks";
 import {
   Accordion,
   AccordionContent,
@@ -21,10 +20,10 @@ interface PreReadingPanelProps {
 }
 
 const rowListClass =
-  "overflow-hidden rounded-lg border border-border/60 bg-card/30";
+  "overflow-hidden rounded-xl border border-border/50 bg-card/25 shadow-[var(--shadow-xs)]";
 
 const rowItemClass =
-  "border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out hover:bg-accent/40";
+  "border-b border-border/45 px-4 py-3.5 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/35";
 
 export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
   const preReading = useStore(
@@ -84,7 +83,7 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
         title="Prepare this paper"
         body={
           loadError ||
-          "Extract definitions, research questions, prior work, and concepts before reading."
+          "Extract definitions, research questions, and key concepts before you read."
         }
         cta={{ label: loadError ? "Retry Prepare" : "Analyze Paper", onClick: handleAnalyze }}
       />
@@ -93,13 +92,11 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
 
   const definitions = preReading.definitions ?? [];
   const research_questions = preReading.research_questions ?? [];
-  const prior_work = preReading.prior_work ?? [];
   const concepts = preReading.concepts ?? [];
 
   const hasAnySection =
     definitions.length > 0 ||
     research_questions.length > 0 ||
-    prior_work.length > 0 ||
     concepts.length > 0;
 
   if (!hasAnySection) {
@@ -197,45 +194,6 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
                     )}
                   </div>
                 ))}
-              </div>
-            </AccordionContent>
-          </AccordionItem>
-        )}
-
-        {prior_work.length > 0 && (
-          <AccordionItem value="prior" className="border-b-0">
-            <AccordionTrigger className="py-2.5 hover:no-underline">
-              <SectionHeader
-                className="mb-0"
-                title="Related"
-                count={prior_work.length}
-              />
-            </AccordionTrigger>
-            <AccordionContent>
-              <div className={rowListClass}>
-                {prior_work.map((p, i) => {
-                  const scholarHref = scholarSearchHrefFromPriorWork(p);
-                  const display =
-                    (typeof p.citation_display === "string" && p.citation_display.trim()) ||
-                    p.title.trim() ||
-                    "Untitled reference";
-                  return (
-                    <div key={i} className={rowItemClass}>
-                      {scholarHref ? (
-                        <a
-                          href={scholarHref}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mb-0.5 block whitespace-pre-wrap font-medium text-[var(--text-md)] text-primary underline underline-offset-2 hover:opacity-90"
-                        >
-                          {display}
-                        </a>
-                      ) : (
-                        <p className="mb-0.5 whitespace-pre-wrap font-medium text-[var(--text-md)]">{display}</p>
-                      )}
-                    </div>
-                  );
-                })}
               </div>
             </AccordionContent>
           </AccordionItem>

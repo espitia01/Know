@@ -8,7 +8,7 @@ import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
 import { scholarSearchHrefFromPriorWork } from "@/lib/priorWorkLinks";
-import { normalizeBibliographyCitationLine } from "@/lib/formatBibliography";
+import { sanitizeCitationForDisplay } from "@/lib/formatBibliography";
 
 interface RelatedWorkPanelProps {
   paperId: string;
@@ -25,7 +25,7 @@ function VerbatimCitationLink({ work }: { work: PriorWork }) {
     (typeof work.citation_display === "string" && work.citation_display.trim()) ||
     work.title.trim() ||
     "Reference";
-  const display = normalizeBibliographyCitationLine(raw);
+  const display = sanitizeCitationForDisplay(raw);
 
   const cls =
     "related-citation-display block text-[var(--text-sm)] leading-relaxed underline-offset-[3px] text-pretty hyphens-auto [overflow-wrap:anywhere]";

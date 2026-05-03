@@ -58,6 +58,94 @@ export function abortFigureScreenshotIfPending(): void {
   }
 }
 
+type VideoElWithVfc = HTMLVideoElement & {
+  requestVideoFrameCallback?: (cb: DOMHighResTimeStamp, meta: VideoFrameCallbackMetadata) => number;
+};
+
+async function awaitFirstVideoDimensions(v: HTMLVideoElement): Promise<boolean> {
+  const minPx = 8;
+  const deadline = Date.now() + 12000;
+
+  while (v.videoWidth < minPx || v.videoHeight < minPx) {
+    if (Date.now() > deadline) return false;
+    await new Promise<void>((resolve) => {
+      const vv = v as VideoElWithVfc;
+      if (typeof vv.requestVideoFrameCallback === "function") {
+        vv.requestVideoFrameCallback(() => resolve());
+      } else {
+        v.addEventListener("loadeddata", () => resolve(), { once: true });
+        requestAnimationFrame(() => resolve());
+      }
+    });
+  }
+  return true;
+}
+
+/** One-frame PNG from a user-picked screen/tab (browser prompt). */
+export async function captureScreenTabToPng(): Promise<Blob | null> {
+  const md = navigator.mediaDevices;
+  if (!md?.getDisplayMedia) return null;
+  let stream: MediaStream | null = null;
+  try {
+    stream = await md.getDisplayMedia({ video: true, audio: false });
+    const v = document.createElement("video");
+    v.muted = true;
+    v.playsInline = true;
+    v.srcObject = stream;
+    await v.play().catch(() => undefined);
+    const ready = await awaitFirstVideoDimensions(v);
+
+    const w = v.videoWidth || 0;
+    const h = v.videoHeight || 0;
+    if (!ready || w < 8 || h < 8) {
+      stream.getTracks().forEach((t) => t.stop());
+      stream = null;
+      return null;
+    }
+
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext("2d");
+    if (!ctx) {
+      stream.getTracks().forEach((t) => t.stop());
+      stream = null;
+      return null;
+    }
+    ctx.drawImage(v, 0, 0);
+
+    stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+
+    return new Promise((resolve) => {
+      c.toBlob((b) => resolve(b && b.size >= 64 ? b : null), "image/png", 0.92);
+    });
+  } catch {
+    return null;
+  } finally {
+    stream?.getTracks().forEach((t) => t.stop());
+  }
+}
+
+/** Clipboard image (⌘V after macOS screenshot / Win+Shift+S, etc.). */
+export async function readClipboardImageBlob(): Promise<Blob | null> {
+  try {
+    if (!navigator.clipboard?.read) return null;
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      for (const ty of item.types) {
+        if (ty.startsWith("image/")) {
+          const blob = await item.getType(ty);
+          if (blob.size >= 64) return blob;
+        }
+      }
+    }
+  } catch {
+    /* PermissionDenied or unsupported */
+  }
+  return null;
+}
+
 /** Union of sensible client rects from a Range (fallback: single bbox). */
 function unionSelectionRects(range: Range): DOMRect | null {
   let rects = Array.from(range.getClientRects());
@@ -88,7 +176,7 @@ function intersectRects(a: DOMRectReadOnly, b: DOMRectReadOnly): DOMRect | null 
   const bottom = Math.min(a.bottom, b.bottom);
   const w = right - left;
   const h = bottom - top;
-  if (w < 6 || h < 6) return null;
+  if (w < 4 || h < 4) return null;
   return new DOMRect(left, top, w, h);
 }
 
@@ -200,7 +288,8 @@ export function capturePdfViewportUnionToBlob(
     return new Promise((resolve) => {
       outCanvas.toBlob(
         (blob) => {
-          resolve(blob && blob.size > 400 ? blob : null);
+          // Thin crops (small figures / tight boxes) are valid; only reject empty.
+          resolve(blob && blob.size >= 64 ? blob : null);
         },
         "image/png",
         0.92,
