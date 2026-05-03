@@ -483,6 +483,12 @@
   user-select: text;
   -webkit-user-select: text;
   cursor: text;
+  /*
+   * NEVER add translateZ(0), translate3d, or will-change: transform here —
+   * those promote the layer to its own GPU surface and PDF.js'
+   * per-glyph scaleX() transforms drift sub-pixel-wise from the canvas
+   * under ::selection (SciSpace-crisp tuning).
+   */
 }
 .react-pdf__Page__textContent span,
 .react-pdf__Page__textContent br {

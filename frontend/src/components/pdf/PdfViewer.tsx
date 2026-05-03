@@ -178,10 +178,9 @@ function usePdfCanvasDeviceRatio() {
   useEffect(() => {
     const update = () => {
       const raw = window.devicePixelRatio || 1;
-      // Use the platform-reported DPR directly. Capped at 3 to avoid
-      // pathological canvas sizes on 3x phones; no floor, because
-      // fractional DPR causes glyph-span misalignment in the text layer
-      // and is the leading cause of selection drift.
+      // Platform DPR capped at 3; no arbitrary minimum — compounded with
+      // BASELINE_SCALE, a fractional/device-fudged DPR misaligns pdf.js
+      // glyph scaleX() vs the painted canvas pixels.
       setRatio(Math.min(3, raw));
     };
     update();
@@ -191,11 +190,46 @@ function usePdfCanvasDeviceRatio() {
   return ratio;
 }
 
-/** Expand a Range outward to the nearest word boundary at each end.
- *  Mid-word releases become whole-word selections — same affordance
- *  as Apple Books / Kindle / SciSpace. Returns null when boundaries
- *  can't be determined; callers should fall back to the live range. */
-function snapRangeToWords(range: Range): Range | null {
+/** Outward-only: snapped DOM range must encompass the user's original anchors. */
+function snappedRangeDoesNotShrink(origin: Range, snapped: Range): boolean {
+  try {
+    return (
+      snapped.compareBoundaryPoints(Range.START_TO_START, origin) <= 0 &&
+      snapped.compareBoundaryPoints(Range.END_TO_END, origin) >= 0
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Blink/WebKit/Firefox Selection.modify survives PDF.js glyph-per-span splits
+ * where Intl.Segmenter only sees fragments inside one text node.
+ */
+function snapRangeUsingSelectionModify(origin: Range): Range | null {
+  const mod = Selection.prototype.modify;
+  if (typeof mod !== "function") return null;
+
+  const sel = window.getSelection();
+  if (!sel || origin.collapsed) return null;
+
+  const originClone = origin.cloneRange();
+  try {
+    sel.removeAllRanges();
+    sel.addRange(origin.cloneRange());
+    mod.call(sel, "extend", "backward", "word");
+    mod.call(sel, "extend", "forward", "word");
+    if (sel.rangeCount === 0 || sel.isCollapsed) return null;
+    const snapped = sel.getRangeAt(0).cloneRange();
+    if (!snappedRangeDoesNotShrink(originClone, snapped)) return null;
+    return snapped;
+  } catch {
+    return null;
+  }
+}
+
+/** Expand anchors outward to nearest word boundaries using Intl segments. */
+function snapRangeToWordsViaIntl(range: Range): Range | null {
   if (typeof Intl === "undefined" || !("Segmenter" in Intl)) return null;
   const startNode = range.startContainer;
   const endNode = range.endContainer;
@@ -204,8 +238,6 @@ function snapRangeToWords(range: Range): Range | null {
 
   const seg = new Intl.Segmenter(undefined, { granularity: "word" });
 
-  // Walk segments of the start node; if the cursor landed *inside* a
-  // word-like segment, pull the start back to that segment's beginning.
   const startText = startNode.textContent ?? "";
   let newStart = range.startOffset;
   for (const s of seg.segment(startText)) {
@@ -219,8 +251,6 @@ function snapRangeToWords(range: Range): Range | null {
     if (segStart >= range.startOffset) break;
   }
 
-  // Same logic at the trailing edge: extend forward to the end of the
-  // word the cursor stopped inside.
   const endText = endNode.textContent ?? "";
   let newEnd = range.endOffset;
   for (const s of seg.segment(endText)) {
@@ -229,6 +259,7 @@ function snapRangeToWords(range: Range): Range | null {
     const segEnd = s.index + s.segment.length;
     if (segStart < range.endOffset && range.endOffset < segEnd) {
       newEnd = segEnd;
+      break;
     }
     if (segStart >= range.endOffset) break;
   }
@@ -242,6 +273,11 @@ function snapRangeToWords(range: Range): Range | null {
     return null;
   }
   return next;
+}
+
+/** Native extend-by-word first; Intl fallback inside each TEXT_NODE. */
+function snapRangeToWords(range: Range): Range | null {
+  return snapRangeUsingSelectionModify(range) ?? snapRangeToWordsViaIntl(range);
 }
 
 export function PdfViewer({
