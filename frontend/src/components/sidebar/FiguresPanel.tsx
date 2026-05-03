@@ -184,6 +184,11 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   const [clipSaving, setClipSaving] = useState(false);
   const [clipError, setClipError] = useState<string | null>(null);
 
+  const marqueeMode = useStore((s) => s.marqueeMode);
+  const setMarqueeMode = useStore((s) => s.setMarqueeMode);
+  const pendingFigureBlob = useStore((s) => s.pendingFigureBlob);
+  const setPendingFigureBlob = useStore((s) => s.setPendingFigureBlob);
+
   useEffect(() => {
     setClipError(null);
   }, [paperId]);
@@ -435,17 +440,12 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     [paperId, cachePaper, setPaper, handleAnalyze],
   );
 
-  const pendingFigureBlob = useStore((s) => s.pendingFigureBlob);
-  const setPendingFigureBlobStore = useStore((s) => s.setPendingFigureBlob);
-
   useEffect(() => {
     if (!pendingFigureBlob) return;
     const blob = pendingFigureBlob;
-    setPendingFigureBlobStore(null);
-    void ingestFigureBlob(blob, "Could not save the captured region. Try again.");
-    // ingestFigureBlob is stable per paperId — only re-run when a new blob is queued.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingFigureBlob]);
+    setPendingFigureBlob(null);
+    void ingestFigureBlob(blob, "Region capture failed.");
+  }, [pendingFigureBlob, setPendingFigureBlob, ingestFigureBlob]);
 
   const handleScreenCapture = useCallback(async () => {
     await ingestFigureBlob(
@@ -493,7 +493,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           </div>
           <p className="text-[var(--text-md)] font-semibold tracking-tight text-foreground/95">No figures yet</p>
           <p className="mx-auto max-w-md text-[var(--text-xs)] leading-relaxed text-muted-foreground/88">
-            Use <strong className="font-semibold text-foreground/85">Capture</strong> in the PDF toolbar to drag a region of any page. Or paste an image from your clipboard, or share your screen.
+            Draw a region on the PDF, use the browser picker, or grab a screenshot with your OS tool and paste here.
           </p>
         </div>
         <div className="flex flex-col gap-2.5">
@@ -507,6 +507,18 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
             </svg>
             {clipSaving ? "Saving…" : "Capture screen or window…"}
+          </button>
+          <button
+            type="button"
+            title="Draw a rectangle on the PDF to capture a region"
+            onClick={() => setMarqueeMode(true)}
+            disabled={marqueeMode || clipSaving || reextracting}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border/65 bg-background/70 px-4 py-3 text-[var(--text-sm)] font-medium text-foreground/90 backdrop-blur-sm transition-colors hover:border-border-strong hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <svg className="h-4 w-4 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5M20.25 16.5V18A2.25 2.25 0 0 1 18 20.25h-1.5M3.75 16.5V18A2.25 2.25 0 0 0 6 20.25h1.5" />
+            </svg>
+            {marqueeMode ? "Drawing…" : "Select region"}
           </button>
           <button
             type="button"
@@ -674,7 +686,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     <div className="space-y-4">
       <div className="rounded-xl border border-border/45 bg-card/25 px-3.5 py-3 shadow-[var(--shadow-xs)]">
         <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/85">
-          Open a figure to analyze. Use <strong className="font-semibold text-foreground/85">Capture</strong> in the PDF toolbar, paste from the clipboard, use screen share, or re-run PDF extraction.
+          Open a figure to analyze. Use <strong className="font-semibold text-foreground/85">Select region</strong> to outline the PDF, capture the screen or window, paste from the clipboard, or re-run PDF extraction.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <button
@@ -688,6 +700,18 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
             </svg>
             {clipSaving ? "…" : "Capture"}
+          </button>
+          <button
+            type="button"
+            title="Draw a rectangle on the PDF to capture a region"
+            onClick={() => setMarqueeMode(true)}
+            disabled={marqueeMode || clipSaving || reextracting || loading}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-background/55 px-2.5 py-1.5 text-[11px] font-semibold text-foreground/90 transition-colors hover:border-border-strong hover:bg-accent/40 disabled:opacity-40"
+          >
+            <svg className="h-3.5 w-3.5 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5M20.25 16.5V18A2.25 2.25 0 0 1 18 20.25h-1.5M3.75 16.5V18A2.25 2.25 0 0 0 6 20.25h1.5" />
+            </svg>
+            {marqueeMode ? "Drawing…" : "Select region"}
           </button>
           <button
             type="button"

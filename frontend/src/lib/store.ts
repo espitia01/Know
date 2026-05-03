@@ -76,6 +76,9 @@ interface AppStore {
   activeTab: string;
   setActiveTab: (t: string) => void;
 
+  marqueeMode: boolean;
+  setMarqueeMode: (v: boolean) => void;
+
   /** Viewer hands off marquee captures; FiguresPanel uploads then clears — not persisted */
   pendingFigureBlob: Blob | null;
   setPendingFigureBlob: (b: Blob | null) => void;
@@ -190,6 +193,7 @@ export const useStore = create<AppStore>()(
           return {
             paper: p,
             pendingFigureBlob: null,
+            marqueeMode: false,
             preReading: null,
             preReadingPaperId: null,
             assumptions: [],
@@ -356,6 +360,7 @@ export const useStore = create<AppStore>()(
           sessionPapers: [], crossPaperResults: [],
           papersById: {},
           pendingFigureBlob: null,
+          marqueeMode: false,
           preReading: null,
           preReadingPaperId: null,
           assumptions: [], summary: null, notes: [],
@@ -383,6 +388,9 @@ export const useStore = create<AppStore>()(
 
       activeTab: "summary",
       setActiveTab: (t) => set({ activeTab: t }),
+
+      marqueeMode: false,
+      setMarqueeMode: (v) => set({ marqueeMode: v }),
 
       pendingFigureBlob: null,
       setPendingFigureBlob: (b) => set({ pendingFigureBlob: b }),
@@ -541,6 +549,8 @@ export const useStore = create<AppStore>()(
       // Per audit §3.3: keep only lightweight session/UI state in
       // localStorage. Analysis artifacts live in server cached_analysis and
       // in the in-memory papersById read-through cache.
+      // `marqueeMode` / `pendingFigureBlob` intentionally omitted —
+      // session-only overlays and blob hand-offs.
       partialize: (state) => ({
         sessionPapers: state.sessionPapers,
         crossPaperResults: state.crossPaperResults,

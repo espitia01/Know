@@ -7,8 +7,6 @@
  * 4. Bare LaTeX commands/expressions not inside $ → wrapped in $ or $$.
  */
 
-import { stripOrphanCitationCounters } from "@/lib/formatBibliography";
-
 /** Note authoring: `$$$$…$$$$` = display (block), `$$…$$` = inline. Maps to remark-math (`$$` / `$`). */
 export function remapNoteMathDelimiters(raw: string): string {
   const displays: string[] = [];
@@ -108,41 +106,66 @@ function tightenStrayAdjacentDollarDelimiters(s: string): string {
   return t;
 }
 
-/**
- * LLM/PDF dumps sometimes put every character on its own line. Join long
- * glyph-per-line runs only (≥4); short runs stay as-is (avoid splitting
- * doubled letters inside normal words vs the old heuristic).
- */
+/** Reassemble PDF/LLM glyph-per-line dumps: ≥4 short lines with ≥50% single-char → one line + boundary regexes */
 function joinDegenerateGlyphPerLineReflow(s: string): string {
   const lines = s.split(/\r?\n/);
-  const isAtomicGlyphLine = (raw: string): boolean => {
-    const t = raw.trim();
-    if (t.length !== 1) return false;
-    return /^[A-Za-z0-9.,;:'"_^+\-=]$/.test(t);
-  };
-
   const out: string[] = [];
   let i = 0;
+
   while (i < lines.length) {
-    if (!isAtomicGlyphLine(lines[i])) {
+    if (lines[i].trim() === "") {
       out.push(lines[i]);
       i++;
       continue;
     }
-    let j = i;
-    while (j < lines.length && isAtomicGlyphLine(lines[j])) j++;
-    const runLen = j - i;
-    if (runLen < 4) {
-      for (let k = i; k < j; k++) out.push(lines[k]);
-      i = j;
+
+    const t0 = lines[i].trim();
+    if (
+      /^#{1,6}\s/.test(t0) ||
+      /^[-*•]\s/.test(t0) ||
+      /^\d+\.[\s)]/.test(t0) ||
+      t0.startsWith("```") ||
+      t0.includes("|")
+    ) {
+      out.push(lines[i]);
+      i++;
       continue;
     }
-    let joined = lines.slice(i, j).map((l) => l.trim()).join("");
+
+    let j = i;
+    let singleCount = 0;
+    while (j < lines.length) {
+      const tj = lines[j].trim();
+      if (tj === "") break;
+      if (tj.length > 2) break;
+      if (/^[-*•]\s/.test(tj) || /^\d+\.[\s)]/.test(tj) || /^#{1,6}\s/.test(tj)) break;
+      if (tj.length <= 1) singleCount++;
+      j++;
+    }
+
+    const runLen = j - i;
+    const isSingleCharDominant = runLen >= 4 && singleCount / runLen >= 0.5;
+
+    if (!isSingleCharDominant) {
+      out.push(lines[i]);
+      i++;
+      continue;
+    }
+
+    let joined = "";
+    for (let k = i; k < j; k++) {
+      joined += lines[k].trim();
+    }
+
     joined = joined.replace(/([a-z])([A-Z])/g, "$1 $2");
     joined = joined.replace(/([.!?:;,)])([A-Za-z0-9])/g, "$1 $2");
+    joined = joined.replace(/([a-zA-Z])(\d)/g, "$1 $2");
+    joined = joined.replace(/(\d)([a-zA-Z])/g, "$1 $2");
+
     out.push(joined);
     i = j;
   }
+
   return out.join("\n");
 }
 
@@ -654,13 +677,36 @@ function stripInferenceAngleTags(text: string): string {
   );
 }
 
+/** Strip orphan bibliography index/year pairs: "21\n2006.\n22\n2017." */
+function stripOrphanCitationCounters(s: string): string {
+  let t = s;
+  for (let pass = 0; pass < 10; pass++) {
+    const next = t.replace(
+      /\n\s*\d{1,3}\.?\s*\n\s*(?:19|20)\d{2}\.+\s*/g,
+      "\n",
+    );
+    if (next === t) break;
+    t = next;
+  }
+  for (let pass = 0; pass < 4; pass++) {
+    const next = t.replace(
+      /^\s*\d{1,3}\.?\s*\n\s*(?:19|20)\d{2}\.+\s*/g,
+      "",
+    );
+    if (next === t) break;
+    t = next;
+  }
+  t = t.replace(/(?:\s+\d{1,3}\s+(?:19|20)\d{2}\.)+\s*$/g, "");
+  return t;
+}
+
 export function preprocessLatex(text: string, opts?: PreprocessLatexOpts): string {
   if (!text) return text;
   const noteMode = Boolean(opts?.noteMode);
 
   let s = stripInferenceAngleTags(text);
-  s = stripOrphanCitationCounters(s);
   s = joinDegenerateGlyphPerLineReflow(s);
+  s = stripOrphanCitationCounters(s);
   s = tightenStrayAdjacentDollarDelimiters(s);
   s = normalizeUnicodeMath(s);
   s = unicodeCapGreekToLatex(s);

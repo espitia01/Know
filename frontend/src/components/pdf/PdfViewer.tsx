@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { api, getAuthHeadersSync, SelectionAnalysisResult } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { normalizeSelectionAction } from "@/lib/selectionActions";
 import { snapshotDomRect } from "@/lib/domRect";
+import { capturePdfViewportUnionToBlob } from "@/lib/pdfSelectionCapture";
 
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -58,6 +59,8 @@ interface PdfViewerProps {
 
 const PAGE_GAP = 16;
 const BUFFER_PAGES = 2;
+
+type PdfMarqueeBox = { startX: number; startY: number; x: number; y: number; w: number; h: number };
 
 /**
  * Module-scoped cache of object URLs pointing at fully-downloaded PDF
@@ -450,18 +453,15 @@ export function PdfViewer({
   const removeSelectionFromHistory = useStore((s) => s.removeSelectionFromHistory);
   const savedScrollByPaper = useStore((s) => s.uiPrefs.scrollByPaper);
   const setPdfScroll = useStore((s) => s.setPdfScroll);
+  const marqueeMode = useStore((s) => s.marqueeMode);
+  const setMarqueeMode = useStore((s) => s.setMarqueeMode);
   const setPendingFigureBlob = useStore((s) => s.setPendingFigureBlob);
   const setActiveTab = useStore((s) => s.setActiveTab);
 
   const [retryKey, setRetryKey] = useState(0);
-  const [marqueeMode, setMarqueeMode] = useState(false);
-  const [marqueeBusy, setMarqueeBusy] = useState(false);
-  const [marqueeRect, setMarqueeRect] = useState<{
-    left: number;
-    top: number;
-    width: number;
-    height: number;
-  } | null>(null);
+  const [marqueeRect, setMarqueeRect] = useState<PdfMarqueeBox | null>(null);
+  const marqueeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const marqueeDraftRef = useRef<PdfMarqueeBox | null>(null);
   // Whether we've already restored the persisted scroll for this paper. We
   // restore exactly once per (paperId, retryKey) pair, on the first page
   // that renders — before any user scrolling writes new values.
@@ -1316,6 +1316,80 @@ export function PdfViewer({
     drawUnderlinesForPage(el, useStore.getState().selectionHistory);
   }, [drawUnderlinesForPage]);
 
+  const handleMarqueeDown = useCallback(
+    (e: ReactMouseEvent<HTMLDivElement>) => {
+      if (!marqueeMode || !containerRef.current) return;
+      if (e.button !== 0) return;
+      e.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      const root = containerRef.current;
+      const br = root.getBoundingClientRect();
+      const x = e.clientX - br.left + root.scrollLeft;
+      const y = e.clientY - br.top + root.scrollTop;
+      marqueeStartRef.current = { x, y };
+      const next: PdfMarqueeBox = { startX: x, startY: y, x, y, w: 0, h: 0 };
+      marqueeDraftRef.current = next;
+      setMarqueeRect(next);
+    },
+    [marqueeMode],
+  );
+
+  const handleMarqueeMove = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!marqueeStartRef.current || !containerRef.current) return;
+    const root = containerRef.current;
+    const br = root.getBoundingClientRect();
+    const cx = e.clientX - br.left + root.scrollLeft;
+    const cy = e.clientY - br.top + root.scrollTop;
+    const sx = marqueeStartRef.current.x;
+    const sy = marqueeStartRef.current.y;
+    const next: PdfMarqueeBox = {
+      startX: sx,
+      startY: sy,
+      x: Math.min(sx, cx),
+      y: Math.min(sy, cy),
+      w: Math.abs(cx - sx),
+      h: Math.abs(cy - sy),
+    };
+    marqueeDraftRef.current = next;
+    setMarqueeRect(next);
+  }, []);
+
+  const handleMarqueeUp = useCallback(async () => {
+    marqueeStartRef.current = null;
+    const mr = marqueeDraftRef.current;
+    marqueeDraftRef.current = null;
+    if (!mr || !containerRef.current) return;
+
+    if (mr.w < 10 || mr.h < 10) {
+      setMarqueeRect(null);
+      return;
+    }
+
+    const container = containerRef.current;
+    const containerBounds = container.getBoundingClientRect();
+    const viewportRect = new DOMRect(
+      mr.x - container.scrollLeft + containerBounds.left,
+      mr.y - container.scrollTop + containerBounds.top,
+      mr.w,
+      mr.h,
+    );
+
+    let blob: Blob | null = null;
+    try {
+      blob = await capturePdfViewportUnionToBlob(container, viewportRect);
+    } catch {
+      blob = null;
+    }
+
+    setMarqueeRect(null);
+    setMarqueeMode(false);
+
+    if (blob) {
+      setPendingFigureBlob(blob);
+      setActiveTab("figures");
+    }
+  }, [setMarqueeMode, setPendingFigureBlob, setActiveTab]);
+
   const finalizeTextSelectionToolbar = useCallback(() => {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed || !sel.toString().trim()) {
@@ -1352,94 +1426,30 @@ export function PdfViewer({
   }, [onTextSelected, onSelectionClear]);
 
   const handleMouseUp = useCallback(() => {
-    if (marqueeMode || marqueeBusy) return;
+    if (marqueeMode) return;
     if (preferIntlWordSnapFirstForPdf()) {
       requestAnimationFrame(() => finalizeTextSelectionToolbar());
       return;
     }
     finalizeTextSelectionToolbar();
-  }, [finalizeTextSelectionToolbar, marqueeMode, marqueeBusy]);
+  }, [finalizeTextSelectionToolbar, marqueeMode]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (marqueeMode) {
-          setMarqueeMode(false);
-          setMarqueeRect(null);
-          return;
-        }
-        window.getSelection()?.removeAllRanges();
-        onSelectionClear?.();
+      if (e.key !== "Escape") return;
+      if (marqueeMode) {
+        setMarqueeMode(false);
+        setMarqueeRect(null);
+        marqueeStartRef.current = null;
+        marqueeDraftRef.current = null;
+        return;
       }
+      window.getSelection()?.removeAllRanges();
+      onSelectionClear?.();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onSelectionClear, marqueeMode]);
-
-  useEffect(() => {
-    if (!marqueeMode) return;
-    const container = containerRef.current;
-    if (!container) return;
-
-    let start: { x: number; y: number } | null = null;
-
-    const onDown = (e: MouseEvent) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      window.getSelection()?.removeAllRanges();
-      start = { x: e.clientX, y: e.clientY };
-      setMarqueeRect({ left: e.clientX, top: e.clientY, width: 0, height: 0 });
-    };
-
-    const onMove = (e: MouseEvent) => {
-      if (!start) return;
-      const left = Math.min(start.x, e.clientX);
-      const top = Math.min(start.y, e.clientY);
-      const width = Math.abs(e.clientX - start.x);
-      const height = Math.abs(e.clientY - start.y);
-      setMarqueeRect({ left, top, width, height });
-    };
-
-    const onUp = async (e: MouseEvent) => {
-      if (!start) return;
-      const left = Math.min(start.x, e.clientX);
-      const top = Math.min(start.y, e.clientY);
-      const width = Math.abs(e.clientX - start.x);
-      const height = Math.abs(e.clientY - start.y);
-      start = null;
-
-      if (width < 6 || height < 6) {
-        setMarqueeRect(null);
-        return;
-      }
-
-      setMarqueeBusy(true);
-      try {
-        const { capturePdfViewportUnionToBlob } = await import("@/lib/pdfSelectionCapture");
-        const rect = new DOMRect(left, top, width, height);
-        const blob = await capturePdfViewportUnionToBlob(container, rect);
-        if (blob) {
-          setPendingFigureBlob(blob);
-          setActiveTab("figures");
-          setMarqueeMode(false);
-          setMarqueeRect(null);
-        } else {
-          setMarqueeRect(null);
-        }
-      } finally {
-        setMarqueeBusy(false);
-      }
-    };
-
-    container.addEventListener("mousedown", onDown);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      container.removeEventListener("mousedown", onDown);
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [marqueeMode, setPendingFigureBlob, setActiveTab]);
+  }, [marqueeMode, onSelectionClear, setMarqueeMode]);
 
   // Safari-style auto-scroll while dragging a selection (Chromium). WebKit
   // PDF selection fights our RAF scroll (visible “jumping”), so we skip it.
@@ -1633,28 +1643,6 @@ export function PdfViewer({
 
         <div className="flex-1" />
 
-        <button
-          type="button"
-          onClick={() => {
-            setMarqueeMode((m) => !m);
-            setMarqueeRect(null);
-          }}
-          disabled={marqueeBusy || !paperId}
-          className={`h-7 px-2 inline-flex items-center gap-1 rounded-lg text-[11px] font-medium transition-all ${
-            marqueeMode
-              ? "bg-foreground text-background shadow-sm"
-              : "text-muted-foreground hover:text-foreground hover:bg-accent/70"
-          } disabled:opacity-50 disabled:cursor-wait`}
-          title="Drag a region of the PDF to capture as a figure (Esc to cancel)"
-          aria-pressed={marqueeMode}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-3.5 h-3.5" aria-hidden>
-            <rect x="4" y="4" width="16" height="16" rx="1" strokeDasharray="3 2" />
-          </svg>
-          {marqueeBusy ? "Capturing…" : marqueeMode ? "Cancel capture" : "Capture"}
-        </button>
-        <div className="h-4 w-px bg-border" />
-
         <span className="text-[10px] text-muted-foreground/85 text-right max-sm:hidden">
           <span className="text-muted-foreground/50">Drag to select text · floating actions attach to what you highlighted</span>
         </span>
@@ -1664,19 +1652,28 @@ export function PdfViewer({
       <div
         ref={containerRef}
         data-know-pdf-scroll
-        className="relative flex-1 overflow-auto bg-neutral-100 dark:bg-neutral-900"
-        style={marqueeMode ? { cursor: "crosshair" } : undefined}
-        onMouseUp={handleMouseUp}
+        className={`relative flex-1 overflow-auto bg-neutral-100 dark:bg-neutral-900 ${
+          marqueeMode ? "cursor-crosshair select-none" : ""
+        }`}
+        onMouseUp={
+          marqueeMode
+            ? () => {
+                void handleMarqueeUp();
+              }
+            : handleMouseUp
+        }
+        onMouseDown={marqueeMode ? handleMarqueeDown : undefined}
+        onMouseMove={marqueeMode ? handleMarqueeMove : undefined}
       >
-        {marqueeMode && marqueeRect && marqueeRect.width >= 1 && marqueeRect.height >= 1 && !!fileData && !loadError && (
+        {marqueeMode && marqueeRect && marqueeRect.w > 2 && marqueeRect.h > 2 && !!fileData && !loadError && (
           <div
             aria-hidden
-            className="pointer-events-none fixed z-[110] border-2 border-blue-500/85 bg-blue-500/12 shadow-[0_0_0_9999px_rgb(0_0_0/0.18)]"
+            className="absolute z-50 pointer-events-none rounded-sm border-2 border-blue-500 bg-blue-500/10"
             style={{
-              left: `${marqueeRect.left}px`,
-              top: `${marqueeRect.top}px`,
-              width: `${marqueeRect.width}px`,
-              height: `${marqueeRect.height}px`,
+              left: marqueeRect.x,
+              top: marqueeRect.y,
+              width: marqueeRect.w,
+              height: marqueeRect.h,
             }}
           />
         )}
