@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { selectionLooksLikeEquationSnippet } from "@/lib/selectionMathHeuristic";
 
@@ -76,6 +77,7 @@ const actions: {
 export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuota }: SelectionToolbarProps) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [portalReady, setPortalReady] = useState(false);
   const mountedAt = useRef(Date.now());
   const { user } = useUserTier();
   const tier = user?.tier || "free";
@@ -115,6 +117,10 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
 
     setPos({ top, left });
   }, [rect]);
+
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
 
   useEffect(() => {
     updatePosition();
@@ -163,17 +169,17 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
   // "selection completed" event that spawned us doesn't also fire
   // through the toolbar into the page, which could blur the selection
   // immediately. The inner pill re-enables interactions for buttons.
-  return (
+  const toolbar = (
     <div
       ref={toolbarRef}
-      className="fixed z-50 pointer-events-none animate-fade-in"
+      className="fixed z-[260] pointer-events-none animate-fade-in"
       style={{ top: pos.top, left: pos.left }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div
         role="toolbar"
         aria-label="Selection actions"
-        className="pointer-events-auto flex items-center gap-0.5 rounded-2xl border border-border/80 bg-popover/95 backdrop-blur-md px-1 py-1 shadow-xl shadow-black/8 ring-1 ring-black/[0.04] motion-safe:transition-shadow dark:shadow-black/35 dark:ring-white/[0.06]"
+        className="pointer-events-auto flex items-center gap-0.5 rounded-2xl border border-border/70 bg-popover/97 backdrop-blur-xl px-1 py-1 shadow-2xl shadow-black/12 ring-1 ring-black/[0.06] motion-safe:transition-[box-shadow,transform] dark:shadow-black/50 dark:ring-white/[0.08]"
       >
         {visibleActions.map((a, i) => (
           <button
@@ -204,4 +210,7 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
       </div>
     </div>
   );
+
+  if (!portalReady || typeof document === "undefined") return null;
+  return createPortal(toolbar, document.body);
 }

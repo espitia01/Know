@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { api, type FigureInfo, type FigureAnalysis, type ParsedPaper } from "@/lib/api";
-import { beginFigureScreenshotFlow, captureScreenTabToPng, readClipboardImageBlob } from "@/lib/pdfSelectionCapture";
+import { captureScreenTabToPng, readClipboardImageBlob } from "@/lib/pdfSelectionCapture";
 import { useStore } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
@@ -435,13 +435,6 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     [paperId, cachePaper, setPaper, handleAnalyze],
   );
 
-  const handleCaptureFromPdf = useCallback(async () => {
-    await ingestFigureBlob(
-      await beginFigureScreenshotFlow(),
-      "Drag on the PDF to box the figure, then release—or press Esc to cancel.",
-    );
-  }, [ingestFigureBlob]);
-
   const handleScreenCapture = useCallback(async () => {
     await ingestFigureBlob(
       await captureScreenTabToPng(),
@@ -479,42 +472,40 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
   if (figures.length === 0) {
     return (
-      <div className="mx-auto flex max-w-lg flex-col gap-5 rounded-xl border border-border/50 bg-card/25 px-6 py-10 text-center shadow-[var(--shadow-xs)] motion-safe:animate-fade-in">
-        <div className="space-y-2">
-          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-full border border-border/50 bg-muted/30 text-muted-foreground/55">
-            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25}>
+      <div className="mx-auto flex max-w-lg flex-col gap-6 rounded-2xl border border-border/45 bg-gradient-to-b from-card/35 to-card/[0.08] px-6 py-9 text-center shadow-[var(--shadow-sm)] backdrop-blur-[2px] motion-safe:animate-fade-in dark:from-card/20 dark:to-transparent">
+        <div className="space-y-3">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-border/40 bg-background/50 text-muted-foreground/60 shadow-inner">
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
             </svg>
           </div>
-          <p className="text-[var(--text-md)] font-medium text-foreground/90">No figures yet</p>
-          <p className="mx-auto max-w-md text-[var(--text-xs)] leading-relaxed text-muted-foreground/85">
-            Web apps cannot start macOS ⌘⇧4/⌘⇧5 automatically. For a region screenshot to the clipboard on Mac press <kbd className="font-mono">Ctrl&nbsp;⌘&nbsp;Shift&nbsp;4</kbd>; then use Paste screenshot in Figures or follow the on-PDF marquee below.
+          <p className="text-[var(--text-md)] font-semibold tracking-tight text-foreground/95">No figures yet</p>
+          <p className="mx-auto max-w-md text-[var(--text-xs)] leading-relaxed text-muted-foreground/88">
+            Add a snapshot with the browser picker (whole screen, a window, or a tab)—or grab a region with your OS screenshot tool, copy the image, then paste here. Websites cannot invoke the system marquee for you.
           </p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-center">
-          <button
-            type="button"
-            onClick={handleCaptureFromPdf}
-            disabled={clipSaving || reextracting}
-            className="btn-primary-glass rounded-lg px-4 py-2.5 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {clipSaving ? "Working…" : "Crop on PDF"}
-          </button>
+        <div className="flex flex-col gap-2.5">
           <button
             type="button"
             onClick={handleScreenCapture}
             disabled={clipSaving || reextracting}
-            className="rounded-lg border border-border/60 bg-background/60 px-4 py-2.5 text-[var(--text-sm)] font-medium text-foreground/90 backdrop-blur-sm transition-colors hover:bg-accent/45 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+            className="btn-primary-glass inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-[var(--text-sm)] font-semibold text-background shadow-md transition-[opacity,transform] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Screen capture
+            <svg className="h-4 w-4 shrink-0 opacity-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
+            </svg>
+            {clipSaving ? "Saving…" : "Capture screen or window…"}
           </button>
           <button
             type="button"
             onClick={handlePasteFromClipboard}
             disabled={clipSaving || reextracting}
-            className="rounded-lg border border-border/60 bg-background/60 px-4 py-2.5 text-[var(--text-sm)] font-medium text-foreground/90 backdrop-blur-sm transition-colors hover:bg-accent/45 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border/65 bg-background/70 px-4 py-3 text-[var(--text-sm)] font-medium text-foreground/90 backdrop-blur-sm transition-colors hover:border-border-strong hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
           >
-            Paste screenshot
+            <svg className="h-4 w-4 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.65}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.398.084.612v9.75c0 .414-.336.75-.75.75H4.5a.75.75 0 0 1-.75-.75v-9.75c0-.214.03-.418.084-.612m7.336 0c.653.734 1.693 1.164 2.744 1.323.31.067.627.097.956.097h3.073a2.25 2.25 0 0 0 2.227-1.932m-11.964-11.962L4.744 15.058A75.846 75.846 0 0 1 12 21.75a75.837 75.837 0 0 1-7.893-11.962Z" />
+            </svg>
+            Paste from clipboard
           </button>
         </div>
         <button
@@ -669,42 +660,42 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-border/50 bg-card/20 px-3.5 py-3 shadow-[var(--shadow-xs)]">
-        <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/80">
-          Tap a card to analyze. Add more via crop, screen capture, paste, or re-extract from the PDF.
+      <div className="rounded-xl border border-border/45 bg-card/25 px-3.5 py-3 shadow-[var(--shadow-xs)]">
+        <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/85">
+          Open a figure to analyze. Add images with capture (browser picker), paste after an OS screenshot, or re-run PDF extraction.
         </p>
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
+        <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={handleCaptureFromPdf}
-            disabled={clipSaving || reextracting || loading}
-            className="rounded-md border border-border/55 bg-background/50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:border-border-strong hover:bg-accent/45 hover:text-foreground disabled:opacity-40"
-          >
-            {clipSaving ? "…" : "Crop"}
-          </button>
-          <button
-            type="button"
+            title="Opens your browser's screen / window picker"
             onClick={handleScreenCapture}
             disabled={clipSaving || reextracting || loading}
-            className="rounded-md border border-border/55 bg-background/50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:border-border-strong hover:bg-accent/45 hover:text-foreground disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-background/55 px-2.5 py-1.5 text-[11px] font-semibold text-foreground/90 transition-colors hover:border-border-strong hover:bg-accent/40 disabled:opacity-40"
           >
-            Screen
+            <svg className="h-3.5 w-3.5 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
+            </svg>
+            {clipSaving ? "…" : "Capture"}
           </button>
           <button
             type="button"
+            title="Clipboard image after system screenshot"
             onClick={handlePasteFromClipboard}
             disabled={clipSaving || reextracting || loading}
-            className="rounded-md border border-border/55 bg-background/50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:border-border-strong hover:bg-accent/45 hover:text-foreground disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-background/55 px-2.5 py-1.5 text-[11px] font-semibold text-foreground/90 transition-colors hover:border-border-strong hover:bg-accent/40 disabled:opacity-40"
           >
+            <svg className="h-3.5 w-3.5 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.65}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.398.084.612v9.75c0 .414-.336.75-.75.75H4.5a.75.75 0 0 1-.75-.75v-9.75c0-.214.03-.418.084-.612m7.336 0c.653.734 1.693 1.164 2.744 1.323.31.067.627.097.956.097h3.073a2.25 2.25 0 0 0 2.227-1.932m-11.964-11.962L4.744 15.058A75.846 75.846 0 0 1 12 21.75a75.837 75.837 0 0 1-7.893-11.962Z" />
+            </svg>
             Paste
           </button>
           <button
             type="button"
             onClick={handleReextract}
             disabled={reextracting || clipSaving || loading}
-            className="rounded-md border border-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/85 transition-colors hover:bg-accent/40 hover:text-foreground disabled:opacity-40"
+            className="rounded-lg border border-transparent px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground/90 transition-colors hover:bg-accent/45 hover:text-foreground disabled:opacity-40"
           >
-            {reextracting ? "…" : "Re-extract"}
+            {reextracting ? "…" : "Re-extract PDF"}
           </button>
         </div>
       </div>

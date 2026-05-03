@@ -56,10 +56,6 @@ interface AppStore {
   figureReextractInFlight: Record<string, boolean>;
   setFigureReextractInFlight: (paperId: string, running: boolean) => void;
 
-  /** PdfViewer draws a marquee; user captures a rectangular figure crop. Not persisted. */
-  figureScreenshotMode: boolean;
-  setFigureScreenshotMode: (v: boolean) => void;
-
   sessionPapers: { id: string; title: string }[];
   addSessionPaper: (p: { id: string; title: string }) => void;
   removeSessionPaper: (id: string) => void;
@@ -298,9 +294,6 @@ export const useStore = create<AppStore>()(
           else delete next[paperId];
           return { figureReextractInFlight: next };
         }),
-
-      figureScreenshotMode: false,
-      setFigureScreenshotMode: (v) => set({ figureScreenshotMode: v }),
 
       sessionPapers: [],
       addSessionPaper: (p) =>

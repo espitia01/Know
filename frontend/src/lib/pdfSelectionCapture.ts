@@ -1,16 +1,13 @@
 /**
- * PDF figure crop: composites intersecting `.react-pdf__Page__canvas`
- * pixels for a viewport rectangle. Coordinates via pointer-drag mode
- * (SciSpace-style) or legacy text selection union.
+ * Figure images: clipboard read + display capture, and PDF viewport pixel union
+ * for legacy selection-based paths.
  */
-
-import { useStore } from "@/lib/store";
 
 export type PdfSelectionCaptureFn = () => Promise<Blob | null>;
 
 let captureImpl: PdfSelectionCaptureFn | null = null;
 
-/** @deprecated Kept for API compat; interactive flow uses {@link beginFigureScreenshotFlow}. */
+/** @deprecated */
 export function registerPdfSelectionCapture(fn: PdfSelectionCaptureFn | null): void {
   captureImpl = fn;
 }
@@ -18,44 +15,6 @@ export function registerPdfSelectionCapture(fn: PdfSelectionCaptureFn | null): v
 /** @deprecated */
 export function capturePdfSelectionToPng(): Promise<Blob | null> {
   return captureImpl ? captureImpl() : Promise.resolve(null);
-}
-
-let rectCaptureResolve: ((blob: Blob | null) => void) | null = null;
-
-/**
- * Highlights the PDF and waits for the user to drag a rectangle + release,
- * then returns PNG pixels for that viewport region (or null if cancelled /
- * degenerate drag).
- */
-export function beginFigureScreenshotFlow(): Promise<Blob | null> {
-  return new Promise((resolve) => {
-    if (rectCaptureResolve) {
-      const prev = rectCaptureResolve;
-      rectCaptureResolve = null;
-      useStore.getState().setFigureScreenshotMode(false);
-      prev(null);
-    }
-    rectCaptureResolve = resolve;
-    useStore.getState().setFigureScreenshotMode(true);
-  });
-}
-
-export function resolveFigureScreenshot(blob: Blob | null): void {
-  const r = rectCaptureResolve;
-  rectCaptureResolve = null;
-  useStore.getState().setFigureScreenshotMode(false);
-  r?.(blob);
-}
-
-export function cancelFigureScreenshot(): void {
-  resolveFigureScreenshot(null);
-}
-
-/** Safe to call when leaving the reader — avoids dangling promises. */
-export function abortFigureScreenshotIfPending(): void {
-  if (rectCaptureResolve || useStore.getState().figureScreenshotMode) {
-    cancelFigureScreenshot();
-  }
 }
 
 type VideoElWithVfc = HTMLVideoElement & {
@@ -81,7 +40,7 @@ async function awaitFirstVideoDimensions(v: HTMLVideoElement): Promise<boolean> 
   return true;
 }
 
-/** One-frame PNG from a user-picked screen/tab (browser prompt). */
+/** One-frame PNG from a user-picked screen/tab (browser / OS picker). */
 export async function captureScreenTabToPng(): Promise<Blob | null> {
   const md = navigator.mediaDevices;
   if (!md?.getDisplayMedia) return null;
@@ -291,7 +250,6 @@ export function capturePdfViewportUnionToBlob(
     return new Promise((resolve) => {
       outCanvas.toBlob(
         (blob) => {
-          // Thin crops (small figures / tight boxes) are valid; only reject empty.
           resolve(blob && blob.size >= 64 ? blob : null);
         },
         "image/png",
