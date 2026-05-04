@@ -43,7 +43,7 @@ function Md({ children }: { children: string }) {
 }
 
 const TAB_STYLE =
-  "shrink-0 flex-none h-7 rounded-md px-2.5 text-[11px] font-medium tracking-normal text-muted-foreground hover:text-foreground data-active:text-foreground data-active:font-semibold";
+  "shrink-0 flex-none h-8 rounded-md px-2.5 text-[var(--text-sm)] tracking-[-0.012em] font-medium text-muted-foreground hover:text-foreground data-active:text-foreground data-active:font-semibold";
 
 const MIN_PANEL = 300;
 const MAX_PANEL = 560;
@@ -473,9 +473,9 @@ export default function TrialPaperView() {
           style={{ width: panelW, maxWidth: "100vw" }}
         >
           <Tabs value={effectiveTab} onValueChange={setActiveTab} className="flex h-full min-h-0 flex-col">
-            <div className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-border/50 bg-muted/10 px-2 dark:bg-muted/[0.06]">
+            <div className="flex h-10 min-w-0 shrink-0 items-center gap-1 border-b border-border/40 bg-muted/[0.11] px-2 dark:bg-muted/[0.08]">
               <div className="min-h-0 min-w-0 flex-1 overflow-x-auto overscroll-x-contain [scrollbar-gutter:stable]">
-                <TabsList variant="line" className="inline-flex h-8 w-max flex-nowrap justify-start gap-1 p-0">
+                <TabsList variant="line" className="inline-flex h-9 w-max flex-nowrap justify-start gap-0.5 p-0">
                   {showSelectionTab && (
                     <TabsTrigger value="selection" className={TAB_STYLE} title={FEATURE_TOOLTIPS.Selection}>
                       Selection

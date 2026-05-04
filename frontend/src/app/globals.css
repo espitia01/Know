@@ -68,7 +68,7 @@
 }
 
 /* ────────────────────────────────────────────────────────────────────────
-   Light theme — warm off-white, slightly cool ink
+   Light theme — neutral canvas, restrained chroma (product / tooling feel)
    ──────────────────────────────────────────────────────────────────── */
 :root {
   /* Analysis-pane typography scale. Per audit §12.1, keep panel text on a
@@ -79,37 +79,37 @@
   --text-lg: 16px;
   --text-2xs: 10.5px;
 
-  --background: oklch(0.99 0.006 88);
-  --foreground: oklch(0.22 0.022 55);
+  --background: oklch(0.993 0.0035 82);
+  --foreground: oklch(0.215 0.016 52);
 
   --surface: oklch(1 0 0);
-  --surface-foreground: oklch(0.22 0.022 55);
+  --surface-foreground: oklch(0.215 0.016 52);
 
-  --card: oklch(0.995 0.004 88);
-  --card-foreground: oklch(0.22 0.022 55);
+  --card: oklch(0.997 0.0028 82);
+  --card-foreground: oklch(0.215 0.016 52);
 
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.22 0.022 55);
+  --popover-foreground: oklch(0.215 0.016 52);
 
-  --primary: oklch(0.26 0.024 55);
-  --primary-foreground: oklch(0.99 0.004 90);
+  --primary: oklch(0.245 0.018 52);
+  --primary-foreground: oklch(0.99 0.003 88);
 
-  --secondary: oklch(0.96 0.01 88);
-  --secondary-foreground: oklch(0.26 0.024 55);
+  --secondary: oklch(0.962 0.008 82);
+  --secondary-foreground: oklch(0.26 0.018 52);
 
-  --muted: oklch(0.95 0.008 88);
-  --muted-foreground: oklch(0.42 0.021 73);
+  --muted: oklch(0.951 0.006 82);
+  --muted-foreground: oklch(0.425 0.018 72);
 
-  --accent: oklch(0.94 0.012 95);
-  --accent-foreground: oklch(0.26 0.024 55);
+  --accent: oklch(0.938 0.009 92);
+  --accent-foreground: oklch(0.26 0.018 52);
 
   --destructive: oklch(0.55 0.19 25);
   --warning: oklch(0.72 0.14 72);
   --success: oklch(0.58 0.14 155);
 
-  --border: oklch(0.87 0.009 82 / 84%);
-  --border-strong: oklch(0.8 0.011 78 / 92%);
-  --input: oklch(0.89 0.01 85 / 78%);
+  --border: oklch(0.865 0.0075 78 / 88%);
+  --border-strong: oklch(0.785 0.009 74 / 94%);
+  --input: oklch(0.885 0.008 82 / 82%);
   --ring: oklch(0.48 0.06 195);
 
   /* PDF text-selection tint — tuned to feel like Safari/Preview's native
@@ -127,26 +127,26 @@
   --chart-4: oklch(0.56 0.12 35);
   --chart-5: oklch(0.52 0.1 135);
 
-  --radius: 0.75rem;
+  --radius: 0.625rem;
 
-  --sidebar: oklch(0.985 0.005 88);
-  --sidebar-foreground: oklch(0.22 0.022 55);
-  --sidebar-primary: oklch(0.26 0.024 55);
-  --sidebar-primary-foreground: oklch(0.99 0.004 90);
-  --sidebar-accent: oklch(0.94 0.012 95);
-  --sidebar-accent-foreground: oklch(0.26 0.024 55);
-  --sidebar-border: oklch(0.89 0.01 85 / 78%);
+  --sidebar: oklch(0.988 0.004 82);
+  --sidebar-foreground: oklch(0.215 0.016 52);
+  --sidebar-primary: oklch(0.245 0.018 52);
+  --sidebar-primary-foreground: oklch(0.99 0.003 88);
+  --sidebar-accent: oklch(0.938 0.009 92);
+  --sidebar-accent-foreground: oklch(0.26 0.018 52);
+  --sidebar-border: oklch(0.885 0.008 82 / 82%);
   --sidebar-ring: oklch(0.48 0.06 195);
 
   /* Elevation — tuned for a "paper" feel. The shadows are close to
      invisible on their own and only register at the edges, which keeps
      nested surfaces (cards inside a panel inside the reader) from
      stacking visual weight the way the previous heavier shadows did. */
-  --shadow-xs: 0 1px 1px oklch(0 0 0 / 0.03);
-  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04);
-  --shadow-md: 0 2px 8px oklch(0 0 0 / 0.05), 0 1px 2px oklch(0 0 0 / 0.03);
-  --shadow-lg: 0 8px 24px oklch(0 0 0 / 0.06), 0 2px 4px oklch(0 0 0 / 0.03);
-  --shadow-xl: 0 20px 48px oklch(0 0 0 / 0.08), 0 3px 8px oklch(0 0 0 / 0.04);
+  --shadow-xs: 0 1px 1px oklch(0 0 0 / 0.028);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.036);
+  --shadow-md: 0 2px 8px oklch(0 0 0 / 0.046), 0 1px 2px oklch(0 0 0 / 0.028);
+  --shadow-lg: 0 8px 24px oklch(0 0 0 / 0.052), 0 2px 4px oklch(0 0 0 / 0.026);
+  --shadow-xl: 0 20px 48px oklch(0 0 0 / 0.072), 0 3px 8px oklch(0 0 0 / 0.034);
 
   /* Tinted surfaces — used by glass/mesh utilities. Re-declared in .dark
      with different alphas so the same utility works in both themes. */
@@ -260,6 +260,7 @@
     font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
     font-size: 14px;
     line-height: 1.575;
+    letter-spacing: 0.0045em;
     /* cv11: single-storey a. ss01: alt letters. ss03: stylistic curl.
        tabular nums on body so tier prices / counters never reflow. */
     font-feature-settings: "cv11", "ss01", "ss03";
@@ -350,6 +351,8 @@
 .paper-content {
   font-family: var(--font-source-serif), "Georgia", "Times New Roman", serif;
   color: var(--foreground);
+  /* Long-form serif: neutral tracking (body uses slight positive UI tracking). */
+  letter-spacing: 0;
 }
 .paper-content h1, .paper-content h2, .paper-content h3 {
   font-family: var(--font-inter), system-ui, sans-serif;
@@ -1227,7 +1230,7 @@ body::before {
 
 /* Analysis body: slight negative tracking reads tighter next to tabular nums. */
 .analysis-pane-v2 {
-  letter-spacing: -0.01em;
+  letter-spacing: -0.006em;
 }
 
 /*
@@ -1297,9 +1300,9 @@ body::before {
 
 /* Reader shell: visually join the navbar + side analysis column (non-focus). */
 .know-reader-analysis-shell {
-  background: rgb(var(--surface-tint) / 0.82);
-  backdrop-filter: blur(24px) saturate(1.12);
-  -webkit-backdrop-filter: blur(24px) saturate(1.12);
+  background: rgb(var(--surface-tint) / 0.86);
+  backdrop-filter: blur(20px) saturate(1.05);
+  -webkit-backdrop-filter: blur(20px) saturate(1.05);
   border-top: none;
 }
 .know-reader-analysis-shell-right {
