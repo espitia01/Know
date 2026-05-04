@@ -495,6 +495,7 @@ def normalize_extracted_text(raw: str) -> str:
             .replace("\u200c", "")
             .replace("\u200d", "")
             .replace("\u2060", "")
+            .replace("\u2061", "")
         )
         t = t.replace("\u00a0", " ").strip()
         return t
@@ -526,24 +527,46 @@ def normalize_extracted_text(raw: str) -> str:
 
         if len(stripped) <= 2:
             j = i
+            max_blank_sep = 12
+
             while j < len(lines):
                 sj = norm_line(lines[j])
-                if not sj:
+                if sj:
                     if (
-                        j + 1 < len(lines)
-                        and norm_line(lines[j + 1])
-                        and len(norm_line(lines[j + 1])) <= 2
+                        len(sj) > 2
+                        or sj.startswith("#")
+                        or "|" in sj
+                        or sj.startswith("```")
+                        or re.match(r"^[-*•]\s", sj)
+                        or re.match(r"^\d+\.[\s)]", sj)
                     ):
-                        j += 1
-                        continue
+                        break
+                    j += 1
+                    continue
+
+                empty_start = j
+                blank_run = 0
+                while j < len(lines) and not norm_line(lines[j]):
+                    blank_run += 1
+                    j += 1
+                if blank_run == 0:
                     break
-                if len(sj) > 2:
+                if blank_run > max_blank_sep or j >= len(lines):
+                    j = empty_start
                     break
-                if sj.startswith("#") or "|" in sj or sj.startswith("```"):
-                    break
-                if re.match(r"^[-*•]\s", sj) or re.match(r"^\d+\.[\s)]", sj):
-                    break
-                j += 1
+                nxt = norm_line(lines[j])
+                if (
+                    nxt
+                    and len(nxt) <= 2
+                    and not nxt.startswith("#")
+                    and "|" not in nxt
+                    and not nxt.startswith("```")
+                    and not re.match(r"^[-*•]\s", nxt)
+                    and not re.match(r"^\d+\.[\s)]", nxt)
+                ):
+                    continue
+                j = empty_start
+                break
 
             glyph_lines = [norm_line(lines[k]) for k in range(i, j) if norm_line(lines[k])]
 

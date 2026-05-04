@@ -45,6 +45,7 @@ function normalizeUnicodeMath(s: string): string {
   return s
     .replace(/\u2212/g, "-")
     .replace(/\u2013|\u2014/g, "-")
+    .replace(/\u2061/g, "") // invisible function-application (Unicode math quirks near operators)
     .replace(/\u00a0/g, " ");
 }
 
@@ -112,9 +113,12 @@ function tightenStrayAdjacentDollarDelimiters(s: string): string {
 function normalizeGlyphReflowLine(raw: string): string {
   return raw
     .replace(/\uFEFF|[\u200B-\u200D\u2060]/g, "")
+    .replace(/\u2061/g, "")
     .replace(/\u00a0/g, " ")
     .trim();
 }
+
+const MAX_BLANK_LINES_BETWEEN_GLYPH_CHARS = 8;
 
 /**
  * Glue consecutive ≤2-character lines after PDF glyph-per-span reflow (≥4 rows).
@@ -124,6 +128,13 @@ function normalizeGlyphReflowLine(raw: string): string {
 function joinDegenerateGlyphPerLineReflow(s: string): string {
   const rawLines = s.split(/\r?\n/);
 
+  const glyphLineStructural = (tp: string) =>
+    /^#{1,6}\s/.test(tp) ||
+    /^[-*•]\s/.test(tp) ||
+    /^\d+\.[\s)]/.test(tp) ||
+    tp.startsWith("```") ||
+    tp.includes("|");
+
   /** Collapse blank lines between isolated ≤2-char lines so main pass can merge runs ≥4 */
   const preCollapsed: string[] = [];
   let k = 0;
@@ -132,42 +143,40 @@ function joinDegenerateGlyphPerLineReflow(s: string): string {
     const couldStartGlyphRun =
       tk.length >= 1 &&
       tk.length <= 2 &&
-      !/^[-*•]\s/.test(tk) &&
-      !/^\d+\.[\s)]/.test(tk) &&
-      !/^#{1,6}\s/.test(tk) &&
-      !tk.startsWith("```") &&
-      !tk.includes("|");
+      !glyphLineStructural(tk);
 
     if (couldStartGlyphRun) {
       let peek = k;
-      let glyphCount = 0;
       const chars: string[] = [];
       while (peek < rawLines.length) {
         const tp = normalizeGlyphReflowLine(rawLines[peek]);
-        if (
-          tp.length >= 1 &&
-          tp.length <= 2 &&
-          !/^[-*•]\s/.test(tp) &&
-          !/^\d+\.[\s)]/.test(tp) &&
-          !/^#{1,6}\s/.test(tp) &&
-          !tp.startsWith("```") &&
-          !tp.includes("|")
-        ) {
-          glyphCount++;
+        if (tp) {
+          if (glyphLineStructural(tp) || tp.length > 2) break;
           chars.push(tp);
           peek++;
-          if (
-            peek < rawLines.length &&
-            rawLines[peek].trim() === "" &&
-            peek + 1 < rawLines.length &&
-            rawLines[peek + 1].trim() !== ""
-          ) {
-            peek++;
-          }
-        } else {
-          break;
+          continue;
         }
+
+        const emptyStart = peek;
+        while (peek < rawLines.length && normalizeGlyphReflowLine(rawLines[peek]) === "") {
+          peek++;
+        }
+        const emptyCount = peek - emptyStart;
+        if (
+          emptyCount > 0 &&
+          emptyCount <= MAX_BLANK_LINES_BETWEEN_GLYPH_CHARS &&
+          peek < rawLines.length
+        ) {
+          const ntp = normalizeGlyphReflowLine(rawLines[peek]);
+          if (ntp && ntp.length <= 2 && !glyphLineStructural(ntp)) {
+            continue;
+          }
+        }
+        peek = emptyStart;
+        break;
       }
+
+      const glyphCount = chars.length;
       if (glyphCount >= 4) {
         if (peek > k + glyphCount) {
           for (const c of chars) preCollapsed.push(c);
@@ -194,13 +203,7 @@ function joinDegenerateGlyphPerLineReflow(s: string): string {
     }
 
     const t0 = normalizeGlyphReflowLine(lines[i]);
-    if (
-      /^#{1,6}\s/.test(t0) ||
-      /^[-*•]\s/.test(t0) ||
-      /^\d+\.[\s)]/.test(t0) ||
-      t0.startsWith("```") ||
-      t0.includes("|")
-    ) {
+    if (glyphLineStructural(t0)) {
       out.push(lines[i]);
       i++;
       continue;
@@ -209,9 +212,25 @@ function joinDegenerateGlyphPerLineReflow(s: string): string {
     let j = i;
     while (j < lines.length) {
       const tj = normalizeGlyphReflowLine(lines[j]);
-      if (tj === "") break;
+      if (tj === "") {
+        const emptyStart = j;
+        while (j < lines.length && normalizeGlyphReflowLine(lines[j]) === "") {
+          j++;
+        }
+        const emptyCount = j - emptyStart;
+        if (
+          emptyCount <= MAX_BLANK_LINES_BETWEEN_GLYPH_CHARS &&
+          j < lines.length &&
+          normalizeGlyphReflowLine(lines[j]) &&
+          normalizeGlyphReflowLine(lines[j]).length <= 2 &&
+          !glyphLineStructural(normalizeGlyphReflowLine(lines[j]))
+        ) {
+          continue;
+        }
+        break;
+      }
       if (tj.length > 2) break;
-      if (/^[-*•]\s/.test(tj) || /^\d+\.[\s)]/.test(tj) || /^#{1,6}\s/.test(tj)) break;
+      if (glyphLineStructural(tj)) break;
       j++;
     }
 
@@ -770,6 +789,99 @@ function stripOrphanCitationCounters(s: string): string {
   return t;
 }
 
+/** Transform prose only — leaves `$…$` / `$$…$$` math spans untouched. */
+function replaceOutsideMathRegions(s: string, fn: (plain: string) => string): string {
+  const pieces: string[] = [];
+  let last = 0;
+  MATH_REGION.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = MATH_REGION.exec(s)) !== null) {
+    if (m.index > last) pieces.push(fn(s.slice(last, m.index)));
+    pieces.push(m[0]);
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) pieces.push(fn(s.slice(last)));
+  return pieces.join("");
+}
+
+/** LLM artefacts like `operatorname{softmax}!(` or plaintext `softmax!(`. */
+function repairSoftmaxBangOutsideMath(plain: string): string {
+  return plain
+    .replace(/\\operatorname\{\s*softmax\s*\}\s*!/gi, "\\operatorname{softmax}")
+    .replace(/\bsoftmax\s*!/gi, "softmax");
+}
+
+/**
+ * Fuse repair: "`produceanoutput`" → space before common lemma endings (derive/summary prose).
+ * Skips `$…$` via `replaceOutsideMathRegions`; suffixes sorted long-first to reduce bad splits.
+ */
+const GLUED_DERIVE_SUFFIXES = [
+  "combinations",
+  "combination",
+  "similarities",
+  "similarity",
+  "distribution",
+  "distributions",
+  "probability",
+  "probabilities",
+  "parallelizable",
+  "substituting",
+  "multiplying",
+  "independence",
+  "independent",
+  "normalization",
+  "normalized",
+  "vanishingly",
+  "expectations",
+  "expression",
+  "expressions",
+  "dimensions",
+  "dimension",
+  "summation",
+  "operations",
+  "embeddings",
+  "references",
+  "derivatives",
+  "derivative",
+  "logarithm",
+  "saturation",
+  "components",
+  "component",
+  "operators",
+  "operator",
+  "arguments",
+  "argument",
+  "weighted",
+  "scaling",
+  "formula",
+  "products",
+  "product",
+  "queries",
+  "vectors",
+  "attention",
+  "outputs",
+  "output",
+];
+
+function repairGluedLemmaSuffixRuns(plain: string): string {
+  const uniq = [...new Set(GLUED_DERIVE_SUFFIXES)].sort((a, b) => b.length - a.length);
+  const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  let t = plain.replace(/\bacross(?=keys\b)/gi, "across ");
+
+  for (let pass = 0; pass < 8; pass++) {
+    let next = t;
+    for (const w of uniq) {
+      if (w.length < 5) continue;
+      next = next.replace(new RegExp(`([a-z]{3,})(${esc(w)})\\b`, "gi"), "$1 $2");
+    }
+    if (next === t) break;
+    t = next;
+  }
+
+  return t;
+}
+
 export function preprocessLatex(text: string, opts?: PreprocessLatexOpts): string {
   if (!text) return text;
   const noteMode = Boolean(opts?.noteMode);
@@ -778,6 +890,9 @@ export function preprocessLatex(text: string, opts?: PreprocessLatexOpts): strin
   s = joinDegenerateGlyphPerLineReflow(s);
   s = stripOrphanCitationCounters(s);
   s = tightenStrayAdjacentDollarDelimiters(s);
+  s = replaceOutsideMathRegions(s, (plain) =>
+    repairSoftmaxBangOutsideMath(repairGluedLemmaSuffixRuns(plain)),
+  );
   s = normalizeUnicodeMath(s);
   s = unicodeCapGreekToLatex(s);
   s = repairCommonTransformerMathFractures(s);
