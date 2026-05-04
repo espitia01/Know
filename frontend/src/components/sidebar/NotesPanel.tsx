@@ -110,7 +110,7 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
         <NoteMarkdownEditor value={input} onChange={setInput} minHeight={180} />
         <div className="flex items-center justify-between gap-3">
           <p className="text-[var(--text-xs)] text-muted-foreground/80 shrink-0">
-            Markdown + LaTeX preview below · save when ready
+            Preview updates as you type
           </p>
           <button
             type="button"
@@ -166,28 +166,29 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
                   </div>
                 ) : (
                   <>
-                    <div className={`text-[var(--text-md)] leading-relaxed [&_.analysis-content]:text-[var(--text-md)] relative ${isPending ? "know-note-pending" : ""}`}>
-                      {isPending && (
-                        <div
-                          aria-hidden
-                          className="absolute right-3 top-0 flex items-center gap-1.5 text-[var(--text-xs)] text-muted-foreground/90"
-                        >
-                          <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground/25 border-t-muted-foreground/70" />
-                          <span className="font-medium">Saving…</span>
-                        </div>
-                      )}
-                      <Md className="analysis-content note-markdown-preview" latexMode="note">
-                        {note.text}
-                      </Md>
-                    </div>
+                    {isPending ? (
+                      <div
+                        className="flex min-h-[7rem] flex-col items-center justify-center gap-2 py-4"
+                        aria-busy="true"
+                        aria-label="Saving note"
+                      >
+                        <span className="inline-block h-8 w-8 animate-spin rounded-full border-[2.5px] border-muted-foreground/20 border-t-muted-foreground/70" />
+                        <span className="sr-only">Saving note…</span>
+                      </div>
+                    ) : (
+                      <>
+                      <div className="text-[var(--text-md)] leading-relaxed [&_.analysis-content]:text-[var(--text-md)]">
+                        <Md className="analysis-content note-markdown-preview" latexMode="note">
+                          {note.text}
+                        </Md>
+                      </div>
                     <div className="mt-1.5 flex items-center justify-between">
                       <span className="font-mono text-[0.7rem] font-light tabular-nums text-muted-foreground/70">
-                        {!isPending && formatNoteDate(note.created_at)}
+                        {formatNoteDate(note.created_at)}
                       </span>
                       <div className="analysis-note-actions flex gap-2 opacity-100 motion-safe:transition-opacity">
                         <button
                           type="button"
-                          disabled={isPending}
                           onClick={() => {
                             setEditing(note.id);
                             setEditText(note.text);
@@ -198,14 +199,15 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
                         </button>
                         <button
                           type="button"
-                          disabled={isPending}
                           onClick={() => handleDelete(note.id)}
-                          className="text-[var(--text-xs)] font-medium text-muted-foreground hover:text-destructive focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:opacity-40 disabled:pointer-events-none"
+                          className="text-[var(--text-xs)] font-medium text-muted-foreground hover:text-destructive focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                         >
                           Delete
                         </button>
                       </div>
                     </div>
+                      </>
+                    )}
                   </>
                 )}
               </div>

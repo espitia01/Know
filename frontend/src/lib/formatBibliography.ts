@@ -40,19 +40,41 @@ function collapseDuplicateSentenceRuns(s: string): string {
   return t;
 }
 
+/** Max characters for a single bibliography line in the UI (PDF glue often pastes the whole tail of the paper). */
+const MAX_CITATION_DISPLAY_CHARS = 360;
+
 /**
  * Cut off paper body / figure-caption junk that was concatenated into a bib line
  * (common when raw_text paragraphs run together).
  */
 function truncateAfterBibliographyBleed(s: string): string {
-  /** Section headers / methods text glued after the bib paragraph (Attention is enough). */
-  const att = /(?:^|[\s.])(\d{1,2})\s+Attention\b/i.exec(s);
+  if (s.length >= 140) {
+    const probe = s.slice(120);
+    const sec = /\s(?=Introduction\b|Discussion\b|Abstract\b|METHODS\b|Results\b|Fig\.\s*\d)/i.exec(
+      probe,
+    );
+    if (sec && sec.index !== undefined) {
+      const cut = 120 + sec.index;
+      return s.slice(0, cut).trim();
+    }
+  }
+  /** Numbered line immediately followed by another paper title starting with "Attention …" (transformer-artifact glue) */
+  const att = /(?:^|[\s.])(?:\d{1,3}\s+Attention\s+is\b)/i.exec(s);
   if (att && att.index !== undefined && att.index > 50) return s.slice(0, att.index).trim();
 
   const fig = /(?:^|[\s.])(Figure\s+\d+\s*[:\.])/i.exec(s);
   if (fig && fig.index !== undefined && fig.index > 80) return s.slice(0, fig.index).trim();
 
   return s;
+}
+
+function clipCitationLineLength(s: string, max = MAX_CITATION_DISPLAY_CHARS): string {
+  const t = s.trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const lastBreak = Math.max(cut.lastIndexOf(", "), cut.lastIndexOf(". "), cut.lastIndexOf(" "));
+  const base = lastBreak > Math.floor(max * 0.55) ? cut.slice(0, lastBreak) : cut;
+  return `${base.trimEnd()}…`;
 }
 
 /** Remove standalone footnote-counter / year tokens (e.g. lines that contain
@@ -147,5 +169,6 @@ export function sanitizeCitationForDisplay(raw: string): string {
   s = s.replace(/\.\s+(?:\d{1,3}\.{0,2}\s+){1,3}(?=\s*\[)/g, ". ");
   s = collapseDuplicateSentenceRuns(s);
   s = s.replace(/\s{2,}/g, " ").trim();
+  s = clipCitationLineLength(s);
   return s;
 }

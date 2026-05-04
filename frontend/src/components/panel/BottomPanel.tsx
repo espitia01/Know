@@ -81,9 +81,13 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       : activeTab === "selection" && !showSelectionTab
         ? "summary"
         : activeTab;
-  const [mountedTabs, setMountedTabs] = useState<Set<string>>(
-    () => new Set([effectiveTab]),
-  );
+  /** Mount core analysis tabs immediately so Prepare/Summary pipelines start without visiting each tab first. */
+  const [mountedTabs, setMountedTabs] = useState<Set<string>>(() => {
+    const next = new Set<string>([effectiveTab]);
+    next.add("summary");
+    next.add("preread");
+    return next;
+  });
   useEffect(() => {
     // Per audit §4.1/§6.3: inactive Radix tabs stay mounted by default,
     // which lets hidden panels hydrate and fetch data before the user

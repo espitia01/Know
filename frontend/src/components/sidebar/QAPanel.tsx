@@ -64,6 +64,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
     setExtraPrompts([]);
     setUsedPrompts(new Set());
     setExtraError(null);
+    setCrossPaper(false);
   }, [paperId]);
 
   useEffect(() => {
