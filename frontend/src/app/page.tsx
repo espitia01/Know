@@ -15,6 +15,25 @@ function trustPublicSrc(filename: string) {
   return `/trust/${encodeURIComponent(filename)}`;
 }
 
+function ArcadeEmbed() {
+  return (
+    <div
+      className="w-full overflow-hidden rounded-[var(--radius-lg)] border border-border/55 bg-muted/[0.08] shadow-[var(--shadow-xs)]"
+      style={{ position: "relative", paddingBottom: "calc(55.67129629629629% + 41px)", height: 0, width: "100%" }}
+    >
+      <iframe
+        src="https://demo.arcade.software/FdmtEjGlxgDKSz0UfxW6?embed&embed_mobile=tab&embed_desktop=tab&show_copy_link=true"
+        title="Know product demo (Arcade)"
+        loading="lazy"
+        allowFullScreen
+        allow="clipboard-write"
+        className="absolute left-0 top-0 h-full w-full border-0 rounded-[calc(var(--radius-lg)-1px)]"
+        style={{ colorScheme: "light" }}
+      />
+    </div>
+  );
+}
+
 function useInView(threshold = 0.15) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
@@ -404,32 +423,46 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* How */}
+        {/* Workflow + interactive demo */}
         <section ref={howItWorks.ref} className="px-5 py-[5.25rem] sm:px-8 sm:py-28">
-          <div className="mx-auto max-w-4xl">
+          <div className="mx-auto max-w-6xl">
             <p className="text-center font-display text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
               Workflow
             </p>
             <h2 className="mx-auto mt-4 max-w-2xl text-center font-display text-[clamp(1.6rem,3.35vw,2.15rem)] font-semibold leading-[1.2] tracking-[-0.035em] text-foreground text-balance">
               Orient deeply, retain what mattered.
             </h2>
-            <div className="mx-auto mt-14 grid gap-14 md:grid-cols-3 md:gap-10">
-              {steps.map((s, i) => (
-                <div
-                  key={s.num}
-                  className={cn(
-                    "relative transition-[opacity,transform] duration-500 ease-out",
-                    howItWorks.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3",
-                  )}
-                  style={{ transitionDelay: `${i * 55}ms` }}
-                >
-                  <div className="mb-5 inline-flex h-9 min-w-[2.75rem] items-center justify-center rounded-lg border border-border/70 bg-muted/35 px-2.5 font-mono text-[12px] font-semibold tabular-nums tracking-tight text-muted-foreground">
-                    {s.num}
-                  </div>
-                  <h3 className="font-display text-[17px] font-semibold tracking-[-0.02em] text-foreground">{s.title}</h3>
-                  <p className="mt-2.5 text-[14px] leading-relaxed text-muted-foreground text-pretty">{s.desc}</p>
+            <div
+              className={cn(
+                "relative mt-12 overflow-hidden rounded-[var(--radius-xl)] border border-border/55 bg-background/80 p-5 shadow-[var(--shadow-sm)] sm:p-7 lg:p-8",
+                "dark:bg-background/[0.35]",
+                "transition-[opacity,transform,border-color] duration-500 ease-out",
+                howItWorks.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4",
+              )}
+            >
+              <div className="grid gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.82fr)] lg:items-start lg:gap-12">
+                <div className="min-w-0">
+                  <ArcadeEmbed />
                 </div>
-              ))}
+                <div className="flex min-w-0 flex-col gap-9 lg:justify-center lg:pt-1">
+                  {steps.map((s, i) => (
+                    <div
+                      key={s.num}
+                      className={cn(
+                        "relative transition-[opacity,transform] duration-500 ease-out",
+                        howItWorks.visible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3",
+                      )}
+                      style={{ transitionDelay: `${120 + i * 55}ms` }}
+                    >
+                      <div className="mb-3 inline-flex h-8 min-w-[2.5rem] items-center justify-center rounded-md border border-border/70 bg-muted/35 px-2 font-mono text-[11px] font-semibold tabular-nums tracking-tight text-muted-foreground sm:h-9 sm:min-w-[2.75rem] sm:px-2.5 sm:text-[12px]">
+                        {s.num}
+                      </div>
+                      <h3 className="font-display text-[17px] font-semibold tracking-[-0.02em] text-foreground">{s.title}</h3>
+                      <p className="mt-2 text-[14px] leading-relaxed text-muted-foreground text-pretty">{s.desc}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </section>
