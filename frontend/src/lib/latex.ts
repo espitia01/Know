@@ -87,7 +87,8 @@ function looksLikeBrokenWrappedProseGlyphs(lines: readonly string[]): boolean {
   let veryShort = 0;
   for (const row of t) {
     const len = row.length;
-    if (len <= 1) singleGlyphs++;
+    // Don't count LaTeX delimiter / brace lines as prose glyphs
+    if (len <= 1 && !/^[{}$^_\\]$/.test(row)) singleGlyphs++;
     if (len <= 2) veryShort++;
   }
   const g = singleGlyphs / t.length;
@@ -99,7 +100,8 @@ function looksLikeBrokenWrappedProseGlyphs(lines: readonly string[]): boolean {
 function tightenStrayAdjacentDollarDelimiters(s: string): string {
   let t = s;
   for (let depth = 0; depth < 8; depth++) {
-    const n = t.replace(/\$\s+(?=\$)/g, "");
+    /** Avoid `$ $\\mathrm…` → `$$\mathrm…` false display; preserve `$Q$ $K$` spacing */
+    const n = t.replace(/\$\s+(?=\$(?![\\a-zA-Z]))/g, "$");
     if (n === t) break;
     t = n;
   }
@@ -120,7 +122,67 @@ function normalizeGlyphReflowLine(raw: string): string {
  * rows (pairs like “th”), which is common in condensed fonts.
  */
 function joinDegenerateGlyphPerLineReflow(s: string): string {
-  const lines = s.split(/\r?\n/);
+  const rawLines = s.split(/\r?\n/);
+
+  /** Collapse blank lines between isolated ≤2-char lines so main pass can merge runs ≥4 */
+  const preCollapsed: string[] = [];
+  let k = 0;
+  while (k < rawLines.length) {
+    const tk = normalizeGlyphReflowLine(rawLines[k]);
+    const couldStartGlyphRun =
+      tk.length >= 1 &&
+      tk.length <= 2 &&
+      !/^[-*•]\s/.test(tk) &&
+      !/^\d+\.[\s)]/.test(tk) &&
+      !/^#{1,6}\s/.test(tk) &&
+      !tk.startsWith("```") &&
+      !tk.includes("|");
+
+    if (couldStartGlyphRun) {
+      let peek = k;
+      let glyphCount = 0;
+      const chars: string[] = [];
+      while (peek < rawLines.length) {
+        const tp = normalizeGlyphReflowLine(rawLines[peek]);
+        if (
+          tp.length >= 1 &&
+          tp.length <= 2 &&
+          !/^[-*•]\s/.test(tp) &&
+          !/^\d+\.[\s)]/.test(tp) &&
+          !/^#{1,6}\s/.test(tp) &&
+          !tp.startsWith("```") &&
+          !tp.includes("|")
+        ) {
+          glyphCount++;
+          chars.push(tp);
+          peek++;
+          if (
+            peek < rawLines.length &&
+            rawLines[peek].trim() === "" &&
+            peek + 1 < rawLines.length &&
+            rawLines[peek + 1].trim() !== ""
+          ) {
+            peek++;
+          }
+        } else {
+          break;
+        }
+      }
+      if (glyphCount >= 4) {
+        if (peek > k + glyphCount) {
+          for (const c of chars) preCollapsed.push(c);
+        } else {
+          for (let idx = k; idx < peek; idx++) preCollapsed.push(rawLines[idx]);
+        }
+        k = peek;
+        continue;
+      }
+    }
+    preCollapsed.push(rawLines[k]);
+    k++;
+  }
+
+  const lines = preCollapsed;
   const out: string[] = [];
   let i = 0;
 
@@ -161,19 +223,14 @@ function joinDegenerateGlyphPerLineReflow(s: string): string {
     }
 
     let joined = "";
-    for (let k = i; k < j; k++) {
-      joined += normalizeGlyphReflowLine(lines[k]);
+    for (let lk = i; lk < j; lk++) {
+      joined += normalizeGlyphReflowLine(lines[lk]);
     }
 
     joined = joined.replace(/([a-z])([A-Z])/g, "$1 $2");
     joined = joined.replace(/([.!?:;,)])([A-Za-z0-9])/g, "$1 $2");
     joined = joined.replace(/([a-zA-Z])(\d)/g, "$1 $2");
     joined = joined.replace(/(\d)([a-zA-Z])/g, "$1 $2");
-    /** Glue like “Theresearch” right after headings when “The…” was concatenated */
-    joined = joined.replace(
-      /^(The|A|An|In|On|At|By|If|Is|Or|So|As|Dr|Fig|Via|Versus|[Vv]s)([a-z])/gi,
-      "$1 $2",
-    );
 
     out.push(joined);
     i = j;
@@ -364,11 +421,11 @@ function repairRsfsParenBlock(s: string, macro: string): string {
 }
 
 function repairCommonTransformerMathFractures(s: string): string {
-  let t = repairFracturedDollarCommaPatterns(s);
+  let t = repairWholeLineMacroSalad(s);
+  t = repairFracturedDollarCommaPatterns(t);
   for (const macro of ["Attention", "MultiHead", "Concat"] as const) {
     t = repairRsfsParenBlock(t, macro);
   }
-  t = repairWholeLineMacroSalad(t);
   return t;
 }
 
