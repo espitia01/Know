@@ -476,6 +476,93 @@ def extract_figures(doc: fitz.Document, paper_dir: Path) -> list[FigureInfo]:
     return figures
 
 
+def normalize_extracted_text(raw: str) -> str:
+    """Collapse glyph-per-line artifacts from PyMuPDF plain-text extraction.
+
+    Many PDFs emit one character (or a two-letter span) per line. That shape
+    confuses downstream LLMs, which occasionally echo vertical glyph dumps or
+    fused tokens. Runs of ``>= 4`` consecutive short non-empty lines
+    (``<= 2`` chars after light cleanup) are joined; word boundaries are
+    re-inserted at camel-case and punctuation transitions.
+    """
+    if not isinstance(raw, str):
+        return ""
+
+    def norm_line(row: str) -> str:
+        t = (
+            row.replace("\uFEFF", "")
+            .replace("\u200b", "")
+            .replace("\u200c", "")
+            .replace("\u200d", "")
+            .replace("\u2060", "")
+        )
+        t = t.replace("\u00a0", " ").strip()
+        return t
+
+    if not raw.strip():
+        return raw
+
+    lines = raw.split("\n")
+    out: list[str] = []
+    i = 0
+
+    while i < len(lines):
+        stripped = norm_line(lines[i])
+
+        if not stripped:
+            out.append(lines[i])
+            i += 1
+            continue
+
+        # Skip markdown/table-like lines PDFs occasionally surface as plain text
+        if stripped.startswith("#") or "|" in stripped or stripped.startswith("```"):
+            out.append(lines[i])
+            i += 1
+            continue
+        if re.match(r"^[-*•]\s", stripped) or re.match(r"^\d+\.[\s)]", stripped):
+            out.append(lines[i])
+            i += 1
+            continue
+
+        if len(stripped) <= 2:
+            j = i
+            while j < len(lines):
+                sj = norm_line(lines[j])
+                if not sj:
+                    if (
+                        j + 1 < len(lines)
+                        and norm_line(lines[j + 1])
+                        and len(norm_line(lines[j + 1])) <= 2
+                    ):
+                        j += 1
+                        continue
+                    break
+                if len(sj) > 2:
+                    break
+                if sj.startswith("#") or "|" in sj or sj.startswith("```"):
+                    break
+                if re.match(r"^[-*•]\s", sj) or re.match(r"^\d+\.[\s)]", sj):
+                    break
+                j += 1
+
+            glyph_lines = [norm_line(lines[k]) for k in range(i, j) if norm_line(lines[k])]
+
+            if len(glyph_lines) >= 4:
+                joined = "".join(glyph_lines)
+                joined = re.sub(r"([a-z])([A-Z])", r"\1 \2", joined)
+                joined = re.sub(r"([.!?:;,)])([A-Za-z0-9])", r"\1 \2", joined)
+                joined = re.sub(r"([a-zA-Z])(\d)", r"\1 \2", joined)
+                joined = re.sub(r"(\d)([A-Za-z])", r"\1 \2", joined)
+                out.append(joined)
+                i = j
+                continue
+
+        out.append(lines[i])
+        i += 1
+
+    return "\n".join(out)
+
+
 def extract_raw_text(doc: fitz.Document) -> str:
     """Dump all text from the PDF page-by-page into one string, bounded to
     ``MAX_PAGES`` pages so adversarial PDFs can't pin a worker."""
@@ -490,7 +577,9 @@ def extract_raw_text(doc: fitz.Document) -> str:
 
     if len(doc) > MAX_PAGES:
         logger.info("Truncated text extraction at %d/%d pages", MAX_PAGES, len(doc))
-    return "\n\n".join(pages)
+
+    raw = "\n\n".join(pages)
+    return normalize_extracted_text(raw)
 
 
 def extract_pdf(pdf_path: Path, paper_id: str) -> RawExtraction:
