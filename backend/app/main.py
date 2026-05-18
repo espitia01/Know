@@ -2,7 +2,6 @@ import os
 import re
 import time
 import asyncio
-import collections
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, Depends
@@ -52,6 +51,17 @@ async def _trial_cleanup_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # The in-process cleanup loop is the legacy path; Vercel Cron at
+    # /api/cron/cleanup-trial owns the schedule once configured. Set
+    # KNOW_DISABLE_INTERNAL_CRON_FALLBACK=1 on Railway after the cron
+    # is verified running so we stop double-cleaning.
+    if settings.disable_internal_cron_fallback == "1":
+        _main_logger.info(
+            "Trial cleanup loop disabled (KNOW_DISABLE_INTERNAL_CRON_FALLBACK=1); "
+            "Vercel Cron is expected to drive cleanup."
+        )
+        yield
+        return
     task = asyncio.create_task(_trial_cleanup_loop())
     yield
     task.cancel()
@@ -270,28 +280,85 @@ TRIAL_RATE_LIMIT = 5
 TRIAL_WINDOW = 3600
 
 
+def _resolve_client_ip(request: Request) -> str | None:
+    """Best-effort caller IP. Honors the first hop of x-forwarded-for
+    when the immediate peer is loopback / private (i.e. behind Railway,
+    Vercel, localtunnel, or a load balancer)."""
+    immediate = request.client.host if request.client else None
+    if immediate and immediate not in ("127.0.0.1", "::1"):
+        # We're not behind a proxy locally — but in production the
+        # upstream proxy is what `request.client.host` will report.
+        # x-forwarded-for is still authoritative when present.
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            first = forwarded.split(",")[0].strip()
+            if first:
+                return first
+        return immediate
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first
+    return immediate
+
+
 def _check_trial_rate(request: Request):
     """Enforce IP-based rate limiting on unauthenticated trial endpoints.
 
-    C3: Previously, if the Supabase RPC raised (DB down, migration missing,
-    etc.) we silently fell through to an in-memory fallback. The fallback
-    is per-process, so a restart/redeploy wiped counters and a cluster of
-    workers meant each had its own quota — a trivial abuse path for
-    unauthenticated endpoints. We now:
+    Resolution order:
+      1. Vercel KV-backed limiter (if KNOW_NEXTJS_RATELIMIT_URL is set).
+         This is the primary path post-Stage 6 — survives Railway and
+         Vercel redeploys.
+      2. Supabase RPC ``check_trial_rate``. Authoritative fallback.
+      3. Fail closed with a retryable 503.
 
-      * keep the in-memory deque ONLY as a last resort when Supabase isn't
-        configured at all (dev / self-host),
-      * fail closed (503) when Supabase IS configured but the RPC call
-        fails. We'd rather reject a legit user with a retryable 503 than
-        hand a free-LLM-calls-per-IP oracle to attackers.
+    The previous in-memory deque was per-process and reset on every
+    redeploy, leaking free LLM calls to anyone tolerating a redeploy
+    blip. It is gone.
     """
-    ip = request.client.host if request.client else "unknown"
-    if ip in ("127.0.0.1", "::1", "unknown"):
-        forwarded = request.headers.get("x-forwarded-for", "")
-        if forwarded:
-            ip = forwarded.split(",")[0].strip()
-    if not ip or ip == "unknown":
+    ip = _resolve_client_ip(request)
+    if not ip:
         raise HTTPException(status_code=429, detail="Cannot determine client IP for rate limiting.")
+
+    if settings.nextjs_ratelimit_url and settings.internal_backend_token:
+        url = settings.nextjs_ratelimit_url.rstrip("/") + "/api/trial/rate-check"
+        try:
+            import httpx as _httpx
+            with _httpx.Client(timeout=3.0) as client:
+                resp = client.post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {settings.internal_backend_token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "ip": ip,
+                        "max_requests": TRIAL_RATE_LIMIT,
+                        "window_seconds": TRIAL_WINDOW,
+                    },
+                )
+            if resp.status_code == 200:
+                data = resp.json() or {}
+                if data.get("ok") is True:
+                    if not data.get("allowed"):
+                        raise HTTPException(
+                            status_code=429,
+                            detail="Trial rate limit exceeded. Sign up to continue.",
+                        )
+                    return
+            else:
+                _main_logger.warning(
+                    "Vercel rate-check returned %s; falling back to Supabase RPC",
+                    resp.status_code,
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            _main_logger.warning(
+                "Vercel rate-check failed (%s); falling back to Supabase RPC",
+                e.__class__.__name__,
+            )
 
     from .services.db import get_db
     client = get_db()
@@ -312,23 +379,12 @@ def _check_trial_rate(request: Request):
             raise HTTPException(status_code=429, detail="Trial rate limit exceeded. Sign up to continue.")
         return
 
-    # Only reachable in local dev / self-host where Supabase isn't configured.
-    now = time.time()
-    if ip not in _trial_fallback:
-        if len(_trial_fallback) > 10000:
-            oldest = sorted(_trial_fallback, key=lambda k: _trial_fallback[k][-1] if _trial_fallback[k] else 0)[:5000]
-            for k in oldest:
-                del _trial_fallback[k]
-        _trial_fallback[ip] = collections.deque()
-    dq = _trial_fallback[ip]
-    while dq and dq[0] < now - TRIAL_WINDOW:
-        dq.popleft()
-    if len(dq) >= TRIAL_RATE_LIMIT:
-        raise HTTPException(status_code=429, detail="Trial rate limit exceeded. Sign up to continue.")
-    dq.append(now)
-
-
-_trial_fallback: dict[str, collections.deque] = {}
+    # No Supabase, no Vercel limiter — fail closed. We refuse to hand
+    # out anonymous LLM calls behind no enforcement.
+    raise HTTPException(
+        status_code=503,
+        detail="Trial rate limiter unavailable. Please try again shortly.",
+    )
 
 
 @app.post("/api/trial/upload")
