@@ -113,20 +113,39 @@ export async function POST(
       // Summaries are large structured objects (overview + motivation
       // + multi-paragraph methodology + multi-paragraph results +
       // discussion + arrays of contributions, equations, figures,
-      // limitations). Anthropic's default output cap (~4k tokens for
-      // many models) was truncating the JSON mid-write, so the final
-      // validation in `onFinish` returned without an object and the
-      // panel showed empty. 16k gives Sonnet plenty of room to finish.
-      maxOutputTokens: 16000,
+      // limitations). Anthropic's default output cap was truncating
+      // the JSON mid-write. 8k is the per-call ceiling on most
+      // current Sonnet variants and is plenty for the schema once
+      // the prompt asks for "concise multi-paragraph" rather than
+      // "exhaustively long" sections.
+      maxOutputTokens: 8000,
       onFinish: async (event) => {
+        // Log every finish so Vercel function logs make the failure
+        // mode obvious (validation error vs empty model response vs
+        // truncation). Keep payloads bounded so logs don't bloat.
+        console.log(
+          JSON.stringify({
+            tag: "summary-stream.finish",
+            paperId,
+            userId: user.userId,
+            hasObject: !!event.object,
+            hasError: !!event.error,
+            errorMessage: event.error
+              ? String(event.error).slice(0, 500)
+              : undefined,
+            finishReason: event.finishReason,
+            usage: event.usage,
+          }),
+        );
         if (event.error) {
           await releaseOnFailure();
           return;
         }
         const finalObject = event.object as PaperSummary | undefined;
-        if (!finalObject) return;
-        // Await directly rather than via `after()` — same reasoning
-        // as the selection-stream route.
+        if (!finalObject) {
+          await releaseOnFailure();
+          return;
+        }
         try {
           await upsertCachedAnalysis({
             userId: user.userId,
@@ -138,7 +157,15 @@ export async function POST(
           console.error("[summary-stream] persist failed", err);
         }
       },
-      onError: async () => {
+      onError: async ({ error }) => {
+        console.error(
+          JSON.stringify({
+            tag: "summary-stream.error",
+            paperId,
+            userId: user.userId,
+            error: String(error).slice(0, 800),
+          }),
+        );
         await releaseOnFailure();
       },
     });

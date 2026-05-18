@@ -179,6 +179,21 @@ export async function POST(
       // default has shifted before.
       maxOutputTokens: 8000,
       onFinish: async (event) => {
+        console.log(
+          JSON.stringify({
+            tag: "selection-stream.finish",
+            paperId,
+            userId: user.userId,
+            action: normalizedAction,
+            hasObject: !!event.object,
+            hasError: !!event.error,
+            errorMessage: event.error
+              ? String(event.error).slice(0, 500)
+              : undefined,
+            finishReason: event.finishReason,
+            usage: event.usage,
+          }),
+        );
         // Schema validation failure mid-stream → release usage,
         // but the client already saw the partial — log and move on.
         if (event.error) {
@@ -186,7 +201,10 @@ export async function POST(
           return;
         }
         const finalObject = event.object as SelectionResult | undefined;
-        if (!finalObject) return;
+        if (!finalObject) {
+          await releaseOnFailure();
+          return;
+        }
 
         // Persist the assembled selection into cached_analysis. We
         // await directly (rather than scheduling via `after()`)
@@ -218,7 +236,16 @@ export async function POST(
           console.error("[selection-stream] persist failed", err);
         }
       },
-      onError: async () => {
+      onError: async ({ error }) => {
+        console.error(
+          JSON.stringify({
+            tag: "selection-stream.error",
+            paperId,
+            userId: user.userId,
+            action: normalizedAction,
+            error: String(error).slice(0, 800),
+          }),
+        );
         await releaseOnFailure();
       },
     });
