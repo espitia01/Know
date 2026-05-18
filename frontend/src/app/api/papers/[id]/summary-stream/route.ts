@@ -2,7 +2,7 @@
  * Migrated summary-stream route (Stage 3 — replaces Python's
  * /api/papers/{id}/summary-stream for authenticated callers).
  *
- * Same shape as the selection-stream route but for the analysis model:
+ * Uses the user's Settings analysis model (via internal model prefs):
  * pull paper context → reserve usage → streamObject(PaperSummary). On
  * finish, persist the assembled summary into cached_analysis.summary
  * via the internal upsert (replaces the old `event.type === "done"`
@@ -13,10 +13,11 @@ import { NextResponse } from "next/server";
 import { streamObject } from "ai";
 import { zodSchema } from "@ai-sdk/provider-utils";
 
-import { getModel } from "@/lib/server/llm";
+import { getModelFromSlug } from "@/lib/server/llm";
 import { requireUser, AuthError } from "@/lib/server/auth";
 import {
   fetchPaperContext,
+  fetchUserModelPrefs,
   reserveUsage,
   releaseUsage,
   upsertCachedAnalysis,
@@ -28,6 +29,8 @@ import { buildSummaryPrompt } from "@/lib/server/prompts/summary";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** Vercel kills at 60s without this; summary can run 90–120s on long papers. */
+export const maxDuration = 300;
 
 const PAPER_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
@@ -58,9 +61,14 @@ export async function POST(
   }
 
   let paper: { title: string; raw_text: string };
+  let analysisModel: string;
   try {
-    const ctx = await fetchPaperContext(paperId, user.userId);
+    const [ctx, prefs] = await Promise.all([
+      fetchPaperContext(paperId, user.userId),
+      fetchUserModelPrefs(user.userId),
+    ]);
     paper = { title: ctx.title, raw_text: ctx.raw_text };
+    analysisModel = prefs.analysis_model;
   } catch (e) {
     if (e instanceof InternalApiError) {
       const status = e.status === 404 ? 404 : 502;
@@ -76,6 +84,7 @@ export async function POST(
       userId: user.userId,
       paperId,
       kind: "summary",
+      model: analysisModel,
     });
     usageToken = reserve.token;
   } catch (e) {
@@ -104,25 +113,44 @@ export async function POST(
   let result: ReturnType<typeof streamObject>;
   try {
     result = streamObject({
-      model: getModel("analysis"),
+      model: getModelFromSlug(analysisModel),
       schema: zodSchema(PaperSummarySchema),
       schemaName: "PaperSummary",
       schemaDescription: "Structured summary of an academic paper.",
-      output: "object",
       system,
       prompt,
       temperature: 0.3,
-      maxOutputTokens: 8000,
+      maxOutputTokens: 6000,
       onFinish: async (event) => {
         if (event.error) {
+          console.error(
+            JSON.stringify({
+              tag: "summary-stream.finish",
+              paperId,
+              userId: user.userId,
+              hasObject: false,
+              hasError: true,
+              errorMessage: String(event.error).slice(0, 500),
+            }),
+          );
           await releaseOnFailure();
           return;
         }
         const finalObject = event.object as PaperSummary | undefined;
-        if (!finalObject) {
+        if (!finalObject?.overview) {
           await releaseOnFailure();
           return;
         }
+        console.log(
+          JSON.stringify({
+            tag: "summary-stream.finish",
+            paperId,
+            userId: user.userId,
+            hasObject: true,
+            hasError: false,
+            usage: event.usage,
+          }),
+        );
         try {
           await upsertCachedAnalysis({
             userId: user.userId,

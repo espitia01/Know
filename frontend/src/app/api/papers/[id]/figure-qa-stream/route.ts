@@ -12,11 +12,12 @@ import { NextResponse } from "next/server";
 import { streamObject } from "ai";
 import { zodSchema } from "@ai-sdk/provider-utils";
 
-import { getModel } from "@/lib/server/llm";
+import { getModelFromSlug } from "@/lib/server/llm";
 import { requireUser, AuthError } from "@/lib/server/auth";
 import {
   fetchFigurePng,
   fetchPaperContext,
+  fetchUserModelPrefs,
   reserveUsage,
   releaseUsage,
   upsertCachedAnalysis,
@@ -28,6 +29,7 @@ import { buildFigurePrompt } from "@/lib/server/prompts/figure";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 const ID_RE = /^[a-zA-Z0-9_-]+$/;
 
@@ -73,13 +75,16 @@ export async function POST(
   // in parallel — they're independent and both are blocking.
   let paper: { title: string; raw_text: string };
   let figure: { bytes: Uint8Array; mediaType: string };
+  let fastModel: string;
   try {
-    const [ctx, png] = await Promise.all([
+    const [ctx, png, prefs] = await Promise.all([
       fetchPaperContext(paperId, user.userId),
       fetchFigurePng(paperId, figureId, user.userId),
+      fetchUserModelPrefs(user.userId),
     ]);
     paper = { title: ctx.title, raw_text: ctx.raw_text };
     figure = png;
+    fastModel = prefs.fast_model;
   } catch (e) {
     if (e instanceof InternalApiError) {
       if (e.status === 404) return jsonError(404, "not_found", e.message);
@@ -94,6 +99,7 @@ export async function POST(
       userId: user.userId,
       paperId,
       kind: "figure",
+      model: fastModel,
     });
     usageToken = reserve.token;
   } catch (e) {
@@ -122,7 +128,7 @@ export async function POST(
   let result: ReturnType<typeof streamObject>;
   try {
     result = streamObject({
-      model: getModel("vision"),
+      model: getModelFromSlug(fastModel),
       schema: zodSchema(FigureAnalysisSchema),
       schemaName: "FigureAnalysis",
       schemaDescription: "Structured analysis of a figure from an academic paper.",

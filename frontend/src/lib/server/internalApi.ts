@@ -104,6 +104,19 @@ export async function fetchPaperContext(
   return call<PaperContext>(`/api/internal/paper/${paperId}/text?${qs}`, { method: "GET" }, signal);
 }
 
+export type UserModelPrefs = {
+  analysis_model: string;
+  fast_model: string;
+};
+
+/** Tier-enforced analysis/fast slugs from Settings (Python source of truth). */
+export async function fetchUserModelPrefs(
+  userId: string,
+  signal?: AbortSignal,
+): Promise<UserModelPrefs> {
+  return call<UserModelPrefs>(`/api/internal/user/${userId}/models`, { method: "GET" }, signal);
+}
+
 // ----------------------------------------------------------------
 // Usage reservation
 // ----------------------------------------------------------------

@@ -6,7 +6,10 @@ export type AnalysisKind = "preReading" | "assumptions" | "summary";
 
 export const autoAnalyzedPapers = new Set<string>();
 export const activeRequests = new Map<string, Set<AnalysisKind>>();
-export const activeSummaryStreams = new Map<string, AbortController>();
+/** In-flight summary stream stop handlers (from `useSummaryStream`). */
+export const activeSummaryStreamStoppers = new Map<string, () => void>();
+/** Registered `start()` from the page-level `useSummaryStream` hook. */
+export const summaryStreamStarters = new Map<string, () => void>();
 
 function requestSet(paperId: string): Set<AnalysisKind> {
   let s = activeRequests.get(paperId);
@@ -26,7 +29,6 @@ export function markRequestEnd(paperId: string, kind: AnalysisKind) {
 }
 
 export function hasActiveRequest(paperId: string, kind: AnalysisKind): boolean {
-  if (kind === "summary") return activeSummaryStreams.has(paperId);
   return activeRequests.get(paperId)?.has(kind) ?? false;
 }
 
@@ -63,11 +65,8 @@ export function forgetPaper(paperId: string) {
     }
   }
   activeRequests.delete(paperId);
-  const stream = activeSummaryStreams.get(paperId);
-  if (stream) {
-    try { stream.abort(); } catch { /* ignore */ }
-    activeSummaryStreams.delete(paperId);
-  }
+  activeSummaryStreamStoppers.get(paperId)?.();
+  activeSummaryStreamStoppers.delete(paperId);
   for (const key of Array.from(progressStartTimes.keys())) {
     if (key.startsWith(`${paperId}:`)) progressStartTimes.delete(key);
   }
@@ -93,14 +92,7 @@ export function allowAutoAnalyzeRetry(paperId: string) {
 
 /** Abort an in-flight summary stream for a paper (e.g. when switching away). */
 export function abortActiveSummaryStream(paperId: string) {
-  const stream = activeSummaryStreams.get(paperId);
-  if (stream) {
-    try {
-      stream.abort();
-    } catch {
-      /* ignore */
-    }
-    activeSummaryStreams.delete(paperId);
-  }
+  activeSummaryStreamStoppers.get(paperId)?.();
+  activeSummaryStreamStoppers.delete(paperId);
   markRequestEnd(paperId, "summary");
 }

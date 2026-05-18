@@ -32,10 +32,10 @@ import {
   forgetPaper,
   allowAutoAnalyzeRetry,
   autoAnalyzedPapers,
-  activeSummaryStreams,
   abortActiveSummaryStream,
+  summaryStreamStarters,
 } from "@/lib/analysisState";
-import { streamSummaryForPaper } from "@/lib/streamSummary";
+import { useSummaryStream } from "@/lib/useSummaryStream";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { recordPaperOpened } from "@/lib/recentPapers";
 import { isPreReadingPopulated } from "@/lib/preReading";
@@ -579,6 +579,7 @@ function PaperContent() {
   // `useSelectionThread` hook below. The bare AbortController + SSE
   // parsing block this used to need is gone; the hook owns it.
   const selectionThread = useSelectionThread(activePaperId);
+  useSummaryStream(activePaperId);
   const initialLoadDone = useRef(false);
 
   useEffect(() => {
@@ -1014,30 +1015,7 @@ function PaperContent() {
       !hasActiveRequest(pid, "summary") &&
       !autoAnalyzedPapers.has(`${pid}:summary`)
     ) {
-      const ac = new AbortController();
-      activeSummaryStreams.set(pid, ac);
-      markRequestStart(pid, "summary");
-      setSummaryLoading(true);
-      clearProgressStart(pid, "summary");
-      streamSummaryForPaper(pid, ac.signal)
-        .then((finalSummary) => {
-          const s = useStore.getState();
-          if (s.paper?.id !== pid) return;
-          if (finalSummary) {
-            setSummary(finalSummary);
-            s.updateCachedAnalysis(pid, { summary: finalSummary });
-            autoAnalyzedPapers.add(`${pid}:summary`);
-          }
-        })
-        .catch(() => {})
-        .finally(() => {
-          markRequestEnd(pid, "summary");
-          clearProgressStart(pid, "summary");
-          activeSummaryStreams.delete(pid);
-          if (useStore.getState().paper?.id === pid) {
-            setSummaryLoading(false);
-          }
-        });
+      queueMicrotask(() => summaryStreamStarters.get(pid)?.());
     }
   }, [
     loadedPaperId,

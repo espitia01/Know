@@ -3,6 +3,10 @@
   "installCommand": "npm install",
   "buildCommand": "npm run build",
   "functions": {
+    "app/api/papers/[id]/selection-stream/route.ts": { "maxDuration": 300 },
+    "app/api/papers/[id]/summary-stream/route.ts": { "maxDuration": 300 },
+    "app/api/papers/[id]/figure-qa-stream/route.ts": { "maxDuration": 300 },
+    "app/api/papers/[id]/qa/route.ts": { "maxDuration": 300 },
     "src/app/api/papers/[id]/selection-stream/route.ts": { "maxDuration": 300 },
     "src/app/api/papers/[id]/summary-stream/route.ts": { "maxDuration": 300 },
     "src/app/api/papers/[id]/figure-qa-stream/route.ts": { "maxDuration": 300 },

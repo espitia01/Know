@@ -116,6 +116,27 @@ async def internal_paper_text(paper_id: str, user_id: str):
 
 
 # ----------------------------------------------------------------
+# User model preferences (Settings → analysis / fast model)
+# ----------------------------------------------------------------
+
+
+@router.get("/user/{user_id}/models", dependencies=[Depends(require_internal_bearer)])
+async def internal_user_models(user_id: str):
+    """Return tier-enforced model slugs for migrated Next.js stream routes.
+
+    Mirrors ``resolve_analysis_model`` / ``resolve_fast_model`` so streaming
+    calls use the same models as batch Python endpoints and Settings UI.
+    """
+    _validate_id(user_id, "user_id")
+    from ..gating import resolve_analysis_model, resolve_fast_model
+
+    return {
+        "analysis_model": resolve_analysis_model(user_id),
+        "fast_model": resolve_fast_model(user_id),
+    }
+
+
+# ----------------------------------------------------------------
 # Usage reservation / release
 # ----------------------------------------------------------------
 

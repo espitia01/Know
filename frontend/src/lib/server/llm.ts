@@ -1,14 +1,12 @@
 /**
  * Model factory for migrated streaming routes.
  *
- * One entry point: `getModel(role)`. Roles map to env-overridable Anthropic
- * model slugs. Routing prefers AI Gateway (which handles caching, retries,
- * and provider failover for us) and falls back to direct `@ai-sdk/anthropic`
- * only when Gateway isn't configured. A model swap is one env change.
+ * Stream routes resolve the user's Settings picks via
+ * `fetchUserModelPrefs` (Python `resolve_*_model`) and call
+ * `getModelFromSlug`. `getModel(role)` remains for health probes and
+ * env-default fallbacks (`MODEL_ANALYSIS`, `MODEL_FAST`, `MODEL_VISION`).
  *
- * Anthropic prompt caching is enabled on the Gateway path for the system
- * prompt — the system prompt repeats verbatim across selection / summary /
- * figure-qa calls, so caching cuts both cost and TTFB.
+ * Routing prefers AI Gateway when configured; otherwise direct Anthropic.
  */
 
 import { anthropic } from "@ai-sdk/anthropic";
@@ -48,13 +46,16 @@ function preferGateway(): boolean {
   return false;
 }
 
-export function getModel(role: ModelRole): LanguageModel {
-  const slug = slugFor(role);
+/** Build a language model from an Anthropic slug (Settings or env default). */
+export function getModelFromSlug(slug: string): LanguageModel {
   if (preferGateway()) {
-    // Gateway routes Anthropic provider IDs as `anthropic/<slug>`.
     return gateway(`anthropic/${slug}`);
   }
   return anthropic(slug);
+}
+
+export function getModel(role: ModelRole): LanguageModel {
+  return getModelFromSlug(slugFor(role));
 }
 
 /**

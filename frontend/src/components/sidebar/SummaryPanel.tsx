@@ -8,20 +8,16 @@ import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import type { PaperSummary } from "@/lib/server/schemas";
 import {
-  activeSummaryStreams,
   clearProgressStart,
   hasActiveRequest,
-  markRequestEnd,
-  markRequestStart,
+  summaryStreamStarters,
 } from "@/lib/analysisState";
-import { streamSummaryForPaper, SummaryStreamError } from "@/lib/streamSummary";
 
 interface SummaryPanelProps {
   paperId: string;
 }
 
 export function SummaryPanel({ paperId }: SummaryPanelProps) {
-  const setSummary = useStore((s) => s.setSummary);
   const cachedSummary = useStore((s) => s.summary) ?? null;
   const streamingPartial = useStore((s) => s.summaryStreamingByPaper[paperId] ?? null);
   const summaryLoading = useStore((s) => s.summaryLoading);
@@ -40,42 +36,17 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     !fromStore &&
     !fromCache;
 
-  const runSummaryStream = useCallback(async () => {
+  const runSummaryStream = useCallback(() => {
     if (hasActiveRequest(paperId, "summary")) return;
     setManualError(null);
-    const ac = new AbortController();
-    activeSummaryStreams.set(paperId, ac);
-    markRequestStart(paperId, "summary");
-    useStore.getState().setSummaryLoading(true);
     clearProgressStart(paperId, "summary");
-    try {
-      const finalSummary = await streamSummaryForPaper(paperId, ac.signal);
-      if (useStore.getState().paper?.id !== paperId) return;
-      if (finalSummary) {
-        setSummary(finalSummary);
-        useStore.getState().updateCachedAnalysis(paperId, { summary: finalSummary });
-      } else if (!useStore.getState().summary) {
-        setManualError("Summary generation finished without content. Try again.");
-      }
-    } catch (e) {
-      if (useStore.getState().paper?.id === paperId) {
-        setManualError(
-          e instanceof SummaryStreamError
-            ? e.message
-            : e instanceof Error
-              ? e.message
-              : "Summary generation failed.",
-        );
-      }
-    } finally {
-      markRequestEnd(paperId, "summary");
-      clearProgressStart(paperId, "summary");
-      activeSummaryStreams.delete(paperId);
-      if (useStore.getState().paper?.id === paperId) {
-        useStore.getState().setSummaryLoading(false);
-      }
+    const start = summaryStreamStarters.get(paperId);
+    if (!start) {
+      setManualError("Summary is still initializing. Try again in a moment.");
+      return;
     }
-  }, [paperId, setSummary]);
+    start();
+  }, [paperId]);
 
   if (!summary && isLoading) {
     return (
@@ -95,7 +66,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
         title={errMsg ? "Failed to generate summary" : "Summary not available yet"}
         body={
           errMsg ||
-          "Generate a detailed overview, contributions, methods, results, and limitations. Generation often takes 30–60 seconds once started."
+          "Generate a detailed overview, contributions, methods, results, and limitations. Generation often takes 30–90 seconds once started."
         }
         cta={{
           label: errMsg ? "Retry" : "Generate Summary",

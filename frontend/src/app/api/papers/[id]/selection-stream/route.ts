@@ -24,10 +24,11 @@ import { NextResponse } from "next/server";
 import { streamObject } from "ai";
 import { zodSchema } from "@ai-sdk/provider-utils";
 
-import { getModel } from "@/lib/server/llm";
+import { getModelFromSlug } from "@/lib/server/llm";
 import { requireUser, AuthError } from "@/lib/server/auth";
 import {
   fetchPaperContext,
+  fetchUserModelPrefs,
   reserveUsage,
   releaseUsage,
   upsertCachedAnalysis,
@@ -43,6 +44,7 @@ import {
 export const runtime = "nodejs";
 // Streaming responses must not be cached; force fresh execution per call.
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 const PAPER_ID_RE = /^[a-zA-Z0-9_-]+$/;
 const ALLOWED_ACTIONS: ReadonlySet<SelectionAction> = new Set([
@@ -115,11 +117,16 @@ export async function POST(
   }
   const question = clip(body.question, MAX_QUESTION_CHARS);
 
-  // 3. Fetch paper context.
+  // 3. Fetch paper context + Settings model prefs (selection = fast model).
   let paper: { title: string; raw_text: string };
+  let fastModel: string;
   try {
-    const ctx = await fetchPaperContext(paperId, user.userId);
+    const [ctx, prefs] = await Promise.all([
+      fetchPaperContext(paperId, user.userId),
+      fetchUserModelPrefs(user.userId),
+    ]);
     paper = { title: ctx.title, raw_text: ctx.raw_text };
+    fastModel = prefs.fast_model;
   } catch (e) {
     if (e instanceof InternalApiError) {
       // 404 from internal == not owned. Surface as 404 to the caller.
@@ -138,6 +145,7 @@ export async function POST(
       userId: user.userId,
       paperId,
       kind: "selection",
+      model: fastModel,
     });
     usageToken = reserve.token;
   } catch (e) {
@@ -170,7 +178,7 @@ export async function POST(
   let result: ReturnType<typeof streamObject>;
   try {
     result = streamObject({
-      model: getModel("fast"),
+      model: getModelFromSlug(fastModel),
       schema: zodSchema(SelectionResultSchema),
       schemaName: "SelectionResult",
       schemaDescription:
