@@ -314,35 +314,11 @@ class AnthropicProvider(LLMProvider):
                         yield delta.get("text", "")
 
 
-class LocalModelProvider(LLMProvider):
-    """OpenAI-compatible provider for local models (Ollama, LM Studio, etc.)."""
-
-    _ALLOWED_HOSTS = {"localhost", "127.0.0.1", "::1"}
-
-    def __init__(self, base_url: str, model_name: str):
-        from urllib.parse import urlparse
-        parsed = urlparse(base_url)
-        if parsed.hostname not in self._ALLOWED_HOSTS:
-            raise ValueError(f"LocalModelProvider only allows local hosts, got: {parsed.hostname}")
-        self.base_url = base_url.rstrip("/")
-        self.model_name = model_name
-        self.client = _get_shared_client()
-
-    async def complete(self, system: str, user: str, max_tokens: int = 4096) -> str:
-        response = await self.client.post(
-            f"{self.base_url}/chat/completions",
-            json={
-                "model": self.model_name,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                "temperature": 0.3,
-            },
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
+# Local-model support (Ollama / OpenAI-compatible local backends) was
+# retired in stage 8 of the AI SDK migration. All LLM calls now go
+# through Anthropic, optionally fronted by Vercel AI Gateway on the
+# Next.js side. If/when local-model support comes back, mount it as a
+# new provider class here — don't resurrect this one.
 
 
 def get_provider(user_id: str | None = None) -> LLMProvider:

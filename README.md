@@ -1,15 +1,36 @@
 # Know
 
-Interactive academic paper reader with AI-powered analysis. Upload a PDF, get clean LaTeX-rich markdown, and use AI tools to study it: pre-reading prep, derivation exercises, assumptions analysis, Q&A, notes, and more.
+Interactive academic paper reader with AI-powered analysis. Upload a PDF, get clean LaTeX-rich markdown, and use AI tools to study it: pre-reading prep, derivation exercises, assumptions analysis, Q&A, figure conversations, notes, and more.
 
 ## Architecture
 
-- **Frontend**: Next.js 16 (App Router), Tailwind CSS, shadcn/ui, KaTeX
-- **Backend**: Python FastAPI, PyMuPDF, httpx (Anthropic API / local models)
-- **LLM**: Anthropic Claude (Haiku for formatting, Sonnet for analysis) or any OpenAI-compatible local model (Ollama, LM Studio)
-- **Auth**: Simple password gate (token-based, configurable via `KNOW_PASSWORD`)
+- **Frontend**: Next.js 15 (App Router) on Vercel, Tailwind CSS, shadcn/ui, Streamdown + KaTeX, Clerk auth.
+- **AI streaming**: Vercel AI SDK (`ai`, `@ai-sdk/anthropic`, `@ai-sdk/gateway`) on Next.js route handlers. Selection, summary, figure-Q&A, and authenticated chat all stream from the Vercel side via `streamObject` against typed Zod schemas. Anthropic prompt caching and AI Gateway provider routing are first-class.
+- **Backend**: Python FastAPI on Railway. Owns paper upload, PDF parse, figure extraction, batch analysis (`analyze`, `assumptions`, `ask`, `ask-multi`), tier gating, billing, and the anonymous trial flow. Single source of truth for usage caps via `gating.py`.
+- **Persistence**: Supabase Postgres with RLS for users / papers / workspaces / billing rows. Vercel Marketplace Redis (Upstash) for token cache, idempotency keys, and trial rate-limit buckets.
+- **Cron**: Vercel Cron (`/api/cron/cleanup-trial`) handles daily cleanup; the in-process FastAPI loop is kept as a gated fallback (`KNOW_DISABLE_INTERNAL_CRON_FALLBACK`).
 
-## Quick Start (Local)
+```
+Browser ──► Next.js (Vercel)
+              ├─► AI SDK route handlers (streaming):
+              │     /api/papers/[id]/selection-stream
+              │     /api/papers/[id]/summary-stream
+              │     /api/papers/[id]/figure-qa-stream
+              ├─► AI Gateway → Anthropic (Sonnet/Haiku/vision)
+              ├─► Upstash Redis (cache, idempotency, rate limits)
+              ├─► Supabase (server-side reads with service role)
+              └─► Python /api/internal/* (HMAC bearer; usage,
+                  paper context, figure bytes, cleanup callback)
+
+Browser ──► Python (Railway)
+              ├─► Paper upload, parse, figure extraction
+              ├─► Batch analysis + Q&A endpoints
+              ├─► Settings, billing, search, library
+              ├─► Trial flow (rate-limited via Vercel KV proxy)
+              └─► /api/internal/* (server-to-server)
+```
+
+## Quick start (local)
 
 ### Backend
 
@@ -19,7 +40,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env with your API keys and password
+# Edit .env with KNOW_ANTHROPIC_API_KEY, KNOW_SUPABASE_*, KNOW_CLERK_*, KNOW_INTERNAL_BACKEND_TOKEN
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -27,177 +48,92 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ```bash
 cd frontend
+cp .env.example .env.local
+# Edit .env.local with ANTHROPIC_API_KEY (or AI_GATEWAY_API_KEY),
+# CLERK_*, SUPABASE_*, INTERNAL_BACKEND_*, KV_REST_API_*
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000 and sign in with your password.
+Open <http://localhost:3000>.
 
----
+## Production deployment
 
-## Deployment: Vercel (Frontend) + Mac Studio (Backend) + Ollama/Qwen
+The deploy is split: **Next.js on Vercel**, **Python on Railway**, **Postgres + Storage on Supabase**, **Redis from the Vercel Marketplace**. There is no longer a self-hosted Mac-Studio + Ollama path — everything runs on managed infra.
 
-### Step 1: Mac Studio Setup
+### 1. Vercel (frontend)
 
-```bash
-# Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
+Set these env vars in Vercel → Settings → Environment Variables (Production + Preview + Development):
 
-# Pull Qwen
-ollama pull qwen3:8b
+| Name | Required | Notes |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | One of these | Direct Anthropic key. Skip if AI Gateway is enabled. |
+| `AI_GATEWAY_API_KEY` | One of these | Vercel AI Gateway key. Auto-detected via OIDC inside a Vercel deploy. |
+| `MODEL_ANALYSIS` | optional | Default `claude-sonnet-4-6`. |
+| `MODEL_FAST` | optional | Default `claude-haiku-4-5`. |
+| `MODEL_VISION` | optional | Default `claude-sonnet-4-6`. |
+| `INTERNAL_BACKEND_URL` | yes | Public URL of the Python service (e.g. `https://your-api.up.railway.app`). |
+| `INTERNAL_BACKEND_TOKEN` | yes | Strong random secret (`openssl rand -hex 32`). Same value on Railway as `KNOW_INTERNAL_BACKEND_TOKEN`. |
+| `SUPABASE_URL` | yes | Same as `KNOW_SUPABASE_URL` on the backend. |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | Supabase → Project Settings → API → service_role. Privileged. |
+| `CLERK_SECRET_KEY` | yes | Clerk dashboard → API Keys. |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | yes | Same source. |
+| `KV_REST_API_URL` | yes (auto) | Auto-injected by the Upstash integration. |
+| `KV_REST_API_TOKEN` | yes (auto) | Same. |
+| `CRON_SECRET` | yes | Vercel auto-generates this when you add a cron entry. |
 
-# Verify it works
-ollama run qwen3:8b "Say hello"
-# Ctrl+D to exit
+Add the Upstash Redis integration: **Vercel → Storage → Create Database → Marketplace → Upstash for Redis → Connect to project**.
 
-# Clone the repo
-git clone https://github.com/espitia01/Know.git
-cd Know/backend
-
-# Python env
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Configure
-cp .env.example .env
-```
-
-Edit `backend/.env`:
-```
-KNOW_ACTIVE_PROVIDER=local
-KNOW_LOCAL_MODEL_URL=http://localhost:11434/v1
-KNOW_LOCAL_MODEL_NAME=qwen3:8b
-KNOW_PASSWORD=Ebong1996
-KNOW_CORS_ORIGINS=https://your-app.vercel.app
-```
-
-### Step 2: Expose Backend with localtunnel
+Then deploy:
 
 ```bash
-# Install localtunnel globally
-npm install -g localtunnel
-
-# Start the backend
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# In another terminal, start the tunnel
-lt --port 8000 --subdomain know-api
-```
-
-This gives you a URL like `https://know-api.loca.lt`.
-
-> **Note**: localtunnel shows a "click to continue" splash page on first visit.
-> To bypass it programmatically, your requests need the header
-> `Bypass-Tunnel-Reminder: true`. The app already sends auth headers
-> which usually suffice, but if you hit the splash page in a browser,
-> just click through once.
-
-### Step 3: Deploy Frontend to Vercel
-
-```bash
-cd Know/frontend
-npx vercel
-```
-
-Set the environment variable (in Vercel dashboard → Settings → Environment Variables):
-- **Key**: `NEXT_PUBLIC_API_URL`
-- **Value**: `https://know-api.loca.lt` (your localtunnel URL from step 2)
-
-Deploy to production:
-```bash
+cd frontend
 npx vercel --prod
 ```
 
-Then update `backend/.env` with your actual Vercel domain:
-```
-KNOW_CORS_ORIGINS=https://know-xyz.vercel.app
-```
+### 2. Railway (backend)
 
-### Step 4: Verify
+Deploy the `backend/` directory; Railway picks up `Dockerfile` automatically. Required env vars:
 
-1. Open your Vercel URL → you should see the login page
-2. Sign in with your password
-3. Upload a PDF → watch your Mac Studio terminal for requests
-
----
-
-## Using tmux (keep everything running)
-
-tmux lets you run multiple persistent terminal sessions that survive if you close your laptop or SSH disconnects. Here's how to use it for Know:
-
-### Install
-```bash
-# macOS
-brew install tmux
-```
-
-### Start a session
-```bash
-tmux new -s know
-```
-
-You're now inside a tmux session named "know".
-
-### Split into panes (run all 3 services at once)
-
-```
-# You start in pane 0. Start Ollama:
-ollama serve
-
-# Split horizontally (new pane below):
-Ctrl+B then "       (that's Ctrl+B, release, then press the double-quote key)
-
-# In the new pane, start the backend:
-cd Know/backend && source .venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# Split again:
-Ctrl+B then "
-
-# In the third pane, start localtunnel:
-lt --port 8000 --subdomain know-api
-```
-
-### Essential tmux commands
-
-| Action | Keys |
+| Name | Notes |
 |---|---|
-| Split pane horizontally | `Ctrl+B` then `"` |
-| Split pane vertically | `Ctrl+B` then `%` |
-| Switch between panes | `Ctrl+B` then arrow key |
-| **Detach** (leave running) | `Ctrl+B` then `d` |
-| **Re-attach** (come back) | `tmux attach -t know` |
-| List sessions | `tmux ls` |
-| Kill a session | `tmux kill-session -t know` |
-| Scroll up in a pane | `Ctrl+B` then `[`, then arrow keys. Press `q` to exit scroll mode |
-| Resize pane | `Ctrl+B` then hold `Ctrl` + arrow key |
+| `KNOW_ANTHROPIC_API_KEY` | Used by the trial flow + remaining batch endpoints. |
+| `KNOW_SUPABASE_URL` / `KNOW_SUPABASE_KEY` | Shared with the Vercel side. |
+| `KNOW_CLERK_*` | JWKS / issuer / audience for `/api/...` JWT verify. |
+| `KNOW_STRIPE_*` | Billing + webhook secret. |
+| `KNOW_INTERNAL_BACKEND_TOKEN` | Same value as Vercel's `INTERNAL_BACKEND_TOKEN`. |
+| `KNOW_NEXTJS_RATELIMIT_URL` | Set to your Vercel deploy URL once `/api/trial/rate-check` is live. |
+| `KNOW_DISABLE_INTERNAL_CRON_FALLBACK` | Set to `1` once Vercel Cron at `/api/cron/cleanup-trial` is verified running. |
+| `KNOW_CORS_ORIGINS` | Comma-separated list of allowed origins (your Vercel domain). |
 
-### The key workflow
+### 3. Supabase
 
-1. **Start**: `tmux new -s know`
-2. **Set up panes**: Split and start your 3 services (Ollama, backend, localtunnel)
-3. **Detach**: `Ctrl+B` then `d` — everything keeps running in the background
-4. **Come back later**: `tmux attach -t know` — all your panes are still there
-5. **After reboot**: just run `tmux new -s know` and start the services again
+Apply the migrations in `backend/supabase/migrations/` to your Supabase project.
 
-This means you can SSH into your Mac Studio, start everything in tmux, detach, close your laptop, and the backend stays running.
+### 4. Verify
 
----
+- `curl https://<your-vercel>/api/health/llm` → `{"ok": true, ...}`.
+- `curl -H "Authorization: Bearer $TOKEN" https://<your-railway>/api/internal/paper/<id>/text?user_id=<user>` → 200.
+- Sign in, upload a paper, click Explain on a passage. Watch the Network tab — the request should hit `<your-vercel>/api/papers/[id]/selection-stream`, not Railway.
 
-## Environment Variables
+## Key paths
 
-### Backend (`backend/.env`)
-| Variable | Description | Default |
-|---|---|---|
-| `KNOW_PASSWORD` | Login password | `Ebong1996` |
-| `KNOW_ANTHROPIC_API_KEY` | Anthropic API key | (empty) |
-| `KNOW_LOCAL_MODEL_URL` | OpenAI-compatible endpoint | `http://localhost:11434/v1` |
-| `KNOW_LOCAL_MODEL_NAME` | Model name | `qwen3:8b` |
-| `KNOW_ACTIVE_PROVIDER` | `anthropic` or `local` | `anthropic` |
-| `KNOW_CORS_ORIGINS` | Comma-separated allowed origins | (empty) |
+| Concern | Path |
+|---|---|
+| LLM streaming routes | `frontend/src/app/api/papers/[id]/*-stream/route.ts` |
+| Server-side LLM helpers | `frontend/src/lib/server/{llm,kv,supabase,auth,internalApi,observability,schemas,prompts/}.ts` |
+| Streaming UI | `frontend/src/components/analysis/{StreamingMarkdown,AnalysisSection,OverflowMenu}.tsx` + `useSelectionThread.ts` |
+| Internal Python router | `backend/app/api/internal.py` |
+| Tier gating | `backend/app/gating.py` |
+| Trial flow | `backend/app/main.py` (`/api/trial/*`) + `frontend/src/app/api/trial/rate-check/route.ts` |
+| Cron | `frontend/src/app/api/cron/cleanup-trial/route.ts` |
 
-### Frontend (Vercel env vars)
-| Variable | Description | Default |
-|---|---|---|
-| `NEXT_PUBLIC_API_URL` | Backend URL | `http://localhost:8000` |
+## Repository docs
+
+- `docs/COMPOSER_BRIEF.md` — implementation brief for the AI SDK migration / analysis-pane refactor.
+- `docs/PRODUCTION_LAUNCH_GUIDE.md` — deployment checklist.
+- `.cursor/rules/{architecture,latex,analysis-pane}.mdc` — always-applied rules for any agent touching this repo.
+
+## License
+
+See `LICENSE`. Built by [@espitia01](https://github.com/espitia01).

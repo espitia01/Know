@@ -283,103 +283,12 @@ async def delete_selection(
     return {"ok": True, "removed_note_ids": holder["ids"]}
 
 
-@router.post("/{paper_id}/selection-stream")
-async def selection_analysis_stream(
-    paper_id: str, body: dict, request: Request,
-    user_id: str = Depends(require_auth),
-):
-    """Stream selection analysis token-by-token via SSE.
-
-    Cancels the upstream Anthropic call when the client disconnects so we
-    don't keep paying for tokens the user will never see. Emits a terminal
-    ``done`` event even on failure so the frontend state machine can't get
-    stuck in "loading" on a dropped stream.
-    """
-    import json as _json
-
-    check_feature_access(user_id, "selection")
-    _validate_id(paper_id, "paper_id")
-    _verify_paper_owner(paper_id, user_id)
-
-    paper = get_paper(paper_id, user_id=user_id)
-    if not paper:
-        raise HTTPException(status_code=404, detail="Paper not found")
-
-    selected_text = body.get("selected_text", "").strip()[:10000]
-    question = (body.get("question") or "").strip()[:2000]
-    action = body.get("action", "explain")
-    if action == "question":
-        action = "explain"
-    if action == "assumptions":
-        action = "explain"
-    if action not in ("explain", "derive", "followup"):
-        action = "explain"
-    if not selected_text:
-        raise HTTPException(status_code=400, detail="No text selected")
-
-    provider = get_fast_provider(user_id)
-    if not isinstance(provider, AnthropicProvider):
-        raise HTTPException(status_code=503, detail="Streaming requires Anthropic provider")
-
-    token = reserve_usage(user_id, paper_id, "selection", model=provider.model)
-
-    system, user_text = _get_selection_prompt(paper.raw_text, selected_text, action)
-
-    async def event_stream():
-        full_text = ""
-        completed = False
-        disconnected = False
-        try:
-            async for chunk in provider.stream_complete(system, user_text, max_tokens=6144):
-                if await request.is_disconnected():
-                    # Abort upstream Anthropic call by exiting the async-for.
-                    # The httpx.AsyncClient.stream() context manager cancels
-                    # the underlying HTTP request when its generator is
-                    # closed, which releases the API-side token budget too.
-                    disconnected = True
-                    break
-                full_text += chunk
-                normalized = _normalize_latex_delimiters(chunk)
-                yield f"data: {_json.dumps({'type': 'chunk', 'text': normalized})}\n\n"
-
-            if disconnected:
-                return
-
-            full_text = _normalize_latex_delimiters(full_text)
-            yield f"data: {_json.dumps({'type': 'done', 'full_text': full_text})}\n\n"
-
-            result = {
-                "action": action,
-                "selected_text": selected_text,
-                "explanation": full_text,
-            }
-            if question:
-                result["question"] = question
-
-            try:
-                if append_selection_db(paper_id, user_id, result):
-                    append_cached_analysis_local(paper_id, user_id, "selections", result)
-                else:
-                    def _apply(p):
-                        append_capped(p.cached_analysis, "selections", result)
-                    mutate_paper(paper_id, user_id, _apply)
-            except Exception:
-                logger.exception("Failed to persist selection stream for %s", paper_id)
-            completed = True
-        except asyncio.CancelledError:
-            disconnected = True
-            raise
-        except Exception:
-            logger.exception("Selection stream error for paper %s", paper_id)
-            yield f"data: {_json.dumps({'type': 'error', 'message': 'Analysis failed. Please try again.'})}\n\n"
-            # Always follow `error` with a terminal `done` so the client's
-            # state machine can't get stuck waiting for the next event.
-            yield f"data: {_json.dumps({'type': 'done', 'full_text': ''})}\n\n"
-        finally:
-            if not completed:
-                release_usage(token)
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+# /{paper_id}/selection-stream lived here through stages 1–7. It now
+# runs on Next.js + AI SDK at the same path on the Vercel deploy
+# (frontend/src/app/api/papers/[id]/selection-stream/route.ts). The
+# anonymous trial flow uses /api/trial/selection-stream in main.py
+# (which still streams from this Python service); authenticated
+# selection streaming has moved entirely.
 
 
 @router.post("/{paper_id}/explain", response_model=ExplainResponse)
@@ -702,92 +611,11 @@ async def summary(paper_id: str, user_id: str = Depends(require_auth)):
                 logger.exception("Failed to persist summary for %s", paper_id)
 
 
-@router.post("/{paper_id}/summary-stream")
-async def summary_stream(
-    paper_id: str, request: Request, user_id: str = Depends(require_auth),
-):
-    """Stream summary generation token-by-token, then send the parsed JSON at
-    the end. Cancels the upstream call on client disconnect (C4) and emits a
-    terminal ``done`` after any error (M3)."""
-    import json as _json
-
-    check_feature_access(user_id, "summary")
-    _validate_id(paper_id, "paper_id")
-    _verify_paper_owner(paper_id, user_id)
-
-    paper = get_paper(paper_id, user_id=user_id)
-    if not paper:
-        raise HTTPException(status_code=404, detail="Paper not found")
-
-    provider = get_provider(user_id)
-    if not isinstance(provider, AnthropicProvider):
-        raise HTTPException(status_code=503, detail="Streaming requires Anthropic provider")
-
-    token = reserve_usage(user_id, paper_id, "api_call", model=provider.model)
-
-    system = """You are an expert science educator and researcher. Produce an extremely detailed, structured summary of the academic paper. Return ONLY valid JSON. CRITICAL: For ALL math expressions, use $ delimiters for inline math and $$ for display math. NEVER use \\( \\) or \\[ \\] delimiters."""
-
-    user_text = f"""Create an extremely detailed summary of this academic paper. The summary should be comprehensive enough that someone could understand the paper's full contribution without reading the original.
-
-Structure your summary with ALL of the following sections:
-
-1. **overview**: A 3-5 sentence high-level overview of what the paper does and why it matters.
-2. **motivation**: Why was this work done? What gap in knowledge does it fill? (3-5 sentences)
-3. **key_contributions**: Array of the paper's main contributions (each as a string, 1-2 sentences).
-4. **methodology**: Detailed explanation of the methods, models, or theoretical framework used. Include equations where relevant. (Multiple paragraphs)
-5. **main_results**: Detailed description of the key findings, including quantitative results. Use LaTeX for any numbers or equations. (Multiple paragraphs)
-6. **discussion**: What do the results mean? How do they compare to prior work? What are the implications? (Multiple paragraphs)
-7. **limitations**: Array of limitations or caveats the authors mention or that are apparent.
-8. **future_work**: What follow-up research does this enable or suggest? (2-3 sentences)
-9. **key_equations**: Array of the most important equations in the paper, each as {{"equation": "LaTeX", "meaning": "what it represents"}}.
-10. **key_figures_and_tables**: Array of descriptions of the most important figures/tables: {{"id": "Fig. 1", "description": "what it shows and why it matters"}}.
-
-Paper content:
-{paper.raw_text[:12000]}
-
-Return JSON with all the above fields."""
-
-    async def event_stream():
-        full_text = ""
-        completed = False
-        disconnected = False
-        try:
-            async for chunk in provider.stream_complete(system, user_text, max_tokens=6000):
-                if await request.is_disconnected():
-                    disconnected = True
-                    break
-                full_text += chunk
-                normalized = _normalize_latex_delimiters(chunk)
-                yield f"data: {_json.dumps({'type': 'chunk', 'text': normalized})}\n\n"
-
-            if disconnected:
-                return
-
-            full_text_normalized = _normalize_latex_delimiters(full_text)
-            parsed = _safe_parse_json(full_text)
-            if parsed and parsed.get("overview"):
-                def _apply(p):
-                    p.cached_analysis["summary"] = parsed
-                try:
-                    mutate_paper(paper_id, user_id, _apply)
-                except Exception:
-                    logger.exception("Failed to persist summary for %s", paper_id)
-                completed = True
-                yield f"data: {_json.dumps({'type': 'done', 'summary': parsed, 'full_text': full_text_normalized})}\n\n"
-            else:
-                yield f"data: {_json.dumps({'type': 'done', 'full_text': full_text_normalized})}\n\n"
-        except asyncio.CancelledError:
-            disconnected = True
-            raise
-        except Exception:
-            logger.exception("Summary stream error for paper %s", paper_id)
-            yield f"data: {_json.dumps({'type': 'error', 'message': 'Summary generation failed. Please try again.'})}\n\n"
-            yield f"data: {_json.dumps({'type': 'done', 'full_text': ''})}\n\n"
-        finally:
-            if not completed:
-                release_usage(token)
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+# /{paper_id}/summary-stream now runs on Next.js + AI SDK at the same
+# path on the Vercel deploy
+# (frontend/src/app/api/papers/[id]/summary-stream/route.ts). The
+# Vercel route uses streamObject(PaperSummary) and streams partial
+# JSON the client renders progressively.
 
 
 @router.post("/{paper_id}/figure-qa")
@@ -842,93 +670,11 @@ async def figure_qa(paper_id: str, body: dict, user_id: str = Depends(require_au
         raise HTTPException(status_code=500, detail="Figure analysis failed. Please try again.")
 
 
-@router.post("/{paper_id}/figure-qa-stream")
-async def figure_qa_stream(
-    paper_id: str, body: dict, request: Request,
-    user_id: str = Depends(require_auth),
-):
-    """Stream figure analysis token-by-token via SSE. Cancels upstream on
-    client disconnect (C4) and emits terminal ``done`` after errors (M3)."""
-    import base64
-    import json as _json
-    check_feature_access(user_id, "figures")
-    _validate_id(paper_id, "paper_id")
-    _verify_paper_owner(paper_id, user_id)
-
-    paper = get_paper(paper_id, user_id=user_id)
-    if not paper:
-        raise HTTPException(status_code=404, detail="Paper not found")
-
-    fig_id = body.get("figure_id", "").strip()
-    question = body.get("question", "").strip()[:2000]
-
-    if not fig_id:
-        raise HTTPException(status_code=400, detail="No figure_id provided")
-    _validate_id(fig_id, "fig_id")
-
-    fig_path = get_figure_path(paper_id, fig_id)
-    if not fig_path:
-        raise HTTPException(status_code=404, detail="Figure not found")
-
-    image_b64 = _resize_image_b64(
-        base64.b64encode(fig_path.read_bytes()).decode("utf-8")
-    )
-
-    provider = get_fast_provider(user_id)
-    if not isinstance(provider, AnthropicProvider):
-        raise HTTPException(status_code=503, detail="Streaming requires Anthropic provider")
-
-    token = reserve_usage(user_id, paper_id, "qa", model=provider.model)
-
-    system, user_text = _get_figure_prompt(paper.raw_text, question)
-
-    async def event_stream():
-        full_text = ""
-        completed = False
-        disconnected = False
-        try:
-            async for chunk in provider.stream_complete_with_image(
-                system, user_text, image_b64, max_tokens=2048
-            ):
-                if await request.is_disconnected():
-                    disconnected = True
-                    break
-                full_text += chunk
-                normalized = _normalize_latex_delimiters(chunk)
-                yield f"data: {_json.dumps({'type': 'chunk', 'text': normalized})}\n\n"
-
-            if disconnected:
-                return
-
-            full_text = _normalize_latex_delimiters(full_text)
-            yield f"data: {_json.dumps({'type': 'done', 'full_text': full_text})}\n\n"
-
-            result = {
-                "figure_id": fig_id,
-                "question": question,
-                "description": full_text,
-                "key_observations": [],
-                "relation_to_paper": "",
-            }
-            def _apply(p):
-                append_capped(p.cached_analysis, "figure_analyses", result)
-            try:
-                mutate_paper(paper_id, user_id, _apply)
-            except Exception:
-                logger.exception("Failed to persist figure stream for %s", paper_id)
-            completed = True
-        except asyncio.CancelledError:
-            disconnected = True
-            raise
-        except Exception:
-            logger.exception("Figure stream error for paper %s", paper_id)
-            yield f"data: {_json.dumps({'type': 'error', 'message': 'Figure analysis failed. Please try again.'})}\n\n"
-            yield f"data: {_json.dumps({'type': 'done', 'full_text': ''})}\n\n"
-        finally:
-            if not completed:
-                release_usage(token)
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+# /{paper_id}/figure-qa-stream now runs on Next.js + AI SDK at the
+# same path on the Vercel deploy
+# (frontend/src/app/api/papers/[id]/figure-qa-stream/route.ts). The
+# Vercel route fetches the figure PNG via /api/internal/figure/...
+# and streams a structured FigureAnalysis JSON.
 
 
 @router.post("/multi-qa")
