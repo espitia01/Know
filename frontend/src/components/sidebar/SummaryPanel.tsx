@@ -46,12 +46,20 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     },
   });
 
+  // `stop` from `experimental_useObject` is recreated on every render.
+  // Putting it in a useEffect dep array would re-fire the cleanup
+  // (and abort any in-flight stream) on every render — that was the
+  // "Generate Summary did nothing" bug. Stash it in a ref so the
+  // cleanup only runs on actual unmount / paper switch.
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
+
   useEffect(() => {
     triggered.current = null;
     return () => {
-      stop();
+      stopRef.current();
     };
-  }, [paperId, stop]);
+  }, [paperId]);
 
   const live = (object as Partial<PaperSummary> | undefined) ?? null;
   const fromStore = onActivePaper ? cachedSummary : null;
