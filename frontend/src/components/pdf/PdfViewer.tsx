@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Document, Page, pdfjs } from "react-pdf";
 import { api, getAuthHeadersSync, SelectionAnalysisResult } from "@/lib/api";
 import { useStore, type PdfRegionHighlight } from "@/lib/store";
@@ -15,6 +16,8 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 function highlightPointerKey(entry: SelectionAnalysisResult): string {
   return `${normalizeSelectionAction(entry.action)}::${(entry.selected_text || "").slice(0, 240)}`;
 }
+
+const EMPTY_REGIONS: PdfRegionHighlight[] = [];
 
 /** MutationObserver helper: overlays must not participate in repaint loops */
 function isUnderSelectionOverlay(node: Node | null | undefined): boolean {
@@ -492,7 +495,11 @@ export function PdfViewer({
   const setPendingFigureCaption = useStore((s) => s.setPendingFigureCaption);
   const setPdfTextLayerEmpty = useStore((s) => s.setPdfTextLayerEmpty);
   const isScannedPdf = useStore((s) => !!(paperId && s.pdfTextLayerEmptyByPaper[paperId]));
-  const pdfRegionHighlights = useStore((s) => (paperId ? s.pdfRegionHighlightsByPaper[paperId] ?? [] : []));
+  const pdfRegionHighlights = useStore(
+    useShallow((s) =>
+      paperId ? (s.pdfRegionHighlightsByPaper[paperId] ?? EMPTY_REGIONS) : EMPTY_REGIONS,
+    ),
+  );
   const addPdfRegionHighlight = useStore((s) => s.addPdfRegionHighlight);
   const setActiveTab = useStore((s) => s.setActiveTab);
 
@@ -1281,8 +1288,6 @@ export function PdfViewer({
       pending = new Set();
       for (const el of items) {
         drawUnderlinesForPage(el, selectionHistory);
-        const pageNum = parseInt(el.getAttribute("data-page-number") || "0", 10);
-        if (pageNum > 0) drawRegionHighlightsForPage(el, pageNum, pdfRegionHighlights);
       }
     };
     const schedulePage = (pageEl: HTMLElement) => {
@@ -1349,7 +1354,16 @@ export function PdfViewer({
       pageObservers.clear();
       if (raf !== null) cancelAnimationFrame(raf);
     };
-  }, [selectionHistory, drawUnderlinesForPage, drawRegionHighlightsForPage, pdfRegionHighlights, scale, paperId]);
+  }, [selectionHistory, drawUnderlinesForPage, scale, paperId]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]").forEach((pageEl) => {
+      const pageNum = parseInt(pageEl.getAttribute("data-page-number") || "0", 10);
+      if (pageNum > 0) drawRegionHighlightsForPage(pageEl, pageNum, pdfRegionHighlights);
+    });
+  }, [pdfRegionHighlights, drawRegionHighlightsForPage, scale, paperId]);
 
   const handlePageRender = useCallback((pageNum: number) => {
     const el = containerRef.current?.querySelector(`[data-page-number="${pageNum}"]`) as HTMLElement | null;

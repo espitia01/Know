@@ -12,6 +12,8 @@ import { ACTION_LABELS, normalizeSelectionAction, selectionKey } from "@/lib/sel
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { SectionHeader } from "@/components/panel/SectionHeader";
 import { AnalysisSection } from "@/components/analysis/AnalysisSection";
+import { CardMeta } from "@/components/analysis/CardMeta";
+import { ReadMoreProse } from "@/components/analysis/ReadMoreProse";
 import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
 import { useStore } from "@/lib/store";
 
@@ -297,7 +299,7 @@ function ResultCard({
   return (
     <div className="space-y-3">
       {!hideHeader && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span
             className="text-[10px] font-medium uppercase tracking-[0.14em]"
             data-action={action}
@@ -307,9 +309,12 @@ function ResultCard({
           >
             {ACTION_LABELS[action] || action}
           </span>
-          {isStreaming && (
-            <span className="text-[var(--text-xs)] text-muted-foreground/50 motion-safe:animate-pulse">streaming…</span>
-          )}
+          <div className="flex items-center gap-2">
+            <CardMeta model={result.model} createdAt={result.created_at} />
+            {isStreaming && (
+              <span className="text-[var(--text-xs)] text-muted-foreground/50 motion-safe:animate-pulse">streaming…</span>
+            )}
+          </div>
         </div>
       )}
 
@@ -322,9 +327,11 @@ function ResultCard({
       {(result.explanation || result.elaboration || result.answer) && (
         <div className="text-[var(--text-sm)] leading-relaxed text-foreground/90">
           {result.explanation && (
-            <StreamingMarkdown streaming={isStreaming}>
-              {result.explanation}
-            </StreamingMarkdown>
+            <ReadMoreProse markdown={result.explanation} streaming={isStreaming}>
+              <StreamingMarkdown streaming={isStreaming}>
+                {result.explanation}
+              </StreamingMarkdown>
+            </ReadMoreProse>
           )}
           {result.elaboration && (
             <StreamingMarkdown>{result.elaboration}</StreamingMarkdown>

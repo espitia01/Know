@@ -8,6 +8,7 @@ import { useStore } from "@/lib/store";
 // Stage 3: figure analysis streams from the migrated AI SDK route and
 // renders via Streamdown.
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
+import { CardMeta } from "@/components/analysis/CardMeta";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 
 interface FiguresPanelProps {
@@ -347,6 +348,8 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
         const res = await streamFigure(0);
         if (controller.signal.aborted) return;
+        const streamModel = res.headers.get("X-Know-Model") ?? undefined;
+
         if (!res.ok) {
           let detailMessage = `HTTP ${res.status}`;
           try {
@@ -431,6 +434,8 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           methodology_shown: finalObj.methodology_shown as string | undefined,
           takeaway: finalObj.takeaway as string | undefined,
           answer: finalObj.answer as string | undefined,
+          model: streamModel,
+          created_at: Date.now(),
         };
         appendFigureAnalysisToCaches(paperId, cacheEntry);
         setConversations((prev) => {
@@ -656,6 +661,22 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               {selected.caption}
             </p>
           )}
+
+          <CardMeta
+            model={
+              paper?.cached_analysis?.figure_analyses?.find((a) => a.figure_id === selected.id)
+                ?.model
+            }
+            createdAt={
+              paper?.cached_analysis?.figure_analyses?.find((a) => a.figure_id === selected.id)
+                ?.created_at
+            }
+            extra={
+              <span className="text-muted-foreground/75">
+                {selected.caption ? `Fig. · page ${selected.page + 1}` : `Page ${selected.page + 1}`}
+              </span>
+            }
+          />
 
           {chat.length === 0 && !loading && (
             <button

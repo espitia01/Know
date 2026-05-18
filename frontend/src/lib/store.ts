@@ -15,6 +15,8 @@ import { selectionKey as selectionResultKey } from "./selectionActions";
 
 type ReaderPanelPosition = "right" | "left" | "bottom";
 
+export type AnalysisFontFamily = "sans" | "serif" | "mono" | "times" | "arial";
+
 export type PdfRegionHighlight = {
   id: string;
   pageNum: number;
@@ -126,6 +128,9 @@ interface AppStore {
   analysisFontScale: number;
   setAnalysisFontScale: (v: number) => void;
   bumpAnalysisFontScale: (delta: number) => void;
+
+  analysisFontFamily: AnalysisFontFamily;
+  setAnalysisFontFamily: (v: AnalysisFontFamily) => void;
 
   selectionResult: SelectionAnalysisResult | null;
   setSelectionResult: (r: SelectionAnalysisResult | null) => void;
@@ -475,6 +480,9 @@ export const useStore = create<AppStore>()(
           analysisFontScale: Math.max(0.85, Math.min(1.6, +(s.analysisFontScale + delta).toFixed(2))),
         })),
 
+      analysisFontFamily: "sans",
+      setAnalysisFontFamily: (v) => set({ analysisFontFamily: v }),
+
       selectionResult: null,
       setSelectionResult: (r) => set({ selectionResult: r }),
       selectionLoading: false,
@@ -644,6 +652,7 @@ export const useStore = create<AppStore>()(
         headerHidden: state.headerHidden,
         focusMode: state.focusMode,
         analysisFontScale: state.analysisFontScale,
+        analysisFontFamily: state.analysisFontFamily,
         uiPrefs: state.uiPrefs,
       }),
     }

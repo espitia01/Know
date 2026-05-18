@@ -10,12 +10,18 @@ const SHARED_RULES = `Output rules (strict):
 - Markdown for all narrative fields.
 - Math: inline math in $...$, display math in $$...$$ on its own line. NEVER bare LaTeX commands or Unicode math symbols outside math delimiters.`;
 
+import type { PromptDepth } from "@/lib/server/promptDepth";
+import { depthSuffix } from "@/lib/server/promptDepth";
+
 const PAPER_CHAR_BUDGET = 4000;
 
 export function buildFigurePrompt(args: {
   paperContext: string;
   question?: string;
+  depth?: PromptDepth;
 }): { system: string; userText: string } {
+  const depthLine = depthSuffix(args.depth);
+  const depthBlock = depthLine ? `\n\n${depthLine}` : "";
   const paperContext = (args.paperContext || "").slice(0, PAPER_CHAR_BUDGET);
   const q = (args.question || "").trim();
 
@@ -30,6 +36,7 @@ export function buildFigurePrompt(args: {
         `- "key_observations": 2–4 short markdown strings noting the most important observations.`,
         `- "relation_to_paper": one paragraph on how this figure supports the paper's argument.`,
         `- "methodology_shown" / "takeaway": optional; include if a method or single-sentence takeaway is appropriate.`,
+        depthBlock,
       ].join("\n\n"),
       userText: [
         `User question: ${q}`,
@@ -49,6 +56,7 @@ export function buildFigurePrompt(args: {
       `- "relation_to_paper": one paragraph on how this figure supports the paper's arguments.`,
       `- "takeaway": one-sentence markdown takeaway.`,
       `- Leave "answer" empty — there is no question.`,
+      depthBlock,
     ].join("\n\n"),
     userText: `Paper context (for reference):\n"""\n${paperContext}\n"""`,
   };

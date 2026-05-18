@@ -64,6 +64,7 @@ export function useSummaryStream(paperId: string) {
   const fallbackStartedRef = useRef(false);
   const startedForPaperRef = useRef<string | null>(null);
   const latestObjectRef = useRef<Partial<PaperSummary> | undefined>(undefined);
+  const streamModelRef = useRef<string | undefined>(undefined);
 
   const clearFallbackTimer = useCallback(() => {
     if (fallbackTimerRef.current != null) {
@@ -76,8 +77,13 @@ export function useSummaryStream(paperId: string) {
     (pid: string, summary: PaperSummary) => {
       if (useStore.getState().paper?.id !== pid) return;
       setSummaryError(pid, null);
-      setSummary(summary);
-      updateCachedAnalysis(pid, { summary });
+      const withMeta: PaperSummary = {
+        ...summary,
+        model: summary.model ?? streamModelRef.current,
+        created_at: summary.created_at ?? Date.now(),
+      };
+      setSummary(withMeta);
+      updateCachedAnalysis(pid, { summary: withMeta });
       useStore.getState().clearSummaryStreamingPartial(pid);
     },
     [setSummary, setSummaryError, updateCachedAnalysis],
@@ -163,10 +169,10 @@ export function useSummaryStream(paperId: string) {
   useEffect(() => {
     if (useStore.getState().paper?.id !== paperId) return;
     if (obj.object && hasMeaningfulPartial(obj.object as Partial<PaperSummary>)) {
-      useStore.getState().setSummaryStreamingPartial(
-        paperId,
-        obj.object as Partial<PaperSummary>,
-      );
+      useStore.getState().setSummaryStreamingPartial(paperId, {
+        ...(obj.object as Partial<PaperSummary>),
+        model: streamModelRef.current,
+      });
     }
     if (!obj.isLoading && hasOverview(useStore.getState().summary)) {
       useStore.getState().clearSummaryStreamingPartial(paperId);
@@ -194,6 +200,10 @@ export function useSummaryStream(paperId: string) {
       obj.stop();
       void runBatchFallback(paperId);
     }, STREAM_FALLBACK_MS);
+    streamModelRef.current = undefined;
+    void api.getSettings().then((s) => {
+      streamModelRef.current = s.analysis_model;
+    });
     obj.submit({});
   }, [
     paperId,

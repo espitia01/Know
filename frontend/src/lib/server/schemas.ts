@@ -73,6 +73,8 @@ export type SelectionResult = z.infer<typeof SelectionResultSchema>;
  * to "" / [] in the panel renderer so the UI is unaffected.
  */
 export const PaperSummarySchema = z.object({
+  model: z.string().optional(),
+  created_at: z.number().optional(),
   overview: z.string().optional(),
   motivation: z.string().optional(),
   key_contributions: z.array(z.string()).optional(),

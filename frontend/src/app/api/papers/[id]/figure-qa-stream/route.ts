@@ -12,7 +12,8 @@ import { NextResponse } from "next/server";
 import { streamObject } from "ai";
 import { zodSchema } from "@ai-sdk/provider-utils";
 
-import { getModelFromSlug } from "@/lib/server/llm";
+import { getModelFromSlug, maxOutputTokensFor } from "@/lib/server/llm";
+import { promptDepthForModel } from "@/lib/modelLabels";
 import { requireUser, AuthError } from "@/lib/server/auth";
 import {
   fetchFigurePng,
@@ -113,9 +114,11 @@ export async function POST(
     return jsonError(503, "usage_unavailable", "Usage tracking unavailable");
   }
 
+  const depth = promptDepthForModel(fastModel);
   const { system, userText } = buildFigurePrompt({
     paperContext: paper.raw_text,
     question,
+    depth,
   });
 
   let releasedOnError = false;
@@ -133,7 +136,7 @@ export async function POST(
       schemaName: "FigureAnalysis",
       schemaDescription: "Structured analysis of a figure from an academic paper.",
       system,
-      maxOutputTokens: 4000,
+      maxOutputTokens: maxOutputTokensFor(fastModel, "vision"),
       messages: [
         {
           role: "user",
@@ -159,6 +162,7 @@ export async function POST(
               figure_id: figureId,
               question: question || undefined,
               ...finalObject,
+              model: fastModel,
             },
           });
         } catch (err) {
@@ -179,6 +183,7 @@ export async function POST(
     headers: {
       "Cache-Control": "no-store, no-transform",
       "X-Accel-Buffering": "no",
+      "X-Know-Model": fastModel,
     },
   });
 }

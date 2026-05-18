@@ -26,7 +26,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { experimental_useObject as useObject } from "@ai-sdk/react";
-import type { SelectionAnalysisResult } from "@/lib/api";
+import { api, type SelectionAnalysisResult } from "@/lib/api";
 import { SelectionResultSchema } from "@/lib/server/schemas";
 import { useStore } from "@/lib/store";
 
@@ -43,6 +43,7 @@ type StartedState = {
   action: SelectionAction;
   selectedText: string;
   question?: string;
+  model?: string;
 };
 
 function newClientKey(): string {
@@ -150,6 +151,8 @@ export function useSelectionThread(paperId: string) {
       steps: partial?.steps as SelectionAnalysisResult["steps"],
       streaming: isStillStreaming,
       clientKey: started.clientKey,
+      model: started.model,
+      created_at: isStillStreaming ? undefined : Date.now(),
     };
 
     upsertSelectionInHistory(result);
@@ -169,6 +172,11 @@ export function useSelectionThread(paperId: string) {
         question: args.question,
       };
       finalizedRef.current = null;
+      void api.getSettings().then((s) => {
+        if (startedRef.current?.clientKey === clientKey) {
+          startedRef.current = { ...startedRef.current, model: s.fast_model };
+        }
+      });
 
       const provisional: SelectionAnalysisResult = {
         action: args.action,

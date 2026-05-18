@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { SectionHeader } from "@/components/panel/SectionHeader";
+import { AnalysisSection } from "@/components/analysis/AnalysisSection";
 
 interface AssumptionsPanelProps {
   paperId: string;
@@ -122,8 +122,7 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
   return (
     <div className="space-y-6 motion-safe:animate-fade-in">
       {explicit.length > 0 && (
-        <section>
-          <SectionHeader title="Explicit" count={explicit.length} />
+        <AnalysisSection title="Explicit" count={explicit.length} size="nested">
           <div className={rowListClass}>
             {explicit.map((a, i) => (
               <div key={i} className={rowItemClass}>
@@ -138,12 +137,11 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
               </div>
             ))}
           </div>
-        </section>
+        </AnalysisSection>
       )}
 
       {implicit.length > 0 && (
-        <section>
-          <SectionHeader title="Implicit" count={implicit.length} />
+        <AnalysisSection title="Implicit" count={implicit.length} size="nested">
           <div className={rowListClass}>
             {implicit.map((a, i) => (
               <div key={i} className={rowItemClass}>
@@ -158,7 +156,7 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
               </div>
             ))}
           </div>
-        </section>
+        </AnalysisSection>
       )}
 
       <div className="pt-1">

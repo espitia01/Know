@@ -24,7 +24,8 @@ import { NextResponse } from "next/server";
 import { streamObject } from "ai";
 import { zodSchema } from "@ai-sdk/provider-utils";
 
-import { getModelFromSlug } from "@/lib/server/llm";
+import { getModelFromSlug, maxOutputTokensFor } from "@/lib/server/llm";
+import { promptDepthForModel } from "@/lib/modelLabels";
 import { requireUser, AuthError } from "@/lib/server/auth";
 import {
   fetchPaperContext,
@@ -160,12 +161,14 @@ export async function POST(
   }
 
   // 5. Build prompt + stream.
+  const depth = promptDepthForModel(fastModel);
   const { system, prompt } = buildSelectionPrompt({
     action: normalizedAction,
     selectedText,
     paperTitle: paper.title,
     paperContext: paper.raw_text,
     question,
+    depth,
   });
 
   let releasedOnError = false;
@@ -189,7 +192,7 @@ export async function POST(
       // can run several thousand tokens. Default cap on Haiku is
       // generous, but explicit beats implicit and the Anthropic
       // default has shifted before.
-      maxOutputTokens: 8000,
+      maxOutputTokens: maxOutputTokensFor(fastModel, "fast"),
       onFinish: async (event) => {
         console.log(
           JSON.stringify({
@@ -241,6 +244,7 @@ export async function POST(
               starting_point: finalObject.starting_point,
               final_result: finalObject.final_result,
               steps: finalObject.steps ?? [],
+              model: fastModel,
             },
           });
         } catch (err) {
@@ -270,6 +274,7 @@ export async function POST(
     headers: {
       "Cache-Control": "no-store, no-transform",
       "X-Accel-Buffering": "no",
+      "X-Know-Model": fastModel,
     },
   });
 }

@@ -6,6 +6,10 @@
  * `getModelFromSlug`. `getModel(role)` remains for health probes and
  * env-default fallbacks (`MODEL_ANALYSIS`, `MODEL_FAST`, `MODEL_VISION`).
  *
+ * Per-model completion budgets: use `maxOutputTokensFor(slug, role)` so
+ * Opus/Sonnet can emit deeper structured output than Haiku on the same
+ * route. Do not hard-code a single cap per route.
+ *
  * Routing prefers AI Gateway when configured; otherwise direct Anthropic.
  */
 
@@ -71,4 +75,13 @@ export function modelRouting(): { gateway: boolean; roles: Record<ModelRole, str
       vision: slugFor("vision"),
     },
   };
+}
+
+/** Completion token budget by user-selected model tier (Bug 3). */
+export function maxOutputTokensFor(slug: string, role: ModelRole): number {
+  const isOpus = slug.includes("opus");
+  const isSonnet = slug.includes("sonnet");
+  if (role === "analysis") return isOpus ? 12000 : isSonnet ? 8000 : 6000;
+  if (role === "fast") return isOpus ? 10000 : isSonnet ? 8000 : 6000;
+  return isOpus ? 6000 : 4000;
 }

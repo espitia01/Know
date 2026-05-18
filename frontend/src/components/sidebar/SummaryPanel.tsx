@@ -4,6 +4,8 @@ import { useCallback, useState } from "react";
 import { useStore } from "@/lib/store";
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { AnalysisSection } from "@/components/analysis/AnalysisSection";
+import { CardMeta } from "@/components/analysis/CardMeta";
+import { ReadMoreProse } from "@/components/analysis/ReadMoreProse";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import type { PaperSummary } from "@/lib/server/schemas";
@@ -97,13 +99,37 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     return null;
   })();
 
+  const takeawaySource = (s as PaperSummary & { tl_dr?: string }).tl_dr ?? s.overview;
+  const takeaway =
+    takeawaySource && takeawaySource.length > 180
+      ? `${takeawaySource.slice(0, 180).trim()}…`
+      : takeawaySource;
+
   return (
     <div className="space-y-8">
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="font-display text-[var(--text-md)] font-medium tracking-[-0.02em] text-foreground">
+          Summary
+        </h2>
+        <CardMeta model={s.model} createdAt={s.created_at} />
+      </div>
+
+      {takeaway && (
+        <div className="rounded-[var(--radius-lg)] border border-border/50 bg-card/35 px-4 py-3 dark:bg-card/22">
+          <p className="text-[var(--text-xs)] font-medium uppercase tracking-[0.12em] text-muted-foreground/85">
+            Key takeaway
+          </p>
+          <p className="mt-1 text-[var(--text-sm)] leading-relaxed text-foreground/90">{takeaway}</p>
+        </div>
+      )}
+
       {s.overview && (
         <AnalysisSection title="Overview">
-          <StreamingMarkdown streaming={streamingCursorField === "overview"}>
-            {s.overview}
-          </StreamingMarkdown>
+          <ReadMoreProse markdown={s.overview} streaming={stillStreaming && streamingCursorField === "overview"}>
+            <StreamingMarkdown streaming={streamingCursorField === "overview"}>
+              {s.overview}
+            </StreamingMarkdown>
+          </ReadMoreProse>
         </AnalysisSection>
       )}
       {s.motivation && (
@@ -131,23 +157,29 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.methodology && (
         <AnalysisSection title="Methodology">
-          <StreamingMarkdown streaming={streamingCursorField === "methodology"}>
-            {s.methodology}
-          </StreamingMarkdown>
+          <ReadMoreProse markdown={s.methodology} streaming={stillStreaming && streamingCursorField === "methodology"}>
+            <StreamingMarkdown streaming={streamingCursorField === "methodology"}>
+              {s.methodology}
+            </StreamingMarkdown>
+          </ReadMoreProse>
         </AnalysisSection>
       )}
       {s.main_results && (
         <AnalysisSection title="Main results">
-          <StreamingMarkdown streaming={streamingCursorField === "main_results"}>
-            {s.main_results}
-          </StreamingMarkdown>
+          <ReadMoreProse markdown={s.main_results} streaming={stillStreaming && streamingCursorField === "main_results"}>
+            <StreamingMarkdown streaming={streamingCursorField === "main_results"}>
+              {s.main_results}
+            </StreamingMarkdown>
+          </ReadMoreProse>
         </AnalysisSection>
       )}
       {s.discussion && (
         <AnalysisSection title="Discussion">
-          <StreamingMarkdown streaming={streamingCursorField === "discussion"}>
-            {s.discussion}
-          </StreamingMarkdown>
+          <ReadMoreProse markdown={s.discussion} streaming={stillStreaming && streamingCursorField === "discussion"}>
+            <StreamingMarkdown streaming={streamingCursorField === "discussion"}>
+              {s.discussion}
+            </StreamingMarkdown>
+          </ReadMoreProse>
         </AnalysisSection>
       )}
       {s.key_equations && s.key_equations.length > 0 && (

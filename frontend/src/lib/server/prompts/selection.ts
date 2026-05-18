@@ -25,6 +25,9 @@ const SHARED_TASK_NOTE = `The selected text comes from a PDF text layer and may 
 
 export type SelectionAction = "explain" | "derive" | "followup";
 
+import type { PromptDepth } from "@/lib/server/promptDepth";
+import { depthSuffix } from "@/lib/server/promptDepth";
+
 export type SelectionPromptInput = {
   action: SelectionAction;
   selectedText: string;
@@ -32,6 +35,7 @@ export type SelectionPromptInput = {
   paperContext: string;
   /** Free-form follow-up question. Only used when action = "followup". */
   question?: string;
+  depth?: PromptDepth;
 };
 
 const PAPER_CONTEXT_CHAR_BUDGET = 6000;
@@ -47,6 +51,8 @@ export function buildSelectionPrompt(input: SelectionPromptInput): {
   system: string;
   prompt: string;
 } {
+  const depthLine = depthSuffix(input.depth);
+  const depthBlock = depthLine ? `\n\n${depthLine}` : "";
   const action = input.action;
   const selectedText = trim(input.selectedText, SELECTION_CHAR_BUDGET);
   const paperContext = trim(input.paperContext, PAPER_CONTEXT_CHAR_BUDGET);
@@ -63,6 +69,7 @@ export function buildSelectionPrompt(input: SelectionPromptInput): {
         `- "body": a thorough markdown explanation. If the selection ends like a question, ANSWER it directly using the paper as context. If it is a statement, EXPLAIN it: break down jargon, clarify the logic, give context and implications. Use math delimiters where helpful.`,
         `- "assumptions": ONLY premises THIS excerpt explicitly states or unmistakably depends on. Stay narrow — do not survey assumptions of unrelated sections. Empty array is the right answer when nothing fits. Each entry has a "type" ("explicit"|"implicit"), a "statement", and an optional "significance" describing what shifts if relaxed.`,
         `- "steps", "starting_point", "final_result": leave empty.`,
+        depthBlock,
       ].join("\n\n"),
       prompt: [
         paperTitleLine + `Selected passage:\n"""\n${selectedText}\n"""`,
@@ -85,6 +92,7 @@ export function buildSelectionPrompt(input: SelectionPromptInput): {
         `- "final_result": the target expression OR conclusion (markdown).`,
         `- "steps": 6–12 atomic steps. Each step has step_number (1-indexed), prompt (instruction), answer (resulting expression or stated inference, markdown with math delimiters), explanation (why this step follows; 1–3 sentences), and an optional hint.`,
         `- "assumptions": empty array.`,
+        depthBlock,
       ].join("\n\n"),
       prompt: [
         paperTitleLine + `Selected passage:\n"""\n${selectedText}\n"""`,
@@ -105,6 +113,7 @@ export function buildSelectionPrompt(input: SelectionPromptInput): {
       `- "action" = "followup"`,
       `- "body": a clear, concrete answer to the follow-up. Cite the passage where useful. Use math delimiters when the answer involves math.`,
       `- "assumptions", "steps", "starting_point", "final_result": leave empty/[].`,
+      depthBlock,
     ].join("\n\n"),
     prompt: [
       paperTitleLine + `Earlier passage and what was already said about it:\n"""\n${selectedText}\n"""`,

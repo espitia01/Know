@@ -13,7 +13,8 @@ import { NextResponse } from "next/server";
 import { streamObject } from "ai";
 import { zodSchema } from "@ai-sdk/provider-utils";
 
-import { getModelFromSlug } from "@/lib/server/llm";
+import { getModelFromSlug, maxOutputTokensFor } from "@/lib/server/llm";
+import { promptDepthForModel } from "@/lib/modelLabels";
 import { requireUser, AuthError } from "@/lib/server/auth";
 import {
   fetchPaperContext,
@@ -98,9 +99,11 @@ export async function POST(
     return jsonError(503, "usage_unavailable", "Usage tracking unavailable");
   }
 
+  const depth = promptDepthForModel(analysisModel);
   const { system, prompt } = buildSummaryPrompt({
     paperTitle: paper.title,
     paperContext: paper.raw_text,
+    depth,
   });
 
   let releasedOnError = false;
@@ -120,7 +123,7 @@ export async function POST(
       system,
       prompt,
       temperature: 0.3,
-      maxOutputTokens: 6000,
+      maxOutputTokens: maxOutputTokensFor(analysisModel, "analysis"),
       onFinish: async (event) => {
         if (event.error) {
           console.error(
@@ -160,7 +163,7 @@ export async function POST(
             userId: user.userId,
             paperId,
             key: "summary",
-            value: { ...finalObject, overview } as PaperSummary,
+            value: { ...finalObject, overview, model: analysisModel } as PaperSummary,
           });
         } catch (err) {
           console.error("[summary-stream] persist failed", err);
@@ -189,6 +192,7 @@ export async function POST(
       "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-store, no-transform",
       "X-Accel-Buffering": "no",
+      "X-Know-Model": analysisModel,
     },
   });
 }

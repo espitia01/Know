@@ -7,6 +7,9 @@ import { useSelectionThread } from "@/lib/useSelectionThread";
 import { FEATURE_TOOLTIPS } from "@/lib/tooltips";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { OverflowMenu } from "@/components/analysis/OverflowMenu";
+import { FAMILY_TO_VAR } from "@/lib/analysisFont";
+import type { AnalysisFontFamily } from "@/lib/store";
+import { cn } from "@/lib/utils";
 import { SelectionResultPanel } from "./SelectionResultPanel";
 import { PreReadingPanel } from "../sidebar/PreReadingPanel";
 import { RelatedWorkPanel } from "../sidebar/RelatedWorkPanel";
@@ -57,6 +60,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
     activeTab, setActiveTab,
     selectionResult, selectionLoading, selectionHistory,
     analysisFontScale, bumpAnalysisFontScale, setAnalysisFontScale,
+    analysisFontFamily, setAnalysisFontFamily,
   } = useStore();
   const { user } = useUserTier();
   const tier = user?.tier || "free";
@@ -176,34 +180,33 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
 
         <OverflowMenu
           ariaLabel="Panel options"
-          trigger={
-            <button
-              type="button"
-              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground data-[popup-open]:bg-accent/60 motion-safe:duration-150"
-              title="Panel options — text size, pane position"
-              aria-label="Panel options"
+          buttonProps={{
+            className:
+              "rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground data-[popup-open]:bg-accent/60 motion-safe:duration-150",
+            title: "Panel options — text size, font, pane position",
+            "aria-label": "Panel options",
+          }}
+          triggerInner={
+            <svg
+              className="h-3.5 w-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
             >
-              <svg
-                className="h-3.5 w-3.5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-              >
-                <line x1="4" x2="4" y1="21" y2="14" />
-                <line x1="4" x2="4" y1="10" y2="3" />
-                <line x1="12" x2="12" y1="21" y2="12" />
-                <line x1="12" x2="12" y1="8" y2="3" />
-                <line x1="20" x2="20" y1="21" y2="16" />
-                <line x1="20" x2="20" y1="12" y2="3" />
-                <line x1="1" x2="7" y1="14" y2="14" />
-                <line x1="9" x2="15" y1="8" y2="8" />
-                <line x1="17" x2="23" y1="16" y2="16" />
-              </svg>
-            </button>
+              <line x1="4" x2="4" y1="21" y2="14" />
+              <line x1="4" x2="4" y1="10" y2="3" />
+              <line x1="12" x2="12" y1="21" y2="12" />
+              <line x1="12" x2="12" y1="8" y2="3" />
+              <line x1="20" x2="20" y1="21" y2="16" />
+              <line x1="20" x2="20" y1="12" y2="3" />
+              <line x1="1" x2="7" y1="14" y2="14" />
+              <line x1="9" x2="15" y1="8" y2="8" />
+              <line x1="17" x2="23" y1="16" y2="16" />
+            </svg>
           }
         >
           <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">
@@ -242,6 +245,37 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
             Saved across every paper and reload.
           </div>
 
+          <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">
+            Font family
+          </div>
+          <div className="grid grid-cols-2 gap-1 px-1 pb-2">
+            {(
+              [
+                { id: "sans", label: "Sans" },
+                { id: "serif", label: "Serif" },
+                { id: "times", label: "Times" },
+                { id: "arial", label: "Arial" },
+                { id: "mono", label: "Mono" },
+              ] as const
+            ).map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setAnalysisFontFamily(f.id as AnalysisFontFamily)}
+                className={cn(
+                  "h-7 inline-flex items-center justify-center rounded-md border text-[var(--text-xs)] font-medium",
+                  analysisFontFamily === f.id
+                    ? "border-foreground/35 bg-accent/50 text-foreground"
+                    : "border-border bg-transparent text-foreground/80 hover:bg-accent/40",
+                )}
+                style={{ fontFamily: FAMILY_TO_VAR[f.id as AnalysisFontFamily] }}
+                aria-pressed={analysisFontFamily === f.id}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
           <div className="my-1 mx-1 h-px bg-border/70" />
 
           <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">
@@ -269,7 +303,10 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       <div className="analysis-scroll-fade min-h-0 flex-1 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable]">
         <div
           className="analysis-pane-v2 mx-auto w-full max-w-3xl px-4 py-5 md:px-8 md:py-7"
-          style={{ ["--analysis-font-scale" as string]: analysisFontScale }}
+          style={{
+            ["--analysis-font-scale" as string]: analysisFontScale,
+            ["--analysis-font-family" as string]: FAMILY_TO_VAR[analysisFontFamily],
+          }}
         >
           {showSelectionTab && mountedTabs.has("selection") && (
             <TabsContent value="selection" className="mt-0">

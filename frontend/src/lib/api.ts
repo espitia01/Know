@@ -369,6 +369,8 @@ export interface SelectionAnalysisResult {
   streaming?: boolean;
   /** Stable id for in-flight streams so threaded UI + history stay keyed while text grows */
   clientKey?: string;
+  model?: string;
+  created_at?: number;
 }
 
 export interface SettingsResponse {
@@ -393,6 +395,8 @@ export interface PaperSummary {
   future_work?: string;
   key_equations?: { equation: string; meaning: string }[];
   key_figures_and_tables?: { id: string; description: string }[];
+  model?: string;
+  created_at?: number;
 }
 
 export interface FigureAnalysis {
@@ -404,6 +408,8 @@ export interface FigureAnalysis {
   methodology_shown?: string;
   relation_to_paper: string;
   takeaway?: string;
+  model?: string;
+  created_at?: number;
 }
 
 export const api = {

@@ -11,12 +11,18 @@ const SHARED_RULES = `Output rules (strict):
 - Math: inline math goes in $...$, display math in $$...$$ on its own line. NEVER bare LaTeX commands or Unicode math symbols outside math delimiters.
 - Don't preserve PDF artifacts like one-glyph-per-line or run-on words; reconstruct using paper context.`;
 
+import type { PromptDepth } from "@/lib/server/promptDepth";
+import { depthSuffix } from "@/lib/server/promptDepth";
+
 const PAPER_CHAR_BUDGET = 8000;
 
 export function buildSummaryPrompt(args: {
   paperTitle: string;
   paperContext: string;
+  depth?: PromptDepth;
 }): { system: string; prompt: string } {
+  const depthLine = depthSuffix(args.depth);
+  const depthBlock = depthLine ? `\n\n${depthLine}` : "";
   const paperContext = (args.paperContext || "").slice(0, PAPER_CHAR_BUDGET);
   const titleLine = args.paperTitle ? `Paper title: ${args.paperTitle}\n\n` : "";
 
@@ -34,6 +40,7 @@ export function buildSummaryPrompt(args: {
     `- "future_work": 2–3 sentences on what follow-up research this enables or suggests.`,
     `- "key_equations": array of {"equation": LaTeX (display math), "meaning": one-paragraph markdown}. Pick the 3–6 most important equations of the paper.`,
     `- "key_figures_and_tables": array of {"id": author label (e.g. "Fig. 1"), "description": one-paragraph markdown}. Pick the most informative figures/tables.`,
+    depthBlock,
   ].join("\n\n");
 
   const prompt = [
