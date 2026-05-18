@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, memo, useEffect, useRef } from "react";
-import { Md } from "@/components/ui/Md";
+// Stage 2: migrated selection-stream paths render via Streamdown
+// (KaTeX math + streaming carets baked in). The legacy `<Md>` is still
+// imported elsewhere for the Notes path; we just don't reach for it
+// here anymore.
+import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { Badge } from "@/components/ui/badge";
 import type { SelectionAnalysisResult } from "@/lib/api";
 import { ACTION_LABELS, normalizeSelectionAction, selectionKey } from "@/lib/selectionActions";
@@ -339,22 +343,15 @@ function ResultCard({
           }
         >
           {result.explanation && (
-            <div className="prose prose-sm max-w-none text-[var(--text-md)] leading-relaxed dark:prose-invert">
-              <Md>{result.explanation}</Md>
-              {isStreaming && (
-                <span className="ml-0.5 inline-block h-4 w-1.5 align-text-bottom rounded-sm bg-foreground/60 motion-safe:animate-pulse" />
-              )}
-            </div>
+            <StreamingMarkdown streaming={isStreaming}>
+              {result.explanation}
+            </StreamingMarkdown>
           )}
           {result.elaboration && (
-            <div className="prose prose-sm max-w-none text-[var(--text-md)] leading-relaxed dark:prose-invert">
-              <Md>{result.elaboration}</Md>
-            </div>
+            <StreamingMarkdown>{result.elaboration}</StreamingMarkdown>
           )}
           {result.answer && (
-            <div className="prose prose-sm max-w-none text-[var(--text-md)] leading-relaxed dark:prose-invert">
-              <Md>{result.answer}</Md>
-            </div>
+            <StreamingMarkdown>{result.answer}</StreamingMarkdown>
           )}
         </div>
       )}
@@ -385,10 +382,10 @@ function ResultCard({
                   {a.type}
                 </Badge>
                 <div className="min-w-0 flex-1 text-[var(--text-sm)] leading-relaxed">
-                  <Md>{a.statement}</Md>
+                  <StreamingMarkdown>{a.statement}</StreamingMarkdown>
                   {a.significance && (
                     <div className="mt-1 text-[var(--text-xs)] text-muted-foreground/80">
-                      <Md>{a.significance}</Md>
+                      <StreamingMarkdown>{a.significance}</StreamingMarkdown>
                     </div>
                   )}
                 </div>
@@ -411,9 +408,7 @@ const DerivationView = memo(function DerivationView({ result }: { result: Select
       {result.starting_point && (
         <div className="rounded-lg border border-border/60 bg-card/30 px-3 py-2.5">
           <p className="mb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">Starting point</p>
-          <div className="text-[var(--text-md)]">
-            <Md>{result.starting_point}</Md>
-          </div>
+          <StreamingMarkdown>{result.starting_point}</StreamingMarkdown>
         </div>
       )}
 
@@ -426,9 +421,7 @@ const DerivationView = memo(function DerivationView({ result }: { result: Select
       {result.final_result && (
         <div className="rounded-lg border border-success/30 bg-card/30 px-3 py-2.5 ring-1 ring-success/10">
           <p className="mb-1 text-[var(--text-xs)] font-semibold text-success">Final result</p>
-          <div className="text-[var(--text-md)]">
-            <Md>{result.final_result}</Md>
-          </div>
+          <StreamingMarkdown>{result.final_result}</StreamingMarkdown>
         </div>
       )}
     </div>
@@ -447,7 +440,7 @@ const StepCard = memo(function StepCard({ step }: { step: NonNullable<SelectionA
             {step.step_number}
           </span>
           <div className="min-w-0 flex-1 text-[var(--text-sm)]">
-            <Md>{step.prompt}</Md>
+            <StreamingMarkdown>{step.prompt}</StreamingMarkdown>
           </div>
         </div>
       </div>
@@ -472,18 +465,18 @@ const StepCard = memo(function StepCard({ step }: { step: NonNullable<SelectionA
             </button>
           )}
         </div>
-        {showHint && !showAnswer && (
+        {showHint && !showAnswer && step.hint && (
           <div className="rounded-md border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-[var(--text-xs)] italic text-warning">
-            <Md>{step.hint}</Md>
+            <StreamingMarkdown>{step.hint}</StreamingMarkdown>
           </div>
         )}
         {showAnswer && (
           <div className="space-y-2 motion-safe:animate-fade-in">
             <div className="text-[var(--text-sm)] font-medium">
-              <Md>{step.answer}</Md>
+              <StreamingMarkdown>{step.answer}</StreamingMarkdown>
             </div>
             <div className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/80">
-              <Md>{step.explanation}</Md>
+              <StreamingMarkdown>{step.explanation}</StreamingMarkdown>
             </div>
           </div>
         )}

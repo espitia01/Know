@@ -9,7 +9,10 @@ import { useShallow } from "zustand/react/shallow";
 import { api, type SelectionAnalysisResult, type PaperListEntry, type ParsedPaper } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { selectionKey } from "@/lib/selectionActions";
-import { consumeSelectionSse } from "@/lib/selectionSse";
+// Stage 2: streaming for selection moved to Next.js + AI SDK via this hook.
+// The previous SSE consumer (`consumeSelectionSse`) is still used by the
+// trial flow in `try/[id]/page.tsx`, so we don't delete it yet.
+import { useSelectionThread } from "@/lib/useSelectionThread";
 import { SelectionToolbar, type SelectionAction } from "@/components/pdf/SelectionToolbar";
 import { AnalysisPanel, type PanelPosition } from "@/components/panel/BottomPanel";
 import { BibtexModal } from "@/components/BibtexModal";
@@ -537,10 +540,9 @@ function PaperContent() {
       setSummaryLoading: s.setSummaryLoading,
     })),
   );
-  const { setSelectionResult, setSelectionLoading, upsertSelectionInHistory, setActiveTab } = useStore(
+  const { setSelectionResult, upsertSelectionInHistory, setActiveTab } = useStore(
     useShallow((s) => ({
       setSelectionResult: s.setSelectionResult,
-      setSelectionLoading: s.setSelectionLoading,
       upsertSelectionInHistory: s.upsertSelectionInHistory,
       setActiveTab: s.setActiveTab,
     })),
@@ -570,7 +572,10 @@ function PaperContent() {
   const [error, setError] = useState("");
 
   const [activePaperId, setActivePaperId] = useState(paperId);
-  const sseAbortRef = useRef<AbortController | null>(null);
+  // Stage 2 migration: streaming + history + abort all flow through the
+  // `useSelectionThread` hook below. The bare AbortController + SSE
+  // parsing block this used to need is gone; the hook owns it.
+  const selectionThread = useSelectionThread(activePaperId);
   const initialLoadDone = useRef(false);
 
   useEffect(() => {
@@ -587,7 +592,7 @@ function PaperContent() {
 
   useEffect(() => {
     if (paperId !== activePaperId) {
-      sseAbortRef.current?.abort();
+      selectionThread.abort();
       resetAnalysisState();
       // If a background fetch for the incoming paper is still in flight,
       // re-show its loading state so the UI doesn't flash "Analyze Paper".
@@ -609,6 +614,7 @@ function PaperContent() {
     setPreReadingLoading,
     setAssumptionsLoading,
     setSummaryLoading,
+    selectionThread,
   ]);
   const panelPos = uiPrefs.panelPos as PanelPosition;
   const panelSize = panelPos === "bottom" ? uiPrefs.panelSizeBottom : uiPrefs.panelSizeSide;
@@ -996,7 +1002,7 @@ function PaperContent() {
 
   const handleSwitchPaper = useCallback((id: string) => {
     if (id === activePaperId) return;
-    sseAbortRef.current?.abort();
+    selectionThread.abort();
     setSelection(null);
     setSelectionResult(null);
     resetAnalysisState();
@@ -1016,7 +1022,7 @@ function PaperContent() {
     if (typeof window !== "undefined" && id !== paperId) {
       router.replace(`/paper/${id}`);
     }
-  }, [activePaperId, paperId, router, resetAnalysisState, setSelectionResult, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading]);
+  }, [activePaperId, paperId, router, resetAnalysisState, setSelectionResult, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading, selectionThread]);
 
   const handleAddPaper = useCallback((id: string, title: string) => {
     // Register the paper in the multi-paper session tab bar…
@@ -1268,138 +1274,21 @@ function PaperContent() {
       return;
     }
 
-    sseAbortRef.current?.abort();
-    const controller = new AbortController();
-    sseAbortRef.current = controller;
-
+    // Streaming actions — explain / derive — go through the migrated
+    // Next.js + AI SDK route. The hook owns the AbortController, the
+    // partial→final state writes, history upsert, error formatting,
+    // and the usage refresh. We only need to point the panel at the
+    // Selection tab and kick off the stream.
     setPanelVisible(true);
     setActiveTab("selection");
 
-    const clientKey =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `sel-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    if (!stillOnStartedPaper()) return;
 
-    const provisional: SelectionAnalysisResult = {
-      action,
-      selected_text: text,
-      explanation: "",
-      streaming: true,
-      clientKey,
-    };
-
-    const guardedSetSelectionResult = (r: SelectionAnalysisResult | null) => {
-      if (!stillOnStartedPaper()) return;
-      setSelectionResult(r);
-    };
-    const guardedUpsertHistory = (r: SelectionAnalysisResult) => {
-      if (!stillOnStartedPaper()) return;
-      upsertSelectionInHistory(r);
-    };
-    const guardedSetSelectionLoading = (l: boolean) => {
-      if (!stillOnStartedPaper()) return;
-      setSelectionLoading(l);
-    };
-
-    guardedUpsertHistory(provisional);
-    guardedSetSelectionResult(provisional);
-    guardedSetSelectionLoading(false);
-
-    try {
-      const res = await api.analyzeSelectionStream(startedFor, text, action, {
-        signal: controller.signal,
-      });
-      if (controller.signal.aborted) return;
-      if (!res.ok) {
-        const detail = await res.text();
-        let msg = `HTTP ${res.status}`;
-        try { msg = JSON.parse(detail).detail || msg; } catch { /* ignore */ }
-        const errBody: SelectionAnalysisResult = {
-          action,
-          selected_text: text,
-          explanation:
-            res.status === 403 || res.status === 429
-              ? `**Limit reached.** ${msg}\n\nUpgrade your plan to continue.`
-              : msg,
-          streaming: false,
-          clientKey,
-        };
-        guardedUpsertHistory(errBody);
-        guardedSetSelectionResult(errBody);
-        guardedSetSelectionLoading(false);
-        return;
-      }
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No stream");
-
-      let sawTerminalEvent = false;
-
-      await consumeSelectionSse(reader, controller.signal, {
-        onChunk: (accumulated) => {
-          const chunkBody: SelectionAnalysisResult = {
-            action,
-            selected_text: text,
-            explanation: accumulated,
-            streaming: true,
-            clientKey,
-          };
-          guardedUpsertHistory(chunkBody);
-          guardedSetSelectionResult(chunkBody);
-        },
-        onDone: (finalText) => {
-          sawTerminalEvent = true;
-          const finalResult: SelectionAnalysisResult = {
-            action,
-            selected_text: text,
-            explanation: finalText,
-            streaming: false,
-            clientKey,
-          };
-          guardedUpsertHistory(finalResult);
-          guardedSetSelectionResult(finalResult);
-          if (stillOnStartedPaper()) {
-            refreshUsage();
-          }
-        },
-        onError: (message) => {
-          sawTerminalEvent = true;
-          const errResult: SelectionAnalysisResult = {
-            action,
-            selected_text: text,
-            explanation: `Error: ${message}`,
-            streaming: false,
-            clientKey,
-          };
-          guardedUpsertHistory(errResult);
-          guardedSetSelectionResult(errResult);
-        },
-      });
-
-      if (!sawTerminalEvent && !controller.signal.aborted) {
-        const errResult: SelectionAnalysisResult = {
-          action,
-          selected_text: text,
-          explanation: "Analysis ended unexpectedly.",
-          streaming: false,
-          clientKey,
-        };
-        guardedUpsertHistory(errResult);
-        guardedSetSelectionResult(errResult);
-      }
-    } catch (e) {
-      if (controller.signal.aborted) return;
-      const errResult: SelectionAnalysisResult = {
-        action,
-        selected_text: text,
-        explanation: `Analysis failed: ${e instanceof Error ? e.message : "Unknown error"}`,
-        streaming: false,
-        clientKey,
-      };
-      guardedUpsertHistory(errResult);
-      guardedSetSelectionResult(errResult);
-      guardedSetSelectionLoading(false);
-    }
-  }, [activePaperId, setPanelVisible, setActiveTab, setSelectionLoading, setSelectionResult, upsertSelectionInHistory, refreshUsage]);
+    selectionThread.start({
+      action: action as "explain" | "derive",
+      selectedText: text,
+    });
+  }, [activePaperId, setPanelVisible, setActiveTab, selectionThread, setSelectionResult, upsertSelectionInHistory]);
 
   const onDragStart = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
