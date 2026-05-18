@@ -1,0 +1,37 @@
+---
+description: High-level architecture & runtime split for Know.
+alwaysApply: true
+---
+
+# Architecture rules
+
+Know runs on two services. Respect this split.
+
+## Where work runs
+
+- **Streaming LLM calls** (selection-stream, summary-stream, figure-qa-stream, authenticated Q&A) run on **Next.js (Vercel)** via the **Vercel AI SDK** (`ai`, `@ai-sdk/anthropic`, `@ai-sdk/gateway`, `@ai-sdk/react`). Anthropic key lives in Vercel env.
+- **Batch LLM calls** (analyze, assumptions, ask, ask-multi, extract_metadata, polish_note_from_selection) and the **anonymous trial flow** stay on **Python FastAPI** (Railway / Mac Studio). Anthropic key also lives there.
+- **Paper upload, PDF parse, figure extraction, storage mirror, search, billing, settings** stay on Python.
+- **Tier gating, usage reservation/release** is the Python source of truth. Next.js routes call back via `/api/internal/*` (HMAC bearer). Never duplicate `gating.py` logic in TypeScript.
+
+## Provider routing
+
+- All model calls go through **Vercel AI Gateway** when `AI_GATEWAY_API_KEY` (or OIDC) is present; fall back to direct `@ai-sdk/anthropic` only when Gateway is unavailable.
+- Model slugs are env-overridable: `MODEL_ANALYSIS`, `MODEL_FAST`, `MODEL_VISION`. A model swap is one env change, never code.
+- Anthropic prompt caching enabled on system prompt blocks.
+
+## Local model support
+
+- Removed. Do not reintroduce `LocalModelProvider`, Ollama, qwen, or `KNOW_LOCAL_MODEL_*` env vars.
+
+## Auth boundaries
+
+- Browser → Next.js: Clerk session.
+- Browser → Python: Clerk Bearer (existing `require_auth`).
+- Next.js (server) → Python: HMAC bearer in `Authorization: Bearer ${INTERNAL_BACKEND_TOKEN}`. Constant-time compare on Python side.
+- Next.js (server) → Supabase: service role key, server-only client (`frontend/src/lib/server/supabase.ts`).
+
+## Observability
+
+- Use Vercel logs + AI Gateway dashboard. No `console.log` in production paths.
+- Structured errors `{ code, message, model? }` mirroring Python `LLMProviderError`.

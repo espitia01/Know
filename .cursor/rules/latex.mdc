@@ -1,0 +1,37 @@
+---
+description: LaTeX rendering rules. Math is structured data, not embedded markdown.
+alwaysApply: true
+---
+
+# LaTeX rules
+
+The old pipeline (model → markdown with `$...$` → 956-line `preprocessLatex` → remark-math → KaTeX) is dead for migrated paths. Do not extend it.
+
+## Migrated paths (selection-stream, summary-stream, figure-qa-stream, Q&A, anything new)
+
+- LLM returns **structured `ContentBlock[]`** validated by Zod (`frontend/src/lib/server/schemas.ts`). Never free-form markdown for content that may include math.
+- `prose` blocks contain Markdown text only. **Never** `$`, `\(`, `\[`, or LaTeX commands.
+- `math` blocks have `{ display: boolean, tex: string }`. Render via `katex.renderToString(tex, { displayMode, throwOnError: false, strict: false })`.
+- Lists, quotes, code are their own block kinds; math nests inside list items as a `math` block.
+- Render with `frontend/src/components/analysis/RichContent.tsx`. Do not import `Md`, `preprocessLatex`, `remark-math`, or `rehype-katex` in migrated code paths.
+- Streaming-safe: incomplete `math.tex` renders as raw text with a cursor; `prose` renders incrementally without delimiter scanning.
+
+## Display rules
+
+- Display math: `overflow-x-auto`, `max-w-full`, centered, `py-1`. Parents in flex must set `min-w-0`.
+- Inline math: inline-block, no scroll.
+- Math inside accordion rows must not break accordion height.
+
+## Notes path (legacy, kept)
+
+- `polish_note_from_selection` still returns markdown-with-LaTeX. `Md.tsx` + slim `preprocessLatex` are kept for **only** this path. Add a deprecation comment if you touch them.
+
+## Prompt rule (system prompts for migrated paths)
+
+> Math always goes in `math` blocks. Prose `markdown` MUST NOT contain `$`, `\(`, `\[`, or any LaTeX command. If you need a symbol inline, emit a separate `math` block — do not embed in prose.
+
+This single rule replaces the entire ~60-line `LATEX_FORMAT_INSTRUCTIONS` blob. Do not reintroduce it.
+
+## Lint guard
+
+- `RichContent` runtime-checks `prose.markdown` for `$` and warns + strips. If you see the `lint:prose_dollar` KV counter trending up, the prompt regressed.

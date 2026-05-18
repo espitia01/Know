@@ -1,0 +1,45 @@
+---
+description: Analysis-pane primitives and visual language. Enforce, don't reinvent.
+alwaysApply: true
+---
+
+# Analysis-pane rules
+
+Use the shared primitives. Do not rebuild card / header / list / loading shells per panel.
+
+## Primitives (under `frontend/src/components/analysis/`)
+
+- `AnalysisSection` — `<section>` + `SectionHeader` + spacing. Use for every titled block in a panel.
+- `AnalysisCard` — card shell. Variants: `default`, `accent`, `compact`. Use for selection results, QA answers, assumption rows, derivation steps.
+- `AnalysisAccordionRow` — collapsible row.
+- `AnalysisTabs` — config-driven tab strip. Tabs are data: `{ id, label, feature?, pinned?, badge?, icon? }`.
+- `OverflowMenu` — base-ui Popover wrapper (replaces hand-rolled portal menus).
+- `RichContent` — renders `ContentBlock[]`.
+- `StreamingMarkdown` — wraps `RichContent` with the streaming cursor + badge.
+- `useSelectionThread` — single source of truth for selection messages, status, history. Replaces ad-hoc streaming logic.
+- `useStreamingObject` — generic AI SDK `useObject` wrapper with abort + idempotency + zustand persistence.
+
+## Visual language (carry from recent commits — no new tokens)
+
+- Card bg: `bg-card/30 dark:bg-card/22`. Chrome bg: `bg-muted/[0.08]`.
+- Borders: `border-border/50` standard; `border-border/40` chrome.
+- Spacing: `space-y-8` between sections; `space-y-3` inside; `space-y-2` for list items.
+- Typography: `font-display` for headings; `tracking-[-0.02em]` for h3; body `text-[var(--text-sm)]`.
+- Motion: only `motion-safe:duration-150` color transitions and the existing streaming-cursor blink. **No new animations.**
+- Shadows: only `var(--shadow-xs)` and `var(--shadow-sm)`.
+- Focus: `focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring`.
+
+## Hard rules
+
+- No new colors, no new shadow tokens, no new motion durations. Audit yourself: any new className must already exist somewhere in the codebase, or carry a one-line comment justifying it.
+- Streaming UX (cursor, "streaming…" badge, pulse footer) lives in **one** component (`StreamingMarkdown`). Never reimplement.
+- Tab strip is data-driven via `AnalysisTabs`. Do not hand-write `<TabsTrigger>` arrays in panel hosts.
+- Position cycle and font scale live inside `OverflowMenu`. Do not portal a bespoke menu.
+- Lazy-mount tabs on first visit, then keep mounted. The `AnalysisTabs` primitive owns this; panel hosts don't.
+
+## Component LOC budget (refactor target)
+
+- `BottomPanel.tsx` ≤ 200 LOC.
+- `SelectionResultPanel.tsx` ≤ 250 LOC.
+- `SummaryPanel.tsx` ≤ 160 LOC.
+- New panels: keep below the equivalent budgets.

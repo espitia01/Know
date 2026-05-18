@@ -1,15 +1,32 @@
+# Dependencies
 node_modules/
-.next/
-__pycache__/
-*.pyc
-.env
-papers/
 .venv/
-*.egg-info/
+
+# Build output
+.next/
 dist/
 build/
-.DS_Store
-.vercel/
+*.egg-info/
+frontend/tsconfig.tsbuildinfo
+
+# Caches
+__pycache__/
+*.pyc
 .turbo/
-frontend/package-lock 2.json
+.vercel/
+
+# Secrets
+.env
+.env.local
+.env*.local
+
+# Editor / OS
+.DS_Store
+**/.DS_Store
 .claude/
+
+# User content
+papers/
+
+# Stale lockfile from macOS rename collisions
+frontend/package-lock 2.json
