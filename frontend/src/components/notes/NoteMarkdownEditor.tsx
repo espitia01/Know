@@ -40,7 +40,7 @@ export function NoteMarkdownEditor({
           <p className="text-[10px] leading-snug text-muted-foreground/75">
             <span className="font-medium text-muted-foreground/90">Math:</span>{" "}
             <code className="rounded bg-muted/60 px-1 py-0.5 font-mono text-[10px]">$…$</code> inline · own-line blocks{" "}
-            <code className="rounded bg-muted/60 px-1 py-0.5 font-mono text-[10px]">$$$$…$$$$</code>
+            <code className="rounded bg-muted/60 px-1 py-0.5 font-mono text-[10px]">$$…$$</code>
           </p>
         </div>
         <div className="max-h-[min(55vh,480px)] overflow-y-auto rounded-md bg-card/50 px-2.5 py-2">

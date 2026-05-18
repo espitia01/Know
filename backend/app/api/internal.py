@@ -233,7 +233,7 @@ async def internal_cached_analysis_upsert(body: dict = Body(...)):
 
     from ..services.pdf_parser import mutate_local_paper, append_capped
 
-    appended = key in {"selections", "qa_history"}
+    appended = key in {"selections", "qa_history", "figure_analyses", "qa_sessions"}
 
     def _apply(p):
         if appended:

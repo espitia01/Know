@@ -7,31 +7,19 @@
  * 4. Bare LaTeX commands/expressions not inside $ → wrapped in $ or $$.
  */
 
-/** Note authoring: `$$$$…$$$$` = display (block), `$$…$$` = inline. Maps to remark-math (`$$` / `$`). */
-export function remapNoteMathDelimiters(raw: string): string {
-  const displays: string[] = [];
-  let s = raw.replace(/\$\$\$\$([\s\S]*?)\$\$\$\$/g, (_m, body: string) => {
-    displays.push(String(body).trim());
-    return `\0NM_D${displays.length - 1}\0`;
+/** Legacy notes authored with `$$$$…$$$$`; collapse to standard display `$$…$$`. */
+export function migrateLegacyNoteMathDelimiters(raw: string): string {
+  return raw.replace(/\$\$\$\$([\s\S]*?)\$\$\$\$/g, (_m, body: string) => {
+    const t = String(body).trim();
+    return `\n$$\n${t}\n$$\n`;
   });
-  const inlines: string[] = [];
-  s = s.replace(/\$\$([\s\S]*?)\$\$/g, (_m, body: string) => {
-    inlines.push(String(body).trim());
-    return `\0NM_I${inlines.length - 1}\0`;
-  });
-  for (let i = 0; i < displays.length; i++) {
-    s = s.replace(`\0NM_D${i}\0`, `\n$$\n${displays[i]}\n$$\n`);
-  }
-  for (let i = 0; i < inlines.length; i++) {
-    s = s.replace(`\0NM_I${i}\0`, `$${inlines[i]}$`);
-  }
-  return s;
 }
 
 export type PreprocessLatexOpts = {
   /**
-   * Notes: remap `$$$$`→display / `$$`→inline first, and skip heuristics that
-   * promote inline `$…$` into display blocks (would fight author intent).
+   * Notes: migrate legacy `$$$$` blocks, and skip heuristics that promote
+   * inline `$…$` into display (would fight author intent). Math uses
+   * standard `$…$` inline and `$$…$$` display.
    */
   noteMode?: boolean;
 };
@@ -897,7 +885,7 @@ export function preprocessLatex(text: string, opts?: PreprocessLatexOpts): strin
   s = unicodeCapGreekToLatex(s);
   s = repairCommonTransformerMathFractures(s);
   if (noteMode) {
-    s = remapNoteMathDelimiters(s);
+    s = migrateLegacyNoteMathDelimiters(s);
   }
   s = stripOrphanEquationIndexLine(s);
   s = softenLeadingPipeBeforeMath(s);

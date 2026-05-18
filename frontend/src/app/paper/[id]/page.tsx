@@ -32,7 +32,10 @@ import {
   forgetPaper,
   allowAutoAnalyzeRetry,
   autoAnalyzedPapers,
+  activeSummaryStreams,
+  abortActiveSummaryStream,
 } from "@/lib/analysisState";
+import { streamSummaryForPaper } from "@/lib/streamSummary";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { recordPaperOpened } from "@/lib/recentPapers";
 import { isPreReadingPopulated } from "@/lib/preReading";
@@ -592,6 +595,7 @@ function PaperContent() {
 
   useEffect(() => {
     if (paperId !== activePaperId) {
+      abortActiveSummaryStream(activePaperId);
       selectionThread.abort();
       resetAnalysisState();
       // If a background fetch for the incoming paper is still in flight,
@@ -998,10 +1002,60 @@ function PaperContent() {
           }
         });
     }
-  }, [loadedPaperId, activePaperId, loadedPaperCache, tierLoading, tierUser?.tier, setPreReading, setPreReadingLoading, setAssumptions, setAssumptionsLoading]);
+
+    const hasSummary = !!(
+      cache.summary ||
+      sessionCache.summary ||
+      storeSnap.summary
+    );
+    if (
+      !hasSummary &&
+      canAccess(tierUser?.tier || "free", "summary") &&
+      !hasActiveRequest(pid, "summary") &&
+      !autoAnalyzedPapers.has(`${pid}:summary`)
+    ) {
+      const ac = new AbortController();
+      activeSummaryStreams.set(pid, ac);
+      markRequestStart(pid, "summary");
+      setSummaryLoading(true);
+      clearProgressStart(pid, "summary");
+      streamSummaryForPaper(pid, ac.signal)
+        .then((finalSummary) => {
+          const s = useStore.getState();
+          if (s.paper?.id !== pid) return;
+          if (finalSummary) {
+            setSummary(finalSummary);
+            s.updateCachedAnalysis(pid, { summary: finalSummary });
+            autoAnalyzedPapers.add(`${pid}:summary`);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          markRequestEnd(pid, "summary");
+          clearProgressStart(pid, "summary");
+          activeSummaryStreams.delete(pid);
+          if (useStore.getState().paper?.id === pid) {
+            setSummaryLoading(false);
+          }
+        });
+    }
+  }, [
+    loadedPaperId,
+    activePaperId,
+    loadedPaperCache,
+    tierLoading,
+    tierUser?.tier,
+    setPreReading,
+    setPreReadingLoading,
+    setAssumptions,
+    setAssumptionsLoading,
+    setSummary,
+    setSummaryLoading,
+  ]);
 
   const handleSwitchPaper = useCallback((id: string) => {
     if (id === activePaperId) return;
+    abortActiveSummaryStream(activePaperId);
     selectionThread.abort();
     setSelection(null);
     setSelectionResult(null);

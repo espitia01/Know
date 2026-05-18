@@ -4,9 +4,7 @@
  * @deprecated Stage 4 migration. Every panel that renders LLM output now
  * renders via `<StreamingMarkdown>` (Streamdown + KaTeX). `Md` and the
  * 956-line `preprocessLatex` it depends on are kept around only for the
- * Notes path, which still authors via the `note` LaTeX mode (`$$$$` for
- * display math) and stores prepared markdown in the database — that
- * persisted shape is incompatible with Streamdown's `$...$` rules. Do
+ * Notes path, which still uses remark-math via `latexMode="note"`. Do
  * not import `Md` in new code; use `StreamingMarkdown` instead.
  */
 
@@ -22,8 +20,8 @@ interface MdProps {
   children: string;
   className?: string;
   /**
-   * `note` remaps `$$$$`→display and `$$`→inline, and skips aggressive
-   * display promotion heuristics used for LLM analysis text.
+   * `note` skips analysis heuristics that promote inline math to display.
+   * Math delimiters: `$...$` inline, `$$...$$` display.
    */
   latexMode?: "analysis" | "note";
 }

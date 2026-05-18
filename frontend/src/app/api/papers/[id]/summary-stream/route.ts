@@ -105,44 +105,15 @@ export async function POST(
   try {
     result = streamObject({
       model: getModel("analysis"),
-      // Wrap with `zodSchema()` from @ai-sdk/provider-utils. AI SDK
-      // v6 + Zod 4 sometimes mis-detects FlexibleSchema type when
-      // passed a raw `z.object(...)` returned by Zod 4 — the JSON
-      // Schema conversion fails silently and the model gets nothing
-      // it can call as a tool, so the stream closes empty (the
-      // "Value: undefined" Zod error we saw on the client). The
-      // explicit wrapper forces the documented adapter path.
       schema: zodSchema(PaperSummarySchema),
       schemaName: "PaperSummary",
       schemaDescription: "Structured summary of an academic paper.",
+      output: "object",
       system,
       prompt,
-      // Summaries are large structured objects (overview + motivation
-      // + multi-paragraph methodology + multi-paragraph results +
-      // discussion + arrays of contributions, equations, figures,
-      // limitations). Anthropic's default output cap was truncating
-      // the JSON mid-write. 8k is the per-call ceiling on most
-      // current Sonnet variants and is plenty for the schema once
-      // the prompt asks for "concise multi-paragraph" rather than
-      // "exhaustively long" sections.
+      temperature: 0.3,
       maxOutputTokens: 8000,
       onFinish: async (event) => {
-        // Log every finish so Vercel function logs make the failure
-        // mode obvious (validation error vs empty model response vs
-        // truncation). Keep payloads bounded so logs don't bloat.
-        console.log(
-          JSON.stringify({
-            tag: "summary-stream.finish",
-            paperId,
-            userId: user.userId,
-            hasObject: !!event.object,
-            hasError: !!event.error,
-            errorMessage: event.error
-              ? String(event.error).slice(0, 500)
-              : undefined,
-            usage: event.usage,
-          }),
-        );
         if (event.error) {
           await releaseOnFailure();
           return;
@@ -183,6 +154,7 @@ export async function POST(
 
   return result.toTextStreamResponse({
     headers: {
+      "Content-Type": "text/plain; charset=utf-8",
       "Cache-Control": "no-store, no-transform",
       "X-Accel-Buffering": "no",
     },

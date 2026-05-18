@@ -11,7 +11,7 @@ const SHARED_RULES = `Output rules (strict):
 - Math: inline math goes in $...$, display math in $$...$$ on its own line. NEVER bare LaTeX commands or Unicode math symbols outside math delimiters.
 - Don't preserve PDF artifacts like one-glyph-per-line or run-on words; reconstruct using paper context.`;
 
-const PAPER_CHAR_BUDGET = 12000;
+const PAPER_CHAR_BUDGET = 8000;
 
 export function buildSummaryPrompt(args: {
   paperTitle: string;

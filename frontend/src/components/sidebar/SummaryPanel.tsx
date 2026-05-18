@@ -1,91 +1,81 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { experimental_useObject as useObject } from "@ai-sdk/react";
+import { useCallback, useState } from "react";
 import { useStore } from "@/lib/store";
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { AnalysisSection } from "@/components/analysis/AnalysisSection";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { PaperSummarySchema, type PaperSummary } from "@/lib/server/schemas";
+import type { PaperSummary } from "@/lib/server/schemas";
+import {
+  activeSummaryStreams,
+  clearProgressStart,
+  hasActiveRequest,
+  markRequestEnd,
+  markRequestStart,
+} from "@/lib/analysisState";
+import { streamSummaryForPaper, SummaryStreamError } from "@/lib/streamSummary";
 
 interface SummaryPanelProps {
   paperId: string;
 }
 
-/**
- * Stage 5 refactor:
- *   - Sections are array-driven via `AnalysisSection`. Replaces seven
- *     near-identical `<section><SectionHeader />…</section>` blocks
- *     that diverged subtly across the panel.
- *   - Streaming + cache + auto-trigger logic preserved verbatim from
- *     stage 3; only the render layer changes.
- */
 export function SummaryPanel({ paperId }: SummaryPanelProps) {
   const setSummary = useStore((s) => s.setSummary);
   const cachedSummary = useStore((s) => s.summary) ?? null;
+  const streamingPartial = useStore((s) => s.summaryStreamingByPaper[paperId] ?? null);
+  const summaryLoading = useStore((s) => s.summaryLoading);
   const paperCached = useStore((s) =>
     s.paper?.id === paperId ? s.paper?.cached_analysis?.summary : null,
   );
   const onActivePaper = useStore((s) => s.paper?.id === paperId);
-
-  const triggered = useRef<string | null>(null);
-
-  const { submit, object, isLoading, error, stop } = useObject({
-    id: paperId,
-    api: `/api/papers/${paperId}/summary-stream`,
-    schema: PaperSummarySchema,
-    onFinish: ({ object: finalObject, error: finishError }) => {
-      if (finishError) {
-        console.error("[summary-stream] finish error", finishError);
-      }
-      if (!finalObject) {
-        console.warn("[summary-stream] finished without an object");
-        return;
-      }
-      if (useStore.getState().paper?.id === paperId) {
-        setSummary(finalObject);
-        useStore.getState().updateCachedAnalysis(paperId, {
-          summary: finalObject,
-        });
-      }
-    },
-    onError: (err) => {
-      console.error("[summary-stream] request error", err);
-    },
-  });
-
-  // `stop` and `submit` from `experimental_useObject` are recreated on
-  // every render. Putting either in a useEffect dep array re-fires
-  // the effect on every render — for `stop` that aborted any
-  // in-flight stream; for `submit` it would re-fire the auto-trigger
-  // even after the guard condition was supposed to be stable. Stash
-  // both in refs so deps stay coherent.
-  const stopRef = useRef(stop);
-  stopRef.current = stop;
-  const submitRef = useRef(submit);
-  submitRef.current = submit;
-
-  useEffect(() => {
-    triggered.current = null;
-    return () => {
-      stopRef.current();
-    };
-  }, [paperId]);
-
-  const live = (object as Partial<PaperSummary> | undefined) ?? null;
+  const [manualError, setManualError] = useState<string | null>(null);
   const fromStore = onActivePaper ? cachedSummary : null;
   const fromCache = onActivePaper ? (paperCached as PaperSummary | null) : null;
-  const summary = live ?? fromStore ?? fromCache ?? null;
+  const live = onActivePaper ? streamingPartial : null;
+  const summary = (live ?? fromStore ?? fromCache ?? null) as Partial<PaperSummary> | null;
+  const isLoading =
+    onActivePaper &&
+    (summaryLoading || hasActiveRequest(paperId, "summary")) &&
+    !fromStore &&
+    !fromCache;
 
-  useEffect(() => {
-    if (!onActivePaper) return;
-    if (isLoading) return;
-    if (fromStore || fromCache) return;
-    if (triggered.current === paperId) return;
-    triggered.current = paperId;
-    submitRef.current({});
-  }, [onActivePaper, isLoading, fromStore, fromCache, paperId]);
+  const runSummaryStream = useCallback(async () => {
+    if (hasActiveRequest(paperId, "summary")) return;
+    setManualError(null);
+    const ac = new AbortController();
+    activeSummaryStreams.set(paperId, ac);
+    markRequestStart(paperId, "summary");
+    useStore.getState().setSummaryLoading(true);
+    clearProgressStart(paperId, "summary");
+    try {
+      const finalSummary = await streamSummaryForPaper(paperId, ac.signal);
+      if (useStore.getState().paper?.id !== paperId) return;
+      if (finalSummary) {
+        setSummary(finalSummary);
+        useStore.getState().updateCachedAnalysis(paperId, { summary: finalSummary });
+      } else if (!useStore.getState().summary) {
+        setManualError("Summary generation finished without content. Try again.");
+      }
+    } catch (e) {
+      if (useStore.getState().paper?.id === paperId) {
+        setManualError(
+          e instanceof SummaryStreamError
+            ? e.message
+            : e instanceof Error
+              ? e.message
+              : "Summary generation failed.",
+        );
+      }
+    } finally {
+      markRequestEnd(paperId, "summary");
+      clearProgressStart(paperId, "summary");
+      activeSummaryStreams.delete(paperId);
+      if (useStore.getState().paper?.id === paperId) {
+        useStore.getState().setSummaryLoading(false);
+      }
+    }
+  }, [paperId, setSummary]);
 
   if (!summary && isLoading) {
     return (
@@ -99,32 +89,26 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   }
 
   if (!summary) {
-    const errMsg = error ? readErrorMessage(error) : null;
+    const errMsg = manualError;
     return (
       <EmptyState
         title={errMsg ? "Failed to generate summary" : "Summary not available yet"}
         body={
-          errMsg
-            ? errMsg
-            : "Generate a detailed overview, contributions, methods, results, and limitations. Generation often takes 30–60 seconds once started."
+          errMsg ||
+          "Generate a detailed overview, contributions, methods, results, and limitations. Generation often takes 30–60 seconds once started."
         }
         cta={{
           label: errMsg ? "Retry" : "Generate Summary",
           onClick: () => {
-            triggered.current = paperId;
-            submitRef.current({});
+            void runSummaryStream();
           },
         }}
       />
     );
   }
 
-  const s = summary as Partial<PaperSummary>;
+  const s = summary;
   const stillStreaming = isLoading;
-  // For the in-flight stream, the "current" section is the last one
-  // that hasn't started filling — show the streaming caret on it so
-  // users can see progress front-to-back. Fields are intentionally
-  // produced in this order by the schema.
   const FIELD_ORDER = [
     "overview",
     "motivation",
@@ -257,15 +241,4 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
     </div>
   );
-}
-
-function readErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  try {
-    const parsed = JSON.parse(message) as { detail?: { code?: string; message?: string } };
-    if (parsed.detail?.message) return parsed.detail.message;
-  } catch {
-    /* not JSON */
-  }
-  return message || "Summary generation failed.";
 }

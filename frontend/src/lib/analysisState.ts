@@ -88,4 +88,19 @@ export function forgetPaper(paperId: string) {
 export function allowAutoAnalyzeRetry(paperId: string) {
   autoAnalyzedPapers.delete(`${paperId}:preReading`);
   autoAnalyzedPapers.delete(`${paperId}:assumptions`);
+  autoAnalyzedPapers.delete(`${paperId}:summary`);
+}
+
+/** Abort an in-flight summary stream for a paper (e.g. when switching away). */
+export function abortActiveSummaryStream(paperId: string) {
+  const stream = activeSummaryStreams.get(paperId);
+  if (stream) {
+    try {
+      stream.abort();
+    } catch {
+      /* ignore */
+    }
+    activeSummaryStreams.delete(paperId);
+  }
+  markRequestEnd(paperId, "summary");
 }

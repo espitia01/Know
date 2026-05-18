@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { api, type PriorWork } from "@/lib/api";
 import { useStore } from "@/lib/store";
+import { AnalysisSection } from "@/components/analysis/AnalysisSection";
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -17,11 +18,27 @@ interface RelatedWorkPanelProps {
   paperId: string;
 }
 
-/** Shown beneath the Related tab chrome; explains bib-extracted citations + Scholar. */
 const RELATED_TAB_INTRO =
   "Tap a citation to search Google Scholar. Reference lines come from this paper’s bibliography when we can extract them.";
 
-/** One bibliography line: hyperlink wraps the verbatim excerpt; Scholar searches that text. */
+function showThemeHeading(t: string): boolean {
+  const s = (t || "").trim();
+  if (!s) return false;
+  if (/^other\s+references?$/i.test(s)) return false;
+  return true;
+}
+
+function CitationIndex({ n }: { n: number }) {
+  return (
+    <span
+      className="mt-px shrink-0 w-6 text-right text-[var(--text-xs)] tabular-nums text-muted-foreground/70"
+      aria-hidden
+    >
+      {n}.
+    </span>
+  );
+}
+
 function VerbatimCitationLink({ work }: { work: PriorWork }) {
   const scholarHref = scholarSearchHrefFromPriorWork(work);
   const raw =
@@ -29,21 +46,41 @@ function VerbatimCitationLink({ work }: { work: PriorWork }) {
     work.title.trim() ||
     "Reference";
   const display = sanitizeCitationForDisplay(raw);
+  const linkCls =
+    "block text-[var(--text-sm)] leading-relaxed text-foreground/90 underline decoration-border underline-offset-[3px] hover:decoration-foreground/60 text-pretty hyphens-auto [overflow-wrap:anywhere]";
 
-  const cls =
-    "related-citation-display block text-[var(--text-sm)] leading-relaxed underline-offset-[3px] text-pretty hyphens-auto [overflow-wrap:anywhere]";
-
-  return scholarHref ? (
-    <a
-      href={scholarHref}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`${cls} font-medium text-primary underline decoration-primary/35 hover:decoration-primary`}
-    >
+  if (scholarHref) {
+    return (
+      <a href={scholarHref} target="_blank" rel="noopener noreferrer" className={linkCls}>
+        {display}
+      </a>
+    );
+  }
+  return (
+    <span className="block text-[var(--text-sm)] leading-relaxed text-foreground/90 text-pretty hyphens-auto [overflow-wrap:anywhere]">
       {display}
-    </a>
-  ) : (
-    <span className={`${cls} font-medium text-foreground/95`}>{display}</span>
+    </span>
+  );
+}
+
+function CitationList({
+  items,
+  startIndex = 0,
+}: {
+  items: PriorWork[];
+  startIndex?: number;
+}) {
+  return (
+    <ol className="mt-3 list-none space-y-2 p-0">
+      {items.map((p, i) => (
+        <li key={`${p.bib_label ?? p.title}-${startIndex + i}`} className="flex items-start gap-2.5">
+          <CitationIndex n={startIndex + i + 1} />
+          <div className="min-w-0 flex-1 pt-px">
+            <VerbatimCitationLink work={p} />
+          </div>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -94,7 +131,6 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
     return hasItems ? pts!.filter((t) => (t.items?.length ?? 0) > 0) : null;
   }, [preReading]);
 
-  /** Starting index per themed cluster so chips show one global bibliography order */
   const clusterGlobalStarts = useMemo(() => {
     if (!topicalClusters?.length) return [];
     let acc = 0;
@@ -107,7 +143,7 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
 
   if (preReadingLoading) {
     return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 py-8 motion-safe:animate-fade-in md:max-w-none">
+      <div className="space-y-3 py-8 motion-safe:animate-fade-in">
         <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground">{RELATED_TAB_INTRO}</p>
         <div className="flex min-h-[32vh] flex-col items-center justify-center gap-3">
           <div className="w-full max-w-xs">
@@ -139,72 +175,35 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
     );
   }
 
-  const showThemeHeading = (t: string) => {
-    const s = (t || "").trim();
-    if (!s) return false;
-    if (/^other\s+references?$/i.test(s)) return false;
-    return true;
-  };
-
   return (
-    <div className="space-y-6 motion-safe:animate-fade-in">
+    <div className="space-y-8 motion-safe:animate-fade-in">
       <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground">{RELATED_TAB_INTRO}</p>
       {topicalClusters?.length ? (
-        <div className="space-y-5">
-          {topicalClusters.map((sec, si) => (
-            <section
-              key={`cluster-${si}`}
-              className="rounded-xl border border-border/55 bg-card/35 px-4 py-3.5 shadow-sm shadow-black/[0.03] md:px-5 dark:bg-card/25 dark:shadow-black/25"
-            >
-              {showThemeHeading(sec.theme ?? "") ? (
-                <p className="mb-2.5 border-b border-border/45 pb-2 text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground/90">
-                  {sec.theme!.trim()}
-                </p>
-              ) : null}
-              {(sec.summary || "").trim() ? (
-                <div className="related-cluster-summary mb-4 [&_.analysis-content]:text-[var(--text-sm)] [&_.analysis-content]:leading-relaxed [&_.analysis-content_*]:text-foreground/92">
+        topicalClusters.map((sec, si) => {
+          const items = sec.items ?? [];
+          const theme = (sec.theme ?? "").trim();
+          const summary = (sec.summary || "").trim();
+          const title = showThemeHeading(theme) ? theme : "References";
+          return (
+            <AnalysisSection key={`cluster-${si}`} title={title} count={items.length}>
+              {summary ? (
+                <div className="[&_.analysis-content]:text-[var(--text-sm)] [&_.analysis-content]:leading-relaxed">
                   <StreamingMarkdown>
-                    {sanitizeRelatedClusterSummaryMarkdown(sec.summary!)}
+                    {sanitizeRelatedClusterSummaryMarkdown(summary)}
                   </StreamingMarkdown>
                 </div>
               ) : null}
-              <ul className="flex flex-col gap-4">
-                {(sec.items || []).map((p, pi) => (
-                  <li key={`${p.bib_label ?? p.title}-${si}-${pi}`} className="flex gap-3.5 items-start">
-                    <span
-                      className="mt-0.5 flex h-6 min-w-[1.5rem] shrink-0 items-center justify-center rounded-md bg-muted/85 text-[10px] font-semibold tabular-nums leading-none text-muted-foreground shadow-[inset_0_1px_0_rgb(255_255_255/8%)]"
-                      aria-hidden
-                    >
-                      {(clusterGlobalStarts[si] ?? 0) + pi + 1}
-                    </span>
-                    <div className="min-w-0 flex-1 pt-px">
-                      <VerbatimCitationLink work={p} />
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
+              <CitationList items={items} startIndex={clusterGlobalStarts[si] ?? 0} />
+            </AnalysisSection>
+          );
+        })
       ) : (
-        <ul className="flex flex-col gap-4">
-          {priorList.map((p, i) => (
-            <li key={`${p.bib_label ?? p.title}-${i}`} className="flex gap-3.5 items-start">
-              <span
-                className="mt-0.5 flex h-6 min-w-[1.5rem] shrink-0 items-center justify-center rounded-md bg-muted/85 text-[10px] font-semibold tabular-nums leading-none text-muted-foreground shadow-[inset_0_1px_0_rgb(255_255_255/8%)]"
-                aria-hidden
-              >
-                {i + 1}
-              </span>
-              <div className="min-w-0 flex-1 pt-px">
-                <VerbatimCitationLink work={p} />
-              </div>
-            </li>
-          ))}
-        </ul>
+        <AnalysisSection title="References" count={priorList.length}>
+          <CitationList items={priorList} />
+        </AnalysisSection>
       )}
 
-      <div className="border-t border-border/50 pt-3">
+      <div>
         <button
           type="button"
           onClick={handleRunPrepare}
