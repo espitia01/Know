@@ -559,12 +559,17 @@ from .api.analysis import router as analysis_router
 from .api.search import router as search_router
 from .api.settings import router as settings_router
 from .api.billing import router as billing_router
+from .api.internal import router as internal_router
 
 app.include_router(papers_router)
 app.include_router(analysis_router)
 app.include_router(search_router)
 app.include_router(settings_router)
 app.include_router(billing_router)
+# Server-to-server only — guarded by a shared bearer in the router. Browser
+# CORS does not apply (no Origin will be set on a legitimate caller); if it
+# is set, the bearer check still rejects.
+app.include_router(internal_router)
 
 
 # ----------------------------------------------------------------
