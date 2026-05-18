@@ -35,14 +35,23 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     id: paperId,
     api: `/api/papers/${paperId}/summary-stream`,
     schema: PaperSummarySchema,
-    onFinish: ({ object: finalObject }) => {
-      if (!finalObject) return;
+    onFinish: ({ object: finalObject, error: finishError }) => {
+      if (finishError) {
+        console.error("[summary-stream] finish error", finishError);
+      }
+      if (!finalObject) {
+        console.warn("[summary-stream] finished without an object");
+        return;
+      }
       if (useStore.getState().paper?.id === paperId) {
         setSummary(finalObject);
         useStore.getState().updateCachedAnalysis(paperId, {
           summary: finalObject,
         });
       }
+    },
+    onError: (err) => {
+      console.error("[summary-stream] request error", err);
     },
   });
 

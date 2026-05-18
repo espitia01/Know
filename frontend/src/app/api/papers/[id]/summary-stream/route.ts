@@ -11,7 +11,6 @@
 
 import { NextResponse } from "next/server";
 import { streamObject } from "ai";
-import { after } from "next/server";
 
 import { getModel } from "@/lib/server/llm";
 import { requireUser, AuthError } from "@/lib/server/auth";
@@ -118,14 +117,18 @@ export async function POST(
         }
         const finalObject = event.object as PaperSummary | undefined;
         if (!finalObject) return;
-        after(
-          upsertCachedAnalysis({
+        // Await directly rather than via `after()` — same reasoning
+        // as the selection-stream route.
+        try {
+          await upsertCachedAnalysis({
             userId: user.userId,
             paperId,
             key: "summary",
             value: finalObject,
-          }),
-        );
+          });
+        } catch (err) {
+          console.error("[summary-stream] persist failed", err);
+        }
       },
       onError: async () => {
         await releaseOnFailure();

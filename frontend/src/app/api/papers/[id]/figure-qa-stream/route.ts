@@ -10,7 +10,6 @@
 
 import { NextResponse } from "next/server";
 import { streamObject } from "ai";
-import { after } from "next/server";
 
 import { getModel } from "@/lib/server/llm";
 import { requireUser, AuthError } from "@/lib/server/auth";
@@ -141,8 +140,8 @@ export async function POST(
         }
         const finalObject = event.object as FigureAnalysis | undefined;
         if (!finalObject) return;
-        after(
-          upsertCachedAnalysis({
+        try {
+          await upsertCachedAnalysis({
             userId: user.userId,
             paperId,
             key: "figure_analyses",
@@ -151,8 +150,10 @@ export async function POST(
               question: question || undefined,
               ...finalObject,
             },
-          }),
-        );
+          });
+        } catch (err) {
+          console.error("[figure-qa-stream] persist failed", err);
+        }
       },
       onError: async () => {
         await releaseOnFailure();

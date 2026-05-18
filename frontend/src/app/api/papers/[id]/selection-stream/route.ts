@@ -22,7 +22,6 @@
 
 import { NextResponse } from "next/server";
 import { streamObject } from "ai";
-import { after } from "next/server";
 
 import { getModel } from "@/lib/server/llm";
 import { requireUser, AuthError } from "@/lib/server/auth";
@@ -184,12 +183,15 @@ export async function POST(
         const finalObject = event.object as SelectionResult | undefined;
         if (!finalObject) return;
 
-        // Persist the assembled selection into cached_analysis. Mirrors
-        // the Python path's append_capped("selections", ...) so panels
-        // that read history get the same rows regardless of which
-        // backend served the request.
-        after(
-          upsertCachedAnalysis({
+        // Persist the assembled selection into cached_analysis. We
+        // await directly (rather than scheduling via `after()`)
+        // because `after()` can be cut off on Vercel without Fluid
+        // Compute when the function shuts down. Awaiting trades a
+        // few hundred ms of tail-latency for guaranteed persistence
+        // — the client already has the answer rendered by the time
+        // this resolves, so the user doesn't perceive the delay.
+        try {
+          await upsertCachedAnalysis({
             userId: user.userId,
             paperId,
             key: "selections",
@@ -206,8 +208,10 @@ export async function POST(
               final_result: finalObject.final_result,
               steps: finalObject.steps ?? [],
             },
-          }),
-        );
+          });
+        } catch (err) {
+          console.error("[selection-stream] persist failed", err);
+        }
       },
       onError: async () => {
         await releaseOnFailure();
