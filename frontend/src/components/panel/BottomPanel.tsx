@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useStore } from "@/lib/store";
 import { useSelectionThread } from "@/lib/useSelectionThread";
 import { FEATURE_TOOLTIPS } from "@/lib/tooltips";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
+import { OverflowMenu } from "@/components/analysis/OverflowMenu";
 import { SelectionResultPanel } from "./SelectionResultPanel";
 import { PreReadingPanel } from "../sidebar/PreReadingPanel";
 import { RelatedWorkPanel } from "../sidebar/RelatedWorkPanel";
@@ -103,66 +103,6 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
 
   const icon = positionIcons[position] || positionIcons.right;
 
-  // Overflow-menu state. Both the font-scale control cluster and the
-  // pane-position cycle live behind a single kebab to keep the tab
-  // strip visually quiet. Click-outside + Escape close the menu so it
-  // behaves like the native menus elsewhere in the app.
-  //
-  // The menu is portaled to document.body so it always lands on the
-  // topmost stacking context. An earlier version rendered it as a
-  // child of the pane header and used `z-50`, which was fine in
-  // isolation but got *visually* covered in focus mode: the pane
-  // column itself sits inside a stacking context (z-20 in page.tsx)
-  // and some TabsContent children (math, figures, lightbox backdrops)
-  // can create their own higher contexts. A body-portal sidesteps
-  // every one of those ancestor clipping / stacking traps.
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [menuCoords, setMenuCoords] = useState<{ top: number; right: number } | null>(null);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (menuRef.current?.contains(target)) return;
-      if (menuButtonRef.current?.contains(target)) return;
-      setMenuOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [menuOpen]);
-  // Re-compute the popover position whenever the menu opens *or* the
-  // viewport changes (scroll / resize). Anchored to the kebab
-  // button's current rect so the menu tracks its trigger even if the
-  // user scrolls with the menu open. Uses useLayoutEffect so the
-  // first paint never shows the menu at (0, 0).
-  useLayoutEffect(() => {
-    if (!menuOpen) { setMenuCoords(null); return; }
-    const updateCoords = () => {
-      const btn = menuButtonRef.current;
-      if (!btn) return;
-      const r = btn.getBoundingClientRect();
-      setMenuCoords({
-        top: r.bottom + 6,
-        right: Math.max(8, window.innerWidth - r.right),
-      });
-    };
-    updateCoords();
-    window.addEventListener("resize", updateCoords);
-    window.addEventListener("scroll", updateCoords, true);
-    return () => {
-      window.removeEventListener("resize", updateCoords);
-      window.removeEventListener("scroll", updateCoords, true);
-    };
-  }, [menuOpen]);
-
   const handleFollowUp = async (question: string, context: string) => {
     // Pack the prior passage + analysis blob as the "selected text"
     // input — the prompt builder treats it as conversation history.
@@ -234,51 +174,37 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
           </TabsList>
         </div>
 
-        {/* Overflow menu trigger. The actual popover is portaled to
-            document.body (see below) so it can never be clipped or
-            occluded by anything inside the analysis pane. */}
-        <div className="relative shrink-0">
-          <button
-            ref={menuButtonRef}
-            type="button"
-            onClick={() => setMenuOpen((v) => !v)}
-            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground data-open:bg-accent/60 data-open:[&_path]:text-foreground motion-safe:duration-150"
-            data-open={menuOpen ? "" : undefined}
-            title="Panel options — text size, pane position"
-            aria-label="Panel options"
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-          >
-            <svg
-              className="h-3.5 w-3.5"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.5}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
+        <OverflowMenu
+          ariaLabel="Panel options"
+          trigger={
+            <button
+              type="button"
+              className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground data-[popup-open]:bg-accent/60 motion-safe:duration-150"
+              title="Panel options — text size, pane position"
+              aria-label="Panel options"
             >
-              <line x1="4" x2="4" y1="21" y2="14" />
-              <line x1="4" x2="4" y1="10" y2="3" />
-              <line x1="12" x2="12" y1="21" y2="12" />
-              <line x1="12" x2="12" y1="8" y2="3" />
-              <line x1="20" x2="20" y1="21" y2="16" />
-              <line x1="20" x2="20" y1="12" y2="3" />
-              <line x1="1" x2="7" y1="14" y2="14" />
-              <line x1="9" x2="15" y1="8" y2="8" />
-              <line x1="17" x2="23" y1="16" y2="16" />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {menuOpen && menuCoords && typeof document !== "undefined" && createPortal(
-        <div
-          ref={menuRef}
-          role="menu"
-          style={{ position: "fixed", top: menuCoords.top, right: menuCoords.right, zIndex: 1000 }}
-          className="w-56 rounded-xl border border-border bg-popover text-popover-foreground shadow-xl p-2 animate-fade-in"
+              <svg
+                className="h-3.5 w-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <line x1="4" x2="4" y1="21" y2="14" />
+                <line x1="4" x2="4" y1="10" y2="3" />
+                <line x1="12" x2="12" y1="21" y2="12" />
+                <line x1="12" x2="12" y1="8" y2="3" />
+                <line x1="20" x2="20" y1="21" y2="16" />
+                <line x1="20" x2="20" y1="12" y2="3" />
+                <line x1="1" x2="7" y1="14" y2="14" />
+                <line x1="9" x2="15" y1="8" y2="8" />
+                <line x1="17" x2="23" y1="16" y2="16" />
+              </svg>
+            </button>
+          }
         >
           <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">
             Text size
@@ -316,15 +242,14 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
             Saved across every paper and reload.
           </div>
 
-          <div className="h-px bg-border/70 mx-1 my-1" />
+          <div className="my-1 mx-1 h-px bg-border/70" />
 
           <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">
             Pane position
           </div>
           <button
             type="button"
-            role="menuitem"
-            onClick={() => { onCyclePosition(); setMenuOpen(false); }}
+            onClick={onCyclePosition}
             className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-[var(--text-sm)] hover:bg-accent transition-colors"
           >
             <span className="flex items-center gap-2 text-foreground/90">
@@ -338,9 +263,8 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
           <div className="px-2 pt-1 text-[var(--text-xs)] text-muted-foreground/70 leading-snug">
             Saved across every paper and reload.
           </div>
-        </div>,
-        document.body,
-      )}
+        </OverflowMenu>
+      </div>
 
       <div className="analysis-scroll-fade min-h-0 flex-1 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable]">
         <div
