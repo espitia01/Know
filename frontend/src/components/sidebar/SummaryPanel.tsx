@@ -46,13 +46,16 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     },
   });
 
-  // `stop` from `experimental_useObject` is recreated on every render.
-  // Putting it in a useEffect dep array would re-fire the cleanup
-  // (and abort any in-flight stream) on every render — that was the
-  // "Generate Summary did nothing" bug. Stash it in a ref so the
-  // cleanup only runs on actual unmount / paper switch.
+  // `stop` and `submit` from `experimental_useObject` are recreated on
+  // every render. Putting either in a useEffect dep array re-fires
+  // the effect on every render — for `stop` that aborted any
+  // in-flight stream; for `submit` it would re-fire the auto-trigger
+  // even after the guard condition was supposed to be stable. Stash
+  // both in refs so deps stay coherent.
   const stopRef = useRef(stop);
   stopRef.current = stop;
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
 
   useEffect(() => {
     triggered.current = null;
@@ -72,8 +75,8 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     if (fromStore || fromCache) return;
     if (triggered.current === paperId) return;
     triggered.current = paperId;
-    submit({});
-  }, [onActivePaper, isLoading, fromStore, fromCache, paperId, submit]);
+    submitRef.current({});
+  }, [onActivePaper, isLoading, fromStore, fromCache, paperId]);
 
   if (!summary && isLoading) {
     return (
@@ -100,7 +103,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
           label: errMsg ? "Retry" : "Generate Summary",
           onClick: () => {
             triggered.current = paperId;
-            submit({});
+            submitRef.current({});
           },
         }}
       />

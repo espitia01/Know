@@ -128,7 +128,9 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
               <div className={rowListClass}>
                 {definitions.map((d, i) => (
                   <div key={i} className={rowItemClass}>
-                    <p className="mb-0.5 font-medium text-[var(--text-md)]">{d.term}</p>
+                    <div className="mb-0.5 font-medium text-[var(--text-md)]">
+                      <StreamingMarkdown size="tight">{d.term}</StreamingMarkdown>
+                    </div>
                     <StreamingMarkdown>{d.definition}</StreamingMarkdown>
                     {d.source && (
                       <p className="mt-1 text-[var(--text-xs)] text-muted-foreground/70">Source: {d.source}</p>
@@ -179,7 +181,9 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
               <div className={rowListClass}>
                 {concepts.map((c, i) => (
                   <div key={i} className={rowItemClass}>
-                    <p className="mb-0.5 font-medium text-[var(--text-md)]">{c.name}</p>
+                    <div className="mb-0.5 font-medium text-[var(--text-md)]">
+                      <StreamingMarkdown size="tight">{c.name}</StreamingMarkdown>
+                    </div>
                     <StreamingMarkdown>{c.description}</StreamingMarkdown>
                     {c.importance && (
                       <div className="mt-1 text-[var(--text-xs)] italic text-muted-foreground/70">

@@ -35,14 +35,24 @@ type StreamingMarkdownProps = {
   children: string | null | undefined;
   /** True while the source is still being produced. Drives the caret + animation. */
   streaming?: boolean;
-  /** Visual size variant. Defaults to body text used in panels. */
-  size?: "sm" | "md";
+  /**
+   * Visual size variant. Defaults to body text. Use `tight` for titles /
+   * pill-style cells where the prose paragraph margin would be wrong:
+   * the wrapper drops the `prose` typography defaults and renders the
+   * markdown without per-paragraph spacing.
+   */
+  size?: "sm" | "md" | "tight";
   className?: string;
 };
 
 const SIZE_CLASS: Record<NonNullable<StreamingMarkdownProps["size"]>, string> = {
   sm: "prose prose-sm max-w-none leading-relaxed dark:prose-invert",
   md: "prose prose-sm md:prose-base max-w-none leading-relaxed dark:prose-invert",
+  // `tight`: math-aware inline rendering for titles. We keep the
+  // analysis-content hook so KaTeX-rendered math inherits the
+  // panel's typography, but strip the prose paragraph margins so a
+  // single-line term doesn't gain extra vertical space.
+  tight: "[&_p]:m-0 [&_p]:inline [&_p]:leading-snug",
 };
 
 export const StreamingMarkdown = memo(function StreamingMarkdown({

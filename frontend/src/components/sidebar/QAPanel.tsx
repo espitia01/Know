@@ -426,7 +426,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
                 key={itemKey}
                 open={open}
                 onOpenChange={(next) => setOpenQAKey(next ? itemKey : null)}
-                title={item.question}
+                title={<StreamingMarkdown size="tight">{item.question}</StreamingMarkdown>}
                 leading={
                   <span
                     className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border/55 bg-background/70 text-[10px] font-semibold tabular-nums text-muted-foreground dark:bg-card/35"
