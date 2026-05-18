@@ -10,6 +10,7 @@ import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { SectionHeader } from "@/components/panel/SectionHeader";
 import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
 import { SwitchField } from "@/components/ui/switch";
+import { WORKSPACE_FEATURES_TEMPORARILY_DISABLED } from "@/lib/workspaceFeatureFlags";
 
 interface QAPanelProps {
   paperId: string;
@@ -28,14 +29,6 @@ const SEED_PROMPTS = [
   "Practical implications?",
 ];
 
-const CROSS_PAPER_PROMPTS = [
-  "Compare methodologies across papers",
-  "What are the common assumptions?",
-  "How do the results complement each other?",
-  "Identify contradictions between papers",
-  "Synthesize key findings",
-];
-
 export function QAPanel({ paperId }: QAPanelProps) {
   const {
     questions, addQuestion, removeQuestion, clearQuestions,
@@ -46,7 +39,6 @@ export function QAPanel({ paperId }: QAPanelProps) {
   const { user } = useUserTier();
   const tier = user?.tier || "free";
   const [input, setInput] = useState("");
-  const [crossPaper, setCrossPaper] = useState(false);
   const [qaError, setQAError] = useState("");
   const [usedPrompts, setUsedPrompts] = useState<Set<string>>(new Set());
   // Fresh, paper-specific suggestions returned by
@@ -64,7 +56,6 @@ export function QAPanel({ paperId }: QAPanelProps) {
     setExtraPrompts([]);
     setUsedPrompts(new Set());
     setExtraError(null);
-    setCrossPaper(false);
   }, [paperId]);
 
   useEffect(() => {
@@ -85,7 +76,8 @@ export function QAPanel({ paperId }: QAPanelProps) {
     prevQaCount.current = n;
   }, [qaResults]);
 
-  const canMultiQA = canAccess(tier, "multi-qa");
+  const canMultiQA =
+    !WORKSPACE_FEATURES_TEMPORARILY_DISABLED && canAccess(tier, "multi-qa");
   const hasMultiplePapers = sessionPapers.length > 1 && canMultiQA;
 
   const [justAdded, setJustAdded] = useState(false);
@@ -137,13 +129,8 @@ export function QAPanel({ paperId }: QAPanelProps) {
     setQALoading(true);
     setQAError("");
     try {
-      let result;
-      if (crossPaper && hasMultiplePapers) {
-        const ids = sessionPapers.map((p) => p.id);
-        result = await api.askQuestionsMulti(ids, toAnswer);
-      } else {
-        result = await api.askQuestions(paperId, toAnswer);
-      }
+      // TODO(workspaces): restore api.askQuestionsMulti when WORKSPACE_FEATURES_TEMPORARILY_DISABLED flips.
+      const result = await api.askQuestions(paperId, toAnswer);
       setQAResults([...qaResults, ...result.items]);
       clearQuestions();
       bumpUsageRefresh();
@@ -162,12 +149,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
     }
   };
 
-  // Single-paper Q&A pulls from the seed list + any LLM-generated
-  // extras. Cross-paper mode keeps its own static list because the
-  // generator is tuned per single-paper.
-  const prompts = crossPaper && hasMultiplePapers
-    ? CROSS_PAPER_PROMPTS
-    : [...SEED_PROMPTS, ...extraPrompts];
+  const prompts = [...SEED_PROMPTS, ...extraPrompts];
 
   const visiblePrompts = prompts.filter((p) => !usedPrompts.has(p));
 
@@ -226,9 +208,10 @@ export function QAPanel({ paperId }: QAPanelProps) {
               </p>
             </div>
             <SwitchField
-              checked={crossPaper}
-              onCheckedChange={setCrossPaper}
+              checked={false}
+              onCheckedChange={() => {}}
               aria-label="Toggle cross-paper mode"
+              disabled
             />
           </div>
         )}
@@ -272,8 +255,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
                     the seed list is empty) because users sometimes
                     want fresher options before exhausting the seeds —
                     they just stay collapsed visually with a + glyph. */}
-                {!crossPaper && (
-                  <button
+                <button
                     type="button"
                     onClick={handleGenerateMore}
                     disabled={extraLoading}
@@ -299,7 +281,6 @@ export function QAPanel({ paperId }: QAPanelProps) {
                       </>
                     )}
                   </button>
-                )}
               </div>
             )}
             {extraError && (
@@ -315,7 +296,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
           autoComplete="off"
           autoCorrect="on"
           spellCheck
-          placeholder={crossPaper && hasMultiplePapers ? "Ask across all papers..." : "Type a question..."}
+          placeholder="Type a question..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -352,7 +333,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
             <AnalysisProgress kind="qa" />
           </div>
           <p className="text-[var(--text-xs)] text-muted-foreground/85">
-            {crossPaper && hasMultiplePapers ? "Analyzing across papers…" : "Analyzing…"}
+            Analyzing…
           </p>
         </div>
       )}
@@ -407,9 +388,6 @@ export function QAPanel({ paperId }: QAPanelProps) {
               </button>
             }
           />
-          {crossPaper && hasMultiplePapers && (
-            <p className="text-[var(--text-xs)] text-muted-foreground/80">Cross-paper session</p>
-          )}
           {/*
             Newest answer first. Numeric ordinals were dropped at the user's
             request — the visual order now carries the "which is newest"

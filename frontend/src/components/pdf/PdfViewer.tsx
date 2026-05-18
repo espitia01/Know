@@ -484,7 +484,7 @@ export function PdfViewer({
   // entire viewer every time a new analysis streams in; we only need a
   // stable reference to `selectionHistory` when drawing, so we pull it
   // from the store lazily inside the draw callback via `getState`.
-  const selectionHistory = useStore((s) => s.selectionHistory);
+  const selectionHistoryLength = useStore((s) => s.selectionHistory.length);
   const openSelectionFromHistory = useStore((s) => s.openSelectionFromHistory);
   const removeSelectionFromHistory = useStore((s) => s.removeSelectionFromHistory);
   const savedScrollByPaper = useStore((s) => s.uiPrefs.scrollByPaper);
@@ -735,14 +735,25 @@ export function PdfViewer({
       const overlay = document.createElement("div");
       overlay.className = "know-region-overlay";
       overlay.setAttribute("aria-hidden", "true");
+      const pw = pageEl.offsetWidth;
+      const ph = pageEl.offsetHeight;
+      if (pw <= 0 || ph <= 0) return;
       for (const r of forPage) {
+        if (
+          typeof r.xPct !== "number" ||
+          typeof r.yPct !== "number" ||
+          typeof r.wPct !== "number" ||
+          typeof r.hPct !== "number"
+        ) {
+          continue;
+        }
         const box = document.createElement("div");
         box.className = "know-region-highlight";
         box.setAttribute("data-action", "note");
-        box.style.left = `${r.x}px`;
-        box.style.top = `${r.y}px`;
-        box.style.width = `${r.w}px`;
-        box.style.height = `${r.h}px`;
+        box.style.left = `${r.xPct * pw}px`;
+        box.style.top = `${r.yPct * ph}px`;
+        box.style.width = `${r.wPct * pw}px`;
+        box.style.height = `${r.hPct * ph}px`;
         overlay.appendChild(box);
       }
       pageEl.appendChild(overlay);
@@ -1286,8 +1297,12 @@ export function PdfViewer({
       raf = null;
       const items = Array.from(pending);
       pending = new Set();
+      const history = useStore.getState().selectionHistory;
+      const regions = useStore.getState().pdfRegionHighlightsByPaper[paperId ?? ""] ?? EMPTY_REGIONS;
       for (const el of items) {
-        drawUnderlinesForPage(el, selectionHistory);
+        drawUnderlinesForPage(el, history);
+        const pageNum = parseInt(el.getAttribute("data-page-number") || "0", 10);
+        if (pageNum > 0) drawRegionHighlightsForPage(el, pageNum, regions);
       }
     };
     const schedulePage = (pageEl: HTMLElement) => {
@@ -1344,26 +1359,34 @@ export function PdfViewer({
     });
     top.observe(container, { subtree: true, childList: true });
 
-    const resizeRo = new ResizeObserver(() => scheduleAll());
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    const resizeRo = new ResizeObserver(() => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => scheduleAll(), 90);
+    });
     resizeRo.observe(container);
 
     return () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
       resizeRo.disconnect();
       top.disconnect();
       pageObservers.forEach((m) => m.disconnect());
       pageObservers.clear();
       if (raf !== null) cancelAnimationFrame(raf);
     };
-  }, [selectionHistory, drawUnderlinesForPage, scale, paperId]);
+  }, [drawUnderlinesForPage, drawRegionHighlightsForPage, scale, paperId]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    const history = useStore.getState().selectionHistory;
+    const regions = useStore.getState().pdfRegionHighlightsByPaper[paperId ?? ""] ?? EMPTY_REGIONS;
     container.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]").forEach((pageEl) => {
+      drawUnderlinesForPage(pageEl, history);
       const pageNum = parseInt(pageEl.getAttribute("data-page-number") || "0", 10);
-      if (pageNum > 0) drawRegionHighlightsForPage(pageEl, pageNum, pdfRegionHighlights);
+      if (pageNum > 0) drawRegionHighlightsForPage(pageEl, pageNum, regions);
     });
-  }, [pdfRegionHighlights, drawRegionHighlightsForPage, scale, paperId]);
+  }, [selectionHistoryLength, pdfRegionHighlights, drawUnderlinesForPage, drawRegionHighlightsForPage, paperId, scale]);
 
   const handlePageRender = useCallback((pageNum: number) => {
     const el = containerRef.current?.querySelector(`[data-page-number="${pageNum}"]`) as HTMLElement | null;
@@ -1513,8 +1536,16 @@ export function PdfViewer({
         setPendingFigureCaption(`Page ${pageNum} — region`);
         if (pageEl) {
           const local = regionRectOnPage(pageEl, mr);
-          if (local) {
-            addPdfRegionHighlight(paperId, { pageNum, ...local });
+          const pw = pageEl.offsetWidth;
+          const ph = pageEl.offsetHeight;
+          if (local && pw > 0 && ph > 0) {
+            addPdfRegionHighlight(paperId, {
+              pageNum,
+              xPct: local.x / pw,
+              yPct: local.y / ph,
+              wPct: local.w / pw,
+              hPct: local.h / ph,
+            });
             drawRegionHighlightsForPage(pageEl, pageNum, [
               ...(useStore.getState().pdfRegionHighlightsByPaper[paperId] ?? []),
             ]);

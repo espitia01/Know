@@ -14,6 +14,7 @@ import {
   hasActiveRequest,
   summaryStreamStarters,
 } from "@/lib/analysisState";
+import { ensureDisplayMath, firstSentence } from "@/lib/text";
 
 interface SummaryPanelProps {
   paperId: string;
@@ -99,11 +100,9 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     return null;
   })();
 
-  const takeawaySource = (s as PaperSummary & { tl_dr?: string }).tl_dr ?? s.overview;
-  const takeaway =
-    takeawaySource && takeawaySource.length > 180
-      ? `${takeawaySource.slice(0, 180).trim()}…`
-      : takeawaySource;
+  const takeawaySource =
+    (s as PaperSummary & { tl_dr?: string }).tl_dr ?? s.overview ?? "";
+  const takeaway = stillStreaming ? "" : firstSentence(takeawaySource, 240);
 
   return (
     <div className="space-y-8">
@@ -192,7 +191,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
                   key={i}
                   className="border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40"
                 >
-                  <StreamingMarkdown>{eq.equation ?? ""}</StreamingMarkdown>
+                  <StreamingMarkdown>{ensureDisplayMath(eq.equation)}</StreamingMarkdown>
                   <div className="mt-1.5 text-[var(--text-sm)] text-muted-foreground">
                     <StreamingMarkdown>{eq.meaning ?? ""}</StreamingMarkdown>
                   </div>

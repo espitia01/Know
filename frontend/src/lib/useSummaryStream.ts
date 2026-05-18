@@ -132,6 +132,7 @@ export function useSummaryStream(paperId: string) {
       clearFallbackTimer();
       const pid = startedForPaperRef.current;
       if (!pid) return;
+      useStore.getState().clearSummaryStreamingPartial(pid);
       if (useStore.getState().paper?.id === pid) {
         setSummaryError(pid, describeError(error));
       }
@@ -143,6 +144,7 @@ export function useSummaryStream(paperId: string) {
       if (!pid) return;
       startedForPaperRef.current = null;
       activeSummaryStreamStoppers.delete(pid);
+      useStore.getState().clearSummaryStreamingPartial(pid);
 
       const candidate = (object ?? latestObjectRef.current) as Partial<PaperSummary> | undefined;
       if (hasOverview(candidate)) {

@@ -89,7 +89,7 @@ export const PaperSummarySchema = z.object({
         equation: z
           .string()
           .describe(
-            "LaTeX expression for one of the paper's most important equations. Wrap in $$...$$ for display math.",
+            "Display-math LaTeX for one of the paper's most important equations. MUST be wrapped in $$...$$ delimiters. Example: \"$$E = mc^2$$\". Never emit bare LaTeX commands.",
           ),
         meaning: z.string().describe("Markdown one-paragraph explanation."),
       }),

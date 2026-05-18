@@ -1,3 +1,7 @@
+/**
+ * @deprecated Cross-paper Q&A is gated behind WORKSPACE_FEATURES_TEMPORARILY_DISABLED.
+ * Do not mount this component in product surfaces. Restore when workspaces ship.
+ */
 "use client";
 
 import { useState } from "react";

@@ -20,10 +20,11 @@ export type AnalysisFontFamily = "sans" | "serif" | "mono" | "times" | "arial";
 export type PdfRegionHighlight = {
   id: string;
   pageNum: number;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+  /** Normalized [0,1] page-local box so zoom does not move the overlay. */
+  xPct: number;
+  yPct: number;
+  wPct: number;
+  hPct: number;
 };
 
 interface UiPrefs {
@@ -94,7 +95,7 @@ interface AppStore {
   pdfTextLayerEmptyByPaper: Record<string, boolean>;
   setPdfTextLayerEmpty: (paperId: string, empty: boolean) => void;
 
-  /** Page-local region boxes from marquee capture (scanned PDFs). Not persisted. */
+  /** Page-local region boxes from marquee capture (scanned PDFs). Persisted in localStorage. */
   pdfRegionHighlightsByPaper: Record<string, PdfRegionHighlight[]>;
   addPdfRegionHighlight: (paperId: string, highlight: Omit<PdfRegionHighlight, "id">) => void;
 
@@ -252,8 +253,19 @@ export const useStore = create<AppStore>()(
         }),
 
       papersById: {},
+      // LRU cap: full ParsedPaper blobs (raw_text + cached_analysis) are large;
+      // evict oldest non-active entries after 8 papers to keep long sessions responsive.
       cachePaper: (p) =>
-        set((s) => ({ papersById: { ...s.papersById, [p.id]: p } })),
+        set((s) => {
+          const next = { ...s.papersById, [p.id]: p };
+          const keys = Object.keys(next);
+          if (keys.length > 8) {
+            const activeId = s.paper?.id;
+            const evict = keys.find((k) => k !== activeId && k !== p.id);
+            if (evict) delete next[evict];
+          }
+          return { papersById: next };
+        }),
       updateCachedAnalysis: (paperId, partial) =>
         set((s) => {
           const existing = s.papersById[paperId];
@@ -419,7 +431,7 @@ export const useStore = create<AppStore>()(
 
       crossPaperResults: [],
       addCrossPaperResults: (items) =>
-        set((s) => ({ crossPaperResults: [...items, ...s.crossPaperResults].slice(0, 200) })),
+        set((s) => ({ crossPaperResults: [...items, ...s.crossPaperResults].slice(0, 80) })),
       clearCrossPaperResults: () => set({ crossPaperResults: [] }),
 
       loading: false,
@@ -489,7 +501,7 @@ export const useStore = create<AppStore>()(
       setSelectionLoading: (l) => set({ selectionLoading: l }),
       selectionHistory: [],
       addSelectionToHistory: (r) =>
-        set((s) => ({ selectionHistory: [r, ...s.selectionHistory].slice(0, 50) })),
+        set((s) => ({ selectionHistory: [r, ...s.selectionHistory].slice(0, 30) })),
       upsertSelectionInHistory: (r) =>
         set((s) => {
           if (r.clientKey) {
@@ -500,7 +512,7 @@ export const useStore = create<AppStore>()(
               return { selectionHistory: next };
             }
           }
-          return { selectionHistory: [r, ...s.selectionHistory].slice(0, 50) };
+          return { selectionHistory: [r, ...s.selectionHistory].slice(0, 30) };
         }),
       openSelectionFromHistory: (r) =>
         set({
@@ -540,7 +552,7 @@ export const useStore = create<AppStore>()(
       // Cap QA history to the most recent 200 items so the panel — and the
       // persisted blob in sessionStorage — can't grow unbounded in long
       // reading sessions.
-      setQAResults: (items) => set({ qaResults: items.slice(-200) }),
+      setQAResults: (items) => set({ qaResults: items.slice(-60) }),
       qaLoading: false,
       setQALoading: (l) => set({ qaLoading: l }),
 
@@ -644,7 +656,9 @@ export const useStore = create<AppStore>()(
       // session-only overlays and blob hand-offs.
       partialize: (state) => ({
         sessionPapers: state.sessionPapers,
-        crossPaperResults: state.crossPaperResults,
+        // TODO(workspaces): restore crossPaperResults persistence when workspaces ship.
+        // TODO(backend): sync region highlights via cached_analysis.region_highlights.
+        pdfRegionHighlightsByPaper: state.pdfRegionHighlightsByPaper,
         // Chrome preferences survive reloads so the reader feels "sticky":
         // if the user worked in focus mode last session, they return to it
         // instead of re-picking it every time. Intentionally excludes
@@ -655,6 +669,24 @@ export const useStore = create<AppStore>()(
         analysisFontFamily: state.analysisFontFamily,
         uiPrefs: state.uiPrefs,
       }),
+      migrate: (persisted) => {
+        const p = persisted as {
+          state?: { pdfRegionHighlightsByPaper?: Record<string, Array<Record<string, unknown>>> };
+        };
+        const byPaper = p.state?.pdfRegionHighlightsByPaper;
+        if (byPaper) {
+          for (const pid of Object.keys(byPaper)) {
+            byPaper[pid] = (byPaper[pid] ?? []).filter(
+              (h) =>
+                typeof h.xPct === "number" &&
+                typeof h.yPct === "number" &&
+                typeof h.wPct === "number" &&
+                typeof h.hPct === "number",
+            );
+          }
+        }
+        return persisted;
+      },
     }
   )
 );

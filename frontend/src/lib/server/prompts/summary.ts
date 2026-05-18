@@ -38,7 +38,7 @@ export function buildSummaryPrompt(args: {
     `- "discussion": multi-paragraph markdown — what the results mean, how they compare to prior work, what they imply.`,
     `- "limitations": array of short markdown strings with caveats the authors mention OR that are evident.`,
     `- "future_work": 2–3 sentences on what follow-up research this enables or suggests.`,
-    `- "key_equations": array of {"equation": LaTeX (display math), "meaning": one-paragraph markdown}. Pick the 3–6 most important equations of the paper.`,
+    `- "key_equations": array of {"equation": LaTeX wrapped in $$...$$ on its own line (display math, no surrounding prose), "meaning": one-paragraph markdown}. Pick the 3–6 most important equations of the paper. NEVER emit bare LaTeX — always wrap the equation field in $$...$$.`,
     `- "key_figures_and_tables": array of {"id": author label (e.g. "Fig. 1"), "description": one-paragraph markdown}. Pick the most informative figures/tables.`,
     depthBlock,
   ].join("\n\n");
