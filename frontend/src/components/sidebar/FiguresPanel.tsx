@@ -58,21 +58,58 @@ function appendFigureAnalysisToCaches(paperId: string, entry: FigureAnalysis) {
   }
 }
 
+const FIG_BLOB_CACHE_SIZE = 64;
+const figureBlobCache = new Map<string, string>();
+
+function rememberFigureBlob(src: string, blobUrl: string) {
+  if (figureBlobCache.has(src)) return;
+  figureBlobCache.set(src, blobUrl);
+  if (figureBlobCache.size > FIG_BLOB_CACHE_SIZE) {
+    const firstKey = figureBlobCache.keys().next().value;
+    if (firstKey) {
+      const stale = figureBlobCache.get(firstKey);
+      if (stale && stale !== blobUrl) URL.revokeObjectURL(stale);
+      figureBlobCache.delete(firstKey);
+    }
+  }
+}
+
+async function fetchFigureBlobWithRetry(src: string, headers: Record<string, string>) {
+  for (let i = 0; i < 2; i++) {
+    try {
+      const res = await fetch(src, { headers, cache: "no-store" });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      return await res.blob();
+    } catch (e) {
+      if (i === 1) throw e;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+  throw new Error("unreachable");
+}
+
 function AuthImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
-  const [blobUrl, setBlobUrl] = useState<string>("");
+  const cached = figureBlobCache.get(src);
+  const [blobUrl, setBlobUrl] = useState<string>(cached ?? "");
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    const hit = figureBlobCache.get(src);
+    if (hit) {
+      setBlobUrl(hit);
+      setFailed(false);
+      return;
+    }
+
     let cancelled = false;
     import("@/lib/api").then(({ getAuthHeadersSync }) => {
       const headers = getAuthHeadersSync();
-      fetch(src, { headers })
-        .then((res) => {
-          if (!res.ok) throw new Error("fetch failed");
-          return res.blob();
-        })
+      fetchFigureBlobWithRetry(src, headers)
         .then((blob) => {
-          if (!cancelled) setBlobUrl(URL.createObjectURL(blob));
+          if (cancelled) return;
+          const objUrl = URL.createObjectURL(blob);
+          rememberFigureBlob(src, objUrl);
+          setBlobUrl(objUrl);
         })
         .catch(() => {
           if (!cancelled) setFailed(true);
@@ -82,20 +119,29 @@ function AuthImage({ src, alt, className }: { src: string; alt: string; classNam
   }, [src]);
 
   useEffect(() => {
-    return () => { if (blobUrl) URL.revokeObjectURL(blobUrl); };
+    return () => {
+      if (blobUrl && !Array.from(figureBlobCache.values()).includes(blobUrl)) {
+        URL.revokeObjectURL(blobUrl);
+      }
+    };
   }, [blobUrl]);
 
   if (failed) {
     return (
-      <div className={`flex items-center justify-center text-muted-foreground/30 text-[var(--text-xs)] ${className || ""}`}>
-        No preview
+      <div
+        className={`flex flex-col items-center justify-center gap-1 bg-muted/[0.10] text-muted-foreground/70 ${className || ""}`}
+      >
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 4.5h18v15H3zM7 10l3 3 5-6 4 6" />
+        </svg>
+        <span className="text-[var(--text-xs)] font-medium">Preview unavailable</span>
       </div>
     );
   }
   if (!blobUrl) {
     return (
-      <div className={`flex items-center justify-center ${className || ""}`}>
-        <div className="w-4 h-4 border-2 border-muted-foreground/20 border-t-muted-foreground/60 rounded-full animate-spin" />
+      <div className={`flex h-full w-full items-center justify-center bg-muted/[0.12] ${className || ""}`}>
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground/70" />
       </div>
     );
   }
@@ -191,6 +237,8 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   const setMarqueeMode = useStore((s) => s.setMarqueeMode);
   const pendingFigureBlob = useStore((s) => s.pendingFigureBlob);
   const setPendingFigureBlob = useStore((s) => s.setPendingFigureBlob);
+  const pendingFigureCaption = useStore((s) => s.pendingFigureCaption);
+  const setPendingFigureCaption = useStore((s) => s.setPendingFigureCaption);
 
   useEffect(() => {
     setClipError(null);
@@ -415,7 +463,11 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
       }
       try {
         setClipSaving(true);
-        const { figure, figures } = await api.uploadFigureFromSelection(paperId, blob);
+        const { figure: uploaded, figures: uploadedFigures } = await api.uploadFigureFromSelection(paperId, blob);
+        const caption = useStore.getState().pendingFigureCaption;
+        const figure = caption ? { ...uploaded, caption } : uploaded;
+        const figures = uploadedFigures.map((f) => (f.id === figure.id ? figure : f));
+        if (caption) useStore.getState().setPendingFigureCaption(null);
         const snap =
           useStore.getState().papersById[paperId] ??
           (useStore.getState().paper?.id === paperId ? useStore.getState().paper : null);
@@ -444,7 +496,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     const blob = pendingFigureBlob;
     setPendingFigureBlob(null);
     void ingestFigureBlob(blob, "Region capture failed.");
-  }, [pendingFigureBlob, setPendingFigureBlob, ingestFigureBlob]);
+  }, [pendingFigureBlob, setPendingFigureBlob, ingestFigureBlob, pendingFigureCaption, setPendingFigureCaption]);
 
   const handleScreenCapture = useCallback(async () => {
     await ingestFigureBlob(
@@ -490,9 +542,9 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
             </svg>
           </div>
-          <p className="text-[var(--text-md)] font-semibold tracking-tight text-foreground/95">No figures yet</p>
+          <p className="text-[var(--text-md)] font-semibold tracking-tight text-foreground/95">No figures detected</p>
           <p className="mx-auto max-w-sm text-[var(--text-xs)] leading-snug text-muted-foreground/88">
-            Add one from the PDF, screen capture, or clipboard. Figures are saved per paper automatically.
+            Nothing was extracted from the PDF. Capture a region, paste an image, or re-run extraction.
           </p>
         </div>
         <div className="flex flex-col gap-2">

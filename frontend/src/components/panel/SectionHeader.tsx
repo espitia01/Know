@@ -8,26 +8,45 @@ export function SectionHeader({
   count,
   action,
   className,
+  eyebrow = false,
+  size = "primary",
 }: {
   title: string;
   count?: number;
   action?: ReactNode;
   className?: string;
+  /** Uppercase eyebrow for legacy chrome rows (History, Follow-ups). */
+  eyebrow?: boolean;
+  /** Primary section titles vs nested. */
+  size?: "primary" | "nested";
 }) {
   return (
     <div
       className={cn(
-        "mb-2.5 flex min-h-[1.25rem] items-baseline justify-between gap-2 border-b border-border/32 pb-2",
-        className
+        "mb-0 flex min-h-[1.25rem] items-baseline justify-between gap-2 pb-1.5",
+        className,
       )}
     >
       <div className="flex min-w-0 items-baseline gap-2">
-        <h2 className="shrink-0 text-[var(--text-sm)] font-medium tracking-[-0.014em] text-foreground">
-          {title}
-        </h2>
+        {eyebrow ? (
+          <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/85">
+            {title}
+          </span>
+        ) : (
+          <h2
+            className={cn(
+              "shrink-0 font-display tracking-[-0.02em] text-foreground",
+              size === "primary"
+                ? "text-[var(--text-md)] font-medium"
+                : "text-[var(--text-sm)] font-medium",
+            )}
+          >
+            {title}
+          </h2>
+        )}
         {count != null && (
           <span
-            className="font-mono text-[var(--text-2xs)] font-medium tabular-nums text-muted-foreground/72"
+            className="rounded-full bg-muted/40 px-1.5 py-px font-mono text-[10px] font-medium tabular-nums text-muted-foreground/80"
             aria-hidden
           >
             {count}

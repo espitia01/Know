@@ -328,40 +328,48 @@ function snapRangeUsingSelectionModify(origin: Range): Range | null {
 /** Expand anchors outward to nearest word boundaries using Intl segments. */
 function snapRangeToWordsViaIntl(range: Range): Range | null {
   if (typeof Intl === "undefined" || !("Segmenter" in Intl)) return null;
-  const startNode = range.startContainer;
-  const endNode = range.endContainer;
-  if (startNode.nodeType !== Node.TEXT_NODE) return null;
-  if (endNode.nodeType !== Node.TEXT_NODE) return null;
 
+  const startResolved =
+    range.startContainer.nodeType === Node.TEXT_NODE
+      ? { node: range.startContainer as Text, offset: range.startOffset }
+      : resolveTextPoint(range.startContainer, range.startOffset, "start");
+  const endResolved =
+    range.endContainer.nodeType === Node.TEXT_NODE
+      ? { node: range.endContainer as Text, offset: range.endOffset }
+      : resolveTextPoint(range.endContainer, range.endOffset, "end");
+  if (!startResolved || !endResolved) return null;
+
+  const startNode = startResolved.node;
+  const endNode = endResolved.node;
   const seg = new Intl.Segmenter(undefined, { granularity: "word" });
 
   const startText = startNode.textContent ?? "";
-  let newStart = range.startOffset;
+  let newStart = startResolved.offset;
   for (const s of seg.segment(startText)) {
     if (!s.isWordLike) continue;
     const segStart = s.index;
     const segEnd = s.index + s.segment.length;
-    if (segStart < range.startOffset && range.startOffset < segEnd) {
+    if (segStart < startResolved.offset && startResolved.offset < segEnd) {
       newStart = segStart;
       break;
     }
-    if (segStart >= range.startOffset) break;
+    if (segStart >= startResolved.offset) break;
   }
 
   const endText = endNode.textContent ?? "";
-  let newEnd = range.endOffset;
+  let newEnd = endResolved.offset;
   for (const s of seg.segment(endText)) {
     if (!s.isWordLike) continue;
     const segStart = s.index;
     const segEnd = s.index + s.segment.length;
-    if (segStart < range.endOffset && range.endOffset < segEnd) {
+    if (segStart < endResolved.offset && endResolved.offset < segEnd) {
       newEnd = segEnd;
       break;
     }
-    if (segStart >= range.endOffset) break;
+    if (segStart >= endResolved.offset) break;
   }
 
-  if (newStart === range.startOffset && newEnd === range.endOffset) return null;
+  if (newStart === startResolved.offset && newEnd === endResolved.offset) return null;
   const next = document.createRange();
   try {
     next.setStart(startNode, newStart);
@@ -380,11 +388,20 @@ function snapRangeToWords(origin: Range): Range | null {
   const normalized = normalizeRangeEndpointsToText(origin.cloneRange());
   const work = normalized ?? origin.cloneRange();
 
+  const isMultiLine =
+    work.getClientRects().length > 1 || work.startContainer !== work.endContainer;
+
   const webkitFirst = preferIntlWordSnapFirstForPdf();
   const intl = snapRangeToWordsViaIntl(work);
   const intlOk = intl !== null && snappedRangeDoesNotShrink(originClone, intl);
   const mod = snapRangeUsingSelectionModify(work);
   const modOk = mod !== null;
+
+  if (isMultiLine) {
+    if (modOk) return mod;
+    if (intlOk) return intl;
+    return null;
+  }
 
   if (webkitFirst) {
     if (intlOk) return intl;
@@ -456,7 +473,14 @@ export function PdfViewer({
   const marqueeMode = useStore((s) => s.marqueeMode);
   const setMarqueeMode = useStore((s) => s.setMarqueeMode);
   const setPendingFigureBlob = useStore((s) => s.setPendingFigureBlob);
+  const setPendingFigureCaption = useStore((s) => s.setPendingFigureCaption);
+  const setPdfTextLayerEmpty = useStore((s) => s.setPdfTextLayerEmpty);
+  const isScannedPdf = useStore((s) => !!(paperId && s.pdfTextLayerEmptyByPaper[paperId]));
   const setActiveTab = useStore((s) => s.setActiveTab);
+
+  const [scannedBannerDismissed, setScannedBannerDismissed] = useState(false);
+  const pageTextCheckRef = useRef<Map<number, boolean>>(new Map());
+  const scannedDetectedRef = useRef(false);
 
   const [retryKey, setRetryKey] = useState(0);
   const [marqueeRect, setMarqueeRect] = useState<PdfMarqueeBox | null>(null);
@@ -472,6 +496,12 @@ export function PdfViewer({
       selectionDeletePopoverCleanup?.();
     };
   }, []);
+
+  useEffect(() => {
+    pageTextCheckRef.current = new Map();
+    scannedDetectedRef.current = false;
+    setScannedBannerDismissed(false);
+  }, [paperId, retryKey]);
 
   // Hand the URL straight to PDF.js for the *first* load so HTTP range
   // requests can start rendering page 1 before the full document has
@@ -669,6 +699,13 @@ export function PdfViewer({
   // step is to remove any existing overlay on the page so we never
   // stack duplicates.
   const drawUnderlinesForPage = useCallback((pageEl: HTMLElement, history: SelectionAnalysisResult[]) => {
+    if (paperId && useStore.getState().pdfTextLayerEmptyByPaper[paperId]) {
+      pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
+      const peek = pageEl as HTMLElement & { __knowHighlights?: unknown[] };
+      peek.__knowHighlights = [];
+      return;
+    }
+
     const textLayer = pageEl.querySelector(".react-pdf__Page__textContent, .textLayer") as HTMLElement | null;
 
     const peekHost = pageEl as HTMLElement & {
@@ -1272,7 +1309,7 @@ export function PdfViewer({
       pageObservers.clear();
       if (raf !== null) cancelAnimationFrame(raf);
     };
-  }, [selectionHistory, drawUnderlinesForPage, scale]);
+  }, [selectionHistory, drawUnderlinesForPage, scale, paperId]);
 
   const handlePageRender = useCallback((pageNum: number) => {
     const el = containerRef.current?.querySelector(`[data-page-number="${pageNum}"]`) as HTMLElement | null;
@@ -1313,8 +1350,24 @@ export function PdfViewer({
   const handleTextLayerRendered = useCallback((pageNum: number) => {
     const el = containerRef.current?.querySelector(`.react-pdf__Page[data-page-number="${pageNum}"]`) as HTMLElement | null;
     if (!el) return;
+
+    if (pageNum <= 3 && !scannedDetectedRef.current) {
+      const textLayer = el.querySelector(".react-pdf__Page__textContent, .textLayer") as HTMLElement | null;
+      const hasText = !!(textLayer?.textContent?.trim());
+      pageTextCheckRef.current.set(pageNum, hasText);
+      const sampled = [1, 2, 3].every((p) => pageTextCheckRef.current.has(p));
+      if (sampled) {
+        const allEmpty = [1, 2, 3].every((p) => !pageTextCheckRef.current.get(p));
+        if (allEmpty) {
+          scannedDetectedRef.current = true;
+          setMarqueeMode(true);
+          if (paperId) setPdfTextLayerEmpty(paperId, true);
+        }
+      }
+    }
+
     drawUnderlinesForPage(el, useStore.getState().selectionHistory);
-  }, [drawUnderlinesForPage]);
+  }, [drawUnderlinesForPage, paperId, setMarqueeMode, setPdfTextLayerEmpty]);
 
   const handleMarqueeDown = useCallback(
     (e: ReactMouseEvent<HTMLDivElement>) => {
@@ -1382,13 +1435,30 @@ export function PdfViewer({
     }
 
     setMarqueeRect(null);
-    setMarqueeMode(false);
+    if (!isScannedPdf) {
+      setMarqueeMode(false);
+    }
 
     if (blob) {
+      if (isScannedPdf && containerRef.current) {
+        const pages = containerRef.current.querySelectorAll(".react-pdf__Page[data-page-number]");
+        let pageNum = 1;
+        const midY = mr.y + mr.h / 2;
+        for (const p of pages) {
+          const el = p as HTMLElement;
+          const top = el.offsetTop;
+          const bottom = top + el.offsetHeight;
+          if (midY >= top && midY < bottom) {
+            pageNum = parseInt(el.getAttribute("data-page-number") || "1", 10);
+            break;
+          }
+        }
+        setPendingFigureCaption(`Page ${pageNum} — region`);
+      }
       setPendingFigureBlob(blob);
       setActiveTab("figures");
     }
-  }, [setMarqueeMode, setPendingFigureBlob, setActiveTab]);
+  }, [isScannedPdf, setMarqueeMode, setPendingFigureBlob, setPendingFigureCaption, setActiveTab]);
 
   const finalizeTextSelectionToolbar = useCallback(() => {
     const sel = window.getSelection();
@@ -1404,6 +1474,13 @@ export function PdfViewer({
     const snapped = snapRangeToWords(liveRange);
     if (snapped) {
       stabilizeSelectionAnchors(sel, snapped);
+      if (sel.rangeCount === 0) {
+        const retryRange = snapped;
+        requestAnimationFrame(() => {
+          if (sel.rangeCount > 0) return;
+          stabilizeSelectionAnchors(sel, retryRange);
+        });
+      }
     }
 
     let text = sel.toString().trim();
@@ -1411,6 +1488,7 @@ export function PdfViewer({
 
     text = text
       .replace(/\r\n/g, "\n")
+      .replace(/-\n/g, "")
       .replace(/[ \t]+/g, " ")
       .replace(/ ?\n ?/g, " ")
       .replace(/\s{2,}/g, " ")
@@ -1665,6 +1743,18 @@ export function PdfViewer({
         onMouseDown={marqueeMode ? handleMarqueeDown : undefined}
         onMouseMove={marqueeMode ? handleMarqueeMove : undefined}
       >
+        {isScannedPdf && !scannedBannerDismissed && (
+          <div className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-border/50 bg-muted/[0.12] px-4 py-2 text-[var(--text-sm)] text-foreground/90 backdrop-blur-sm">
+            <span>This PDF has no selectable text. Drag to capture a region instead.</span>
+            <button
+              type="button"
+              onClick={() => setScannedBannerDismissed(true)}
+              className="text-[var(--text-xs)] font-medium text-muted-foreground hover:text-foreground"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         {marqueeMode && marqueeRect && marqueeRect.w > 2 && marqueeRect.h > 2 && !!fileData && !loadError && (
           <div
             aria-hidden

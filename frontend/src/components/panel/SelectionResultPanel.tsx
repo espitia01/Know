@@ -11,6 +11,7 @@ import type { SelectionAnalysisResult } from "@/lib/api";
 import { ACTION_LABELS, normalizeSelectionAction, selectionKey } from "@/lib/selectionActions";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { SectionHeader } from "@/components/panel/SectionHeader";
+import { AnalysisSection } from "@/components/analysis/AnalysisSection";
 import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
 import { useStore } from "@/lib/store";
 
@@ -70,7 +71,7 @@ function FollowUpThreadList({ followups }: { followups: SelectionAnalysisResult[
             title={q}
             leading={
               <span
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border/50 bg-background/60 text-[10px] font-medium tabular-nums text-muted-foreground dark:bg-card/30"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-muted/35 text-[10px] font-medium tabular-nums text-muted-foreground"
                 aria-hidden
               >
                 {i + 1}
@@ -98,11 +99,11 @@ export function SelectionResultPanel({
 
   if (loading && !result) {
     return (
-      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-12">
-        <div className="w-full max-w-xs">
+      <div className="flex flex-col items-center gap-2 py-6">
+        <div className="w-full max-w-[16rem]">
           <AnalysisProgress kind="selection" />
         </div>
-        <span className="text-[var(--text-sm)] text-muted-foreground">Analyzing selection…</span>
+        <p className="text-[var(--text-xs)] text-muted-foreground/85">Analyzing selection…</p>
       </div>
     );
   }
@@ -159,7 +160,7 @@ export function SelectionResultPanel({
       <ResultCard result={t.root} />
       {t.followups.length > 0 && (
         <div>
-          <SectionHeader title="Follow-ups" count={t.followups.length} className="mb-2" />
+          <SectionHeader title="Follow-ups" count={t.followups.length} eyebrow className="mb-2" />
           <FollowUpThreadList followups={t.followups} />
         </div>
       )}
@@ -172,13 +173,11 @@ export function SelectionResultPanel({
         <>
           {renderThreadCard(activeThread)}
           {loading && (
-            <div className="flex w-full flex-col items-center gap-2.5 rounded-lg border border-border/55 bg-muted/10 px-4 py-5 dark:bg-muted/[0.08]">
-              <div className="w-full max-w-xs">
-                <AnalysisProgress kind="selection" className="mx-auto" />
+            <div className="flex flex-col items-center gap-2 py-6">
+              <div className="w-full max-w-[16rem]">
+                <AnalysisProgress kind="selection" />
               </div>
-              <span className="text-center text-[var(--text-xs)] text-muted-foreground motion-safe:animate-pulse">
-                Thinking…
-              </span>
+              <p className="text-[var(--text-xs)] text-muted-foreground/85">Thinking…</p>
             </div>
           )}
           {canAskFollowUp && (
@@ -198,8 +197,8 @@ export function SelectionResultPanel({
       {/* History: every thread except the active one — click a row to focus it so follow-ups attach here. */}
       {threads.filter((t) => t !== activeThread).length > 0 && (
         <div className="space-y-2 border-t border-border/50 pt-6">
-          <SectionHeader title="History" count={threads.filter((t) => t !== activeThread).length} />
-          <div className="overflow-hidden rounded-lg border border-border/60 bg-card/45 divide-y divide-border/50 dark:border-border/55 dark:bg-card/22">
+          <SectionHeader title="History" count={threads.filter((t) => t !== activeThread).length} eyebrow />
+          <div className="overflow-hidden rounded-[var(--radius-lg)] border border-border/50 bg-card/35 divide-y divide-border/40 dark:bg-card/22">
             {threads
               .filter((t) => t !== activeThread)
               .map((t) => {
@@ -212,13 +211,8 @@ export function SelectionResultPanel({
                       className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors duration-150 hover:bg-accent/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                     >
                       <span
-                        className="shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium tracking-wide"
+                        className="shrink-0 rounded-full border border-border/55 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/85"
                         data-action={action}
-                        style={{
-                          color: "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)))",
-                          background:
-                            "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)) / 0.12)",
-                        }}
                       >
                         {ACTION_LABELS[action] || action}
                       </span>
@@ -232,9 +226,6 @@ export function SelectionResultPanel({
                           +{t.followups.length}
                         </span>
                       )}
-                      <span className="shrink-0 text-[10px] font-medium tracking-wide text-muted-foreground/60">
-                        Open
-                      </span>
                     </button>
                   </div>
                 );
@@ -303,19 +294,15 @@ function ResultCard({
   const hasContent = !!(result.explanation || result.elaboration || result.answer || result.assumptions?.length || result.steps?.length);
   const action = normalizeSelectionAction(result.action);
   const streamingLabel = action === "followup" ? "Thinking…" : "Generating analysis…";
-  const inAccordion = hideHeader && hideQuote;
-
   return (
     <div className="space-y-3">
       {!hideHeader && (
         <div className="flex items-center gap-2">
           <span
-            className="rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+            className="text-[10px] font-medium uppercase tracking-[0.14em]"
             data-action={action}
             style={{
-              color: "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)))",
-              background:
-                "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)) / 0.14)",
+              color: "rgb(var(--highlight-rgb, var(--muted-foreground-rgb, 113 113 122)) / 0.85)",
             }}
           >
             {ACTION_LABELS[action] || action}
@@ -327,21 +314,13 @@ function ResultCard({
       )}
 
       {!hideQuote && (
-        <div className="rounded-lg border border-border/40 bg-muted/20 px-3 py-2.5 text-[var(--text-xs)] leading-relaxed text-muted-foreground/75">
-          <span className="italic text-foreground/85">
-            &ldquo;{result.selected_text.length > 200 ? result.selected_text.slice(0, 200) + "…" : result.selected_text}&rdquo;
-          </span>
+        <div className="border-l-2 border-border/50 pl-3 text-[var(--text-sm)] italic text-foreground/80 dark:text-foreground/75">
+          &ldquo;{result.selected_text.length > 200 ? result.selected_text.slice(0, 200) + "…" : result.selected_text}&rdquo;
         </div>
       )}
 
       {(result.explanation || result.elaboration || result.answer) && (
-        <div
-          className={
-            inAccordion
-              ? "rounded-md border border-border/45 bg-background/55 px-3 py-2.5 dark:bg-card/22"
-              : "rounded-lg border border-border/50 bg-card/50 px-3.5 py-3 dark:bg-card/32"
-          }
-        >
+        <div className="text-[var(--text-sm)] leading-relaxed text-foreground/90">
           {result.explanation && (
             <StreamingMarkdown streaming={isStreaming}>
               {result.explanation}
@@ -357,42 +336,43 @@ function ResultCard({
       )}
 
       {!hasContent && isStreaming && (
-        <div className="flex w-full flex-col items-center gap-2 py-4">
-          <div className="w-full max-w-xs">
-            <AnalysisProgress kind="selection" className="mx-auto" />
+        <div className="flex flex-col items-center gap-2 py-6">
+          <div className="w-full max-w-[16rem]">
+            <AnalysisProgress kind="selection" />
           </div>
-          <p className="text-center text-[var(--text-xs)] text-muted-foreground motion-safe:animate-pulse">
-            {streamingLabel}
-          </p>
+          <p className="text-[var(--text-xs)] text-muted-foreground/85">{streamingLabel}</p>
         </div>
       )}
 
       {result.assumptions && result.assumptions.length > 0 && (
-        <div className="overflow-hidden rounded-lg border border-border/60">
-          {result.assumptions.map((a, i) => (
-            <div
-              key={i}
-              className="border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40"
-            >
-              <div className="flex items-start gap-2">
-                <Badge
-                  variant={a.type === "explicit" ? "soft" : "outline"}
-                  className={a.type === "explicit" ? "text-success" : "text-warning"}
-                >
-                  {a.type}
-                </Badge>
-                <div className="min-w-0 flex-1 text-[var(--text-sm)] leading-relaxed">
-                  <StreamingMarkdown>{a.statement}</StreamingMarkdown>
-                  {a.significance && (
-                    <div className="mt-1 text-[var(--text-xs)] text-muted-foreground/80">
-                      <StreamingMarkdown>{a.significance}</StreamingMarkdown>
-                    </div>
-                  )}
+        <AnalysisSection title="Assumptions" count={result.assumptions.length}>
+          <div className="overflow-hidden rounded-lg border border-border/50 bg-card/45 divide-y divide-border/50 dark:bg-card/22">
+            {result.assumptions.map((a, i) => (
+              <div
+                key={i}
+                data-type={a.type}
+                className="px-3 py-2.5 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40"
+              >
+                <div className="flex items-start gap-2">
+                  <Badge
+                    variant={a.type === "explicit" ? "soft" : "outline"}
+                    className={a.type === "explicit" ? "text-success" : "text-warning"}
+                  >
+                    {a.type}
+                  </Badge>
+                  <div className="min-w-0 flex-1 text-[var(--text-sm)] leading-relaxed text-foreground/90">
+                    <StreamingMarkdown>{a.statement}</StreamingMarkdown>
+                    {a.significance && (
+                      <div className="mt-1 text-[var(--text-xs)] text-muted-foreground/80">
+                        <StreamingMarkdown>{a.significance}</StreamingMarkdown>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </AnalysisSection>
       )}
 
       {result.steps && result.steps.length > 0 && (

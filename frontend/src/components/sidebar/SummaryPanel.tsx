@@ -51,11 +51,11 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
 
   if (!summary && isLoading) {
     return (
-      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-12">
-        <div className="w-full max-w-xs">
+      <div className="flex flex-col items-center gap-2 py-6">
+        <div className="w-full max-w-[16rem]">
           <AnalysisProgress kind="summary" paperId={paperId} />
         </div>
-        <p className="text-[var(--text-sm)] text-muted-foreground">Generating detailed summary…</p>
+        <p className="text-[var(--text-xs)] text-muted-foreground/85">Generating detailed summary…</p>
       </div>
     );
   }
@@ -152,7 +152,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.key_equations && s.key_equations.length > 0 && (
         <AnalysisSection title="Key equations" count={s.key_equations.length}>
-          <div className="overflow-hidden rounded-lg border border-border/60 bg-card/30">
+          <div className="overflow-hidden rounded-lg border border-border/50 bg-card/35 dark:bg-card/22">
             {s.key_equations.map((eq, i) => {
               if (!eq) return null;
               return (
@@ -172,7 +172,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.key_figures_and_tables && s.key_figures_and_tables.length > 0 && (
         <AnalysisSection title="Key figures & tables" count={s.key_figures_and_tables.length}>
-          <div className="overflow-hidden rounded-lg border border-border/60 bg-card/30">
+          <div className="overflow-hidden rounded-lg border border-border/50 bg-card/35 dark:bg-card/22">
             {s.key_figures_and_tables.map((fig, i) => {
               if (!fig) return null;
               return (

@@ -15,7 +15,7 @@ interface AssumptionsPanelProps {
 }
 
 const rowListClass =
-  "overflow-hidden rounded-lg border border-border/60 bg-card/30";
+  "overflow-hidden rounded-lg border border-border/50 bg-card/35 dark:bg-card/22";
 
 const rowItemClass =
   "border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out hover:bg-accent/40";
@@ -85,11 +85,11 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
 
   if (assumptionsLoading) {
     return (
-      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-8 motion-safe:animate-fade-in">
-        <div className="w-full max-w-xs">
+      <div className="flex flex-col items-center gap-2 py-6 motion-safe:animate-fade-in">
+        <div className="w-full max-w-[16rem]">
           <AnalysisProgress kind="assumptions" paperId={paperId} />
         </div>
-        <p className="text-[var(--text-sm)] text-muted-foreground">Extracting assumptions…</p>
+        <p className="text-[var(--text-xs)] text-muted-foreground/85">Extracting assumptions…</p>
       </div>
     );
   }

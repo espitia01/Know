@@ -1159,7 +1159,7 @@ body::before {
   right: auto !important;
   width: 1.1rem !important;
   max-width: calc(100% - 0.4rem) !important;
-  height: 2px !important;
+  height: 1px !important;
   bottom: 0 !important;
   border-radius: 2px;
   transform: translateX(-50%) !important;

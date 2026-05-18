@@ -35,7 +35,7 @@ const POSITION_LABEL: Record<PanelPosition, string> = {
 // `flex-none shrink-0` overrides TabsTrigger’s default `flex-1` so many tabs
 // don’t compress in a narrow right/left column — the row scrolls instead.
 const TAB_STYLE =
-  "shrink-0 flex-none h-8 rounded-md px-2.5 text-[var(--text-sm)] tracking-[-0.012em] font-medium text-muted-foreground hover:text-foreground data-active:text-foreground data-active:font-semibold";
+  "shrink-0 flex-none h-8 rounded-md px-2.5 text-[var(--text-sm)] tracking-[-0.012em] font-medium text-muted-foreground/85 hover:text-foreground data-active:text-foreground data-active:font-medium";
 
 const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
   right: {
@@ -120,7 +120,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
       onValueChange={setActiveTab}
       className="analysis-panel-tabs flex h-full flex-col"
     >
-      <div className="flex h-10 min-w-0 shrink-0 items-center gap-1 border-b border-border/40 bg-muted/[0.11] px-3 dark:bg-muted/[0.08]">
+      <div className="flex h-10 min-w-0 shrink-0 items-center gap-1 border-b border-border/40 bg-muted/[0.06] px-3 dark:bg-muted/[0.08]">
         {/* min-w-0 + overflow-x-auto: side panels stay narrow; tab row scrolls
             horizontally. Tab triggers must stay flex-none (see TAB_STYLE) or
             labels collapse. Light scrollbar so the strip is discoverable. */}
@@ -157,7 +157,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
                 >
                   {locked && (
                     <svg
-                      className="mr-0.5 h-2.5 w-2.5 shrink-0 opacity-50"
+                      className="mr-0.5 h-2 w-2 shrink-0 opacity-30"
                       fill="none"
                       viewBox="0 0 24 24"
                       stroke="currentColor"

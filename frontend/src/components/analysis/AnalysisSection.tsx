@@ -24,6 +24,8 @@ export function AnalysisSection({
   children,
   id,
   className,
+  eyebrow,
+  size,
 }: {
   title: string;
   count?: number;
@@ -31,10 +33,12 @@ export function AnalysisSection({
   children: ReactNode;
   id?: string;
   className?: string;
+  eyebrow?: boolean;
+  size?: "primary" | "nested";
 }) {
   return (
     <section id={id} className={cn("space-y-3", className)}>
-      <SectionHeader title={title} count={count} action={action} />
+      <SectionHeader title={title} count={count} action={action} eyebrow={eyebrow} size={size} />
       {children}
     </section>
   );

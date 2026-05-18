@@ -68,11 +68,11 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
 
   if (preReadingLoading) {
     return (
-      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-8 motion-safe:animate-fade-in">
-        <div className="w-full max-w-xs">
+      <div className="flex flex-col items-center gap-2 py-6 motion-safe:animate-fade-in">
+        <div className="w-full max-w-[16rem]">
           <AnalysisProgress kind="preReading" paperId={paperId} />
         </div>
-        <p className="text-[var(--text-sm)] text-muted-foreground">Analyzing paper…</p>
+        <p className="text-[var(--text-xs)] text-muted-foreground/85">Analyzing paper…</p>
       </div>
     );
   }

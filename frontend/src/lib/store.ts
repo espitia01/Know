@@ -79,9 +79,16 @@ interface AppStore {
   marqueeMode: boolean;
   setMarqueeMode: (v: boolean) => void;
 
+  /** Per-paper: pdf.js text layer empty on first pages (scanned PDF). Not persisted. */
+  pdfTextLayerEmptyByPaper: Record<string, boolean>;
+  setPdfTextLayerEmpty: (paperId: string, empty: boolean) => void;
+
   /** Viewer hands off marquee captures; FiguresPanel uploads then clears — not persisted */
   pendingFigureBlob: Blob | null;
   setPendingFigureBlob: (b: Blob | null) => void;
+  /** Optional caption for the next pending figure (e.g. scanned PDF region capture). */
+  pendingFigureCaption: string | null;
+  setPendingFigureCaption: (caption: string | null) => void;
 
   panelVisible: boolean;
   setPanelVisible: (v: boolean) => void;
@@ -199,7 +206,9 @@ export const useStore = create<AppStore>()(
           return {
             paper: p,
             pendingFigureBlob: null,
+            pendingFigureCaption: null,
             marqueeMode: false,
+            pdfTextLayerEmptyByPaper: {},
             preReading: null,
             preReadingPaperId: null,
             assumptions: [],
@@ -368,7 +377,9 @@ export const useStore = create<AppStore>()(
           sessionPapers: [], crossPaperResults: [],
           papersById: {},
           pendingFigureBlob: null,
+          pendingFigureCaption: null,
           marqueeMode: false,
+          pdfTextLayerEmptyByPaper: {},
           preReading: null,
           preReadingPaperId: null,
           assumptions: [], summary: null, notes: [],
@@ -400,8 +411,22 @@ export const useStore = create<AppStore>()(
       marqueeMode: false,
       setMarqueeMode: (v) => set({ marqueeMode: v }),
 
+      pdfTextLayerEmptyByPaper: {},
+      setPdfTextLayerEmpty: (paperId, empty) =>
+        set((s) => ({
+          pdfTextLayerEmptyByPaper: empty
+            ? { ...s.pdfTextLayerEmptyByPaper, [paperId]: true }
+            : (() => {
+                const next = { ...s.pdfTextLayerEmptyByPaper };
+                delete next[paperId];
+                return next;
+              })(),
+        })),
+
       pendingFigureBlob: null,
       setPendingFigureBlob: (b) => set({ pendingFigureBlob: b }),
+      pendingFigureCaption: null,
+      setPendingFigureCaption: (caption) => set({ pendingFigureCaption: caption }),
 
       panelVisible: true,
       setPanelVisible: (v) => set({ panelVisible: v }),

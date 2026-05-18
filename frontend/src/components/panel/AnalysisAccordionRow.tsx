@@ -27,7 +27,7 @@ export function AnalysisAccordionRow({
     <Collapsible.Root open={open} onOpenChange={onOpenChange}>
       <div
         className={cn(
-          "overflow-hidden rounded-lg border border-border/60 bg-card/50 shadow-none dark:border-border/55 dark:bg-card/20",
+          "overflow-hidden rounded-[var(--radius-lg)] border border-border/50 bg-card/35 shadow-none dark:bg-card/22",
           className,
         )}
       >
@@ -47,7 +47,7 @@ export function AnalysisAccordionRow({
             fill="none"
             stroke="currentColor"
             strokeWidth={2}
-            className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/50 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-data-[panel-open]:rotate-180"
+            className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/55 transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] group-data-[panel-open]:rotate-180"
             aria-hidden
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />

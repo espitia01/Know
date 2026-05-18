@@ -347,11 +347,11 @@ export function QAPanel({ paperId }: QAPanelProps) {
       </div>
 
       {qaLoading && (
-        <div className="flex min-h-[20vh] flex-col items-center justify-center gap-2 py-4">
-          <div className="mx-auto w-full max-w-xs">
-            <AnalysisProgress kind="qa" className="mx-auto" />
+        <div className="flex flex-col items-center gap-2 py-6">
+          <div className="w-full max-w-[16rem]">
+            <AnalysisProgress kind="qa" />
           </div>
-          <p className="text-[var(--text-sm)] text-muted-foreground">
+          <p className="text-[var(--text-xs)] text-muted-foreground/85">
             {crossPaper && hasMultiplePapers ? "Analyzing across papers…" : "Analyzing…"}
           </p>
         </div>
