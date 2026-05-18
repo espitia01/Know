@@ -1,161 +1,96 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
-import { api, type PaperSummary } from "@/lib/api";
+import { useEffect, useRef } from "react";
+import { experimental_useObject as useObject } from "@ai-sdk/react";
 import { useStore } from "@/lib/store";
-import { Md } from "@/components/ui/Md";
+import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SectionHeader } from "@/components/panel/SectionHeader";
-import {
-  activeSummaryStreams as activeStreams,
-  clearProgressStart,
-} from "@/lib/analysisState";
+import { PaperSummarySchema, type PaperSummary } from "@/lib/server/schemas";
 
 interface SummaryPanelProps {
   paperId: string;
 }
 
-async function fetchSummaryInBackground(
-  paperId: string,
-  setSummary: (s: PaperSummary) => void,
-  setSummaryLoading: (l: boolean) => void
-): Promise<{ ok: boolean; error?: string }> {
-  if (activeStreams.has(paperId)) return { ok: true };
-
-  const controller = new AbortController();
-  activeStreams.set(paperId, controller);
-  // Only toggle global loading when we're actually looking at this paper;
-  // otherwise we'd clobber another paper's loading indicator.
-  if (useStore.getState().paper?.id === paperId) {
-    setSummaryLoading(true);
-  }
-
-  let streamError: string | null = null;
-
-  try {
-    const res = await api.getSummaryStream(paperId, controller.signal);
-    if (controller.signal.aborted) return { ok: true };
-    if (!res.ok) {
-      let detail = `HTTP ${res.status}`;
-      try {
-        const body = await res.json();
-        if (body?.detail) {
-          detail = typeof body.detail === "string"
-            ? body.detail
-            : body.detail.message || detail;
-        }
-      } catch { /* non-JSON */ }
-      throw new Error(detail);
-    }
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error("No stream");
-
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    while (true) {
-      if (controller.signal.aborted) { reader.cancel(); break; }
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        try {
-          const event = JSON.parse(line.slice(6));
-          if (event.type === "done") {
-            if (event.summary) {
-              // Per audit §3.3: papersById is now the only in-memory paper
-              // artifact cache; keep cached_analysis hot without a parallel
-              // paperCaches slot that can drift.
-              useStore.getState().updateCachedAnalysis(paperId, { summary: event.summary });
-              // If the user is still viewing this paper, also push it to the
-              // top-level store for immediate render.
-              if (useStore.getState().paper?.id === paperId) {
-                setSummary(event.summary);
-              }
-            }
-          } else if (event.type === "error") {
-            throw new Error(event.message || "Stream error");
-          }
-        } catch (e) {
-          if (e instanceof SyntaxError) continue;
-          throw e;
-        }
-      }
-    }
-    return { ok: true };
-  } catch (e) {
-    if (controller.signal.aborted) return { ok: true };
-    streamError = e instanceof Error ? e.message : "Summary generation failed";
-    return { ok: false, error: streamError };
-  } finally {
-    activeStreams.delete(paperId);
-    clearProgressStart(paperId, "summary");
-    // Only clear the global loading indicator if we're still on this paper.
-    // If the user has navigated elsewhere, their current paper owns that flag
-    // and we must not touch it.
-    if (useStore.getState().paper?.id === paperId) {
-      setSummaryLoading(false);
-    }
-  }
-}
-
+/**
+ * Stage 3 migration:
+ *   - The summary now streams via the Vercel AI SDK
+ *     (`/api/papers/[id]/summary-stream`).
+ *   - `experimental_useObject` parses the partial-JSON stream into a
+ *     DeepPartial<PaperSummary>, so each section appears in the UI
+ *     as soon as the model starts emitting it. The user no longer
+ *     stares at a 30-second spinner; they see Overview within a few
+ *     seconds, then Motivation, then Methodology, etc.
+ *   - The server route persists the final assembled summary into
+ *     `cached_analysis.summary` via the internal upsert, so a refresh
+ *     keeps the result on subsequent visits.
+ */
 export function SummaryPanel({ paperId }: SummaryPanelProps) {
-  const { summary, setSummary, summaryLoading, setSummaryLoading, paper } = useStore();
-  const fetchAttempted = useRef<string | null>(null);
-  const [fetchError, setFetchError] = useState<string | null>(null);
+  const setSummary = useStore((s) => s.setSummary);
+  const cachedSummary = useStore((s) => s.summary) ?? null;
+  const paperCached = useStore((s) =>
+    s.paper?.id === paperId ? s.paper?.cached_analysis?.summary : null,
+  );
+  const onActivePaper = useStore((s) => s.paper?.id === paperId);
 
-  useEffect(() => {
-    fetchAttempted.current = null;
-    setFetchError(null);
-  }, [paperId]);
+  const triggered = useRef<string | null>(null);
 
-  // Guard against cross-paper bleed of the global `summary` slice:
-  // surface a summary only when the global `paper` *is* the paper
-  // this panel was mounted for. The store-level `setPaper` clears
-  // `summary` whenever the id changes, but this clamp covers the
-  // brief frame between mount and that effect running on a fresh
-  // upload (which is what produced the "new paper showing previous
-  // paper's summary" report).
-  const effectiveSummary =
-    paper?.id === paperId
-      ? (summary ?? paper?.cached_analysis?.summary ?? null)
-      : null;
-
-  const startFetch = useCallback((targetId: string) => {
-    setFetchError(null);
-    fetchSummaryInBackground(targetId, setSummary, setSummaryLoading).then((result) => {
-      // Only surface the failure if the user is still looking at this paper
-      // AND there's nothing already rendered (a previous cached summary
-      // should not be replaced with an error banner).
-      if (!result.ok && useStore.getState().paper?.id === targetId && !useStore.getState().summary) {
-        setFetchError(result.error || "Summary generation failed");
+  const {
+    submit,
+    object,
+    isLoading,
+    error,
+    stop,
+  } = useObject({
+    id: paperId,
+    api: `/api/papers/${paperId}/summary-stream`,
+    schema: PaperSummarySchema,
+    onFinish: ({ object: finalObject }) => {
+      if (!finalObject) return;
+      // Persist to the in-session zustand slice so other panels
+      // (e.g. shared components, exports) read the freshly-streamed
+      // summary without waiting for a refetch.
+      if (useStore.getState().paper?.id === paperId) {
+        setSummary(finalObject);
+        useStore.getState().updateCachedAnalysis(paperId, {
+          summary: finalObject,
+        });
       }
-    });
-  }, [setSummary, setSummaryLoading]);
+    },
+  });
 
+  // Reset the "have we kicked off a stream yet?" guard when the user
+  // switches papers — otherwise a slow / failed run on paper A would
+  // suppress the auto-trigger when they navigate to paper B.
   useEffect(() => {
-    if (effectiveSummary && paper?.id === paperId) {
-      if (!summary) setSummary(effectiveSummary);
-      return;
-    }
-    if (paper?.id !== paperId) return;
-    if (fetchAttempted.current === paperId) return;
+    triggered.current = null;
+    return () => {
+      stop();
+    };
+  }, [paperId, stop]);
 
-    if (activeStreams.has(paperId)) {
-      setSummaryLoading(true);
-      return;
-    }
+  // Resolve the summary the panel should render. Order of preference:
+  //   1. Live partial from the active stream.
+  //   2. In-session zustand slice from a prior stream.
+  //   3. cached_analysis.summary persisted on the paper row.
+  const live = (object as Partial<PaperSummary> | undefined) ?? null;
+  const fromStore = onActivePaper ? cachedSummary : null;
+  const fromCache = onActivePaper ? (paperCached as PaperSummary | null) : null;
+  const summary = live ?? fromStore ?? fromCache ?? null;
 
-    fetchAttempted.current = paperId;
-    startFetch(paperId);
-  }, [paperId, effectiveSummary, summary, paper, setSummary, setSummaryLoading, startFetch]);
+  // Auto-trigger a stream if there's no cached / in-session summary
+  // for this paper and we haven't started one already.
+  useEffect(() => {
+    if (!onActivePaper) return;
+    if (isLoading) return;
+    if (fromStore || fromCache) return;
+    if (triggered.current === paperId) return;
+    triggered.current = paperId;
+    submit({});
+  }, [onActivePaper, isLoading, fromStore, fromCache, paperId, submit]);
 
-  if (summaryLoading && !effectiveSummary) {
+  if (!summary && isLoading) {
     return (
       <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 py-12">
         <div className="w-full max-w-xs">
@@ -166,50 +101,51 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     );
   }
 
-  if (!effectiveSummary) {
+  if (!summary) {
+    const errMsg = error
+      ? readErrorMessage(error)
+      : null;
     return (
       <EmptyState
-        title={fetchError ? "Failed to generate summary" : "Summary not available yet"}
+        title={errMsg ? "Failed to generate summary" : "Summary not available yet"}
         body={
-          fetchError
-            ? fetchError
+          errMsg
+            ? errMsg
             : "Generate a detailed overview, contributions, methods, results, and limitations. Generation often takes 30–60 seconds once started."
         }
         cta={{
-          label: fetchError ? "Retry" : "Generate Summary",
+          label: errMsg ? "Retry" : "Generate Summary",
           onClick: () => {
-            fetchAttempted.current = null;
-            const ctrl = activeStreams.get(paperId);
-            if (ctrl) { ctrl.abort(); activeStreams.delete(paperId); }
-            clearProgressStart(paperId, "summary");
-            startFetch(paperId);
+            triggered.current = paperId;
+            submit({});
           },
         }}
       />
     );
   }
 
-  const s = effectiveSummary;
+  const s = summary as Partial<PaperSummary>;
+  const stillStreaming = isLoading;
 
   return (
     <div className="space-y-8">
       {s.overview && (
         <section>
           <SectionHeader title="Overview" />
-          <div className="prose prose-sm max-w-none leading-relaxed dark:prose-invert">
-            <Md>{s.overview}</Md>
-          </div>
+          <StreamingMarkdown streaming={stillStreaming && !s.motivation}>
+            {s.overview}
+          </StreamingMarkdown>
         </section>
       )}
       {s.motivation && (
         <section>
           <SectionHeader title="Motivation" />
-          <div className="prose prose-sm max-w-none leading-relaxed dark:prose-invert">
-            <Md>{s.motivation}</Md>
-          </div>
+          <StreamingMarkdown streaming={stillStreaming && !s.methodology}>
+            {s.motivation}
+          </StreamingMarkdown>
         </section>
       )}
-      {s.key_contributions?.length > 0 && (
+      {s.key_contributions && s.key_contributions.length > 0 && (
         <section>
           <SectionHeader title="Key contributions" count={s.key_contributions.length} />
           <ul className="space-y-2">
@@ -218,8 +154,8 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
                 <span className="mt-0.5 shrink-0 text-[var(--text-sm)] text-muted-foreground/50">
                   {i + 1}.
                 </span>
-                <div className="prose prose-sm min-w-0 max-w-none leading-relaxed dark:prose-invert">
-                  <Md>{c}</Md>
+                <div className="min-w-0 flex-1">
+                  <StreamingMarkdown>{c}</StreamingMarkdown>
                 </div>
               </li>
             ))}
@@ -229,74 +165,78 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       {s.methodology && (
         <section>
           <SectionHeader title="Methodology" />
-          <div className="prose prose-sm max-w-none leading-relaxed dark:prose-invert">
-            <Md>{s.methodology}</Md>
-          </div>
+          <StreamingMarkdown streaming={stillStreaming && !s.main_results}>
+            {s.methodology}
+          </StreamingMarkdown>
         </section>
       )}
       {s.main_results && (
         <section>
           <SectionHeader title="Main results" />
-          <div className="prose prose-sm max-w-none leading-relaxed dark:prose-invert">
-            <Md>{s.main_results}</Md>
-          </div>
+          <StreamingMarkdown streaming={stillStreaming && !s.discussion}>
+            {s.main_results}
+          </StreamingMarkdown>
         </section>
       )}
       {s.discussion && (
         <section>
           <SectionHeader title="Discussion" />
-          <div className="prose prose-sm max-w-none leading-relaxed dark:prose-invert">
-            <Md>{s.discussion}</Md>
-          </div>
+          <StreamingMarkdown streaming={stillStreaming && !s.future_work}>
+            {s.discussion}
+          </StreamingMarkdown>
         </section>
       )}
-      {s.key_equations?.length > 0 && (
+      {s.key_equations && s.key_equations.length > 0 && (
         <section>
           <SectionHeader title="Key equations" count={s.key_equations.length} />
           <div className="overflow-hidden rounded-lg border border-border/60 bg-card/30">
-            {s.key_equations.map((eq, i) => (
-              <div
-                key={i}
-                className="border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out hover:bg-accent/40"
-              >
-                <div className="prose prose-sm max-w-none dark:prose-invert">
-                  <Md>{eq.equation}</Md>
+            {s.key_equations.map((eq, i) => {
+              if (!eq) return null;
+              return (
+                <div
+                  key={i}
+                  className="border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40"
+                >
+                  <StreamingMarkdown>{eq.equation ?? ""}</StreamingMarkdown>
+                  <div className="mt-1.5 text-[var(--text-sm)] text-muted-foreground">
+                    <StreamingMarkdown>{eq.meaning ?? ""}</StreamingMarkdown>
+                  </div>
                 </div>
-                <div className="mt-1.5 text-[var(--text-sm)] text-muted-foreground">
-                  <Md>{eq.meaning}</Md>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
-      {s.key_figures_and_tables?.length > 0 && (
+      {s.key_figures_and_tables && s.key_figures_and_tables.length > 0 && (
         <section>
           <SectionHeader title="Key figures & tables" count={s.key_figures_and_tables.length} />
           <div className="overflow-hidden rounded-lg border border-border/60 bg-card/30">
-            {s.key_figures_and_tables.map((fig, i) => (
-              <div
-                key={i}
-                className="border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out hover:bg-accent/40"
-              >
-                <p className="text-[var(--text-sm)] font-medium text-foreground">{fig.id}</p>
-                <div className="mt-0.5 text-[var(--text-sm)] text-muted-foreground">
-                  <Md>{fig.description}</Md>
+            {s.key_figures_and_tables.map((fig, i) => {
+              if (!fig) return null;
+              return (
+                <div
+                  key={i}
+                  className="border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40"
+                >
+                  <p className="text-[var(--text-sm)] font-medium text-foreground">{fig.id}</p>
+                  <div className="mt-0.5 text-[var(--text-sm)] text-muted-foreground">
+                    <StreamingMarkdown>{fig.description ?? ""}</StreamingMarkdown>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
-      {s.limitations?.length > 0 && (
+      {s.limitations && s.limitations.length > 0 && (
         <section>
           <SectionHeader title="Limitations" count={s.limitations.length} />
           <ul className="space-y-1">
             {s.limitations.map((l, i) => (
               <li key={i} className="flex gap-2">
                 <span className="shrink-0 text-[var(--text-sm)] text-muted-foreground/50">•</span>
-                <div className="prose prose-sm min-w-0 max-w-none leading-relaxed dark:prose-invert">
-                  <Md>{l}</Md>
+                <div className="min-w-0 flex-1">
+                  <StreamingMarkdown>{l}</StreamingMarkdown>
                 </div>
               </li>
             ))}
@@ -306,11 +246,22 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       {s.future_work && (
         <section>
           <SectionHeader title="Future work" />
-          <div className="prose prose-sm max-w-none leading-relaxed dark:prose-invert">
-            <Md>{s.future_work}</Md>
-          </div>
+          <StreamingMarkdown streaming={stillStreaming}>
+            {s.future_work}
+          </StreamingMarkdown>
         </section>
       )}
     </div>
   );
+}
+
+function readErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  try {
+    const parsed = JSON.parse(message) as { detail?: { code?: string; message?: string } };
+    if (parsed.detail?.message) return parsed.detail.message;
+  } catch {
+    /* not JSON */
+  }
+  return message || "Summary generation failed.";
 }

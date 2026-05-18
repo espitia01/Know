@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { parsePartialJson } from "ai";
 import { api, type FigureInfo, type FigureAnalysis, type ParsedPaper } from "@/lib/api";
 import { captureScreenTabToPng, readClipboardImageBlob } from "@/lib/pdfSelectionCapture";
 import { useStore } from "@/lib/store";
-import { Md } from "@/components/ui/Md";
+// Stage 3: figure analysis streams from the migrated AI SDK route and
+// renders via Streamdown.
+import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 
 interface FiguresPanelProps {
@@ -274,22 +277,43 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
       setLoading(true);
 
       try {
-        const res = await api.analyzeFigureStream(paperId, figId, q, controller.signal);
+        // Stage 3: hit the migrated Next.js + AI SDK route on the same
+        // origin. The response body is a streaming JSON document
+        // (incremental text output of `streamObject(FigureAnalysis)`).
+        // We parse the partial JSON on each frame and pull `answer` or
+        // `description` for the streaming assistant message.
+        const res = await fetch(`/api/papers/${paperId}/figure-qa-stream`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ figure_id: figId, question: q }),
+          signal: controller.signal,
+        });
         if (controller.signal.aborted) return;
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
+          let detailMessage = `HTTP ${res.status}`;
+          try {
+            const body = await res.json();
+            if (body?.detail?.message) detailMessage = body.detail.message;
+          } catch { /* not JSON */ }
+          throw new Error(detailMessage);
         }
         const reader = res.body?.getReader();
         if (!reader) throw new Error("No stream");
 
         const decoder = new TextDecoder();
-        let accumulated = "";
-        let buffer = "";
+        let jsonAccum = "";
+        let lastDisplay = "";
         let chunkRaf: number | null = null;
 
-        const flushFigureChunk = () => {
+        // Add a streaming assistant message that we'll update in place.
+        setConversations((prev) => ({
+          ...prev,
+          [figId]: [...(prev[figId] || []), { role: "assistant", text: "", streaming: true }],
+        }));
+
+        const flushDisplay = () => {
           chunkRaf = null;
-          const current = accumulated;
+          const current = lastDisplay;
           setConversations((prev) => {
             const msgs = [...(prev[figId] || [])];
             const lastIdx = msgs.length - 1;
@@ -300,87 +324,62 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           });
         };
 
-        const scheduleFigureChunk = () => {
-          if (typeof window === "undefined") {
-            flushFigureChunk();
-            return;
-          }
+        const scheduleDisplay = () => {
+          if (typeof window === "undefined") { flushDisplay(); return; }
           if (chunkRaf == null) {
-            chunkRaf = window.requestAnimationFrame(flushFigureChunk);
+            chunkRaf = window.requestAnimationFrame(flushDisplay);
           }
         };
 
-        // Add a streaming assistant message
-        setConversations((prev) => ({
-          ...prev,
-          [figId]: [...(prev[figId] || []), { role: "assistant", text: "", streaming: true }],
-        }));
-
         while (true) {
-          if (controller.signal.aborted) { reader.cancel(); break; }
+          if (controller.signal.aborted) { await reader.cancel(); break; }
           const { done, value } = await reader.read();
           if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            try {
-              const event = JSON.parse(line.slice(6));
-              if (event.type === "chunk") {
-                accumulated += event.text;
-                scheduleFigureChunk();
-              } else if (event.type === "done") {
-                if (chunkRaf != null && typeof window !== "undefined") {
-                  window.cancelAnimationFrame(chunkRaf);
-                  chunkRaf = null;
-                }
-                const final = event.full_text || accumulated;
-                appendFigureAnalysisToCaches(paperId, {
-                  figure_id: figId,
-                  question: q,
-                  description: final,
-                  key_observations: [],
-                  relation_to_paper: "",
-                });
-                setConversations((prev) => {
-                  const msgs = [...(prev[figId] || [])];
-                  const lastIdx = msgs.length - 1;
-                  if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
-                    msgs[lastIdx] = { role: "assistant", text: final, streaming: false };
-                  }
-                  return { ...prev, [figId]: msgs };
-                });
-              } else if (event.type === "error") {
-                if (chunkRaf != null && typeof window !== "undefined") {
-                  window.cancelAnimationFrame(chunkRaf);
-                  chunkRaf = null;
-                }
-                setConversations((prev) => {
-                  const msgs = [...(prev[figId] || [])];
-                  const lastIdx = msgs.length - 1;
-                  if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
-                    msgs[lastIdx] = { role: "assistant", text: `Error: ${event.message}`, streaming: false };
-                  }
-                  return { ...prev, [figId]: msgs };
-                });
-              }
-            } catch {
-              // ignore malformed events
+          jsonAccum += decoder.decode(value, { stream: true });
+          // Try to parse the partial JSON document; pull the most-
+          // useful narrative field for the visible assistant bubble.
+          const partial = await parsePartialJson(jsonAccum);
+          const obj = (partial.value as Partial<FigureAnalysis> | undefined) ?? null;
+          if (obj) {
+            const next = (obj.answer ?? obj.description ?? "") as string;
+            if (next && next !== lastDisplay) {
+              lastDisplay = next;
+              scheduleDisplay();
             }
           }
         }
 
-        /* Stream ended without a terminal SSE event — flush partial text once. */
         if (chunkRaf != null && typeof window !== "undefined") {
           window.cancelAnimationFrame(chunkRaf);
           chunkRaf = null;
         }
-        if (accumulated.length > 0) {
-          flushFigureChunk();
-        }
+
+        // Final parse — same logic, but commit a non-streaming row and
+        // hydrate the rest of the structured fields into the local
+        // cache so the panel's history row matches what the server
+        // persisted in cached_analysis.figure_analyses.
+        const finalParsed = await parsePartialJson(jsonAccum);
+        const finalObj = (finalParsed.value as Partial<FigureAnalysis> | undefined) ?? {};
+        const finalText = (finalObj.answer ?? finalObj.description ?? lastDisplay ?? "") as string;
+        const cacheEntry: FigureAnalysis = {
+          figure_id: figId,
+          question: q,
+          description: (finalObj.description ?? finalText) as string,
+          key_observations: (finalObj.key_observations as string[] | undefined) ?? [],
+          relation_to_paper: (finalObj.relation_to_paper as string | undefined) ?? "",
+          methodology_shown: finalObj.methodology_shown as string | undefined,
+          takeaway: finalObj.takeaway as string | undefined,
+          answer: finalObj.answer as string | undefined,
+        };
+        appendFigureAnalysisToCaches(paperId, cacheEntry);
+        setConversations((prev) => {
+          const msgs = [...(prev[figId] || [])];
+          const lastIdx = msgs.length - 1;
+          if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
+            msgs[lastIdx] = { role: "assistant", text: finalText, streaming: false };
+          }
+          return { ...prev, [figId]: msgs };
+        });
       } catch (e) {
         if (controller.signal.aborted) return;
         setConversations((prev) => {
@@ -624,12 +623,9 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
                         </div>
                       )}
                       {msg.text && (
-                        <div className="text-[var(--text-sm)] leading-relaxed">
-                          <Md>{msg.text}</Md>
-                          {msg.streaming && (
-                            <span className="inline-block w-1.5 h-4 bg-foreground/60 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
-                          )}
-                        </div>
+                        <StreamingMarkdown streaming={msg.streaming}>
+                          {msg.text}
+                        </StreamingMarkdown>
                       )}
                     </div>
                   </div>
