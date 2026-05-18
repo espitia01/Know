@@ -378,16 +378,21 @@ export interface SettingsResponse {
 }
 
 export interface PaperSummary {
-  overview: string;
-  motivation: string;
-  key_contributions: string[];
-  methodology: string;
-  main_results: string;
-  discussion: string;
-  limitations: string[];
-  future_work: string;
-  key_equations: { equation: string; meaning: string }[];
-  key_figures_and_tables: { id: string; description: string }[];
+  // All fields optional. The migrated summary-stream route's schema
+  // marks them optional too because Anthropic legitimately omits
+  // sections that don't apply (e.g. "limitations" on a short
+  // commentary paper, "key_figures_and_tables" on text-only work).
+  // Renderers already short-circuit on falsy / empty values.
+  overview?: string;
+  motivation?: string;
+  key_contributions?: string[];
+  methodology?: string;
+  main_results?: string;
+  discussion?: string;
+  limitations?: string[];
+  future_work?: string;
+  key_equations?: { equation: string; meaning: string }[];
+  key_figures_and_tables?: { id: string; description: string }[];
 }
 
 export interface FigureAnalysis {
