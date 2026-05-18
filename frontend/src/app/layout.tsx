@@ -5,6 +5,7 @@ import { ClerkTokenProvider } from "@/components/ClerkTokenProvider";
 import { ThemeProvider, THEME_INIT_SCRIPT } from "@/lib/ThemeProvider";
 import { BackgroundImageProvider } from "@/components/BackgroundImageProvider";
 import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import "katex/dist/katex.min.css";
 
@@ -100,6 +101,7 @@ export default function RootLayout({
             <ClerkTokenProvider>{children}</ClerkTokenProvider>
           </ThemeProvider>
           <Analytics />
+          <SpeedInsights />
         </body>
       </html>
     </ClerkProvider>
