@@ -133,7 +133,6 @@ export async function POST(
             errorMessage: event.error
               ? String(event.error).slice(0, 500)
               : undefined,
-            finishReason: event.finishReason,
             usage: event.usage,
           }),
         );
