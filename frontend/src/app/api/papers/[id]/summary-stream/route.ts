@@ -11,6 +11,7 @@
 
 import { NextResponse } from "next/server";
 import { streamObject } from "ai";
+import { zodSchema } from "@ai-sdk/provider-utils";
 
 import { getModel } from "@/lib/server/llm";
 import { requireUser, AuthError } from "@/lib/server/auth";
@@ -103,11 +104,17 @@ export async function POST(
   let result: ReturnType<typeof streamObject>;
   try {
     result = streamObject({
-      // Summary uses the analysis (Sonnet) model — it's the heaviest
-      // single LLM call in the product and quality matters more than
-      // latency.
       model: getModel("analysis"),
-      schema: PaperSummarySchema,
+      // Wrap with `zodSchema()` from @ai-sdk/provider-utils. AI SDK
+      // v6 + Zod 4 sometimes mis-detects FlexibleSchema type when
+      // passed a raw `z.object(...)` returned by Zod 4 — the JSON
+      // Schema conversion fails silently and the model gets nothing
+      // it can call as a tool, so the stream closes empty (the
+      // "Value: undefined" Zod error we saw on the client). The
+      // explicit wrapper forces the documented adapter path.
+      schema: zodSchema(PaperSummarySchema),
+      schemaName: "PaperSummary",
+      schemaDescription: "Structured summary of an academic paper.",
       system,
       prompt,
       // Summaries are large structured objects (overview + motivation

@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { streamObject } from "ai";
+import { zodSchema } from "@ai-sdk/provider-utils";
 
 import { getModel } from "@/lib/server/llm";
 import { requireUser, AuthError } from "@/lib/server/auth";
@@ -122,7 +123,9 @@ export async function POST(
   try {
     result = streamObject({
       model: getModel("vision"),
-      schema: FigureAnalysisSchema,
+      schema: zodSchema(FigureAnalysisSchema),
+      schemaName: "FigureAnalysis",
+      schemaDescription: "Structured analysis of a figure from an academic paper.",
       system,
       maxOutputTokens: 4000,
       messages: [
