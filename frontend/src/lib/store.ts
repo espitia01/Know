@@ -15,6 +15,15 @@ import { selectionKey as selectionResultKey } from "./selectionActions";
 
 type ReaderPanelPosition = "right" | "left" | "bottom";
 
+export type PdfRegionHighlight = {
+  id: string;
+  pageNum: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
 interface UiPrefs {
   panelPos: ReaderPanelPosition;
   panelSizeSide: number;
@@ -82,6 +91,10 @@ interface AppStore {
   /** Per-paper: pdf.js text layer empty on first pages (scanned PDF). Not persisted. */
   pdfTextLayerEmptyByPaper: Record<string, boolean>;
   setPdfTextLayerEmpty: (paperId: string, empty: boolean) => void;
+
+  /** Page-local region boxes from marquee capture (scanned PDFs). Not persisted. */
+  pdfRegionHighlightsByPaper: Record<string, PdfRegionHighlight[]>;
+  addPdfRegionHighlight: (paperId: string, highlight: Omit<PdfRegionHighlight, "id">) => void;
 
   /** Viewer hands off marquee captures; FiguresPanel uploads then clears — not persisted */
   pendingFigureBlob: Blob | null;
@@ -209,6 +222,7 @@ export const useStore = create<AppStore>()(
             pendingFigureCaption: null,
             marqueeMode: false,
             pdfTextLayerEmptyByPaper: {},
+            pdfRegionHighlightsByPaper: {},
             preReading: null,
             preReadingPaperId: null,
             assumptions: [],
@@ -380,6 +394,7 @@ export const useStore = create<AppStore>()(
           pendingFigureCaption: null,
           marqueeMode: false,
           pdfTextLayerEmptyByPaper: {},
+          pdfRegionHighlightsByPaper: {},
           preReading: null,
           preReadingPaperId: null,
           assumptions: [], summary: null, notes: [],
@@ -422,6 +437,19 @@ export const useStore = create<AppStore>()(
                 return next;
               })(),
         })),
+
+      pdfRegionHighlightsByPaper: {},
+      addPdfRegionHighlight: (paperId, highlight) =>
+        set((s) => {
+          const prev = s.pdfRegionHighlightsByPaper[paperId] ?? [];
+          const id = `region-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          return {
+            pdfRegionHighlightsByPaper: {
+              ...s.pdfRegionHighlightsByPaper,
+              [paperId]: [...prev, { ...highlight, id }],
+            },
+          };
+        }),
 
       pendingFigureBlob: null,
       setPendingFigureBlob: (b) => set({ pendingFigureBlob: b }),

@@ -218,10 +218,32 @@ async def internal_figure_png(paper_id: str, figure_id: str, user_id: str):
         raise HTTPException(status_code=404, detail="Paper not found")
 
     from ..services.pdf_parser import get_figure_path
+    from ..services import storage as cloud_storage
+
     fig_path = get_figure_path(paper_id, figure_id)
-    if not fig_path:
-        raise HTTPException(status_code=404, detail="Figure not found")
-    return FileResponse(fig_path, media_type="image/png")
+    if fig_path:
+        return FileResponse(str(fig_path), media_type="image/png")
+
+    # Mirror the public GET /figures/{id} route: on multi-instance deploys the
+    # PNG may exist only in Supabase after upload or re-extract on another node.
+    fig_bytes = cloud_storage.download_file(user_id, f"{paper_id}/figures/{figure_id}.png")
+    if fig_bytes:
+        local_dir = settings.papers_dir / paper_id / "figures"
+        local_dir.mkdir(parents=True, exist_ok=True)
+        cached = local_dir / f"{figure_id}.png"
+        try:
+            cached.write_bytes(fig_bytes)
+        except OSError:
+            logger.warning(
+                "Could not cache figure %s/%s locally; streaming from memory",
+                paper_id,
+                figure_id,
+                exc_info=True,
+            )
+            return Response(content=fig_bytes, media_type="image/png")
+        return FileResponse(str(cached), media_type="image/png")
+
+    raise HTTPException(status_code=404, detail="Figure not found")
 
 
 # ----------------------------------------------------------------

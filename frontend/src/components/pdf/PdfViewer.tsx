@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { api, getAuthHeadersSync, SelectionAnalysisResult } from "@/lib/api";
-import { useStore } from "@/lib/store";
+import { useStore, type PdfRegionHighlight } from "@/lib/store";
 import { normalizeSelectionAction } from "@/lib/selectionActions";
 import { snapshotDomRect } from "@/lib/domRect";
 import { capturePdfViewportUnionToBlob } from "@/lib/pdfSelectionCapture";
@@ -20,7 +20,23 @@ function highlightPointerKey(entry: SelectionAnalysisResult): string {
 function isUnderSelectionOverlay(node: Node | null | undefined): boolean {
   const el =
     node?.nodeType === Node.ELEMENT_NODE ? (node as Element) : (node?.parentElement ?? null);
-  return !!(el && el.closest(".know-selection-overlay"));
+  return !!(el && el.closest(".know-selection-overlay, .know-region-overlay"));
+}
+
+/** Page-local rect for a marquee box (container scroll coordinates). */
+function regionRectOnPage(pageEl: HTMLElement, mr: PdfMarqueeBox): { x: number; y: number; w: number; h: number } | null {
+  const pageLeft = pageEl.offsetLeft;
+  const pageTop = pageEl.offsetTop;
+  const pageW = pageEl.offsetWidth;
+  const pageH = pageEl.offsetHeight;
+  const x0 = Math.max(pageLeft, mr.x);
+  const y0 = Math.max(pageTop, mr.y);
+  const x1 = Math.min(pageLeft + pageW, mr.x + mr.w);
+  const y1 = Math.min(pageTop + pageH, mr.y + mr.h);
+  const w = x1 - x0;
+  const h = y1 - y0;
+  if (w < 4 || h < 4) return null;
+  return { x: x0 - pageLeft, y: y0 - pageTop, w, h };
 }
 
 function mutationAffectsPdfTextLayer(muts: readonly MutationRecord[]): boolean {
@@ -476,6 +492,8 @@ export function PdfViewer({
   const setPendingFigureCaption = useStore((s) => s.setPendingFigureCaption);
   const setPdfTextLayerEmpty = useStore((s) => s.setPdfTextLayerEmpty);
   const isScannedPdf = useStore((s) => !!(paperId && s.pdfTextLayerEmptyByPaper[paperId]));
+  const pdfRegionHighlights = useStore((s) => (paperId ? s.pdfRegionHighlightsByPaper[paperId] ?? [] : []));
+  const addPdfRegionHighlight = useStore((s) => s.addPdfRegionHighlight);
   const setActiveTab = useStore((s) => s.setActiveTab);
 
   const [scannedBannerDismissed, setScannedBannerDismissed] = useState(false);
@@ -698,14 +716,34 @@ export function PdfViewer({
   // time the selectionHistory array changes. Idempotent — the first
   // step is to remove any existing overlay on the page so we never
   // stack duplicates.
-  const drawUnderlinesForPage = useCallback((pageEl: HTMLElement, history: SelectionAnalysisResult[]) => {
-    if (paperId && useStore.getState().pdfTextLayerEmptyByPaper[paperId]) {
-      pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
-      const peek = pageEl as HTMLElement & { __knowHighlights?: unknown[] };
-      peek.__knowHighlights = [];
-      return;
-    }
+  const drawRegionHighlightsForPage = useCallback(
+    (pageEl: HTMLElement, pageNum: number, regions: PdfRegionHighlight[]) => {
+      const forPage = regions.filter((r) => r.pageNum === pageNum);
+      pageEl.querySelectorAll(".know-region-overlay").forEach((n) => n.remove());
+      if (forPage.length === 0) return;
 
+      const pageStyle = getComputedStyle(pageEl);
+      if (pageStyle.position === "static") pageEl.style.position = "relative";
+
+      const overlay = document.createElement("div");
+      overlay.className = "know-region-overlay";
+      overlay.setAttribute("aria-hidden", "true");
+      for (const r of forPage) {
+        const box = document.createElement("div");
+        box.className = "know-region-highlight";
+        box.setAttribute("data-action", "note");
+        box.style.left = `${r.x}px`;
+        box.style.top = `${r.y}px`;
+        box.style.width = `${r.w}px`;
+        box.style.height = `${r.h}px`;
+        overlay.appendChild(box);
+      }
+      pageEl.appendChild(overlay);
+    },
+    [],
+  );
+
+  const drawUnderlinesForPage = useCallback((pageEl: HTMLElement, history: SelectionAnalysisResult[]) => {
     const textLayer = pageEl.querySelector(".react-pdf__Page__textContent, .textLayer") as HTMLElement | null;
 
     const peekHost = pageEl as HTMLElement & {
@@ -1243,6 +1281,8 @@ export function PdfViewer({
       pending = new Set();
       for (const el of items) {
         drawUnderlinesForPage(el, selectionHistory);
+        const pageNum = parseInt(el.getAttribute("data-page-number") || "0", 10);
+        if (pageNum > 0) drawRegionHighlightsForPage(el, pageNum, pdfRegionHighlights);
       }
     };
     const schedulePage = (pageEl: HTMLElement) => {
@@ -1309,7 +1349,7 @@ export function PdfViewer({
       pageObservers.clear();
       if (raf !== null) cancelAnimationFrame(raf);
     };
-  }, [selectionHistory, drawUnderlinesForPage, scale, paperId]);
+  }, [selectionHistory, drawUnderlinesForPage, drawRegionHighlightsForPage, pdfRegionHighlights, scale, paperId]);
 
   const handlePageRender = useCallback((pageNum: number) => {
     const el = containerRef.current?.querySelector(`[data-page-number="${pageNum}"]`) as HTMLElement | null;
@@ -1367,7 +1407,8 @@ export function PdfViewer({
     }
 
     drawUnderlinesForPage(el, useStore.getState().selectionHistory);
-  }, [drawUnderlinesForPage, paperId, setMarqueeMode, setPdfTextLayerEmpty]);
+    drawRegionHighlightsForPage(el, pageNum, useStore.getState().pdfRegionHighlightsByPaper[paperId ?? ""] ?? []);
+  }, [drawUnderlinesForPage, drawRegionHighlightsForPage, paperId, setMarqueeMode, setPdfTextLayerEmpty]);
 
   const handleMarqueeDown = useCallback(
     (e: ReactMouseEvent<HTMLDivElement>) => {
@@ -1440,9 +1481,10 @@ export function PdfViewer({
     }
 
     if (blob) {
-      if (isScannedPdf && containerRef.current) {
+      if (isScannedPdf && containerRef.current && paperId) {
         const pages = containerRef.current.querySelectorAll(".react-pdf__Page[data-page-number]");
         let pageNum = 1;
+        let pageEl: HTMLElement | null = null;
         const midY = mr.y + mr.h / 2;
         for (const p of pages) {
           const el = p as HTMLElement;
@@ -1450,15 +1492,34 @@ export function PdfViewer({
           const bottom = top + el.offsetHeight;
           if (midY >= top && midY < bottom) {
             pageNum = parseInt(el.getAttribute("data-page-number") || "1", 10);
+            pageEl = el;
             break;
           }
         }
         setPendingFigureCaption(`Page ${pageNum} — region`);
+        if (pageEl) {
+          const local = regionRectOnPage(pageEl, mr);
+          if (local) {
+            addPdfRegionHighlight(paperId, { pageNum, ...local });
+            drawRegionHighlightsForPage(pageEl, pageNum, [
+              ...(useStore.getState().pdfRegionHighlightsByPaper[paperId] ?? []),
+            ]);
+          }
+        }
       }
       setPendingFigureBlob(blob);
       setActiveTab("figures");
     }
-  }, [isScannedPdf, setMarqueeMode, setPendingFigureBlob, setPendingFigureCaption, setActiveTab]);
+  }, [
+    isScannedPdf,
+    paperId,
+    addPdfRegionHighlight,
+    drawRegionHighlightsForPage,
+    setMarqueeMode,
+    setPendingFigureBlob,
+    setPendingFigureCaption,
+    setActiveTab,
+  ]);
 
   const finalizeTextSelectionToolbar = useCallback(() => {
     const sel = window.getSelection();
@@ -1758,7 +1819,7 @@ export function PdfViewer({
         {marqueeMode && marqueeRect && marqueeRect.w > 2 && marqueeRect.h > 2 && !!fileData && !loadError && (
           <div
             aria-hidden
-            className="absolute z-50 pointer-events-none rounded-sm border-2 border-blue-500 bg-blue-500/10"
+            className="absolute z-50 pointer-events-none rounded-sm know-region-highlight"
             style={{
               left: marqueeRect.x,
               top: marqueeRect.y,

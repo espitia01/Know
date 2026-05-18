@@ -330,12 +330,22 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         // (incremental text output of `streamObject(FigureAnalysis)`).
         // We parse the partial JSON on each frame and pull `answer` or
         // `description` for the streaming assistant message.
-        const res = await fetch(`/api/papers/${paperId}/figure-qa-stream`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ figure_id: figId, question: q }),
-          signal: controller.signal,
-        });
+        const streamFigure = async (attempt: number): Promise<Response> => {
+          const res = await fetch(`/api/papers/${paperId}/figure-qa-stream`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ figure_id: figId, question: q }),
+            signal: controller.signal,
+          });
+          if (controller.signal.aborted) return res;
+          if (!res.ok && res.status === 404 && attempt === 0) {
+            await new Promise((r) => setTimeout(r, 750));
+            return streamFigure(1);
+          }
+          return res;
+        };
+
+        const res = await streamFigure(0);
         if (controller.signal.aborted) return;
         if (!res.ok) {
           let detailMessage = `HTTP ${res.status}`;
@@ -343,6 +353,9 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
             const body = await res.json();
             if (body?.detail?.message) detailMessage = body.detail.message;
           } catch { /* not JSON */ }
+          if (detailMessage === "Figure 404" || detailMessage.includes("404")) {
+            detailMessage = "Figure image is not available yet. Wait a moment and try again.";
+          }
           throw new Error(detailMessage);
         }
         const reader = res.body?.getReader();
