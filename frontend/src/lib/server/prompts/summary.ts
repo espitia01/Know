@@ -38,7 +38,7 @@ export function buildSummaryPrompt(args: {
 
   const prompt = [
     titleLine + `Paper content (truncated):\n"""\n${paperContext}\n"""`,
-    `Return the structured object. Do not omit any field — leave arrays empty if there's nothing to put there.`,
+    `Return the structured object. Always include a non-empty "overview". Leave arrays empty when a section does not apply.`,
   ].join("\n\n");
 
   return { system, prompt };

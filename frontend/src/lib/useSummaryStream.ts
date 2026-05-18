@@ -21,16 +21,49 @@ import {
   clearProgressStart,
 } from "@/lib/analysisState";
 
-/** If the Vercel stream dies (~60s) with no partials, fall back to Python batch. */
-const STREAM_FALLBACK_MS = 70_000;
+/** Stream stall before Python batch fallback (Vercel often cuts ~60s). */
+const STREAM_FALLBACK_MS = 55_000;
+
+function describeError(error: unknown): string {
+  if (!error) return "Summary generation failed. Try again.";
+  const message = error instanceof Error ? error.message : String(error);
+  try {
+    const parsed = JSON.parse(message) as { detail?: { code?: string; message?: string } };
+    if (parsed.detail?.message) {
+      const code = parsed.detail.code;
+      if (code === "tier_locked" || code === "paper_cap" || code === "daily_cap" || code === "model_cap") {
+        return parsed.detail.message;
+      }
+      return parsed.detail.message;
+    }
+  } catch {
+    /* not JSON */
+  }
+  return message || "Summary generation failed. Try again.";
+}
+
+function hasOverview(value: Partial<PaperSummary> | null | undefined): boolean {
+  return typeof value?.overview === "string" && value.overview.trim().length > 0;
+}
+
+function hasMeaningfulPartial(value: Partial<PaperSummary> | null | undefined): boolean {
+  if (!value || typeof value !== "object") return false;
+  return Object.keys(value).some((k) => {
+    const v = value[k as keyof PaperSummary];
+    if (typeof v === "string") return v.trim().length > 0;
+    return Array.isArray(v) && v.length > 0;
+  });
+}
 
 export function useSummaryStream(paperId: string) {
   const setSummary = useStore((s) => s.setSummary);
   const setSummaryLoading = useStore((s) => s.setSummaryLoading);
+  const setSummaryError = useStore((s) => s.setSummaryError);
   const updateCachedAnalysis = useStore((s) => s.updateCachedAnalysis);
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fallbackStartedRef = useRef(false);
   const startedForPaperRef = useRef<string | null>(null);
+  const latestObjectRef = useRef<Partial<PaperSummary> | undefined>(undefined);
 
   const clearFallbackTimer = useCallback(() => {
     if (fallbackTimerRef.current != null) {
@@ -42,10 +75,12 @@ export function useSummaryStream(paperId: string) {
   const finishSummary = useCallback(
     (pid: string, summary: PaperSummary) => {
       if (useStore.getState().paper?.id !== pid) return;
+      setSummaryError(pid, null);
       setSummary(summary);
       updateCachedAnalysis(pid, { summary });
+      useStore.getState().clearSummaryStreamingPartial(pid);
     },
-    [setSummary, updateCachedAnalysis],
+    [setSummary, setSummaryError, updateCachedAnalysis],
   );
 
   const runBatchFallback = useCallback(
@@ -53,34 +88,47 @@ export function useSummaryStream(paperId: string) {
       if (fallbackStartedRef.current) return;
       fallbackStartedRef.current = true;
       clearFallbackTimer();
+      if (useStore.getState().paper?.id === pid) {
+        setSummaryLoading(true);
+      }
       try {
         const summary = await api.getSummary(pid);
-        if (summary?.overview) {
+        if (hasOverview(summary)) {
           finishSummary(pid, summary as PaperSummary);
           autoAnalyzedPapers.add(`${pid}:summary`);
+          return;
         }
-      } catch {
-        /* batch fallback failed — panel shows retry */
+        if (useStore.getState().paper?.id === pid) {
+          setSummaryError(pid, "Summary generation returned empty results. Try again.");
+        }
+      } catch (e) {
+        if (useStore.getState().paper?.id === pid) {
+          setSummaryError(pid, describeError(e));
+        }
       } finally {
         markRequestEnd(pid, "summary");
         clearProgressStart(pid, "summary");
+        activeSummaryStreamStoppers.delete(pid);
         if (useStore.getState().paper?.id === pid) {
           setSummaryLoading(false);
         }
-        activeSummaryStreamStoppers.delete(pid);
       }
     },
-    [clearFallbackTimer, finishSummary, setSummaryLoading],
+    [clearFallbackTimer, finishSummary, setSummaryLoading, setSummaryError],
   );
 
   const obj = useObject({
     id: paperId,
     api: `/api/papers/${paperId}/summary-stream`,
     schema: PaperSummarySchema,
+    credentials: "include",
     onError: (error) => {
       clearFallbackTimer();
       const pid = startedForPaperRef.current;
       if (!pid) return;
+      if (useStore.getState().paper?.id === pid) {
+        setSummaryError(pid, describeError(error));
+      }
       void runBatchFallback(pid);
     },
     onFinish: ({ object, error }) => {
@@ -89,32 +137,38 @@ export function useSummaryStream(paperId: string) {
       if (!pid) return;
       startedForPaperRef.current = null;
       activeSummaryStreamStoppers.delete(pid);
-      markRequestEnd(pid, "summary");
-      clearProgressStart(pid, "summary");
-      if (useStore.getState().paper?.id === pid) {
-        setSummaryLoading(false);
-      }
-      if (object?.overview) {
-        finishSummary(pid, object as PaperSummary);
+
+      const candidate = (object ?? latestObjectRef.current) as Partial<PaperSummary> | undefined;
+      if (hasOverview(candidate)) {
+        markRequestEnd(pid, "summary");
+        clearProgressStart(pid, "summary");
+        if (useStore.getState().paper?.id === pid) {
+          setSummaryLoading(false);
+        }
+        finishSummary(pid, candidate as PaperSummary);
         autoAnalyzedPapers.add(`${pid}:summary`);
         return;
       }
-      if (error) {
-        void runBatchFallback(pid);
+
+      if (error && useStore.getState().paper?.id === pid) {
+        setSummaryError(pid, describeError(error));
       }
+
+      void runBatchFallback(pid);
     },
   });
 
-  // Mirror partial object into zustand so SummaryPanel can render while streaming.
+  latestObjectRef.current = obj.object as Partial<PaperSummary> | undefined;
+
   useEffect(() => {
     if (useStore.getState().paper?.id !== paperId) return;
-    if (obj.object && Object.keys(obj.object).length > 0) {
+    if (obj.object && hasMeaningfulPartial(obj.object as Partial<PaperSummary>)) {
       useStore.getState().setSummaryStreamingPartial(
         paperId,
         obj.object as Partial<PaperSummary>,
       );
     }
-    if (!obj.isLoading) {
+    if (!obj.isLoading && hasOverview(useStore.getState().summary)) {
       useStore.getState().clearSummaryStreamingPartial(paperId);
     }
   }, [paperId, obj.object, obj.isLoading]);
@@ -128,21 +182,15 @@ export function useSummaryStream(paperId: string) {
       clearFallbackTimer();
       obj.stop();
     });
+    setSummaryError(paperId, null);
     setSummaryLoading(true);
     clearProgressStart(paperId, "summary");
     useStore.getState().setSummaryStreamingPartial(paperId, null);
     clearFallbackTimer();
     fallbackTimerRef.current = setTimeout(() => {
       if (!obj.isLoading) return;
-      const partial = useStore.getState().summaryStreamingByPaper[paperId];
-      const hasContent =
-        partial &&
-        typeof partial === "object" &&
-        Object.keys(partial).some((k) => {
-          const v = partial[k as keyof typeof partial];
-          return typeof v === "string" ? v.trim().length > 0 : Array.isArray(v) && v.length > 0;
-        });
-      if (hasContent) return;
+      if (hasOverview(latestObjectRef.current)) return;
+      if (hasMeaningfulPartial(latestObjectRef.current)) return;
       obj.stop();
       void runBatchFallback(paperId);
     }, STREAM_FALLBACK_MS);
@@ -151,6 +199,7 @@ export function useSummaryStream(paperId: string) {
     paperId,
     obj,
     setSummaryLoading,
+    setSummaryError,
     clearFallbackTimer,
     runBatchFallback,
   ]);
@@ -171,7 +220,6 @@ export function useSummaryStream(paperId: string) {
     activeSummaryStreamStoppers.delete(paperId);
     if (useStore.getState().paper?.id === paperId) {
       setSummaryLoading(false);
-      useStore.getState().clearSummaryStreamingPartial(paperId);
     }
   }, [paperId, obj, clearFallbackTimer, setSummaryLoading]);
 
@@ -182,4 +230,19 @@ export function useSummaryStream(paperId: string) {
     error: obj.error,
     object: obj.object,
   };
+}
+
+/** Retry until the page-level hook registers its start handler. */
+export function kickoffSummaryStream(paperId: string, maxAttempts = 40): void {
+  let attempts = 0;
+  const tryStart = () => {
+    const start = summaryStreamStarters.get(paperId);
+    if (start) {
+      start();
+      return;
+    }
+    if (++attempts >= maxAttempts) return;
+    requestAnimationFrame(tryStart);
+  };
+  tryStart();
 }

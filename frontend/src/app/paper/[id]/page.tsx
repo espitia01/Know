@@ -33,9 +33,8 @@ import {
   allowAutoAnalyzeRetry,
   autoAnalyzedPapers,
   abortActiveSummaryStream,
-  summaryStreamStarters,
 } from "@/lib/analysisState";
-import { useSummaryStream } from "@/lib/useSummaryStream";
+import { useSummaryStream, kickoffSummaryStream } from "@/lib/useSummaryStream";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { recordPaperOpened } from "@/lib/recentPapers";
 import { isPreReadingPopulated } from "@/lib/preReading";
@@ -1015,7 +1014,7 @@ function PaperContent() {
       !hasActiveRequest(pid, "summary") &&
       !autoAnalyzedPapers.has(`${pid}:summary`)
     ) {
-      queueMicrotask(() => summaryStreamStarters.get(pid)?.());
+      kickoffSummaryStream(pid);
     }
   }, [
     loadedPaperId,

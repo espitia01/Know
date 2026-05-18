@@ -25,6 +25,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     s.paper?.id === paperId ? s.paper?.cached_analysis?.summary : null,
   );
   const onActivePaper = useStore((s) => s.paper?.id === paperId);
+  const storedError = useStore((s) => s.summaryErrorByPaper[paperId] ?? null);
   const [manualError, setManualError] = useState<string | null>(null);
   const fromStore = onActivePaper ? cachedSummary : null;
   const fromCache = onActivePaper ? (paperCached as PaperSummary | null) : null;
@@ -60,7 +61,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   }
 
   if (!summary) {
-    const errMsg = manualError;
+    const errMsg = manualError || storedError;
     return (
       <EmptyState
         title={errMsg ? "Failed to generate summary" : "Summary not available yet"}

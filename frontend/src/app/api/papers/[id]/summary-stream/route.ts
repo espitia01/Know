@@ -136,8 +136,12 @@ export async function POST(
           await releaseOnFailure();
           return;
         }
-        const finalObject = event.object as PaperSummary | undefined;
-        if (!finalObject?.overview) {
+        const raw = event.object as PaperSummary | undefined;
+        const parsed = PaperSummarySchema.safeParse(raw);
+        const finalObject = parsed.success ? parsed.data : raw;
+        const overview =
+          typeof finalObject?.overview === "string" ? finalObject.overview.trim() : "";
+        if (!overview) {
           await releaseOnFailure();
           return;
         }
@@ -156,7 +160,7 @@ export async function POST(
             userId: user.userId,
             paperId,
             key: "summary",
-            value: finalObject,
+            value: { ...finalObject, overview } as PaperSummary,
           });
         } catch (err) {
           console.error("[summary-stream] persist failed", err);

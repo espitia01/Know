@@ -168,6 +168,8 @@ interface AppStore {
   summaryStreamingByPaper: Record<string, Partial<PaperSummary> | null>;
   setSummaryStreamingPartial: (paperId: string, partial: Partial<PaperSummary> | null) => void;
   clearSummaryStreamingPartial: (paperId: string) => void;
+  summaryErrorByPaper: Record<string, string | null>;
+  setSummaryError: (paperId: string, message: string | null) => void;
   summaryLoading: boolean;
   setSummaryLoading: (l: boolean) => void;
 
@@ -203,6 +205,7 @@ export const useStore = create<AppStore>()(
             assumptions: [],
             summary: null,
             summaryStreamingByPaper: {},
+            summaryErrorByPaper: {},
             notes: [],
             selectionHistory: [],
             selectionResult: null,
@@ -521,13 +524,21 @@ export const useStore = create<AppStore>()(
           delete next[paperId];
           return { summaryStreamingByPaper: next };
         }),
+      summaryErrorByPaper: {},
+      setSummaryError: (paperId, message) =>
+        set((state) => ({
+          summaryErrorByPaper: {
+            ...state.summaryErrorByPaper,
+            [paperId]: message,
+          },
+        })),
       summaryLoading: false,
       setSummaryLoading: (l) => set({ summaryLoading: l }),
 
       resetAnalysisState: () => set({
         preReading: null,
         preReadingPaperId: null,
-        assumptions: [], summary: null, summaryStreamingByPaper: {}, notes: [],
+        assumptions: [], summary: null, summaryStreamingByPaper: {}, summaryErrorByPaper: {}, notes: [],
         selectionHistory: [], selectionResult: null, qaResults: [], questions: [],
         exercise: null, searchResults: [],
         preReadingLoading: false, assumptionsLoading: false, summaryLoading: false,
