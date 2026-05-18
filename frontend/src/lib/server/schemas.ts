@@ -47,10 +47,10 @@ export const SelectionResultSchema = z.object({
     .describe(
       "Primary markdown narrative. Use $...$ for inline math and $$...$$ for display math. NEVER bare LaTeX commands, Unicode math symbols, or raw HTML."
     ),
-  assumptions: z.array(Assumption).default([]),
+  assumptions: z.array(Assumption).optional(),
   starting_point: z.string().optional(),
   final_result: z.string().optional(),
-  steps: z.array(Step).default([]),
+  steps: z.array(Step).optional(),
 });
 
 export type SelectionResult = z.infer<typeof SelectionResultSchema>;
@@ -63,20 +63,24 @@ export type SelectionResult = z.infer<typeof SelectionResultSchema>;
  * unmigrated reads. Markdown strings, not ContentBlock[]; Streamdown
  * renders math via $...$ / $$...$$.
  *
- * Every field gets a default so `useObject`'s DeepPartial views render
- * cleanly while the stream is still filling the structure in field
- * order — the visible UX is "Overview appears, then Motivation, then
- * Methodology…" rather than a single end-of-stream paint.
+ * All fields are `.optional()`. Structured-output validation runs on
+ * the final assembled JSON in `onFinish`; if the model truncates or
+ * skips a field (Sonnet sometimes drops `key_figures_and_tables` for
+ * papers without a figure list), strict validation would fail the
+ * entire stream and the user would see a blank panel. Optional fields
+ * let `streamObject` still hand us a usable object — sections we
+ * didn't get just don't render. The corresponding text fields default
+ * to "" / [] in the panel renderer so the UI is unaffected.
  */
 export const PaperSummarySchema = z.object({
-  overview: z.string().default(""),
-  motivation: z.string().default(""),
-  key_contributions: z.array(z.string()).default([]),
-  methodology: z.string().default(""),
-  main_results: z.string().default(""),
-  discussion: z.string().default(""),
-  limitations: z.array(z.string()).default([]),
-  future_work: z.string().default(""),
+  overview: z.string().optional(),
+  motivation: z.string().optional(),
+  key_contributions: z.array(z.string()).optional(),
+  methodology: z.string().optional(),
+  main_results: z.string().optional(),
+  discussion: z.string().optional(),
+  limitations: z.array(z.string()).optional(),
+  future_work: z.string().optional(),
   key_equations: z
     .array(
       z.object({
@@ -88,7 +92,7 @@ export const PaperSummarySchema = z.object({
         meaning: z.string().describe("Markdown one-paragraph explanation."),
       }),
     )
-    .default([]),
+    .optional(),
   key_figures_and_tables: z
     .array(
       z.object({
@@ -96,7 +100,7 @@ export const PaperSummarySchema = z.object({
         description: z.string().describe("Markdown description of what the figure/table shows and why it matters."),
       }),
     )
-    .default([]),
+    .optional(),
 });
 
 export type PaperSummary = z.infer<typeof PaperSummarySchema>;
@@ -110,9 +114,9 @@ export type PaperSummary = z.infer<typeof PaperSummarySchema>;
  */
 export const FigureAnalysisSchema = z.object({
   description: z.string().describe("Markdown description of the figure."),
-  key_observations: z.array(z.string()).default([]),
+  key_observations: z.array(z.string()).optional(),
   methodology_shown: z.string().optional(),
-  relation_to_paper: z.string().default(""),
+  relation_to_paper: z.string().optional(),
   takeaway: z.string().optional(),
   answer: z
     .string()

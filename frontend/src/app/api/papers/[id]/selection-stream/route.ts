@@ -173,6 +173,11 @@ export async function POST(
       schema: SelectionResultSchema,
       system,
       prompt,
+      // Derive responses with 6–12 step bodies plus assumption arrays
+      // can run several thousand tokens. Default cap on Haiku is
+      // generous, but explicit beats implicit and the Anthropic
+      // default has shifted before.
+      maxOutputTokens: 8000,
       onFinish: async (event) => {
         // Schema validation failure mid-stream → release usage,
         // but the client already saw the partial — log and move on.

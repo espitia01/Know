@@ -110,6 +110,14 @@ export async function POST(
       schema: PaperSummarySchema,
       system,
       prompt,
+      // Summaries are large structured objects (overview + motivation
+      // + multi-paragraph methodology + multi-paragraph results +
+      // discussion + arrays of contributions, equations, figures,
+      // limitations). Anthropic's default output cap (~4k tokens for
+      // many models) was truncating the JSON mid-write, so the final
+      // validation in `onFinish` returned without an object and the
+      // panel showed empty. 16k gives Sonnet plenty of room to finish.
+      maxOutputTokens: 16000,
       onFinish: async (event) => {
         if (event.error) {
           await releaseOnFailure();

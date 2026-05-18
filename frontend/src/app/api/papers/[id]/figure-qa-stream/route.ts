@@ -124,6 +124,7 @@ export async function POST(
       model: getModel("vision"),
       schema: FigureAnalysisSchema,
       system,
+      maxOutputTokens: 4000,
       messages: [
         {
           role: "user",
