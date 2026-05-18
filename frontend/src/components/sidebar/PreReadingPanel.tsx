@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import { Md } from "@/components/ui/Md";
+import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -129,9 +129,7 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
                 {definitions.map((d, i) => (
                   <div key={i} className={rowItemClass}>
                     <p className="mb-0.5 font-medium text-[var(--text-md)]">{d.term}</p>
-                    <div className="text-[var(--text-sm)] text-muted-foreground">
-                      <Md>{d.definition}</Md>
-                    </div>
+                    <StreamingMarkdown>{d.definition}</StreamingMarkdown>
                     {d.source && (
                       <p className="mt-1 text-[var(--text-xs)] text-muted-foreground/70">Source: {d.source}</p>
                     )}
@@ -155,12 +153,10 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
               <div className={rowListClass}>
                 {research_questions.map((q, i) => (
                   <div key={i} className={rowItemClass}>
-                    <div className="text-[var(--text-md)]">
-                      <Md>{q.question}</Md>
-                    </div>
+                    <StreamingMarkdown>{q.question}</StreamingMarkdown>
                     {q.context && (
                       <div className="mt-1 text-[var(--text-xs)] text-muted-foreground/80">
-                        <Md>{q.context}</Md>
+                        <StreamingMarkdown>{q.context}</StreamingMarkdown>
                       </div>
                     )}
                   </div>
@@ -184,12 +180,10 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
                 {concepts.map((c, i) => (
                   <div key={i} className={rowItemClass}>
                     <p className="mb-0.5 font-medium text-[var(--text-md)]">{c.name}</p>
-                    <div className="text-[var(--text-sm)] text-muted-foreground">
-                      <Md>{c.description}</Md>
-                    </div>
+                    <StreamingMarkdown>{c.description}</StreamingMarkdown>
                     {c.importance && (
                       <div className="mt-1 text-[var(--text-xs)] italic text-muted-foreground/70">
-                        <Md>{c.importance}</Md>
+                        <StreamingMarkdown>{c.importance}</StreamingMarkdown>
                       </div>
                     )}
                   </div>

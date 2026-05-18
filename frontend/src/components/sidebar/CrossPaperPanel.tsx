@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import { Md } from "@/components/ui/Md";
+import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { Textarea } from "@/components/ui/textarea";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { SectionHeader } from "@/components/panel/SectionHeader";
@@ -150,9 +150,7 @@ export function CrossPaperPanel() {
               className="space-y-2 rounded-lg border border-border/60 bg-card/30 px-4 py-3"
             >
               <p className="text-[var(--text-md)] font-medium text-foreground">{r.question}</p>
-              <div className="text-[var(--text-sm)] text-muted-foreground">
-                <Md>{r.answer}</Md>
-              </div>
+              <StreamingMarkdown>{r.answer}</StreamingMarkdown>
             </div>
           ))}
         </div>

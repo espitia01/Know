@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { api, type PriorWork } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import { Md } from "@/components/ui/Md";
+import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
@@ -163,7 +163,9 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
               ) : null}
               {(sec.summary || "").trim() ? (
                 <div className="related-cluster-summary mb-4 [&_.analysis-content]:text-[var(--text-sm)] [&_.analysis-content]:leading-relaxed [&_.analysis-content_*]:text-foreground/92">
-                  <Md>{sanitizeRelatedClusterSummaryMarkdown(sec.summary!)}</Md>
+                  <StreamingMarkdown>
+                    {sanitizeRelatedClusterSummaryMarkdown(sec.summary!)}
+                  </StreamingMarkdown>
                 </div>
               ) : null}
               <ul className="flex flex-col gap-4">

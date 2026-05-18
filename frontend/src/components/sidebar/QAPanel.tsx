@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import { Md } from "@/components/ui/Md";
+import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { Textarea } from "@/components/ui/textarea";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
@@ -436,7 +436,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
                   </span>
                 }
               >
-                <Md>{item.answer}</Md>
+                <StreamingMarkdown>{item.answer}</StreamingMarkdown>
               </AnalysisAccordionRow>
             );
           })}

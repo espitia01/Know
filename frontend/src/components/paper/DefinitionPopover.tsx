@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { api, ExplainResponse } from "@/lib/api";
-import { Md } from "@/components/ui/Md";
+import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 
 interface DefinitionPopoverProps {
   paperId: string;
@@ -69,9 +69,7 @@ export function DefinitionPopover({
 
         {result && (
           <div className="space-y-1.5">
-            <div className="text-[12px] leading-relaxed">
-              <Md>{result.explanation}</Md>
-            </div>
+            <StreamingMarkdown>{result.explanation}</StreamingMarkdown>
             {result.source && (
               <p className="text-[11px] text-muted-foreground/70">
                 Source: {result.source}

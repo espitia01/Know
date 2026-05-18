@@ -21,8 +21,11 @@ import { SelectionResultPanel } from "@/components/panel/SelectionResultPanel";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-const SafeMd = dynamic(
-  () => import("@/components/ui/Md").then((m) => m.Md),
+const StreamingMarkdownDynamic = dynamic(
+  () =>
+    import("@/components/analysis/StreamingMarkdown").then(
+      (m) => m.StreamingMarkdown,
+    ),
   { ssr: false, loading: () => <span className="opacity-60">…</span> },
 );
 
@@ -38,8 +41,14 @@ const PdfViewer = dynamic(
   },
 );
 
+/**
+ * Local alias kept named `Md` so the existing JSX in this trial page
+ * (`<Md>{...}</Md>`) didn't have to be churned during the migration.
+ * Renders via Streamdown so the trial summary gets the same KaTeX +
+ * streaming-safe rendering as the authenticated path.
+ */
 function Md({ children }: { children: string }) {
-  return <SafeMd>{children}</SafeMd>;
+  return <StreamingMarkdownDynamic>{children}</StreamingMarkdownDynamic>;
 }
 
 const TAB_STYLE =

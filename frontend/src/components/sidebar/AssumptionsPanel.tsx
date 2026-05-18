@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
-import { Md } from "@/components/ui/Md";
+import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { Badge } from "@/components/ui/badge";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
@@ -127,9 +127,9 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
           <div className={rowListClass}>
             {explicit.map((a, i) => (
               <div key={i} className={rowItemClass}>
-                <div className="text-[var(--text-md)] leading-relaxed">
-                  <Md>{assumptionStatementDisplay(a.statement, a.type)}</Md>
-                </div>
+                <StreamingMarkdown>
+                  {assumptionStatementDisplay(a.statement, a.type)}
+                </StreamingMarkdown>
                 {a.section && (
                   <Badge variant="soft" className="mt-2">
                     {a.section}
@@ -147,9 +147,9 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
           <div className={rowListClass}>
             {implicit.map((a, i) => (
               <div key={i} className={rowItemClass}>
-                <div className="text-[var(--text-md)] leading-relaxed">
-                  <Md>{assumptionStatementDisplay(a.statement, a.type)}</Md>
-                </div>
+                <StreamingMarkdown>
+                  {assumptionStatementDisplay(a.statement, a.type)}
+                </StreamingMarkdown>
                 {a.section && (
                   <Badge variant="soft" className="mt-2">
                     {a.section}

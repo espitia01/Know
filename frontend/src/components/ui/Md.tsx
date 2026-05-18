@@ -1,5 +1,15 @@
 "use client";
 
+/**
+ * @deprecated Stage 4 migration. Every panel that renders LLM output now
+ * renders via `<StreamingMarkdown>` (Streamdown + KaTeX). `Md` and the
+ * 956-line `preprocessLatex` it depends on are kept around only for the
+ * Notes path, which still authors via the `note` LaTeX mode (`$$$$` for
+ * display math) and stores prepared markdown in the database — that
+ * persisted shape is incompatible with Streamdown's `$...$` rules. Do
+ * not import `Md` in new code; use `StreamingMarkdown` instead.
+ */
+
 import { memo, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
