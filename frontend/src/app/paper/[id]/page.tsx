@@ -41,6 +41,8 @@ import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { recordPaperOpened } from "@/lib/recentPapers";
 import { isPreReadingPopulated } from "@/lib/preReading";
 import { cn } from "@/lib/utils";
+import { GoogleDriveButton } from "@/components/upload/GoogleDriveButton";
+import { isGoogleDriveConfigured } from "@/lib/googleDrive";
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
@@ -396,6 +398,14 @@ function AddPaperPopover({
             </>
           )}
         </button>
+        {isGoogleDriveConfigured() && (
+          <GoogleDriveButton
+            onFile={(file) => handleUploadFiles([file])}
+            disabled={uploading}
+            maxBytes={MAX_UPLOAD_BYTES}
+            onError={setUploadError}
+          />
+        )}
         {/* Small hint so users know they can batch-upload. */}
         <p className="text-[10.5px] text-muted-foreground/70 text-center leading-snug px-1">
           Tip: you can select multiple PDFs at once.

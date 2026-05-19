@@ -14,6 +14,8 @@ import { UpgradeModal } from "@/components/UpgradeModal";
 import { FeedbackModal } from "@/components/FeedbackModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { FullscreenToggle } from "@/components/FullscreenToggle";
+import { GoogleDriveButton } from "@/components/upload/GoogleDriveButton";
+import { isGoogleDriveConfigured } from "@/lib/googleDrive";
 import { DISCORD_URL } from "@/lib/constants";
 import {
   KNOW_RECENT_PAPERS_CHANGED,
@@ -127,19 +129,12 @@ function DashboardContent() {
     }
   }, [searchParams, refreshTier]);
 
-  const onDrop = useCallback(
-    async (acceptedFiles: File[]) => {
-      const file = acceptedFiles[0];
-      if (!file) return;
+  const ingestFile = useCallback(
+    async (file: File) => {
       setError("");
       setLoading(true);
       try {
         const paper = await api.uploadPaper(file);
-        // Mirror the in-paper upload flow: seed the in-memory cache
-        // and the session tab list before navigating, so the reader
-        // page can render instantly without a second `getPaper`
-        // round-trip and (if a workspace is already in session) the
-        // new paper slots straight into the tab bar.
         cachePaper(paper);
         addSessionPaper({ id: paper.id, title: paper.title });
         setPaper(paper);
@@ -150,7 +145,16 @@ function DashboardContent() {
         setLoading(false);
       }
     },
-    [setPaper, setLoading, router, cachePaper, addSessionPaper]
+    [setPaper, setLoading, router, cachePaper, addSessionPaper],
+  );
+
+  const onDrop = useCallback(
+    async (acceptedFiles: File[]) => {
+      const file = acceptedFiles[0];
+      if (!file) return;
+      await ingestFile(file);
+    },
+    [ingestFile],
   );
 
   // Fail fast with a friendly message when the file is too large or not a
@@ -336,13 +340,29 @@ function DashboardContent() {
           <p className="text-[13px] text-destructive text-center animate-fade-in">{error}</p>
         )}
 
-        <p className="text-center text-[12px] text-muted-foreground/85">
-          <Link href="/settings#integrations" className="underline underline-offset-2 hover:text-foreground/90">
-            Google Drive &amp; Workspace
-          </Link>
-          <span className="text-muted-foreground/50"> · </span>
-          <span className="text-muted-foreground/70">import coming soon</span>
-        </p>
+        {isGoogleDriveConfigured() ? (
+          <div className="mx-auto w-full max-w-[320px] space-y-2">
+            <div className="flex items-center gap-3 text-[11px] uppercase tracking-[0.15em] text-muted-foreground/70">
+              <span className="h-px flex-1 bg-border/60" />
+              <span>or</span>
+              <span className="h-px flex-1 bg-border/60" />
+            </div>
+            <GoogleDriveButton
+              onFile={ingestFile}
+              disabled={loading}
+              maxBytes={MAX_UPLOAD_BYTES}
+              onError={setError}
+            />
+          </div>
+        ) : (
+          <p className="text-center text-[12px] text-muted-foreground/85">
+            <Link href="/settings#integrations" className="underline underline-offset-2 hover:text-foreground/90">
+              Google Drive &amp; Workspace
+            </Link>
+            <span className="text-muted-foreground/50"> · </span>
+            <span className="text-muted-foreground/70">import coming soon</span>
+          </p>
+        )}
 
         {/* Recent papers */}
         {papers.length > 0 && (
