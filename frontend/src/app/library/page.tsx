@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
-import { api, PaperListEntry } from "@/lib/api";
+import { api, type PaperListEntry, type WorkspaceRecord } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { useStore } from "@/lib/store";
 import { BibtexModal } from "@/components/BibtexModal";
@@ -14,7 +14,15 @@ import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import {
   WORKSPACE_FEATURES_COMING_SOON_TOOLTIP,
   WORKSPACE_FEATURES_TEMPORARILY_DISABLED,
+  MAX_SESSION_PAPERS,
 } from "@/lib/workspaceFeatureFlags";
+import { WorkspaceTruncationModal } from "@/components/workspaces/WorkspaceTruncationModal";
+import {
+  resolveWorkspacePapers,
+  getRememberedWorkspacePapers,
+  applyWorkspaceSession,
+  type LoadedWorkspacePaper,
+} from "@/lib/workspaceSessionLoad";
 import { forgetPaper } from "@/lib/analysisState";
 
 function FolderIcon({ className = "w-4 h-4", filled = false }: { className?: string; filled?: boolean }) {
@@ -53,7 +61,13 @@ function LibraryContent() {
   const dragPaper = useRef<string | null>(null);
   const [sidebarTab, setSidebarTab] = useState<"folders" | "workspaces">("folders");
   const [fetchError, setFetchError] = useState("");
-  const [workspaces, setWorkspaces] = useState<{ id: string; name: string; paper_ids: string[]; cross_paper_results: { question: string; answer: string }[]; updated_at: string }[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([]);
+  const [workspaceTruncation, setWorkspaceTruncation] = useState<{
+    workspace: WorkspaceRecord;
+    loaded: LoadedWorkspacePaper[];
+    requested: number;
+    missingCount: number;
+  } | null>(null);
   const [workspacesLoading, setWorkspacesLoading] = useState(false);
   const [workspacesFetched, setWorkspacesFetched] = useState(false);
   const [deleteWsConfirm, setDeleteWsConfirm] = useState<string | null>(null);
@@ -89,22 +103,49 @@ function LibraryContent() {
     }
   }, [sidebarTab, workspacesFetched, workspacesLoading, loadWorkspaces, workspaceFeaturesComingSoon]);
 
-  const handleOpenWorkspace = useCallback(async (ws: typeof workspaces[0]) => {
-    clearSession();
-    clearCrossPaperResults();
-    if (ws.cross_paper_results?.length > 0) {
-      addCrossPaperResults(ws.cross_paper_results);
-    }
-    for (const pid of ws.paper_ids) {
-      try {
-        const p = await api.getPaper(pid);
-        addSessionPaper({ id: p.id, title: p.title });
-      } catch { /* paper may have been deleted */ }
-    }
-    if (ws.paper_ids.length > 0) {
-      router.push(`/paper/${ws.paper_ids[0]}`);
-    }
-  }, [clearSession, clearCrossPaperResults, addCrossPaperResults, addSessionPaper, router]);
+  const finalizeWorkspaceOpen = useCallback(
+    (papers: { id: string; title: string }[], ws: WorkspaceRecord) => {
+      applyWorkspaceSession(papers, ws.cross_paper_results, {
+        clearSession,
+        clearCrossPaperResults,
+        addCrossPaperResults,
+        addSessionPaper,
+      });
+      setWorkspaceTruncation(null);
+      if (papers.length > 0) {
+        router.push(`/paper/${papers[0].id}`);
+      }
+    },
+    [clearSession, clearCrossPaperResults, addCrossPaperResults, addSessionPaper, router],
+  );
+
+  const handleOpenWorkspace = useCallback(
+    async (ws: WorkspaceRecord) => {
+      const requested = ws.paper_ids.length;
+      const { loaded, missingCount } = await resolveWorkspacePapers(ws.paper_ids);
+
+      if (loaded.length === 0) {
+        setFetchError(
+          "This workspace can't be opened — every paper it references has been deleted.",
+        );
+        return;
+      }
+
+      const willDrop = Math.max(0, loaded.length - MAX_SESSION_PAPERS);
+      if (willDrop > 0) {
+        const remembered = getRememberedWorkspacePapers(ws, loaded);
+        if (remembered) {
+          finalizeWorkspaceOpen(remembered, ws);
+          return;
+        }
+        setWorkspaceTruncation({ workspace: ws, loaded, requested, missingCount });
+        return;
+      }
+
+      finalizeWorkspaceOpen(loaded, ws);
+    },
+    [finalizeWorkspaceOpen],
+  );
 
   const handleDeleteWorkspace = useCallback(async (wsId: string) => {
     try {
@@ -985,6 +1026,21 @@ function LibraryContent() {
         folder={bibtexModal.folder}
         workspaceId={bibtexModal.workspaceId}
         label={bibtexModal.label}
+      />
+
+      <WorkspaceTruncationModal
+        open={!!workspaceTruncation}
+        workspaceId={workspaceTruncation?.workspace.id ?? ""}
+        workspaceUpdatedAt={workspaceTruncation?.workspace.updated_at ?? ""}
+        requested={workspaceTruncation?.requested ?? 0}
+        missingCount={workspaceTruncation?.missingCount ?? 0}
+        cap={MAX_SESSION_PAPERS}
+        papers={workspaceTruncation?.loaded ?? []}
+        onClose={() => setWorkspaceTruncation(null)}
+        onConfirm={(selected) => {
+          if (!workspaceTruncation) return;
+          finalizeWorkspaceOpen(selected, workspaceTruncation.workspace);
+        }}
       />
     </>
   );

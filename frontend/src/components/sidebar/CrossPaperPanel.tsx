@@ -30,6 +30,7 @@ export function CrossPaperPanel() {
   const [error, setError] = useState("");
 
   const paperIds = sessionPapers.map((p) => p.id);
+  const currentSig = [...paperIds].sort().join(",");
 
   const handleAsk = async (question?: string) => {
     const q = (question || input).trim();
@@ -39,9 +40,14 @@ export function CrossPaperPanel() {
     setLoading(true);
     try {
       const res = await api.askQuestionsMulti(paperIds, [q]);
+      const ids = [...paperIds].sort();
+      const titlesById = new Map(sessionPapers.map((p) => [p.id, p.title]));
       const answers = res.items.map((item: { question: string; answer: string }) => ({
         question: item.question,
         answer: item.answer,
+        asked_against: ids,
+        asked_against_titles: ids.map((id) => titlesById.get(id) ?? "Unknown paper"),
+        created_at: Date.now(),
       }));
       addCrossPaperResults(answers);
     } catch (e) {
@@ -150,15 +156,32 @@ export function CrossPaperPanel() {
               </button>
             }
           />
-          {crossPaperResults.map((r, i) => (
-            <div
-              key={i}
-              className="space-y-2 rounded-lg border border-border/60 bg-card/30 px-4 py-3"
-            >
-              <p className="text-[var(--text-md)] font-medium text-foreground">{r.question}</p>
-              <StreamingMarkdown>{r.answer}</StreamingMarkdown>
-            </div>
-          ))}
+          {crossPaperResults.map((r, i) => {
+            const sig = [...(r.asked_against ?? [])].sort().join(",");
+            const stale = sig.length > 0 && sig !== currentSig;
+            return (
+              <div
+                key={i}
+                className="space-y-2 rounded-lg border border-border/60 bg-card/30 px-4 py-3"
+              >
+                <p className="text-[var(--text-md)] font-medium text-foreground">{r.question}</p>
+                {r.asked_against_titles && r.asked_against_titles.length > 0 && (
+                  <p className="text-[var(--text-xs)] text-muted-foreground/75">
+                    Asked against:{" "}
+                    {r.asked_against_titles
+                      .map((t) => (t.length > 28 ? `${t.slice(0, 28)}…` : t))
+                      .join(", ")}
+                    {stale && (
+                      <span className="ml-1.5 rounded-md border border-border/55 bg-muted/[0.10] px-1.5 py-0.5 text-[var(--text-xs)] uppercase tracking-[0.06em] text-muted-foreground/80">
+                        Different papers
+                      </span>
+                    )}
+                  </p>
+                )}
+                <StreamingMarkdown>{r.answer}</StreamingMarkdown>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

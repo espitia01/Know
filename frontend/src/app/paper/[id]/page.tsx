@@ -24,7 +24,17 @@ import {
   WORKSPACE_FEATURES_COMING_SOON_TOOLTIP,
   WORKSPACE_FEATURES_TEMPORARILY_DISABLED,
   WORKSPACE_PAPER_LIMIT_MESSAGE,
+  MAX_SESSION_PAPERS,
 } from "@/lib/workspaceFeatureFlags";
+import { UnpinnedPaperBanner } from "@/components/header/UnpinnedPaperBanner";
+import { WorkspaceTruncationModal } from "@/components/workspaces/WorkspaceTruncationModal";
+import type { WorkspaceRecord } from "@/lib/api";
+import {
+  resolveWorkspacePapers,
+  getRememberedWorkspacePapers,
+  applyWorkspaceSession,
+  type LoadedWorkspacePaper,
+} from "@/lib/workspaceSessionLoad";
 import {
   hasActiveRequest,
   markRequestStart,
@@ -646,11 +656,30 @@ function PaperContent() {
   const [workspaceSaving, setWorkspaceSaving] = useState(false);
   const [workspaceSaved, setWorkspaceSaved] = useState(false);
   const [workspaceNameInput, setWorkspaceNameInput] = useState("");
-  const [savedWorkspaces, setSavedWorkspaces] = useState<{ id: string; name: string; paper_ids: string[]; cross_paper_results: { question: string; answer: string }[]; updated_at: string }[]>([]);
+  const [savedWorkspaces, setSavedWorkspaces] = useState<WorkspaceRecord[]>([]);
   const [workspacesLoaded, setWorkspacesLoaded] = useState(false);
   const [activeWorkspaceName, setActiveWorkspaceName] = useState<string | null>(null);
+  const [workspaceTruncation, setWorkspaceTruncation] = useState<{
+    workspace: WorkspaceRecord;
+    loaded: LoadedWorkspacePaper[];
+    requested: number;
+    missingCount: number;
+  } | null>(null);
 
   const sessionIds = useMemo(() => new Set(sessionPapers.map((p) => p.id)), [sessionPapers]);
+
+  const isActivePinned = useMemo(
+    () => sessionPapers.some((p) => p.id === activePaperId),
+    [sessionPapers, activePaperId],
+  );
+  const workspaceFull = sessionPapers.length >= MAX_SESSION_PAPERS;
+  const showUnpinnedBanner =
+    canMultiPaper &&
+    !workspaceFeaturesComingSoon &&
+    !workspaceTruncation &&
+    !!activePaperId &&
+    !isActivePinned &&
+    workspaceFull;
 
   useEffect(() => {
     api.listPapers().then((papers) => {
@@ -1175,46 +1204,76 @@ function PaperContent() {
     }
   }, [workspaceNameInput, sessionPapers, crossPaperResults]);
 
-  const handleLoadWorkspace = useCallback(async (ws: typeof savedWorkspaces[0]) => {
-    // Fetch papers BEFORE mutating state so we don't leave the user on a
-    // blank session if every paper in the workspace has since been deleted.
-    const loaded: { id: string; title: string }[] = [];
-    const missing: string[] = [];
-    for (const pid of ws.paper_ids) {
-      try {
-        const p = await api.getPaper(pid);
-        loaded.push({ id: p.id, title: p.title });
-      } catch {
-        missing.push(pid);
+  const finalizeWorkspaceLoad = useCallback(
+    (
+      papers: { id: string; title: string }[],
+      ws: WorkspaceRecord,
+      missingCount: number,
+    ) => {
+      applyWorkspaceSession(papers, ws.cross_paper_results, {
+        clearSession,
+        clearCrossPaperResults,
+        addCrossPaperResults,
+        addSessionPaper,
+      });
+      const firstId = papers[0].id;
+      setActivePaperId(firstId);
+      if (firstId !== paperId) {
+        router.push(`/paper/${firstId}`);
       }
-    }
-
-    if (loaded.length === 0) {
-      setError(
-        "This workspace can't be opened — every paper it references has been deleted."
-      );
       setShowWorkspaceMenu(false);
-      return;
-    }
+      setActiveWorkspaceName(
+        missingCount > 0 ? `${ws.name} (${missingCount} missing)` : ws.name,
+      );
+      setWorkspaceTruncation(null);
+    },
+    [
+      clearSession,
+      clearCrossPaperResults,
+      addCrossPaperResults,
+      addSessionPaper,
+      paperId,
+      router,
+    ],
+  );
 
-    clearSession();
-    clearCrossPaperResults();
+  const handleLoadWorkspace = useCallback(
+    async (ws: WorkspaceRecord) => {
+      const requested = ws.paper_ids.length;
+      const { loaded, missingCount } = await resolveWorkspacePapers(ws.paper_ids);
 
-    if (ws.cross_paper_results && ws.cross_paper_results.length > 0) {
-      addCrossPaperResults(ws.cross_paper_results);
-    }
-    for (const p of loaded) addSessionPaper(p);
+      if (loaded.length === 0) {
+        setError(
+          "This workspace can't be opened — every paper it references has been deleted.",
+        );
+        setShowWorkspaceMenu(false);
+        return;
+      }
 
-    const firstId = loaded[0].id;
-    setActivePaperId(firstId);
-    if (firstId !== paperId) {
-      router.push(`/paper/${firstId}`);
-    }
-    setShowWorkspaceMenu(false);
-    setActiveWorkspaceName(
-      missing.length > 0 ? `${ws.name} (${missing.length} missing)` : ws.name
-    );
-  }, [clearSession, clearCrossPaperResults, addCrossPaperResults, addSessionPaper, paperId, router]);
+      const willDrop = Math.max(0, loaded.length - MAX_SESSION_PAPERS);
+      if (willDrop > 0) {
+        const remembered = getRememberedWorkspacePapers(ws, loaded);
+        if (remembered) {
+          finalizeWorkspaceLoad(remembered, ws, missingCount);
+          return;
+        }
+        setWorkspaceTruncation({ workspace: ws, loaded, requested, missingCount });
+        setShowWorkspaceMenu(false);
+        return;
+      }
+
+      finalizeWorkspaceLoad(loaded, ws, missingCount);
+    },
+    [finalizeWorkspaceLoad],
+  );
+
+  const handlePinSwap = useCallback(
+    (droppedId: string) => {
+      removeSessionPaper(droppedId);
+      addSessionPaper({ id: activePaperId, title: paper?.title ?? "Untitled" });
+    },
+    [removeSessionPaper, addSessionPaper, activePaperId, paper?.title],
+  );
 
   const handleOpenWorkspaceMenu = useCallback(async () => {
     const opening = !showWorkspaceMenu;
@@ -1836,6 +1895,14 @@ function PaperContent() {
       </header>
       )}
 
+      {showUnpinnedBanner && !chromeHidden && (
+        <UnpinnedPaperBanner
+          sessionPapers={sessionPapers}
+          activePaperTitle={paper?.title ?? "Untitled"}
+          onPinSwap={handlePinSwap}
+        />
+      )}
+
       {/* Session paper tabs */}
       {showSessionBar && !chromeHidden && (
         <div className="shrink-0 border-b border-border glass-subtle px-3 py-1.5">
@@ -2061,6 +2128,25 @@ function PaperContent() {
         paperIds={bibtexModal.paperIds}
         workspaceId={bibtexModal.workspaceId}
         label={bibtexModal.label}
+      />
+
+      <WorkspaceTruncationModal
+        open={!!workspaceTruncation}
+        workspaceId={workspaceTruncation?.workspace.id ?? ""}
+        workspaceUpdatedAt={workspaceTruncation?.workspace.updated_at ?? ""}
+        requested={workspaceTruncation?.requested ?? 0}
+        missingCount={workspaceTruncation?.missingCount ?? 0}
+        cap={MAX_SESSION_PAPERS}
+        papers={workspaceTruncation?.loaded ?? []}
+        onClose={() => setWorkspaceTruncation(null)}
+        onConfirm={(selected) => {
+          if (!workspaceTruncation) return;
+          finalizeWorkspaceLoad(
+            selected,
+            workspaceTruncation.workspace,
+            workspaceTruncation.missingCount,
+          );
+        }}
       />
     </>
   );

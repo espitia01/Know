@@ -419,6 +419,26 @@ export interface FigureAnalysis {
   created_at?: number;
 }
 
+/** Cross-paper Q&A result (workspace session or saved workspace). */
+export interface CrossPaperQA {
+  question: string;
+  answer: string;
+  /** Sorted paper IDs in the session at the time this question was asked. */
+  asked_against?: string[];
+  /** Display-only: paper titles indexed to match `asked_against`. */
+  asked_against_titles?: string[];
+  /** Unix ms timestamp the answer was generated. */
+  created_at?: number;
+}
+
+export interface WorkspaceRecord {
+  id: string;
+  name: string;
+  paper_ids: string[];
+  cross_paper_results: CrossPaperQA[];
+  updated_at: string;
+}
+
 export const api = {
   uploadPaper: async (file: File): Promise<ParsedPaper> => {
     const formData = new FormData();
@@ -739,15 +759,15 @@ export const api = {
     }),
 
   listWorkspaces: () =>
-    getRequest<{ id: string; name: string; paper_ids: string[]; cross_paper_results: { question: string; answer: string }[]; updated_at: string }[]>("/api/workspaces"),
+    getRequest<WorkspaceRecord[]>("/api/workspaces"),
 
   saveWorkspace: (data: {
     id?: string;
     name: string;
     paper_ids: string[];
-    cross_paper_results: { question: string; answer: string }[];
+    cross_paper_results: CrossPaperQA[];
   }) =>
-    request<{ id: string; name: string; paper_ids: string[]; cross_paper_results: { question: string; answer: string }[]; updated_at: string }>("/api/workspaces", {
+    request<WorkspaceRecord>("/api/workspaces", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),

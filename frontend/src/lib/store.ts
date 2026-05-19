@@ -10,6 +10,7 @@ import type {
   Note,
   SelectionAnalysisResult,
   PaperSummary,
+  CrossPaperQA,
 } from "./api";
 import { selectionKey as selectionResultKey } from "./selectionActions";
 import { MAX_SESSION_PAPERS } from "./workspaceFeatureFlags";
@@ -35,11 +36,6 @@ interface UiPrefs {
   hideQaSuggestions: boolean;
   scrollByPaper: Record<string, number>;
   qaDraftByPaper: Record<string, string>;
-}
-
-interface CrossPaperQA {
-  question: string;
-  answer: string;
 }
 
 interface AppStore {
@@ -453,6 +449,9 @@ export const useStore = create<AppStore>()(
       },
 
       crossPaperResults: [],
+      // `crossPaperResults` is intentionally NOT per-paper. The Cross-paper
+      // tab shows the workspace's QA history across every active paper.
+      // Membership-staleness is handled at render time via `asked_against`.
       addCrossPaperResults: (items) =>
         set((s) => ({ crossPaperResults: [...items, ...s.crossPaperResults].slice(0, 80) })),
       clearCrossPaperResults: () => set({ crossPaperResults: [] }),
@@ -788,7 +787,8 @@ export const useStore = create<AppStore>()(
       partialize: (state) => ({
         sessionPapers: state.sessionPapers,
         activePaperId: state.activePaperId,
-        // TODO(workspaces): restore crossPaperResults persistence when workspaces ship.
+        // Cross-paper QA history (capped at 80 items in addCrossPaperResults).
+        crossPaperResults: state.crossPaperResults,
         // TODO(backend): sync region highlights via cached_analysis.region_highlights.
         pdfRegionHighlightsByPaper: state.pdfRegionHighlightsByPaper,
         // Chrome preferences survive reloads so the reader feels "sticky":

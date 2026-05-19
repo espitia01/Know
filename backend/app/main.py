@@ -668,6 +668,9 @@ def _cap_cross_paper_results(items: list) -> list:
     the ``workspaces.cross_paper_results`` JSONB column. We serialize each
     item to JSON to measure its real size in the stored form, then truncate
     long string fields in-place.
+
+    Each item may include ``question``, ``answer``, and optional provenance
+    fields ``asked_against``, ``asked_against_titles``, ``created_at``.
     """
     import json as _json
     capped: list = []
