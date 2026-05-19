@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
+  GoogleDriveCancelledError,
+  GoogleDrivePopupBlockedError,
   isGoogleDriveConfigured,
   pickAndDownloadDriveFile,
+  preloadGoogleDrive,
 } from "@/lib/googleDrive";
 import { cn } from "@/lib/utils";
 
@@ -37,15 +40,35 @@ export function GoogleDriveButton({
   onError,
 }: GoogleDriveButtonProps) {
   const [busy, setBusy] = useState(false);
+  const [popupHint, setPopupHint] = useState(false);
+
+  // Pre-load Google's SDKs the moment the button mounts. Browsers
+  // (especially Safari/Firefox) only allow popups inside the same tick
+  // as a user gesture; if the click handler had to await a script
+  // load, the popup would be flagged as programmatic and blocked.
+  useEffect(() => {
+    preloadGoogleDrive();
+  }, []);
 
   const handleClick = useCallback(async () => {
     if (busy || disabled) return;
     setBusy(true);
+    setPopupHint(false);
     try {
       const file = await pickAndDownloadDriveFile({ maxBytes });
       if (!file) return;
       await onFile(file);
     } catch (e) {
+      if (e instanceof GoogleDriveCancelledError) {
+        return;
+      }
+      if (e instanceof GoogleDrivePopupBlockedError) {
+        setPopupHint(true);
+        onError?.(
+          "Your browser blocked the Google sign-in popup. Click the button again to retry, or allow pop-ups for this site.",
+        );
+        return;
+      }
       const message =
         e instanceof Error ? e.message : "Google Drive import failed.";
       if (onError) onError(message);
@@ -60,31 +83,42 @@ export function GoogleDriveButton({
   const isPrimary = variant === "primary";
 
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      disabled={busy || disabled}
-      aria-busy={busy}
-      className={cn(
-        "inline-flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[12px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50",
-        isPrimary
-          ? "btn-primary-glass text-background"
-          : "border border-border/65 bg-background/70 text-foreground/90 hover:border-border-strong hover:bg-accent/40",
-        className,
+    <div className="w-full space-y-1.5">
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={busy || disabled}
+        aria-busy={busy}
+        className={cn(
+          "inline-flex w-full items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-[12px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-50",
+          isPrimary
+            ? "btn-primary-glass text-background"
+            : "border border-border/65 bg-background/70 text-foreground/90 hover:border-border-strong hover:bg-accent/40",
+          className,
+        )}
+      >
+        {busy ? (
+          <>
+            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+            Connecting to Drive…
+          </>
+        ) : (
+          <>
+            <GoogleDriveIcon className="h-3.5 w-3.5" />
+            {popupHint ? "Retry — click to allow popup" : "Open from Google Drive"}
+          </>
+        )}
+      </button>
+      {popupHint && !busy && (
+        <p
+          role="status"
+          className="text-[11px] leading-snug text-muted-foreground/85"
+        >
+          Your browser blocked the Google sign-in popup. Click the button again
+          to retry, or allow pop-ups for this site in your browser settings.
+        </p>
       )}
-    >
-      {busy ? (
-        <>
-          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
-          Connecting to Drive…
-        </>
-      ) : (
-        <>
-          <GoogleDriveIcon className="h-3.5 w-3.5" />
-          Open from Google Drive
-        </>
-      )}
-    </button>
+    </div>
   );
 }
 

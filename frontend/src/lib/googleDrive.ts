@@ -108,6 +108,27 @@ const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
 const GAPI_SRC = "https://apis.google.com/js/api.js";
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 
+/**
+ * Distinguished error thrown when the browser's popup blocker eats the
+ * Google OAuth consent window. Callers should tell the user to click
+ * the button again — the next click *is* a user gesture, so Chrome /
+ * Safari / Firefox will allow the popup on retry.
+ */
+export class GoogleDrivePopupBlockedError extends Error {
+  constructor(message = "Pop-up was blocked. Click the button again to retry.") {
+    super(message);
+    this.name = "GoogleDrivePopupBlockedError";
+  }
+}
+
+/** Distinguished, *non-fatal* signal that the user closed the popup. */
+export class GoogleDriveCancelledError extends Error {
+  constructor() {
+    super("Cancelled");
+    this.name = "GoogleDriveCancelledError";
+  }
+}
+
 const env = () => ({
   clientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "",
   apiKey: process.env.NEXT_PUBLIC_GOOGLE_API_KEY || "",
@@ -176,6 +197,23 @@ function ensureGis(): Promise<void> {
   return gisLoaded;
 }
 
+/**
+ * Warm up Google's SDKs before the user clicks. Browsers (Safari and
+ * Firefox especially) only allow popups when the call is in the same
+ * tick as a user gesture — so the click handler must be able to call
+ * `requestAccessToken()` without awaiting any network. Call this once
+ * from `useEffect` when the Drive button mounts.
+ *
+ * Safe to call multiple times; underlying promises are deduplicated.
+ * Swallows errors — the real call later will surface them.
+ */
+export function preloadGoogleDrive(): Promise<void> {
+  if (!isGoogleDriveConfigured()) return Promise.resolve();
+  return Promise.all([ensureGapiPicker(), ensureGis()])
+    .then(() => undefined)
+    .catch(() => undefined);
+}
+
 function requestAccessToken(): Promise<string> {
   const { clientId } = env();
   if (!clientId) {
@@ -206,14 +244,33 @@ function requestAccessToken(): Promise<string> {
         resolve(response.access_token);
       },
       error_callback: (err) => {
-        reject(new Error(err.message || "Google sign-in cancelled"));
+        // GIS surfaces `popup_failed_to_open` when the browser's popup
+        // blocker prevented the OAuth window from opening — typical on
+        // first-click in Safari/Firefox because we may have awaited a
+        // script load before calling `requestAccessToken`. The next
+        // click *is* a user gesture so a retry will succeed.
+        if (err?.type === "popup_failed_to_open") {
+          reject(new GoogleDrivePopupBlockedError());
+          return;
+        }
+        if (err?.type === "popup_closed") {
+          reject(new GoogleDriveCancelledError());
+          return;
+        }
+        reject(new Error(err?.message || "Google sign-in failed."));
       },
     });
+    // Must be called synchronously inside the user gesture chain. The
+    // caller pre-warms scripts via `preloadGoogleDrive()` so no awaits
+    // sit between the click and this line.
     tokenClient.requestAccessToken({ prompt: cachedToken ? "" : "consent" });
   });
 }
 
 async function getAccessToken(): Promise<string> {
+  // No-op when scripts are already warm (the common case after
+  // `preloadGoogleDrive()`); kept for safety if the caller skipped
+  // pre-warming.
   await ensureGis();
   if (cachedToken && cachedToken.expiresAt > Date.now()) {
     return cachedToken.value;
@@ -297,8 +354,20 @@ export async function pickAndDownloadDriveFile(
   if (!isGoogleDriveConfigured()) {
     throw new Error("Google Drive is not configured for this deployment.");
   }
+  // Scripts should be pre-warmed by `preloadGoogleDrive()` from the
+  // button's `useEffect` so this resolves synchronously and the OAuth
+  // popup fires inside the user gesture. If pre-warm was skipped or
+  // is still in flight, we fall back to the original behavior — the
+  // popup may be blocked, in which case the caller gets a
+  // `GoogleDrivePopupBlockedError` and the user just clicks again.
   await Promise.all([ensureGapiPicker(), ensureGis()]);
-  const token = await getAccessToken();
+  let token: string;
+  try {
+    token = await getAccessToken();
+  } catch (e) {
+    if (e instanceof GoogleDriveCancelledError) return null;
+    throw e;
+  }
   const picked = await openPicker(token);
   if (!picked) return null;
 
