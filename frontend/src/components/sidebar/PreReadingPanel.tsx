@@ -1,10 +1,18 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
-import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
+import {
+  autoAnalyzedPapers,
+  clearProgressStart,
+  hasActiveRequest,
+  markRequestEnd,
+  markRequestStart,
+} from "@/lib/analysisState";
+import { isPreReadingPopulated } from "@/lib/preReading";
+import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SectionHeader } from "@/components/panel/SectionHeader";
@@ -36,13 +44,18 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
   const updateCachedAnalysis = useStore((s) => s.updateCachedAnalysis);
   const preReadingLoading = useStore((s) => s.preReadingLoading);
   const setPreReadingLoading = useStore((s) => s.setPreReadingLoading);
+  const setPreReadingError = useStore((s) => s.setPreReadingError);
+  const autoError = useStore((s) => s.preReadingErrorByPaper[paperId] ?? null);
+  const { user: tierUser } = useUserTier();
   const currentPaperRef = useRef(paperId);
   currentPaperRef.current = paperId;
   const [loadError, setLoadError] = useState<string | null>(null);
+  const displayError = loadError ?? autoError;
 
   const handleAnalyze = async () => {
     const targetId = paperId;
     setLoadError(null);
+    setPreReadingError(targetId, null);
     clearProgressStart(targetId, "preReading");
     markRequestStart(targetId, "preReading");
     setPreReadingLoading(true);
@@ -55,7 +68,9 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
     } catch (e) {
       console.error("Analysis failed:", e);
       if (currentPaperRef.current === targetId) {
-        setLoadError(e instanceof Error ? e.message : "Prepare failed. Try again.");
+        const msg = e instanceof Error ? e.message : "Prepare failed. Try again.";
+        setLoadError(msg);
+        setPreReadingError(targetId, msg);
       }
     } finally {
       markRequestEnd(targetId, "preReading");
@@ -65,6 +80,21 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
       }
     }
   };
+
+  useEffect(() => {
+    const pid = paperId;
+    if (
+      !preReading &&
+      !isPreReadingPopulated(preReading) &&
+      !preReadingLoading &&
+      !hasActiveRequest(pid, "preReading") &&
+      !autoAnalyzedPapers.has(`${pid}:preReading`) &&
+      canAccess(tierUser?.tier || "free", "prepare")
+    ) {
+      void handleAnalyze();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount safety net per paper
+  }, [paperId]);
 
   if (preReadingLoading) {
     return (
@@ -82,10 +112,10 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
       <EmptyState
         title="Prepare this paper"
         body={
-          loadError ||
+          displayError ||
           "Extract definitions, research questions, and key concepts before you read."
         }
-        cta={{ label: loadError ? "Retry Prepare" : "Analyze Paper", onClick: handleAnalyze }}
+        cta={{ label: displayError ? "Retry Prepare" : "Analyze Paper", onClick: handleAnalyze }}
       />
     );
   }
@@ -104,10 +134,10 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
       <EmptyState
         title="Prepare didn't extract structure"
         body={
-          loadError ||
+          displayError ||
           "The analysis returned empty sections for this PDF. Retry, or confirm the PDF has a normal text layer."
         }
-        cta={{ label: loadError ? "Retry Prepare" : "Analyze Paper again", onClick: handleAnalyze }}
+        cta={{ label: displayError ? "Retry Prepare" : "Analyze Paper again", onClick: handleAnalyze }}
       />
     );
   }

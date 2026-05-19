@@ -930,11 +930,16 @@ function PaperContent() {
       Number(sessionCache.assumptions_cooldown_until || 0),
     );
     const assumptionsCoolingDown = cooldownUntil > Date.now() / 1000;
+    const cacheHasPreReadingKey = cache.pre_reading !== undefined;
+    const cachePreReadingPopulated = isPreReadingPopulated(cache.pre_reading);
     const hasPreReading =
-      isPreReadingPopulated(cache.pre_reading) ||
+      cachePreReadingPopulated ||
       isPreReadingPopulated(sessionCache.pre_reading) ||
       (storeSnap.preReadingPaperId === pid &&
         isPreReadingPopulated(storeSnap.preReading));
+    if (cacheHasPreReadingKey && !cachePreReadingPopulated) {
+      autoAnalyzedPapers.add(`${pid}:preReading`);
+    }
 
     if (
       !hasPreReading &&
@@ -951,9 +956,16 @@ function PaperContent() {
           if (s.paper?.id !== pid) return;
           s.setPreReading(pid, r);
           s.updateCachedAnalysis(pid, { pre_reading: r });
+          s.setPreReadingError(pid, null);
           autoAnalyzedPapers.add(`${pid}:preReading`);
         })
-        .catch(() => {})
+        .catch((err) => {
+          const s = useStore.getState();
+          if (s.paper?.id !== pid) return;
+          const msg =
+            err instanceof Error ? err.message : "Prepare failed. Try again.";
+          s.setPreReadingError(pid, msg);
+        })
         .finally(() => {
           markRequestEnd(pid, "preReading");
           clearProgressStart(pid, "preReading");

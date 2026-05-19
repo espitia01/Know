@@ -157,6 +157,8 @@ interface AppStore {
   setPreReading: (forPaperId: string | null, preReading: PreReadingAnalysis | null) => void;
   preReadingLoading: boolean;
   setPreReadingLoading: (l: boolean) => void;
+  preReadingErrorByPaper: Record<string, string | null>;
+  setPreReadingError: (paperId: string, message: string | null) => void;
 
   questions: string[];
   addQuestion: (q: string) => void;
@@ -231,6 +233,7 @@ export const useStore = create<AppStore>()(
             pdfRegionHighlightsByPaper: {},
             preReading: null,
             preReadingPaperId: null,
+            preReadingErrorByPaper: {},
             assumptions: [],
             summary: null,
             summaryStreamingByPaper: {},
@@ -542,6 +545,14 @@ export const useStore = create<AppStore>()(
         }),
       preReadingLoading: false,
       setPreReadingLoading: (l) => set({ preReadingLoading: l }),
+      preReadingErrorByPaper: {},
+      setPreReadingError: (paperId, message) =>
+        set((state) => ({
+          preReadingErrorByPaper: {
+            ...state.preReadingErrorByPaper,
+            [paperId]: message,
+          },
+        })),
 
       questions: [],
       addQuestion: (q) => set((s) => ({ questions: [...s.questions, q] })),
@@ -611,7 +622,8 @@ export const useStore = create<AppStore>()(
       resetAnalysisState: () => set({
         preReading: null,
         preReadingPaperId: null,
-        assumptions: [], summary: null, summaryStreamingByPaper: {}, summaryErrorByPaper: {}, notes: [],
+        assumptions: [], summary: null, summaryStreamingByPaper: {}, summaryErrorByPaper: {},
+        preReadingErrorByPaper: {}, notes: [],
         selectionHistory: [], selectionResult: null, qaResults: [], questions: [],
         exercise: null, searchResults: [],
         preReadingLoading: false, assumptionsLoading: false, summaryLoading: false,
