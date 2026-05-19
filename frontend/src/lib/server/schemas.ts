@@ -44,6 +44,7 @@ export const SelectionResultSchema = z.object({
   action: z.enum(["explain", "derive", "followup"]),
   body: z
     .string()
+    .optional()
     .describe(
       "Primary markdown narrative. Use $...$ for inline math and $$...$$ for display math. NEVER bare LaTeX commands, Unicode math symbols, or raw HTML."
     ),

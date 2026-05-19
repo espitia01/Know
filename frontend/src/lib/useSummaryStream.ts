@@ -47,9 +47,12 @@ function hasOverview(value: Partial<PaperSummary> | null | undefined): boolean {
   return typeof value?.overview === "string" && value.overview.trim().length > 0;
 }
 
+const SUMMARY_META_KEYS = new Set(["model", "created_at"]);
+
 function hasMeaningfulPartial(value: Partial<PaperSummary> | null | undefined): boolean {
   if (!value || typeof value !== "object") return false;
   return Object.keys(value).some((k) => {
+    if (SUMMARY_META_KEYS.has(k)) return false;
     const v = value[k as keyof PaperSummary];
     if (typeof v === "string") return v.trim().length > 0;
     return Array.isArray(v) && v.length > 0;
@@ -205,7 +208,6 @@ export function useSummaryStream(paperId: string) {
       void runBatchFallback(paperId);
     }, STREAM_FALLBACK_MS);
     streamModelRef.current = analysisModel;
-    useStore.getState().setSummaryStreamingPartial(paperId, { model: analysisModel });
     obj.submit({});
   }, [
     paperId,

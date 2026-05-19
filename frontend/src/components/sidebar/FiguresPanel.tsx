@@ -425,6 +425,11 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         const finalParsed = await parsePartialJson(jsonAccum);
         const finalObj = (finalParsed.value as Partial<FigureAnalysis> | undefined) ?? {};
         const finalText = (finalObj.answer ?? finalObj.description ?? lastDisplay ?? "") as string;
+        if (!finalText.trim()) {
+          throw new Error(
+            "The model didn't return a complete figure analysis. Please try again.",
+          );
+        }
         const cacheEntry: FigureAnalysis = {
           figure_id: figId,
           question: q,

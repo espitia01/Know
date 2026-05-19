@@ -15,14 +15,21 @@ import {
   summaryStreamStarters,
 } from "@/lib/analysisState";
 import { ensureDisplayMath, firstSentence } from "@/lib/text";
-import { useUserSettings } from "@/lib/UserSettingsContext";
-
 interface SummaryPanelProps {
   paperId: string;
 }
 
+function hasSummaryBody(value: Partial<PaperSummary> | null | undefined): boolean {
+  if (!value || typeof value !== "object") return false;
+  return Object.keys(value).some((k) => {
+    if (k === "model" || k === "created_at") return false;
+    const v = value[k as keyof PaperSummary];
+    if (typeof v === "string") return v.trim().length > 0;
+    return Array.isArray(v) && v.length > 0;
+  });
+}
+
 export function SummaryPanel({ paperId }: SummaryPanelProps) {
-  const { analysisModel } = useUserSettings();
   const cachedSummary = useStore((s) => s.summary) ?? null;
   const streamingPartial = useStore((s) => s.summaryStreamingByPaper[paperId] ?? null);
   const summaryLoading = useStore((s) => s.summaryLoading);
@@ -35,7 +42,9 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   const fromStore = onActivePaper ? cachedSummary : null;
   const fromCache = onActivePaper ? (paperCached as PaperSummary | null) : null;
   const live = onActivePaper ? streamingPartial : null;
-  const summary = (live ?? fromStore ?? fromCache ?? null) as Partial<PaperSummary> | null;
+  const summaryRaw = (live ?? fromStore ?? fromCache ?? null) as Partial<PaperSummary> | null;
+  const hasBody = hasSummaryBody(summaryRaw);
+  const summary = hasBody ? summaryRaw : null;
   const isLoading =
     onActivePaper &&
     (summaryLoading || hasActiveRequest(paperId, "summary")) &&
@@ -84,7 +93,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     );
   }
 
-  const s = summary;
+  const s = summary!;
   const stillStreaming = isLoading;
   const FIELD_ORDER = [
     "overview",
@@ -112,11 +121,9 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
         <h2 className="font-display text-[var(--text-md)] font-medium tracking-[-0.02em] text-foreground">
           Summary
         </h2>
-        <CardMeta
-          model={s.model ?? analysisModel}
-          createdAt={s.created_at}
-          pending={stillStreaming && !s.model}
-        />
+        {s.model ? (
+          <CardMeta model={s.model} createdAt={s.created_at} pending={stillStreaming} />
+        ) : null}
       </div>
 
       {takeaway && (

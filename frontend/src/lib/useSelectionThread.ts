@@ -56,6 +56,27 @@ function newClientKey(): string {
   return `sel-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+const INCOMPLETE_SELECTION_MSG =
+  "The model didn't return a complete answer. This can happen when the output is cut off or fails validation. Please try again.";
+
+type SelectionPartial = {
+  action?: SelectionAction;
+  body?: string;
+  assumptions?: SelectionAnalysisResult["assumptions"];
+  starting_point?: string;
+  final_result?: string;
+  steps?: SelectionAnalysisResult["steps"];
+};
+
+function hasSelectionContent(partial: SelectionPartial | undefined | null): boolean {
+  if (!partial) return false;
+  if (typeof partial.body === "string" && partial.body.trim().length > 0) return true;
+  if (typeof partial.final_result === "string" && partial.final_result.trim().length > 0) {
+    return true;
+  }
+  return Array.isArray(partial.steps) && partial.steps.length > 0;
+}
+
 function describeError(error: unknown): string {
   if (!error) return "Selection failed.";
   // experimental_useObject surfaces fetch / parse failures as Error
@@ -87,35 +108,53 @@ export function useSelectionThread(paperId: string) {
   const startedRef = useRef<StartedState | null>(null);
   const finalizedRef = useRef<string | null>(null);
 
-  const obj = useObject({
-    id: paperId,
-    api: `/api/papers/${paperId}/selection-stream`,
-    schema: SelectionResultSchema,
-    onError: (error) => {
-      // Don't clobber state from a stale paper.
-      const startedFor = useStore.getState().paper?.id;
-      if (startedFor !== paperId) return;
-      const started = startedRef.current;
-      if (!started) return;
+  const writeErrorResult = useCallback(
+    (started: StartedState, message: string) => {
+      if (useStore.getState().paper?.id !== paperId) return;
       const errResult: SelectionAnalysisResult = {
         action: started.action,
         selected_text: started.selectedText,
         question: started.question,
-        explanation: describeError(error),
+        explanation: message,
         streaming: false,
         clientKey: started.clientKey,
+        model: started.model,
       };
       upsertSelectionInHistory(errResult);
       setSelectionResult(errResult);
       setSelectionLoading(false);
       finalizedRef.current = started.clientKey;
     },
-    onFinish: () => {
+    [paperId, setSelectionResult, setSelectionLoading, upsertSelectionInHistory],
+  );
+
+  const obj = useObject({
+    id: paperId,
+    api: `/api/papers/${paperId}/selection-stream`,
+    schema: SelectionResultSchema,
+    onError: (error) => {
+      const startedFor = useStore.getState().paper?.id;
+      if (startedFor !== paperId) return;
       const started = startedRef.current;
       if (!started) return;
-      // Don't double-finalize: the partial->final sync below will run on
-      // the same render and we use this to refresh usage exactly once.
+      writeErrorResult(started, describeError(error));
+    },
+    onFinish: ({ object, error }) => {
+      const started = startedRef.current;
+      if (!started || useStore.getState().paper?.id !== paperId) return;
       if (finalizedRef.current === started.clientKey) return;
+
+      if (error) {
+        writeErrorResult(started, describeError(error));
+        return;
+      }
+
+      const partial = object as SelectionPartial | undefined;
+      if (!hasSelectionContent(partial)) {
+        writeErrorResult(started, INCOMPLETE_SELECTION_MSG);
+        return;
+      }
+
       bumpUsageRefresh();
     },
   });
@@ -130,19 +169,18 @@ export function useSelectionThread(paperId: string) {
     const currentPaper = useStore.getState().paper?.id;
     if (currentPaper !== paperId) return;
 
-    const partial = obj.object as
-      | {
-          action?: SelectionAction;
-          body?: string;
-          assumptions?: SelectionAnalysisResult["assumptions"];
-          starting_point?: string;
-          final_result?: string;
-          steps?: SelectionAnalysisResult["steps"];
-        }
-      | undefined;
+    const partial = obj.object as SelectionPartial | undefined;
 
     const isStillStreaming = obj.isLoading;
     if (!partial && isStillStreaming) return;
+
+    if (!isStillStreaming && !hasSelectionContent(partial)) {
+      if (finalizedRef.current !== started.clientKey) {
+        const msg = obj.error ? describeError(obj.error) : INCOMPLETE_SELECTION_MSG;
+        writeErrorResult(started, msg);
+      }
+      return;
+    }
 
     const result: SelectionAnalysisResult = {
       action: started.action,
@@ -162,7 +200,15 @@ export function useSelectionThread(paperId: string) {
     upsertSelectionInHistory(result);
     setSelectionResult(result);
     if (!isStillStreaming) finalizedRef.current = started.clientKey;
-  }, [obj.object, obj.isLoading, paperId, setSelectionResult, upsertSelectionInHistory]);
+  }, [
+    obj.object,
+    obj.isLoading,
+    obj.error,
+    paperId,
+    setSelectionResult,
+    upsertSelectionInHistory,
+    writeErrorResult,
+  ]);
 
   const start = useCallback(
     (args: StartArgs) => {
