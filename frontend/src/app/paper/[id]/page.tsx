@@ -30,7 +30,8 @@ import {
   markRequestEnd,
   clearProgressStart,
   forgetPaper,
-  allowAutoAnalyzeRetry,
+  getCachedAssumptionItems,
+  syncAutoAnalyzeGuardsFromCache,
   autoAnalyzedPapers,
   abortActiveSummaryStream,
 } from "@/lib/analysisState";
@@ -608,7 +609,9 @@ function PaperContent() {
       // paper whose first-pass analyze quietly failed left the tabs
       // permanently idle ("workflow doesn't proceed as usual" in the
       // bug report).
-      allowAutoAnalyzeRetry(paperId);
+      const nextCache =
+        useStore.getState().papersById[paperId]?.cached_analysis ?? {};
+      syncAutoAnalyzeGuardsFromCache(paperId, nextCache, nextCache);
       setActivePaperId(paperId);
     }
   }, [
@@ -911,20 +914,19 @@ function PaperContent() {
     hydrateFromCachedAnalysis(loadedPaperCache || {}, loadedPaperNotes || []);
   }, [loadedPaperId, activePaperId, cacheHydrateSig, loadedPaperCache, loadedPaperNotes, hydrateFromCachedAnalysis]);
 
-  // Clearing auto-analyze guards on every paper mount lets dashboard → reopen
-  // retry a failed Prepare pass (`paperId === activePaperId` skips the guard
-  // in the URL effect above). Duplicate work is still blocked by `hasActiveRequest`.
-  useEffect(() => {
-    allowAutoAnalyzeRetry(activePaperId);
-  }, [activePaperId]);
-
   useEffect(() => {
     if (!loadedPaperId || loadedPaperId !== activePaperId || tierLoading) return;
 
     const pid = activePaperId;
     const cache = loadedPaperCache || {};
     const sessionCache = useStore.getState().papersById[pid]?.cached_analysis || {};
+    syncAutoAnalyzeGuardsFromCache(pid, cache, sessionCache);
     const storeSnap = useStore.getState();
+    const cachedAssumptions =
+      getCachedAssumptionItems(cache) ?? getCachedAssumptionItems(sessionCache);
+    if (cachedAssumptions && storeSnap.assumptions.length === 0) {
+      setAssumptions(cachedAssumptions);
+    }
     const cooldownUntil = Math.max(
       Number(cache.assumptions_cooldown_until || 0),
       Number(sessionCache.assumptions_cooldown_until || 0),
@@ -1003,6 +1005,9 @@ function PaperContent() {
           const s = useStore.getState();
           if (s.paper?.id === pid) {
             setAssumptions(r.assumptions);
+            s.updateCachedAnalysis(pid, {
+              assumptions: { assumptions: r.assumptions },
+            });
             autoAnalyzedPapers.add(`${pid}:assumptions`);
           }
         })
@@ -1058,7 +1063,8 @@ function PaperContent() {
     // still missing pre_reading / assumptions) should be allowed to
     // retry rather than being held off by the sticky
     // `autoAnalyzedPapers` flag.
-    allowAutoAnalyzeRetry(id);
+    const nextCache = useStore.getState().papersById[id]?.cached_analysis ?? {};
+    syncAutoAnalyzeGuardsFromCache(id, nextCache, nextCache);
     setActivePaperId(id);
     // Keep the URL in sync with the active paper so deep links, browser
     // history, and copy-URL all reflect reality. `router.replace` (not push)

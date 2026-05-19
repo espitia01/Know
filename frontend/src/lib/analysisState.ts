@@ -2,6 +2,11 @@
 // Persists across component remounts (orientation change, paper switches) so in-flight
 // requests are not re-triggered and progress bars keep running.
 
+import type { Assumption, ParsedPaper } from "@/lib/api";
+import { isPreReadingPopulated } from "@/lib/preReading";
+
+type CacheSlice = NonNullable<ParsedPaper["cached_analysis"]>;
+
 export type AnalysisKind = "preReading" | "assumptions" | "summary";
 
 export const autoAnalyzedPapers = new Set<string>();
@@ -72,18 +77,55 @@ export function forgetPaper(paperId: string) {
   }
 }
 
+/** Non-empty assumptions list from a cached_analysis blob, if any. */
+export function getCachedAssumptionItems(
+  cache: CacheSlice | undefined,
+): Assumption[] | null {
+  const items = cache?.assumptions?.assumptions;
+  return Array.isArray(items) && items.length > 0 ? items : null;
+}
+
 /**
- * Allow the auto-analysis guards for a paper to fire again. Used when
- * the user *re-enters* a paper: if the first pass didn't manage to
- * persist pre-reading / assumptions (server cache still empty), the
- * hydration effect should be free to retry instead of being held off
- * by a stale "we already kicked this off once this session" flag.
- *
- * Concurrent duplicate requests are still prevented by
- * `hasActiveRequest`, so clearing here is safe even if a request from
- * the previous visit is still in flight — the hydration effect will
- * skip on the `hasActiveRequest` check and re-try only if truly idle.
+ * Align session auto-analyze guards with what is already on disk / in
+ * `papersById`. Clears a guard only when that artifact is truly missing
+ * (so dashboard → reopen can retry a failed first pass) and *sets* the
+ * guard when cache already has data (so we do not re-extract assumptions).
  */
+export function syncAutoAnalyzeGuardsFromCache(
+  paperId: string,
+  cache: CacheSlice = {},
+  sessionCache: CacheSlice = {},
+) {
+  const hasPre =
+    isPreReadingPopulated(cache.pre_reading) ||
+    isPreReadingPopulated(sessionCache.pre_reading);
+  const hasPreKey =
+    cache.pre_reading !== undefined || sessionCache.pre_reading !== undefined;
+  if (hasPre || hasPreKey) {
+    autoAnalyzedPapers.add(`${paperId}:preReading`);
+  } else {
+    autoAnalyzedPapers.delete(`${paperId}:preReading`);
+  }
+
+  const cachedAssume =
+    getCachedAssumptionItems(cache) ?? getCachedAssumptionItems(sessionCache);
+  const hasAssumeKey =
+    cache.assumptions !== undefined || sessionCache.assumptions !== undefined;
+  if (cachedAssume || hasAssumeKey) {
+    autoAnalyzedPapers.add(`${paperId}:assumptions`);
+  } else {
+    autoAnalyzedPapers.delete(`${paperId}:assumptions`);
+  }
+
+  const hasSummary = !!(cache.summary || sessionCache.summary);
+  if (hasSummary) {
+    autoAnalyzedPapers.add(`${paperId}:summary`);
+  } else {
+    autoAnalyzedPapers.delete(`${paperId}:summary`);
+  }
+}
+
+/** @deprecated Use `syncAutoAnalyzeGuardsFromCache` — blind clear retriggers cached work. */
 export function allowAutoAnalyzeRetry(paperId: string) {
   autoAnalyzedPapers.delete(`${paperId}:preReading`);
   autoAnalyzedPapers.delete(`${paperId}:assumptions`);

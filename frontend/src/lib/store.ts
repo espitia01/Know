@@ -224,6 +224,11 @@ export const useStore = create<AppStore>()(
           if (prevId === nextId) {
             return { paper: p };
           }
+          const cachedAssumptions = Array.isArray(
+            p?.cached_analysis?.assumptions?.assumptions,
+          )
+            ? p!.cached_analysis!.assumptions!.assumptions
+            : [];
           return {
             paper: p,
             pendingFigureBlob: null,
@@ -234,7 +239,7 @@ export const useStore = create<AppStore>()(
             preReading: null,
             preReadingPaperId: null,
             preReadingErrorByPaper: {},
-            assumptions: [],
+            assumptions: cachedAssumptions,
             summary: null,
             summaryStreamingByPaper: {},
             summaryErrorByPaper: {},

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   autoAnalyzedPapers,
   clearProgressStart,
+  getCachedAssumptionItems,
   hasActiveRequest,
   markRequestEnd,
   markRequestStart,
@@ -48,7 +49,14 @@ function assumptionStatementDisplay(statement: string, type: string): string {
 }
 
 export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
-  const { assumptions, setAssumptions, assumptionsLoading, setAssumptionsLoading, paper } = useStore();
+  const {
+    assumptions,
+    setAssumptions,
+    assumptionsLoading,
+    setAssumptionsLoading,
+    paper,
+    updateCachedAnalysis,
+  } = useStore();
   const { user: tierUser } = useUserTier();
   const currentPaperRef = useRef(paperId);
   currentPaperRef.current = paperId;
@@ -70,6 +78,9 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
       const result = await api.getAssumptions(targetId);
       if (currentPaperRef.current === targetId) {
         setAssumptions(result.assumptions);
+        updateCachedAnalysis(targetId, {
+          assumptions: { assumptions: result.assumptions },
+        });
         if (result.assumptions.length === 0) {
           // Defensive: if the backend ever relaxes its "no items = 502"
           // rule, still surface a clear message instead of dropping the
@@ -93,6 +104,19 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
 
   useEffect(() => {
     const pid = paperId;
+    const sessionCache = useStore.getState().papersById[pid]?.cached_analysis;
+    const cached =
+      getCachedAssumptionItems(
+        paper?.id === pid ? paper.cached_analysis : undefined,
+      ) ?? getCachedAssumptionItems(sessionCache);
+    if (cached && assumptions.length === 0) {
+      setAssumptions(cached);
+      autoAnalyzedPapers.add(`${pid}:assumptions`);
+      if (!hasActiveRequest(pid, "assumptions")) {
+        setAssumptionsLoading(false);
+      }
+      return;
+    }
     const cooldown =
       (paper?.id === pid ? Number(paper.cached_analysis?.assumptions_cooldown_until || 0) : 0) >
       Date.now() / 1000;
@@ -108,6 +132,18 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount safety net per paper
   }, [paperId]);
+
+  // Returning from dashboard can leave `assumptionsLoading` true even though
+  // the in-memory list is already populated (no active request).
+  useEffect(() => {
+    if (
+      assumptions.length > 0 &&
+      assumptionsLoading &&
+      !hasActiveRequest(paperId, "assumptions")
+    ) {
+      setAssumptionsLoading(false);
+    }
+  }, [paperId, assumptions.length, assumptionsLoading, setAssumptionsLoading]);
 
   if (assumptionsLoading) {
     return (
