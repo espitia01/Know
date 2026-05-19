@@ -10,7 +10,6 @@ import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { SectionHeader } from "@/components/panel/SectionHeader";
 import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
 import { SwitchField } from "@/components/ui/switch";
-import { WORKSPACE_FEATURES_TEMPORARILY_DISABLED } from "@/lib/workspaceFeatureFlags";
 
 interface QAPanelProps {
   paperId: string;
@@ -32,10 +31,13 @@ const SEED_PROMPTS = [
 export function QAPanel({ paperId }: QAPanelProps) {
   const {
     questions, addQuestion, removeQuestion, clearQuestions,
-    qaResults, setQAResults, qaLoading, setQALoading,
     sessionPapers, bumpUsageRefresh,
     uiPrefs, setHideQaSuggestions, setQADraft,
   } = useStore();
+  const qaResults = useStore((s) => s.qaResultsByPaper[paperId] ?? []);
+  const setQAResultsForPaper = useStore((s) => s.setQAResultsForPaper);
+  const qaLoading = useStore((s) => s.qaLoadingByPaper[paperId] ?? false);
+  const setQALoadingForPaper = useStore((s) => s.setQALoadingForPaper);
   const { user } = useUserTier();
   const tier = user?.tier || "free";
   const [input, setInput] = useState("");
@@ -76,8 +78,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
     prevQaCount.current = n;
   }, [qaResults]);
 
-  const canMultiQA =
-    !WORKSPACE_FEATURES_TEMPORARILY_DISABLED && canAccess(tier, "multi-qa");
+  const canMultiQA = canAccess(tier, "multi-qa");
   const hasMultiplePapers = sessionPapers.length > 1 && canMultiQA;
 
   const [justAdded, setJustAdded] = useState(false);
@@ -126,12 +127,12 @@ export function QAPanel({ paperId }: QAPanelProps) {
   const handleAnswerAll = async () => {
     if (questions.length === 0) return;
     const toAnswer = [...questions];
-    setQALoading(true);
+    setQALoadingForPaper(paperId, true);
     setQAError("");
     try {
       // TODO(workspaces): restore api.askQuestionsMulti when WORKSPACE_FEATURES_TEMPORARILY_DISABLED flips.
       const result = await api.askQuestions(paperId, toAnswer);
-      setQAResults([...qaResults, ...result.items]);
+      setQAResultsForPaper(paperId, [...qaResults, ...result.items]);
       clearQuestions();
       bumpUsageRefresh();
     } catch (e) {
@@ -145,7 +146,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
       setQAErrorKind(isLimit ? "limit" : "error");
       setQAError(msg);
     } finally {
-      setQALoading(false);
+      setQALoadingForPaper(paperId, false);
     }
   };
 
@@ -381,7 +382,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
             action={
               <button
                 type="button"
-                onClick={() => { setQAResults([]); clearQuestions(); setUsedPrompts(new Set()); setQAError(""); }}
+                onClick={() => { setQAResultsForPaper(paperId, []); clearQuestions(); setUsedPrompts(new Set()); setQAError(""); }}
                 className="text-[var(--text-xs)] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
               >
                 Clear

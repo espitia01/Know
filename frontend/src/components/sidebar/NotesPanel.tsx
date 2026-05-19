@@ -22,22 +22,36 @@ function formatNoteDate(ts: number) {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(d);
 }
 
-function stripPdfHistoryForNote(noteId: string) {
-  useStore.setState((s) => ({
-    selectionHistory: s.selectionHistory.filter(
-      (h) => !(normalizeSelectionAction(h.action) === "note" && h.clientKey === noteId),
-    ),
-    selectionResult:
-      s.selectionResult &&
-      normalizeSelectionAction(s.selectionResult.action) === "note" &&
-      s.selectionResult.clientKey === noteId
-        ? null
-        : s.selectionResult,
-  }));
+function stripPdfHistoryForNote(paperId: string, noteId: string) {
+  useStore.setState((s) => {
+    const history = s.selectionHistoryByPaper[paperId] ?? [];
+    const current = s.selectionResultByPaper[paperId] ?? null;
+    return {
+      selectionHistoryByPaper: {
+        ...s.selectionHistoryByPaper,
+        [paperId]: history.filter(
+          (h) => !(normalizeSelectionAction(h.action) === "note" && h.clientKey === noteId),
+        ),
+      },
+      selectionResultByPaper: {
+        ...s.selectionResultByPaper,
+        [paperId]:
+          current &&
+          normalizeSelectionAction(current.action) === "note" &&
+          current.clientKey === noteId
+            ? null
+            : current,
+      },
+    };
+  });
 }
 
 export function NotesPanel({ paperId }: NotesPanelProps) {
-  const { notes, addNote, updateNote, removeNote, setNotes } = useStore();
+  const notes = useStore((s) => s.notesByPaper[paperId] ?? []);
+  const addNoteForPaper = useStore((s) => s.addNoteForPaper);
+  const updateNoteForPaper = useStore((s) => s.updateNoteForPaper);
+  const removeNoteForPaper = useStore((s) => s.removeNoteForPaper);
+  const setNotesForPaper = useStore((s) => s.setNotesForPaper);
   const [input, setInput] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
@@ -54,8 +68,8 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
     setError(null);
     try {
       const note = await api.addNote(targetId, text, "", false);
+      addNoteForPaper(targetId, note);
       if (currentPaperRef.current === targetId) {
-        addNote(note);
         setInput("");
       }
     } catch (e) {
@@ -68,38 +82,48 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
   const handleUpdate = async (noteId: string) => {
     const text = editText.trim();
     if (!text) return;
-    const prev = useStore.getState().notes;
-    updateNote(noteId, text);
+    const prev = useStore.getState().notesByPaper[paperId] ?? [];
+    updateNoteForPaper(paperId, noteId, text);
     setEditing(null);
     try {
       await api.updateNote(paperId, noteId, text);
-      useStore.setState((s) => ({
-        selectionHistory: s.selectionHistory.map((h) =>
-          normalizeSelectionAction(h.action) === "note" && h.clientKey === noteId
-            ? { ...h, explanation: text }
-            : h,
-        ),
-        selectionResult:
-          s.selectionResult &&
-          normalizeSelectionAction(s.selectionResult.action) === "note" &&
-          s.selectionResult.clientKey === noteId
-            ? { ...s.selectionResult, explanation: text }
-            : s.selectionResult,
-      }));
+      useStore.setState((s) => {
+        const history = s.selectionHistoryByPaper[paperId] ?? [];
+        const current = s.selectionResultByPaper[paperId] ?? null;
+        return {
+          selectionHistoryByPaper: {
+            ...s.selectionHistoryByPaper,
+            [paperId]: history.map((h) =>
+              normalizeSelectionAction(h.action) === "note" && h.clientKey === noteId
+                ? { ...h, explanation: text }
+                : h,
+            ),
+          },
+          selectionResultByPaper: {
+            ...s.selectionResultByPaper,
+            [paperId]:
+              current &&
+              normalizeSelectionAction(current.action) === "note" &&
+              current.clientKey === noteId
+                ? { ...current, explanation: text }
+                : current,
+          },
+        };
+      });
     } catch (e) {
-      setNotes(prev);
+      setNotesForPaper(paperId, prev);
       setError(e instanceof Error ? e.message : "Failed to update note.");
     }
   };
 
   const handleDelete = async (noteId: string) => {
-    const prev = useStore.getState().notes;
-    removeNote(noteId);
-    stripPdfHistoryForNote(noteId);
+    const prev = useStore.getState().notesByPaper[paperId] ?? [];
+    removeNoteForPaper(paperId, noteId);
+    stripPdfHistoryForNote(paperId, noteId);
     try {
       await api.deleteNote(paperId, noteId);
     } catch (e) {
-      setNotes(prev);
+      setNotesForPaper(paperId, prev);
       setError(e instanceof Error ? e.message : "Failed to delete note.");
     }
   };

@@ -221,7 +221,19 @@ function CancellationBanner({ user }: { user: UserInfo | null }) {
 export const TIER_FEATURES: Record<string, Set<string>> = {
   free: new Set(["summary", "qa", "selection"]),
   scholar: new Set(["summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex"]),
-  researcher: new Set(["summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "multi-qa"]),
+  researcher: new Set([
+    "summary",
+    "prepare",
+    "assumptions",
+    "qa",
+    "figures",
+    "notes",
+    "selection",
+    "bibtex",
+    "multi-qa",
+    // PROMPT_7: workspaces (multi-paper sessions + saved workspaces).
+    "workspace",
+  ]),
 };
 
 export function canAccess(tier: string, feature: string): boolean {

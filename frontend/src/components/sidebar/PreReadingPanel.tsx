@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
@@ -34,16 +34,15 @@ const rowItemClass =
   "border-b border-border/45 px-4 py-3.5 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/35";
 
 export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
-  const preReading = useStore(
-    useCallback(
-      (s) => (s.preReadingPaperId === paperId ? s.preReading : null),
-      [paperId],
-    ),
-  );
-  const setPreReading = useStore((s) => s.setPreReading);
+  const preReading = useStore((s) => s.preReadingByPaper[paperId] ?? null);
+  const setPreReadingForPaper = useStore((s) => s.setPreReadingForPaper);
   const updateCachedAnalysis = useStore((s) => s.updateCachedAnalysis);
-  const preReadingLoading = useStore((s) => s.preReadingLoading);
-  const setPreReadingLoading = useStore((s) => s.setPreReadingLoading);
+  const preReadingLoading = useStore(
+    (s) => s.preReadingLoadingByPaper[paperId] ?? false,
+  );
+  const setPreReadingLoadingForPaper = useStore(
+    (s) => s.setPreReadingLoadingForPaper,
+  );
   const setPreReadingError = useStore((s) => s.setPreReadingError);
   const autoError = useStore((s) => s.preReadingErrorByPaper[paperId] ?? null);
   const { user: tierUser } = useUserTier();
@@ -58,26 +57,22 @@ export function PreReadingPanel({ paperId }: PreReadingPanelProps) {
     setPreReadingError(targetId, null);
     clearProgressStart(targetId, "preReading");
     markRequestStart(targetId, "preReading");
-    setPreReadingLoading(true);
+    setPreReadingLoadingForPaper(targetId, true);
     try {
       const result = await api.analyze(targetId);
-      if (currentPaperRef.current === targetId) {
-        setPreReading(targetId, result);
-        updateCachedAnalysis(targetId, { pre_reading: result });
-      }
+      // Writes target `targetId`'s slot — safe even if the user has
+      // already switched to a different paper.
+      setPreReadingForPaper(targetId, result);
+      updateCachedAnalysis(targetId, { pre_reading: result });
     } catch (e) {
       console.error("Analysis failed:", e);
-      if (currentPaperRef.current === targetId) {
-        const msg = e instanceof Error ? e.message : "Prepare failed. Try again.";
-        setLoadError(msg);
-        setPreReadingError(targetId, msg);
-      }
+      const msg = e instanceof Error ? e.message : "Prepare failed. Try again.";
+      setLoadError(msg);
+      setPreReadingError(targetId, msg);
     } finally {
       markRequestEnd(targetId, "preReading");
       clearProgressStart(targetId, "preReading");
-      if (currentPaperRef.current === targetId) {
-        setPreReadingLoading(false);
-      }
+      setPreReadingLoadingForPaper(targetId, false);
     }
   };
 

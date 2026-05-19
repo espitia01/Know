@@ -251,7 +251,12 @@ export interface ParsedPaper {
     qa_sessions?: { items: QAItem[] }[];
     explains?: ExplainResponse[];
     selections?: SelectionAnalysisResult[];
+    /** Coalesced summary (legacy single-blob path, still rendered). */
     summary?: PaperSummary;
+    /** PROMPT_7: fast first-impression summary (overview + tl_dr + key contributions). */
+    summary_lite?: PaperSummary;
+    /** PROMPT_7: detailed body (methodology, results, discussion, limitations, future work, figures). */
+    summary_deep?: PaperSummary;
     figure_analyses?: FigureAnalysis[];
     skipped_steps?: Record<string, unknown>[];
     assumptions_cooldown_until?: number;

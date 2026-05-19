@@ -484,9 +484,13 @@ export function PdfViewer({
   // entire viewer every time a new analysis streams in; we only need a
   // stable reference to `selectionHistory` when drawing, so we pull it
   // from the store lazily inside the draw callback via `getState`.
-  const selectionHistoryLength = useStore((s) => s.selectionHistory.length);
+  const selectionHistoryLength = useStore(
+    (s) => (paperId ? (s.selectionHistoryByPaper[paperId]?.length ?? 0) : 0),
+  );
   const openSelectionFromHistory = useStore((s) => s.openSelectionFromHistory);
-  const removeSelectionFromHistory = useStore((s) => s.removeSelectionFromHistory);
+  const removeSelectionFromHistoryForPaper = useStore(
+    (s) => s.removeSelectionFromHistoryForPaper,
+  );
   const savedScrollByPaper = useStore((s) => s.uiPrefs.scrollByPaper);
   const setPdfScroll = useStore((s) => s.setPdfScroll);
   const marqueeMode = useStore((s) => s.marqueeMode);
@@ -1109,19 +1113,18 @@ export function PdfViewer({
       };
 
       const deleteHighlightEntry = (entry: SelectionAnalysisResult) => {
-        removeSelectionFromHistory(entry);
-        if (paperId) {
-          void api
-            .deleteSelection(paperId, entry.selected_text ?? "", entry.action ?? "explain")
-            .then((res) => {
-              const ids = res.removed_note_ids;
-              if (!ids?.length) return;
-              for (const nid of ids) {
-                useStore.getState().removeNote(nid);
-              }
-            })
-            .catch(() => {});
-        }
+        if (!paperId) return;
+        removeSelectionFromHistoryForPaper(paperId, entry);
+        void api
+          .deleteSelection(paperId, entry.selected_text ?? "", entry.action ?? "explain")
+          .then((res) => {
+            const ids = res.removed_note_ids;
+            if (!ids?.length) return;
+            for (const nid of ids) {
+              useStore.getState().removeNoteForPaper(paperId, nid);
+            }
+          })
+          .catch(() => {});
       };
 
       hostEl.addEventListener(
@@ -1193,7 +1196,7 @@ export function PdfViewer({
         if (hostEl.__knowPendingOpenTimer != null) clearTimeout(hostEl.__knowPendingOpenTimer);
         hostEl.__knowPendingOpenTimer = setTimeout(() => {
           hostEl.__knowPendingOpenTimer = null;
-          openSelectionFromHistory(entry);
+          if (paperId) openSelectionFromHistory(paperId, entry);
         }, 280);
       });
 
@@ -1259,7 +1262,7 @@ export function PdfViewer({
     }
 
     if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
-  }, [openSelectionFromHistory, removeSelectionFromHistory, normalizeForSearch, paperId]);
+  }, [openSelectionFromHistory, removeSelectionFromHistoryForPaper, normalizeForSearch, paperId]);
 
   // Fallback repaint: when the selectionHistory array changes while
   // pages are already on screen, walk every mounted page and redraw.
@@ -1297,7 +1300,8 @@ export function PdfViewer({
       raf = null;
       const items = Array.from(pending);
       pending = new Set();
-      const history = useStore.getState().selectionHistory;
+      const history =
+        useStore.getState().selectionHistoryByPaper[paperId ?? ""] ?? [];
       const regions = useStore.getState().pdfRegionHighlightsByPaper[paperId ?? ""] ?? EMPTY_REGIONS;
       for (const el of items) {
         drawUnderlinesForPage(el, history);
@@ -1379,7 +1383,8 @@ export function PdfViewer({
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const history = useStore.getState().selectionHistory;
+    const history =
+      useStore.getState().selectionHistoryByPaper[paperId ?? ""] ?? [];
     const regions = useStore.getState().pdfRegionHighlightsByPaper[paperId ?? ""] ?? EMPTY_REGIONS;
     container.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]").forEach((pageEl) => {
       drawUnderlinesForPage(pageEl, history);
@@ -1443,7 +1448,10 @@ export function PdfViewer({
       }
     }
 
-    drawUnderlinesForPage(el, useStore.getState().selectionHistory);
+    drawUnderlinesForPage(
+      el,
+      useStore.getState().selectionHistoryByPaper[paperId ?? ""] ?? [],
+    );
     drawRegionHighlightsForPage(el, pageNum, useStore.getState().pdfRegionHighlightsByPaper[paperId ?? ""] ?? []);
   }, [drawUnderlinesForPage, drawRegionHighlightsForPage, paperId, setMarqueeMode, setPdfTextLayerEmpty]);
 

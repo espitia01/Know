@@ -49,14 +49,16 @@ function assumptionStatementDisplay(statement: string, type: string): string {
 }
 
 export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
-  const {
-    assumptions,
-    setAssumptions,
-    assumptionsLoading,
-    setAssumptionsLoading,
-    paper,
-    updateCachedAnalysis,
-  } = useStore();
+  const assumptions = useStore((s) => s.assumptionsByPaper[paperId] ?? []);
+  const setAssumptionsForPaper = useStore((s) => s.setAssumptionsForPaper);
+  const assumptionsLoading = useStore(
+    (s) => s.assumptionsLoadingByPaper[paperId] ?? false,
+  );
+  const setAssumptionsLoadingForPaper = useStore(
+    (s) => s.setAssumptionsLoadingForPaper,
+  );
+  const paper = useStore((s) => s.paper);
+  const updateCachedAnalysis = useStore((s) => s.updateCachedAnalysis);
   const { user: tierUser } = useUserTier();
   const currentPaperRef = useRef(paperId);
   currentPaperRef.current = paperId;
@@ -73,14 +75,14 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
     setError(null);
     clearProgressStart(targetId, "assumptions");
     markRequestStart(targetId, "assumptions");
-    setAssumptionsLoading(true);
+    setAssumptionsLoadingForPaper(targetId, true);
     try {
       const result = await api.getAssumptions(targetId);
+      setAssumptionsForPaper(targetId, result.assumptions);
+      updateCachedAnalysis(targetId, {
+        assumptions: { assumptions: result.assumptions },
+      });
       if (currentPaperRef.current === targetId) {
-        setAssumptions(result.assumptions);
-        updateCachedAnalysis(targetId, {
-          assumptions: { assumptions: result.assumptions },
-        });
         if (result.assumptions.length === 0) {
           // Defensive: if the backend ever relaxes its "no items = 502"
           // rule, still surface a clear message instead of dropping the
@@ -96,9 +98,7 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
     } finally {
       markRequestEnd(targetId, "assumptions");
       clearProgressStart(targetId, "assumptions");
-      if (currentPaperRef.current === targetId) {
-        setAssumptionsLoading(false);
-      }
+      setAssumptionsLoadingForPaper(targetId, false);
     }
   };
 
@@ -110,10 +110,10 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
         paper?.id === pid ? paper.cached_analysis : undefined,
       ) ?? getCachedAssumptionItems(sessionCache);
     if (cached && assumptions.length === 0) {
-      setAssumptions(cached);
+      setAssumptionsForPaper(pid, cached);
       autoAnalyzedPapers.add(`${pid}:assumptions`);
       if (!hasActiveRequest(pid, "assumptions")) {
-        setAssumptionsLoading(false);
+        setAssumptionsLoadingForPaper(pid, false);
       }
       return;
     }
@@ -141,9 +141,9 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
       assumptionsLoading &&
       !hasActiveRequest(paperId, "assumptions")
     ) {
-      setAssumptionsLoading(false);
+      setAssumptionsLoadingForPaper(paperId, false);
     }
-  }, [paperId, assumptions.length, assumptionsLoading, setAssumptionsLoading]);
+  }, [paperId, assumptions.length, assumptionsLoading, setAssumptionsLoadingForPaper]);
 
   if (assumptionsLoading) {
     return (

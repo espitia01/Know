@@ -59,10 +59,12 @@ const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
 export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPanelProps) {
   const {
     activeTab, setActiveTab,
-    selectionResult, selectionLoading, selectionHistory,
     analysisFontScale, bumpAnalysisFontScale, setAnalysisFontScale,
     analysisFontFamily, setAnalysisFontFamily,
   } = useStore();
+  const selectionResult = useStore((s) => s.selectionResultByPaper[paperId] ?? null);
+  const selectionLoading = useStore((s) => s.selectionLoadingByPaper[paperId] ?? false);
+  const selectionHistory = useStore((s) => s.selectionHistoryByPaper[paperId] ?? []);
   const { user } = useUserTier();
   const tier = user?.tier || "free";
 
@@ -317,6 +319,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
           {showSelectionTab && mountedTabs.has("selection") && (
             <TabsContent value="selection" className="mt-0">
               <SelectionResultPanel
+                paperId={paperId}
                 result={selectionResult}
                 loading={selectionLoading}
                 history={selectionHistory}

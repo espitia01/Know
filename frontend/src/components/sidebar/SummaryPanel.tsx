@@ -30,26 +30,31 @@ function hasSummaryBody(value: Partial<PaperSummary> | null | undefined): boolea
 }
 
 export function SummaryPanel({ paperId }: SummaryPanelProps) {
-  const cachedSummary = useStore((s) => s.summary) ?? null;
-  const streamingPartial = useStore((s) => s.summaryStreamingByPaper[paperId] ?? null);
-  const summaryLoading = useStore((s) => s.summaryLoading);
-  const paperCached = useStore((s) =>
-    s.paper?.id === paperId ? s.paper?.cached_analysis?.summary : null,
+  // Per-paper slot is the single source of truth — `useSummary` merges
+  // lite + deep + cached payloads into this slot. Switching tabs never
+  // wipes it; late writes for paper A cannot bleed into paper B.
+  const summaryFromStore = useStore((s) => s.summaryByPaper[paperId] ?? null);
+  const summaryLoading = useStore(
+    (s) => s.summaryLoadingByPaper[paperId] ?? false,
   );
-  const onActivePaper = useStore((s) => s.paper?.id === paperId);
+  const paperCachedSummary = useStore((s) => {
+    const p = s.papersById[paperId];
+    if (!p) return null;
+    const ca = p.cached_analysis || {};
+    const lite = (ca.summary_lite as PaperSummary | undefined) ?? null;
+    const deep = (ca.summary_deep as PaperSummary | undefined) ?? null;
+    const legacy = (ca.summary as PaperSummary | undefined) ?? null;
+    return { ...(legacy ?? {}), ...(deep ?? {}), ...(lite ?? {}) };
+  });
   const storedError = useStore((s) => s.summaryErrorByPaper[paperId] ?? null);
   const [manualError, setManualError] = useState<string | null>(null);
-  const fromStore = onActivePaper ? cachedSummary : null;
-  const fromCache = onActivePaper ? (paperCached as PaperSummary | null) : null;
-  const live = onActivePaper ? streamingPartial : null;
-  const summaryRaw = (live ?? fromStore ?? fromCache ?? null) as Partial<PaperSummary> | null;
+  const summaryRaw = (summaryFromStore ??
+    paperCachedSummary ??
+    null) as Partial<PaperSummary> | null;
   const hasBody = hasSummaryBody(summaryRaw);
   const summary = hasBody ? summaryRaw : null;
   const isLoading =
-    onActivePaper &&
-    (summaryLoading || hasActiveRequest(paperId, "summary")) &&
-    !fromStore &&
-    !fromCache;
+    (summaryLoading || hasActiveRequest(paperId, "summary")) && !hasBody;
 
   const runSummaryStream = useCallback(() => {
     if (hasActiveRequest(paperId, "summary")) return;
@@ -95,6 +100,19 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
 
   const s = summary!;
   const stillStreaming = isLoading;
+  // Two-phase summary (PROMPT_7 Track D): the panel is "ready" as soon
+  // as the lite phase has overview + key_contributions, even though the
+  // deep phase is still streaming methodology / results / discussion.
+  // We show an inline "Loading deep dive…" hint while deep streams.
+  const liteReady =
+    typeof s.overview === "string" &&
+    s.overview.trim().length > 0 &&
+    Array.isArray(s.key_contributions) &&
+    s.key_contributions.length > 0;
+  const deepReady =
+    typeof s.methodology === "string" && s.methodology.trim().length > 0;
+  const deepStreaming = stillStreaming && liteReady && !deepReady;
+
   const FIELD_ORDER = [
     "overview",
     "motivation",
@@ -113,7 +131,9 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
 
   const takeawaySource =
     (s as PaperSummary & { tl_dr?: string }).tl_dr ?? s.overview ?? "";
-  const takeaway = stillStreaming ? "" : firstSentence(takeawaySource, 240);
+  // Render the takeaway as soon as we have it (don't wait for the
+  // whole stream to finish) — it's the highest-signal field.
+  const takeaway = firstSentence(takeawaySource, 240);
 
   return (
     <div className="space-y-8">
@@ -134,6 +154,16 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
           <div className="mt-1 text-[var(--text-sm)] leading-relaxed text-foreground/90">
             <StreamingMarkdown>{takeaway}</StreamingMarkdown>
           </div>
+        </div>
+      )}
+
+      {deepStreaming && (
+        <div
+          role="status"
+          className="flex items-center gap-2 rounded-[var(--radius-md)] border border-border/40 bg-muted/[0.08] px-3 py-2 text-[var(--text-xs)] text-muted-foreground/85"
+        >
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40" />
+          Loading the deep dive (methodology, results, discussion)…
         </div>
       )}
 

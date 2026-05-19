@@ -73,10 +73,81 @@ export type SelectionResult = z.infer<typeof SelectionResultSchema>;
  * didn't get just don't render. The corresponding text fields default
  * to "" / [] in the panel renderer so the UI is unaffected.
  */
+/**
+ * Two-phase summary schemas (PROMPT_7 Track D).
+ *
+ * Lite returns in ~10 s with overview + tl_dr + key contributions + the
+ * 2–3 most important equations. Deep streams in afterward (60–90 s) with
+ * methodology / results / discussion / limitations / future work /
+ * figures. Both write into the same `cached_analysis.summary` slot via a
+ * shallow merge so a single `PaperSummary` consumer keeps rendering.
+ */
+
+const KeyEquation = z.object({
+  equation: z
+    .string()
+    .describe(
+      "Display-math LaTeX for one of the paper's most important equations. MUST be wrapped in $$...$$ delimiters. Example: \"$$E = mc^2$$\". Never emit bare LaTeX commands.",
+    ),
+  meaning: z.string().describe("Markdown one-paragraph explanation."),
+});
+
+const KeyFigure = z.object({
+  id: z.string().describe("Author label, e.g. 'Fig. 1' or 'Table 2'."),
+  description: z
+    .string()
+    .describe("Markdown description of what the figure/table shows and why it matters."),
+});
+
+export const PaperSummaryLiteSchema = z.object({
+  model: z.string().optional(),
+  created_at: z.number().optional(),
+  overview: z.string().describe("3–5 sentence high-level overview of what the paper does and why it matters."),
+  tl_dr: z
+    .string()
+    .optional()
+    .describe("One-sentence takeaway. Math-aware ($...$ allowed)."),
+  key_contributions: z
+    .array(z.string())
+    .describe("1–2 sentence bullets, 3–5 items, ordered by importance."),
+  key_equations: z
+    .array(KeyEquation)
+    .optional()
+    .describe("Up to 3 most important equations."),
+});
+
+export type PaperSummaryLite = z.infer<typeof PaperSummaryLiteSchema>;
+
+export const PaperSummaryDeepSchema = z.object({
+  model: z.string().optional(),
+  created_at: z.number().optional(),
+  motivation: z.string().describe("3–5 sentences on why this work was done and what gap it fills."),
+  methodology: z
+    .string()
+    .describe("1–2 paragraph markdown explanation of the methods, models, or theoretical framework."),
+  main_results: z
+    .string()
+    .describe("1–2 paragraph markdown describing the key findings; quantitative numbers in $...$ delimiters."),
+  discussion: z
+    .string()
+    .describe("1–2 paragraph markdown — what the results mean, how they compare to prior work."),
+  limitations: z.array(z.string()).optional(),
+  future_work: z.string().optional().describe("2–3 sentences on follow-up research this enables."),
+  key_figures_and_tables: z.array(KeyFigure).optional(),
+});
+
+export type PaperSummaryDeep = z.infer<typeof PaperSummaryDeepSchema>;
+
+/**
+ * Combined `PaperSummary` is the union of lite + deep — what the panel
+ * actually renders. Slots that the lite phase didn't populate fall to
+ * the deep phase's values, and vice versa.
+ */
 export const PaperSummarySchema = z.object({
   model: z.string().optional(),
   created_at: z.number().optional(),
   overview: z.string().optional(),
+  tl_dr: z.string().optional(),
   motivation: z.string().optional(),
   key_contributions: z.array(z.string()).optional(),
   methodology: z.string().optional(),
@@ -84,26 +155,8 @@ export const PaperSummarySchema = z.object({
   discussion: z.string().optional(),
   limitations: z.array(z.string()).optional(),
   future_work: z.string().optional(),
-  key_equations: z
-    .array(
-      z.object({
-        equation: z
-          .string()
-          .describe(
-            "Display-math LaTeX for one of the paper's most important equations. MUST be wrapped in $$...$$ delimiters. Example: \"$$E = mc^2$$\". Never emit bare LaTeX commands.",
-          ),
-        meaning: z.string().describe("Markdown one-paragraph explanation."),
-      }),
-    )
-    .optional(),
-  key_figures_and_tables: z
-    .array(
-      z.object({
-        id: z.string().describe("Author label, e.g. 'Fig. 1' or 'Table 2'."),
-        description: z.string().describe("Markdown description of what the figure/table shows and why it matters."),
-      }),
-    )
-    .optional(),
+  key_equations: z.array(KeyEquation).optional(),
+  key_figures_and_tables: z.array(KeyFigure).optional(),
 });
 
 export type PaperSummary = z.infer<typeof PaperSummarySchema>;

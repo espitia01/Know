@@ -31,6 +31,8 @@ interface SelectionResultPanelProps {
   allowFollowUp?: boolean;
   /** Overrides store `openSelectionFromHistory` (e.g. demo uses local React state). */
   onFocusHistoryRoot?: (root: SelectionAnalysisResult) => void;
+  /** Required when using the default `openSelectionFromHistory` store action. */
+  paperId?: string;
 }
 
 function FollowUpThreadList({ followups }: { followups: SelectionAnalysisResult[] }) {
@@ -103,9 +105,14 @@ export function SelectionResultPanel({
   onFollowUpModelChange,
   allowFollowUp = true,
   onFocusHistoryRoot,
+  paperId,
 }: SelectionResultPanelProps) {
   const openSelectionFromHistory = useStore((s) => s.openSelectionFromHistory);
-  const focusHistoryRoot = onFocusHistoryRoot ?? openSelectionFromHistory;
+  const focusHistoryRoot =
+    onFocusHistoryRoot ??
+    ((root: SelectionAnalysisResult) => {
+      if (paperId) openSelectionFromHistory(paperId, root);
+    });
 
   if (loading && !result) {
     return (

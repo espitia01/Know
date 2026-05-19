@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import Image from "next/image";
 import { UserButton } from "@clerk/nextjs";
 import { useShallow } from "zustand/react/shallow";
-import { api, type SelectionAnalysisResult, type PaperListEntry, type ParsedPaper } from "@/lib/api";
+import { api, type SelectionAnalysisResult, type PaperListEntry, type ParsedPaper, type PaperSummary } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { selectionKey } from "@/lib/selectionActions";
 // Stage 2: streaming for selection moved to Next.js + AI SDK via this hook.
@@ -34,7 +34,6 @@ import {
   syncAutoAnalyzeGuardsFromCache,
   autoAnalyzedPapers,
   preReadingAutoRetryCooldownUntil,
-  abortActiveSummaryStream,
 } from "@/lib/analysisState";
 import { useSummaryStream, kickoffSummaryStream } from "@/lib/useSummaryStream";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
@@ -43,6 +42,7 @@ import { isPreReadingPopulated } from "@/lib/preReading";
 import { cn } from "@/lib/utils";
 import { GoogleDriveButton } from "@/components/upload/GoogleDriveButton";
 import { isGoogleDriveConfigured } from "@/lib/googleDrive";
+import { isPaperFresh, markPaperFetched } from "@/lib/papersFreshness";
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
@@ -323,6 +323,10 @@ function AddPaperPopover({
         // in the session bar regardless of which one finishes first
         // and even if this component has already unmounted.
         cachePaper(paper);
+        // Track C2: pre-seed the freshness marker so the reader page
+        // doesn't waste a network round-trip refetching what the
+        // upload just returned.
+        markPaperFetched(paper.id);
         addSessionPaper({ id: paper.id, title: paper.title });
         if (!firstHandled) {
           firstHandled = true;
@@ -541,29 +545,27 @@ function PaperContent() {
     })),
   );
   const {
-    setPreReading, setPreReadingLoading,
-    setAssumptions, setAssumptionsLoading,
-    setSummary, setSummaryLoading,
+    setPreReadingForPaper, setPreReadingLoadingForPaper,
+    setAssumptionsForPaper, setAssumptionsLoadingForPaper,
+    setSummaryLoadingForPaper,
   } = useStore(
     useShallow((s) => ({
-      setPreReading: s.setPreReading,
-      setPreReadingLoading: s.setPreReadingLoading,
-      setAssumptions: s.setAssumptions,
-      setAssumptionsLoading: s.setAssumptionsLoading,
-      setSummary: s.setSummary,
-      setSummaryLoading: s.setSummaryLoading,
+      setPreReadingForPaper: s.setPreReadingForPaper,
+      setPreReadingLoadingForPaper: s.setPreReadingLoadingForPaper,
+      setAssumptionsForPaper: s.setAssumptionsForPaper,
+      setAssumptionsLoadingForPaper: s.setAssumptionsLoadingForPaper,
+      setSummaryLoadingForPaper: s.setSummaryLoadingForPaper,
     })),
   );
-  const { setSelectionResult, upsertSelectionInHistory, setActiveTab } = useStore(
+  const { setSelectionResultForPaper, upsertSelectionInHistoryForPaper, setActiveTab } = useStore(
     useShallow((s) => ({
-      setSelectionResult: s.setSelectionResult,
-      upsertSelectionInHistory: s.upsertSelectionInHistory,
+      setSelectionResultForPaper: s.setSelectionResultForPaper,
+      upsertSelectionInHistoryForPaper: s.upsertSelectionInHistoryForPaper,
       setActiveTab: s.setActiveTab,
     })),
   );
   const {
     sessionPapers, addSessionPaper, removeSessionPaper, clearSession, updatePaperTitle,
-    resetAnalysisState,
     crossPaperResults, addCrossPaperResults, clearCrossPaperResults,
   } = useStore(
     useShallow((s) => ({
@@ -572,7 +574,6 @@ function PaperContent() {
       removeSessionPaper: s.removeSessionPaper,
       clearSession: s.clearSession,
       updatePaperTitle: s.updatePaperTitle,
-      resetAnalysisState: s.resetAnalysisState,
       crossPaperResults: s.crossPaperResults,
       addCrossPaperResults: s.addCrossPaperResults,
       clearCrossPaperResults: s.clearCrossPaperResults,
@@ -607,33 +608,18 @@ function PaperContent() {
 
   useEffect(() => {
     if (paperId !== activePaperId) {
-      abortActiveSummaryStream(activePaperId);
-      selectionThread.abort();
-      resetAnalysisState();
-      // If a background fetch for the incoming paper is still in flight,
-      // re-show its loading state so the UI doesn't flash "Analyze Paper".
-      if (hasActiveRequest(paperId, "preReading")) setPreReadingLoading(true);
-      if (hasActiveRequest(paperId, "assumptions")) setAssumptionsLoading(true);
-      if (hasActiveRequest(paperId, "summary")) setSummaryLoading(true);
-      // Let the hydration effect retry auto-analysis on re-entry if
-      // the server cache is still empty. Without this, returning to a
-      // paper whose first-pass analyze quietly failed left the tabs
-      // permanently idle ("workflow doesn't proceed as usual" in the
-      // bug report).
+      // Track A+B: per-paper analysis state means we no longer reset
+      // anything on switch. Streams for the previous paper keep running
+      // and write into their own slot. The freshness gate (Track B1)
+      // decides whether to refetch the new paper or trust the in-memory
+      // cache. Auto-analyze retry guards are still synced per-paper so a
+      // previously-failed Prepare can re-run on re-entry.
       const nextCache =
         useStore.getState().papersById[paperId]?.cached_analysis ?? {};
       syncAutoAnalyzeGuardsFromCache(paperId, nextCache, nextCache);
       setActivePaperId(paperId);
     }
-  }, [
-    paperId,
-    activePaperId,
-    resetAnalysisState,
-    setPreReadingLoading,
-    setAssumptionsLoading,
-    setSummaryLoading,
-    selectionThread,
-  ]);
+  }, [paperId, activePaperId]);
   const panelPos = uiPrefs.panelPos as PanelPosition;
   const panelSize = panelPos === "bottom" ? uiPrefs.panelSizeBottom : uiPrefs.panelSizeSide;
   const setPanelPos = setPanelPosition;
@@ -792,6 +778,13 @@ function PaperContent() {
       setLoading(true);
     }
 
+    // Track B1: skip the network call when we have a fresh cached copy.
+    // The freshness gate is invalidated by mutators (title, folder,
+    // re-extract) so edits still see fresh data on the next switch.
+    if (cached && isPaperFresh(activePaperId)) {
+      return () => { stale = true; };
+    }
+
     api
       .getPaper(activePaperId)
       .then((p) => {
@@ -799,6 +792,7 @@ function PaperContent() {
         const merged = mergeCachedAnalysis(p, useStore.getState().papersById[activePaperId]);
         setPaper(merged);
         cachePaper(merged);
+        markPaperFetched(activePaperId);
         initialLoadDone.current = true;
       })
       .catch((e) => {
@@ -858,66 +852,90 @@ function PaperContent() {
     ].join("|");
   }, [loadedPaperId, activePaperId, loadedPaperCache, loadedPaperNotes]);
 
-  const hydrateFromCachedAnalysis = useCallback((cache: NonNullable<typeof paper>["cached_analysis"], notes: NonNullable<typeof paper>["notes"]) => {
-    const snap = useStore.getState();
-    // Replacing notes wholesale can erase PDF/Manually-added notes whose ids
-    // have not synced into `parsedPaper.notes` yet (fresh addNote vs slow refetch).
-    if (notes) {
-      useStore.setState((s) => {
-        const ids = new Set(notes!.map((n) => n.id));
-        const onlyLocal = s.notes.filter((n) => !ids.has(n.id));
-        const merged = [...notes!, ...onlyLocal];
-        merged.sort((a, b) => {
-          const d = Number(a.created_at) - Number(b.created_at);
-          return d !== 0 ? d : a.id.localeCompare(b.id);
+  const hydrateFromCachedAnalysis = useCallback(
+    (cache: NonNullable<typeof paper>["cached_analysis"], notes: NonNullable<typeof paper>["notes"]) => {
+      if (!loadedPaperId) return;
+      const pid = loadedPaperId;
+      const snap = useStore.getState();
+
+      // Notes: merge additively so locally-added notes (not yet flushed
+      // into parsedPaper.notes) survive a server refetch.
+      if (notes) {
+        useStore.setState((s) => {
+          const existing = s.notesByPaper[pid] ?? [];
+          const ids = new Set(notes!.map((n) => n.id));
+          const onlyLocal = existing.filter((n) => !ids.has(n.id));
+          const merged = [...notes!, ...onlyLocal];
+          merged.sort((a, b) => {
+            const d = Number(a.created_at) - Number(b.created_at);
+            return d !== 0 ? d : a.id.localeCompare(b.id);
+          });
+          return {
+            notesByPaper: { ...s.notesByPaper, [pid]: merged },
+          };
         });
-        return { notes: merged };
-      });
-    }
+      }
 
-    // Per audit §11.3: server hydration must be additive for selections.
-    // Replacing the live list can erase in-flight follow-ups that have not
-    // been flushed to cached_analysis yet.
-    if (Array.isArray(cache.selections)) {
-      const serverSelections = cache.selections as SelectionAnalysisResult[];
-      const serverNewestFirst = [...serverSelections].reverse();
-      const liveKeys = new Set(snap.selectionHistory.map(selectionKey));
-      const additions = serverNewestFirst.filter((s) => !liveKeys.has(selectionKey(s)));
+      // Selections: additive merge per F-HYDRATION §11.3.
+      if (Array.isArray(cache.selections)) {
+        const serverSelections = cache.selections as SelectionAnalysisResult[];
+        const serverNewestFirst = [...serverSelections].reverse();
+        const live = snap.selectionHistoryByPaper[pid] ?? [];
+        const liveKeys = new Set(live.map(selectionKey));
+        const additions = serverNewestFirst.filter((s) => !liveKeys.has(selectionKey(s)));
+        if (additions.length > 0) {
+          const merged = [...live, ...additions].slice(0, 50);
+          useStore.setState((s) => ({
+            selectionHistoryByPaper: {
+              ...s.selectionHistoryByPaper,
+              [pid]: merged,
+            },
+            selectionResultByPaper:
+              !s.selectionResultByPaper[pid] && !s.selectionLoadingByPaper[pid]
+                ? { ...s.selectionResultByPaper, [pid]: merged[0] ?? null }
+                : s.selectionResultByPaper,
+          }));
+        }
+      }
+
+      // Summary: lite + deep + legacy `summary` shallow-merge into per-paper slot.
+      const liteCached = (cache.summary_lite ?? null) as PaperSummary | null;
+      const deepCached = (cache.summary_deep ?? null) as PaperSummary | null;
+      const legacyCached = (cache.summary ?? null) as PaperSummary | null;
       const merged =
-        additions.length > 0
-          ? [...snap.selectionHistory, ...additions].slice(0, 50)
-          : snap.selectionHistory;
-      if (additions.length > 0) {
-        useStore.setState({ selectionHistory: merged });
+        liteCached || deepCached || legacyCached
+          ? ({
+              ...(legacyCached ?? {}),
+              ...(deepCached ?? {}),
+              ...(liteCached ?? {}),
+            } as PaperSummary)
+          : null;
+      const isSummaryLoading = snap.summaryLoadingByPaper[pid] ?? false;
+      if (merged && !isSummaryLoading) {
+        useStore.getState().setSummaryForPaper(pid, merged);
       }
-      const after = additions.length > 0 ? merged : snap.selectionHistory;
-      if (!snap.selectionResult && !snap.selectionLoading && after.length > 0) {
-        useStore.setState({ selectionResult: after[0] });
+
+      if (cache.qa_sessions && cache.qa_sessions.length > 0) {
+        const allItems = cache.qa_sessions.flatMap(
+          (session: { items?: { question: string; answer: string }[] }) => session.items || [],
+        );
+        useStore.getState().setQAResultsForPaper(pid, allItems);
       }
-    }
 
-    if (cache.summary && !snap.summaryLoading) {
-      setSummary(cache.summary);
-    }
+      const isPreLoading = snap.preReadingLoadingByPaper[pid] ?? false;
+      if (!isPreLoading && isPreReadingPopulated(cache.pre_reading)) {
+        setPreReadingForPaper(pid, cache.pre_reading);
+      }
 
-    if (cache.qa_sessions && cache.qa_sessions.length > 0) {
-      const allItems = cache.qa_sessions.flatMap(
-        (session: { items?: { question: string; answer: string }[] }) => session.items || [],
-      );
-      useStore.getState().setQAResults(allItems);
-    }
-
-    if (!snap.preReadingLoading && loadedPaperId && isPreReadingPopulated(cache.pre_reading)) {
-      setPreReading(loadedPaperId, cache.pre_reading);
-    }
-
-    const serverAssumptions = Array.isArray(cache.assumptions?.assumptions)
-      ? cache.assumptions.assumptions
-      : null;
-    if (serverAssumptions && serverAssumptions.length > 0) {
-      setAssumptions(serverAssumptions);
-    }
-  }, [loadedPaperId, setAssumptions, setPreReading, setSummary]);
+      const serverAssumptions = Array.isArray(cache.assumptions?.assumptions)
+        ? cache.assumptions.assumptions
+        : null;
+      if (serverAssumptions && serverAssumptions.length > 0) {
+        setAssumptionsForPaper(pid, serverAssumptions);
+      }
+    },
+    [loadedPaperId, setAssumptionsForPaper, setPreReadingForPaper],
+  );
 
   useEffect(() => {
     if (!loadedPaperId || loadedPaperId !== activePaperId) return;
@@ -933,10 +951,11 @@ function PaperContent() {
     const sessionCache = useStore.getState().papersById[pid]?.cached_analysis || {};
     syncAutoAnalyzeGuardsFromCache(pid, cache, sessionCache);
     const storeSnap = useStore.getState();
+    const liveAssumptionsSlot = storeSnap.assumptionsByPaper[pid] ?? [];
     const cachedAssumptions =
       getCachedAssumptionItems(cache) ?? getCachedAssumptionItems(sessionCache);
-    if (cachedAssumptions && storeSnap.assumptions.length === 0) {
-      setAssumptions(cachedAssumptions);
+    if (cachedAssumptions && liveAssumptionsSlot.length === 0) {
+      setAssumptionsForPaper(pid, cachedAssumptions);
     }
     const cooldownUntil = Math.max(
       Number(cache.assumptions_cooldown_until || 0),
@@ -946,8 +965,7 @@ function PaperContent() {
     const hasPreReading =
       isPreReadingPopulated(cache.pre_reading) ||
       isPreReadingPopulated(sessionCache.pre_reading) ||
-      (storeSnap.preReadingPaperId === pid &&
-        isPreReadingPopulated(storeSnap.preReading));
+      isPreReadingPopulated(storeSnap.preReadingByPaper[pid] ?? null);
     const preReadingCooldownUntil = preReadingAutoRetryCooldownUntil.get(pid) ?? 0;
     const preReadingCoolingDown = Date.now() < preReadingCooldownUntil;
 
@@ -959,32 +977,27 @@ function PaperContent() {
       !autoAnalyzedPapers.has(`${pid}:preReading`)
     ) {
       markRequestStart(pid, "preReading");
-      setPreReadingLoading(true);
+      setPreReadingLoadingForPaper(pid, true);
       api
         .analyze(pid)
         .then((r) => {
-          const s = useStore.getState();
-          if (s.paper?.id !== pid) return;
-          s.setPreReading(pid, r);
-          s.updateCachedAnalysis(pid, { pre_reading: r });
-          s.setPreReadingError(pid, null);
+          // Per-paper writes — safe even if the user has switched away.
+          useStore.getState().setPreReadingForPaper(pid, r);
+          useStore.getState().updateCachedAnalysis(pid, { pre_reading: r });
+          useStore.getState().setPreReadingError(pid, null);
           autoAnalyzedPapers.add(`${pid}:preReading`);
         })
         .catch((err) => {
-          const s = useStore.getState();
-          if (s.paper?.id !== pid) return;
           const msg =
             err instanceof Error ? err.message : "Prepare failed. Try again.";
-          s.setPreReadingError(pid, msg);
+          useStore.getState().setPreReadingError(pid, msg);
           autoAnalyzedPapers.delete(`${pid}:preReading`);
           preReadingAutoRetryCooldownUntil.set(pid, Date.now() + 30_000);
         })
         .finally(() => {
           markRequestEnd(pid, "preReading");
           clearProgressStart(pid, "preReading");
-          if (useStore.getState().paper?.id === pid) {
-            setPreReadingLoading(false);
-          }
+          setPreReadingLoadingForPaper(pid, false);
         });
     }
 
@@ -993,49 +1006,49 @@ function PaperContent() {
       : null;
     const cacheHasAssumptionsKey = cache.assumptions !== undefined;
     const cacheNonEmpty = (cache.assumptions?.assumptions?.length ?? 0) > 0;
+    const liveAssumptions = useStore.getState().assumptionsByPaper[pid] ?? [];
     const hasUsableAssumptions =
       cacheNonEmpty ||
       (sessionAssumptions && sessionAssumptions.length > 0) ||
-      storeSnap.assumptions.length > 0;
+      liveAssumptions.length > 0;
     if (cacheHasAssumptionsKey && !cacheNonEmpty) {
       autoAnalyzedPapers.add(`${pid}:assumptions`);
     }
     if (
       !hasUsableAssumptions &&
       !assumptionsCoolingDown &&
-      useStore.getState().assumptions.length === 0 &&
       canAccess(tierUser?.tier || "free", "assumptions") &&
       !hasActiveRequest(pid, "assumptions") &&
       !autoAnalyzedPapers.has(`${pid}:assumptions`)
     ) {
       markRequestStart(pid, "assumptions");
-      setAssumptionsLoading(true);
+      setAssumptionsLoadingForPaper(pid, true);
       api
         .getAssumptions(pid)
         .then((r) => {
-          const s = useStore.getState();
-          if (s.paper?.id === pid) {
-            setAssumptions(r.assumptions);
-            s.updateCachedAnalysis(pid, {
-              assumptions: { assumptions: r.assumptions },
-            });
-            autoAnalyzedPapers.add(`${pid}:assumptions`);
-          }
+          setAssumptionsForPaper(pid, r.assumptions);
+          useStore.getState().updateCachedAnalysis(pid, {
+            assumptions: { assumptions: r.assumptions },
+          });
+          autoAnalyzedPapers.add(`${pid}:assumptions`);
         })
         .catch(() => {})
         .finally(() => {
           markRequestEnd(pid, "assumptions");
           clearProgressStart(pid, "assumptions");
-          if (useStore.getState().paper?.id === pid) {
-            setAssumptionsLoading(false);
-          }
+          setAssumptionsLoadingForPaper(pid, false);
         });
     }
 
+    const liveSummary = useStore.getState().summaryByPaper[pid] ?? null;
     const hasSummary = !!(
       cache.summary ||
+      cache.summary_lite ||
+      cache.summary_deep ||
       sessionCache.summary ||
-      storeSnap.summary
+      sessionCache.summary_lite ||
+      sessionCache.summary_deep ||
+      liveSummary
     );
     if (
       !hasSummary &&
@@ -1051,55 +1064,46 @@ function PaperContent() {
     loadedPaperCache,
     tierLoading,
     tierUser?.tier,
-    setPreReading,
-    setPreReadingLoading,
-    setAssumptions,
-    setAssumptionsLoading,
-    setSummary,
-    setSummaryLoading,
+    setPreReadingForPaper,
+    setPreReadingLoadingForPaper,
+    setAssumptionsForPaper,
+    setAssumptionsLoadingForPaper,
+    setSummaryLoadingForPaper,
   ]);
 
   const handleSwitchPaper = useCallback((id: string) => {
     if (id === activePaperId) return;
-    abortActiveSummaryStream(activePaperId);
-    selectionThread.abort();
+    // Track A+B: per-paper state means no global reset on switch, and
+    // streams for the previous paper keep running into their own slot.
+    // We only sync auto-analyze guards so a paper whose first-pass
+    // Prepare quietly failed can retry on re-entry.
     setSelection(null);
-    setSelectionResult(null);
-    resetAnalysisState();
-    if (hasActiveRequest(id, "preReading")) setPreReadingLoading(true);
-    if (hasActiveRequest(id, "assumptions")) setAssumptionsLoading(true);
-    if (hasActiveRequest(id, "summary")) setSummaryLoading(true);
-    // Match the behaviour of the URL-driven effect: coming back to a
-    // paper whose first-pass analysis silently failed (server cache
-    // still missing pre_reading / assumptions) should be allowed to
-    // retry rather than being held off by the sticky
-    // `autoAnalyzedPapers` flag.
     const nextCache = useStore.getState().papersById[id]?.cached_analysis ?? {};
     syncAutoAnalyzeGuardsFromCache(id, nextCache, nextCache);
     setActivePaperId(id);
-    // Keep the URL in sync with the active paper so deep links, browser
-    // history, and copy-URL all reflect reality. `router.replace` (not push)
-    // avoids polluting history every time the user clicks a tab.
+    // Keep the URL in sync. `router.replace` (not `push`) avoids
+    // polluting history on every tab click — browser back skips over
+    // tabs and returns to whatever was open before the workspace.
     if (typeof window !== "undefined" && id !== paperId) {
       router.replace(`/paper/${id}`);
     }
-  }, [activePaperId, paperId, router, resetAnalysisState, setSelectionResult, setPreReadingLoading, setAssumptionsLoading, setSummaryLoading, selectionThread]);
+  }, [activePaperId, paperId, router]);
 
   const handleAddPaper = useCallback((id: string, title: string) => {
     // Register the paper in the multi-paper session tab bar…
     addSessionPaper({ id, title });
-    // …and open it. Previously we silently added it to the session
-    // without navigating, which made uploads look like they had failed
-    // because the reader was still showing the old paper. Switch to the
-    // new paper explicitly unless the user is already looking at it
-    // (idempotent — `handleSwitchPaper` no-ops when id === activePaperId).
+    // …and open it. Track C1: use `router.push` (not `replace`) so the
+    // browser back button returns to the previous paper — that closes
+    // the "uploaded paper didn't load" loop where users hit back, saw
+    // nothing happen, and assumed the upload silently failed.
     if (id !== activePaperId) {
-      // Per F-UPLOAD-LAG: make navigation the first visible response to a
-      // completed upload; the popover can close after the route handoff.
-      handleSwitchPaper(id);
+      const nextCache = useStore.getState().papersById[id]?.cached_analysis ?? {};
+      syncAutoAnalyzeGuardsFromCache(id, nextCache, nextCache);
+      setActivePaperId(id);
+      router.push(`/paper/${id}`);
     }
     setShowAddPaper(false);
-  }, [addSessionPaper, activePaperId, handleSwitchPaper]);
+  }, [addSessionPaper, activePaperId, router]);
 
   const handleRemoveSessionPaper = useCallback((id: string) => {
     if (sessionPapers.length <= 1) return;
@@ -1310,16 +1314,21 @@ function PaperContent() {
         section: "PDF Selection",
         created_at: Math.floor(Date.now() / 1000),
       };
-      useStore.getState().addNote(provisionalNote);
+      useStore.getState().addNoteForPaper(startedFor, provisionalNote);
 
       try {
         const note = await api.addNote(startedFor, text, "PDF Selection", true);
-        if (!stillOnStartedPaper()) return;
+        // Per-paper writes — safe even if the user has switched away.
         useStore.setState((s) => ({
-          notes: s.notes.map((n) => (n.id === pendingId ? note : n)),
+          notesByPaper: {
+            ...s.notesByPaper,
+            [startedFor]: (s.notesByPaper[startedFor] ?? []).map((n) =>
+              n.id === pendingId ? note : n,
+            ),
+          },
         }));
-        setSelectionResult(null);
-        upsertSelectionInHistory({
+        setSelectionResultForPaper(startedFor, null);
+        upsertSelectionInHistoryForPaper(startedFor, {
           action: "note",
           selected_text: text,
           explanation: note.text,
@@ -1328,9 +1337,7 @@ function PaperContent() {
         });
       } catch (e) {
         console.error("Failed to save note:", e);
-        if (stillOnStartedPaper()) {
-          useStore.getState().removeNote(pendingId);
-        }
+        useStore.getState().removeNoteForPaper(startedFor, pendingId);
       }
       return;
     }
@@ -1349,7 +1356,7 @@ function PaperContent() {
       action: action as "explain" | "derive",
       selectedText: text,
     });
-  }, [activePaperId, setPanelVisible, setActiveTab, selectionThread, setSelectionResult, upsertSelectionInHistory]);
+  }, [activePaperId, setPanelVisible, setActiveTab, selectionThread, setSelectionResultForPaper, upsertSelectionInHistoryForPaper]);
 
   const onDragStart = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {

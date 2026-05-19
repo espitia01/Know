@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { api, type PriorWork } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { AnalysisSection } from "@/components/analysis/AnalysisSection";
@@ -85,16 +85,15 @@ function CitationList({
 }
 
 export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
-  const preReading = useStore(
-    useCallback(
-      (s) => (s.preReadingPaperId === paperId ? s.preReading : null),
-      [paperId],
-    ),
-  );
-  const setPreReading = useStore((s) => s.setPreReading);
+  const preReading = useStore((s) => s.preReadingByPaper[paperId] ?? null);
+  const setPreReadingForPaper = useStore((s) => s.setPreReadingForPaper);
   const updateCachedAnalysis = useStore((s) => s.updateCachedAnalysis);
-  const preReadingLoading = useStore((s) => s.preReadingLoading);
-  const setPreReadingLoading = useStore((s) => s.setPreReadingLoading);
+  const preReadingLoading = useStore(
+    (s) => s.preReadingLoadingByPaper[paperId] ?? false,
+  );
+  const setPreReadingLoadingForPaper = useStore(
+    (s) => s.setPreReadingLoadingForPaper,
+  );
   const currentPaperRef = useRef(paperId);
   currentPaperRef.current = paperId;
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -104,13 +103,11 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
     setLoadError(null);
     clearProgressStart(targetId, "preReading");
     markRequestStart(targetId, "preReading");
-    setPreReadingLoading(true);
+    setPreReadingLoadingForPaper(targetId, true);
     try {
       const result = await api.analyze(targetId);
-      if (currentPaperRef.current === targetId) {
-        setPreReading(targetId, result);
-        updateCachedAnalysis(targetId, { pre_reading: result });
-      }
+      setPreReadingForPaper(targetId, result);
+      updateCachedAnalysis(targetId, { pre_reading: result });
     } catch (e) {
       console.error("Prepare analysis failed:", e);
       if (currentPaperRef.current === targetId) {
@@ -119,7 +116,7 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
     } finally {
       markRequestEnd(targetId, "preReading");
       clearProgressStart(targetId, "preReading");
-      if (currentPaperRef.current === targetId) setPreReadingLoading(false);
+      setPreReadingLoadingForPaper(targetId, false);
     }
   };
 

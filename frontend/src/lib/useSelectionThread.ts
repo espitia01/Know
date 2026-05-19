@@ -100,9 +100,11 @@ function describeError(error: unknown): string {
 
 export function useSelectionThread(paperId: string) {
   const { fastModel } = useUserSettings();
-  const setSelectionResult = useStore((s) => s.setSelectionResult);
-  const setSelectionLoading = useStore((s) => s.setSelectionLoading);
-  const upsertSelectionInHistory = useStore((s) => s.upsertSelectionInHistory);
+  // Per-paper writers — late results from a slow Derive on paper A land
+  // in A's slot even if the user has switched to paper B by then.
+  const setSelectionResultForPaper = useStore((s) => s.setSelectionResultForPaper);
+  const setSelectionLoadingForPaper = useStore((s) => s.setSelectionLoadingForPaper);
+  const upsertSelectionInHistoryForPaper = useStore((s) => s.upsertSelectionInHistoryForPaper);
   const bumpUsageRefresh = useStore((s) => s.bumpUsageRefresh);
 
   const startedRef = useRef<StartedState | null>(null);
@@ -110,7 +112,6 @@ export function useSelectionThread(paperId: string) {
 
   const writeErrorResult = useCallback(
     (started: StartedState, message: string) => {
-      if (useStore.getState().paper?.id !== paperId) return;
       const errResult: SelectionAnalysisResult = {
         action: started.action,
         selected_text: started.selectedText,
@@ -120,12 +121,12 @@ export function useSelectionThread(paperId: string) {
         clientKey: started.clientKey,
         model: started.model,
       };
-      upsertSelectionInHistory(errResult);
-      setSelectionResult(errResult);
-      setSelectionLoading(false);
+      upsertSelectionInHistoryForPaper(paperId, errResult);
+      setSelectionResultForPaper(paperId, errResult);
+      setSelectionLoadingForPaper(paperId, false);
       finalizedRef.current = started.clientKey;
     },
-    [paperId, setSelectionResult, setSelectionLoading, upsertSelectionInHistory],
+    [paperId, setSelectionResultForPaper, setSelectionLoadingForPaper, upsertSelectionInHistoryForPaper],
   );
 
   const obj = useObject({
@@ -133,15 +134,13 @@ export function useSelectionThread(paperId: string) {
     api: `/api/papers/${paperId}/selection-stream`,
     schema: SelectionResultSchema,
     onError: (error) => {
-      const startedFor = useStore.getState().paper?.id;
-      if (startedFor !== paperId) return;
       const started = startedRef.current;
       if (!started) return;
       writeErrorResult(started, describeError(error));
     },
     onFinish: ({ object, error }) => {
       const started = startedRef.current;
-      if (!started || useStore.getState().paper?.id !== paperId) return;
+      if (!started) return;
       if (finalizedRef.current === started.clientKey) return;
 
       if (error) {
@@ -159,15 +158,13 @@ export function useSelectionThread(paperId: string) {
     },
   });
 
-  // Sync partial object → store on every paint. We avoid running for
-  // the wrong paper (user switched mid-stream), and we coalesce
-  // streaming/done updates into the same shape the existing UI
-  // (SelectionResultPanel) already renders against.
+  // Sync partial object → store on every paint. Writes target the
+  // hook's own `paperId` (not whichever paper is currently active),
+  // so panel B never sees A's stream and a slow result for A lands
+  // correctly once the user returns.
   useEffect(() => {
     const started = startedRef.current;
     if (!started) return;
-    const currentPaper = useStore.getState().paper?.id;
-    if (currentPaper !== paperId) return;
 
     const partial = obj.object as SelectionPartial | undefined;
 
@@ -197,16 +194,16 @@ export function useSelectionThread(paperId: string) {
       created_at: isStillStreaming ? undefined : Date.now(),
     };
 
-    upsertSelectionInHistory(result);
-    setSelectionResult(result);
+    upsertSelectionInHistoryForPaper(paperId, result);
+    setSelectionResultForPaper(paperId, result);
     if (!isStillStreaming) finalizedRef.current = started.clientKey;
   }, [
     obj.object,
     obj.isLoading,
     obj.error,
     paperId,
-    setSelectionResult,
-    upsertSelectionInHistory,
+    setSelectionResultForPaper,
+    upsertSelectionInHistoryForPaper,
     writeErrorResult,
   ]);
 
@@ -234,9 +231,9 @@ export function useSelectionThread(paperId: string) {
         clientKey,
         model: provisionalModel,
       };
-      upsertSelectionInHistory(provisional);
-      setSelectionResult(provisional);
-      setSelectionLoading(false);
+      upsertSelectionInHistoryForPaper(paperId, provisional);
+      setSelectionResultForPaper(paperId, provisional);
+      setSelectionLoadingForPaper(paperId, false);
 
       obj.submit({
         action: args.action,
@@ -245,7 +242,7 @@ export function useSelectionThread(paperId: string) {
         ...(args.model ? { model: args.model } : {}),
       });
     },
-    [obj, fastModel, setSelectionLoading, setSelectionResult, upsertSelectionInHistory],
+    [obj, fastModel, paperId, setSelectionLoadingForPaper, setSelectionResultForPaper, upsertSelectionInHistoryForPaper],
   );
 
   const abort = useCallback(() => {

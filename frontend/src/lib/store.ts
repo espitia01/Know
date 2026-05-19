@@ -45,6 +45,17 @@ interface AppStore {
   paper: ParsedPaper | null;
   setPaper: (p: ParsedPaper | null) => void;
 
+  /**
+   * The id of the paper the user is currently looking at. Lives in the
+   * store (not local React state) so streams, panels, and effects can
+   * all read the same source of truth without prop-drilling through the
+   * reader tree. Migrating away from per-component activePaperId state
+   * is what makes workspaces possible — every analysis slice is now
+   * keyed by paperId and panels read from the active slot.
+   */
+  activePaperId: string | null;
+  setActivePaperId: (id: string | null) => void;
+
   // Cache of full ParsedPaper objects keyed by id — lets us show a paper
   // instantly while a background refresh runs.
   papersById: Record<string, ParsedPaper>;
@@ -133,30 +144,27 @@ interface AppStore {
   analysisFontFamily: AnalysisFontFamily;
   setAnalysisFontFamily: (v: AnalysisFontFamily) => void;
 
-  selectionResult: SelectionAnalysisResult | null;
-  setSelectionResult: (r: SelectionAnalysisResult | null) => void;
-  selectionLoading: boolean;
-  setSelectionLoading: (l: boolean) => void;
-  selectionHistory: SelectionAnalysisResult[];
-  addSelectionToHistory: (r: SelectionAnalysisResult) => void;
-  /** Insert or merge by `clientKey` (streaming chunks / final replace). */
-  upsertSelectionInHistory: (r: SelectionAnalysisResult) => void;
-  // Surface a past selection in the analysis pane — used when the user
-  // clicks an existing underline in the PDF. Pins the pane open, jumps
-  // to the Selection tab, and sets the active result.
-  openSelectionFromHistory: (r: SelectionAnalysisResult) => void;
-  // Remove a highlight from the in-memory history. The backend
-  // persistence step is handled by callers (via `api.deleteSelection`)
-  // so this action stays synchronous and cheap.
-  removeSelectionFromHistory: (r: SelectionAnalysisResult) => void;
+  /**
+   * Per-paper analysis state. Every slice below is keyed by paperId so
+   * a slow background request for paper A cannot splatter into paper B's
+   * panel after the user switched tabs. Panels read `*ByPaper[paperId]`
+   * directly via the panel-level `paperId` prop. The legacy singleton
+   * accessors still exist (as derived selectors via getters in the
+   * actions) so older call sites keep compiling while we migrate.
+   */
+  selectionResultByPaper: Record<string, SelectionAnalysisResult | null>;
+  setSelectionResultForPaper: (paperId: string, r: SelectionAnalysisResult | null) => void;
+  selectionHistoryByPaper: Record<string, SelectionAnalysisResult[]>;
+  upsertSelectionInHistoryForPaper: (paperId: string, r: SelectionAnalysisResult) => void;
+  removeSelectionFromHistoryForPaper: (paperId: string, r: SelectionAnalysisResult) => void;
+  openSelectionFromHistory: (paperId: string, r: SelectionAnalysisResult) => void;
+  selectionLoadingByPaper: Record<string, boolean>;
+  setSelectionLoadingForPaper: (paperId: string, loading: boolean) => void;
 
-  preReading: PreReadingAnalysis | null;
-  /** Matches `paper.id` whenever `preReading` is non-null; prevents paper B showing paper A's Prepare. */
-  preReadingPaperId: string | null;
-  /** Pass the paper id for every prepare payload (use `null, null` to clear explicitly). */
-  setPreReading: (forPaperId: string | null, preReading: PreReadingAnalysis | null) => void;
-  preReadingLoading: boolean;
-  setPreReadingLoading: (l: boolean) => void;
+  preReadingByPaper: Record<string, PreReadingAnalysis | null>;
+  setPreReadingForPaper: (paperId: string, preReading: PreReadingAnalysis | null) => void;
+  preReadingLoadingByPaper: Record<string, boolean>;
+  setPreReadingLoadingForPaper: (paperId: string, loading: boolean) => void;
   preReadingErrorByPaper: Record<string, string | null>;
   setPreReadingError: (paperId: string, message: string | null) => void;
 
@@ -164,44 +172,46 @@ interface AppStore {
   addQuestion: (q: string) => void;
   removeQuestion: (idx: number) => void;
   clearQuestions: () => void;
-  qaResults: QAItem[];
-  setQAResults: (items: QAItem[]) => void;
-  qaLoading: boolean;
-  setQALoading: (l: boolean) => void;
+  qaResultsByPaper: Record<string, QAItem[]>;
+  setQAResultsForPaper: (paperId: string, items: QAItem[]) => void;
+  qaLoadingByPaper: Record<string, boolean>;
+  setQALoadingForPaper: (paperId: string, loading: boolean) => void;
 
-  exercise: DerivationExercise | null;
-  setExercise: (e: DerivationExercise | null) => void;
-  exerciseLoading: boolean;
-  setExerciseLoading: (l: boolean) => void;
+  exerciseByPaper: Record<string, DerivationExercise | null>;
+  setExerciseForPaper: (paperId: string, e: DerivationExercise | null) => void;
+  exerciseLoadingByPaper: Record<string, boolean>;
+  setExerciseLoadingForPaper: (paperId: string, loading: boolean) => void;
 
-  assumptions: Assumption[];
-  setAssumptions: (a: Assumption[]) => void;
-  assumptionsLoading: boolean;
-  setAssumptionsLoading: (l: boolean) => void;
+  assumptionsByPaper: Record<string, Assumption[]>;
+  setAssumptionsForPaper: (paperId: string, a: Assumption[]) => void;
+  assumptionsLoadingByPaper: Record<string, boolean>;
+  setAssumptionsLoadingForPaper: (paperId: string, loading: boolean) => void;
 
-  searchResults: SearchResult[];
-  setSearchResults: (r: SearchResult[]) => void;
-  searchLoading: boolean;
-  setSearchLoading: (l: boolean) => void;
+  searchResultsByPaper: Record<string, SearchResult[]>;
+  setSearchResultsForPaper: (paperId: string, r: SearchResult[]) => void;
+  searchLoadingByPaper: Record<string, boolean>;
+  setSearchLoadingForPaper: (paperId: string, loading: boolean) => void;
 
-  notes: Note[];
-  setNotes: (n: Note[]) => void;
-  addNote: (n: Note) => void;
-  updateNote: (id: string, text: string) => void;
-  removeNote: (id: string) => void;
+  notesByPaper: Record<string, Note[]>;
+  setNotesForPaper: (paperId: string, n: Note[]) => void;
+  addNoteForPaper: (paperId: string, n: Note) => void;
+  updateNoteForPaper: (paperId: string, id: string, text: string) => void;
+  removeNoteForPaper: (paperId: string, id: string) => void;
 
-  summary: PaperSummary | null;
-  setSummary: (s: PaperSummary | null) => void;
-  /** In-flight partial summary keyed by paper id (page-level stream kickoff). */
+  summaryByPaper: Record<string, PaperSummary | null>;
+  setSummaryForPaper: (paperId: string, s: PaperSummary | null) => void;
+  /**
+   * In-flight partial summary keyed by paper id. Lite + deep phases
+   * both merge into this map as they stream so the panel can render
+   * incremental content for whichever phase is currently running.
+   */
   summaryStreamingByPaper: Record<string, Partial<PaperSummary> | null>;
   setSummaryStreamingPartial: (paperId: string, partial: Partial<PaperSummary> | null) => void;
   clearSummaryStreamingPartial: (paperId: string) => void;
   summaryErrorByPaper: Record<string, string | null>;
   setSummaryError: (paperId: string, message: string | null) => void;
-  summaryLoading: boolean;
-  setSummaryLoading: (l: boolean) => void;
-
-  resetAnalysisState: () => void;
+  summaryLoadingByPaper: Record<string, boolean>;
+  setSummaryLoadingForPaper: (paperId: string, loading: boolean) => void;
 
   usageRefreshKey: number;
   bumpUsageRefresh: () => void;
@@ -224,41 +234,21 @@ export const useStore = create<AppStore>()(
           if (prevId === nextId) {
             return { paper: p };
           }
-          const cachedAssumptions = Array.isArray(
-            p?.cached_analysis?.assumptions?.assumptions,
-          )
-            ? p!.cached_analysis!.assumptions!.assumptions
-            : [];
+          // Drop session-only overlays (pending blob, marquee mode) on
+          // any active-paper change. Analysis slices live in per-paper
+          // maps now — switching no longer wipes them, the panels just
+          // read the new id's slot.
           return {
             paper: p,
             pendingFigureBlob: null,
             pendingFigureCaption: null,
             marqueeMode: false,
-            pdfTextLayerEmptyByPaper: {},
-            pdfRegionHighlightsByPaper: {},
-            preReading: null,
-            preReadingPaperId: null,
-            preReadingErrorByPaper: {},
-            assumptions: cachedAssumptions,
-            summary: null,
-            summaryStreamingByPaper: {},
-            summaryErrorByPaper: {},
-            notes: [],
-            selectionHistory: [],
-            selectionResult: null,
-            qaResults: [],
             questions: [],
-            exercise: null,
-            searchResults: [],
-            preReadingLoading: false,
-            assumptionsLoading: false,
-            summaryLoading: false,
-            selectionLoading: false,
-            qaLoading: false,
-            exerciseLoading: false,
-            searchLoading: false,
           };
         }),
+
+      activePaperId: null,
+      setActivePaperId: (id) => set({ activePaperId: id }),
 
       papersById: {},
       // LRU cap: full ParsedPaper blobs (raw_text + cached_analysis) are large;
@@ -420,11 +410,27 @@ export const useStore = create<AppStore>()(
           marqueeMode: false,
           pdfTextLayerEmptyByPaper: {},
           pdfRegionHighlightsByPaper: {},
-          preReading: null,
-          preReadingPaperId: null,
-          assumptions: [], summary: null, notes: [],
-          selectionHistory: [], selectionResult: null, qaResults: [], questions: [],
-          exercise: null, searchResults: [],
+          preReadingByPaper: {},
+          preReadingLoadingByPaper: {},
+          preReadingErrorByPaper: {},
+          assumptionsByPaper: {},
+          assumptionsLoadingByPaper: {},
+          summaryByPaper: {},
+          summaryStreamingByPaper: {},
+          summaryErrorByPaper: {},
+          summaryLoadingByPaper: {},
+          notesByPaper: {},
+          selectionResultByPaper: {},
+          selectionHistoryByPaper: {},
+          selectionLoadingByPaper: {},
+          qaResultsByPaper: {},
+          qaLoadingByPaper: {},
+          exerciseByPaper: {},
+          exerciseLoadingByPaper: {},
+          searchResultsByPaper: {},
+          searchLoadingByPaper: {},
+          questions: [],
+          activePaperId: null,
         });
         // Drop the persisted blob too — otherwise signing out and signing
         // back in as a different user in the same browser would rehydrate
@@ -503,53 +509,89 @@ export const useStore = create<AppStore>()(
       analysisFontFamily: "sans",
       setAnalysisFontFamily: (v) => set({ analysisFontFamily: v }),
 
-      selectionResult: null,
-      setSelectionResult: (r) => set({ selectionResult: r }),
-      selectionLoading: false,
-      setSelectionLoading: (l) => set({ selectionLoading: l }),
-      selectionHistory: [],
-      addSelectionToHistory: (r) =>
-        set((s) => ({ selectionHistory: [r, ...s.selectionHistory].slice(0, 30) })),
-      upsertSelectionInHistory: (r) =>
-        set((s) => {
+      selectionResultByPaper: {},
+      setSelectionResultForPaper: (paperId, r) =>
+        set((state) => ({
+          selectionResultByPaper: {
+            ...state.selectionResultByPaper,
+            [paperId]: r,
+          },
+        })),
+      selectionLoadingByPaper: {},
+      setSelectionLoadingForPaper: (paperId, loading) =>
+        set((state) => {
+          const next = { ...state.selectionLoadingByPaper };
+          if (loading) next[paperId] = true;
+          else delete next[paperId];
+          return { selectionLoadingByPaper: next };
+        }),
+      selectionHistoryByPaper: {},
+      upsertSelectionInHistoryForPaper: (paperId, r) =>
+        set((state) => {
+          const list = state.selectionHistoryByPaper[paperId] ?? [];
           if (r.clientKey) {
-            const idx = s.selectionHistory.findIndex((h) => h.clientKey === r.clientKey);
+            const idx = list.findIndex((h) => h.clientKey === r.clientKey);
             if (idx >= 0) {
-              const next = [...s.selectionHistory];
+              const next = [...list];
               next[idx] = { ...next[idx], ...r };
-              return { selectionHistory: next };
+              return {
+                selectionHistoryByPaper: {
+                  ...state.selectionHistoryByPaper,
+                  [paperId]: next,
+                },
+              };
             }
           }
-          return { selectionHistory: [r, ...s.selectionHistory].slice(0, 30) };
+          return {
+            selectionHistoryByPaper: {
+              ...state.selectionHistoryByPaper,
+              [paperId]: [r, ...list].slice(0, 30),
+            },
+          };
         }),
-      openSelectionFromHistory: (r) =>
-        set({
-          selectionResult: r,
-          selectionLoading: false,
+      openSelectionFromHistory: (paperId, r) =>
+        set((state) => ({
+          selectionResultByPaper: {
+            ...state.selectionResultByPaper,
+            [paperId]: r,
+          },
           activeTab: "selection",
           panelVisible: true,
-        }),
-      removeSelectionFromHistory: (r) =>
-        set((s) => {
+        })),
+      removeSelectionFromHistoryForPaper: (paperId, r) =>
+        set((state) => {
           const target = selectionResultKey(r);
+          const list = state.selectionHistoryByPaper[paperId] ?? [];
+          const next = list.filter((h) => selectionResultKey(h) !== target);
+          const cur = state.selectionResultByPaper[paperId] ?? null;
+          const clearCurrent = cur && selectionResultKey(cur) === target;
           return {
-            selectionHistory: s.selectionHistory.filter((h) => selectionResultKey(h) !== target),
-            selectionResult:
-              s.selectionResult && selectionResultKey(s.selectionResult) === target
-                ? null
-                : s.selectionResult,
+            selectionHistoryByPaper: {
+              ...state.selectionHistoryByPaper,
+              [paperId]: next,
+            },
+            selectionResultByPaper: clearCurrent
+              ? { ...state.selectionResultByPaper, [paperId]: null }
+              : state.selectionResultByPaper,
           };
         }),
 
-      preReading: null,
-      preReadingPaperId: null,
-      setPreReading: (forPaperId, preReading) =>
-        set({
-          preReading,
-          preReadingPaperId: preReading && forPaperId ? forPaperId : null,
+      preReadingByPaper: {},
+      setPreReadingForPaper: (paperId, preReading) =>
+        set((state) => ({
+          preReadingByPaper: {
+            ...state.preReadingByPaper,
+            [paperId]: preReading,
+          },
+        })),
+      preReadingLoadingByPaper: {},
+      setPreReadingLoadingForPaper: (paperId, loading) =>
+        set((state) => {
+          const next = { ...state.preReadingLoadingByPaper };
+          if (loading) next[paperId] = true;
+          else delete next[paperId];
+          return { preReadingLoadingByPaper: next };
         }),
-      preReadingLoading: false,
-      setPreReadingLoading: (l) => set({ preReadingLoading: l }),
       preReadingErrorByPaper: {},
       setPreReadingError: (paperId, message) =>
         set((state) => ({
@@ -564,41 +606,109 @@ export const useStore = create<AppStore>()(
       removeQuestion: (idx) =>
         set((s) => ({ questions: s.questions.filter((_, i) => i !== idx) })),
       clearQuestions: () => set({ questions: [] }),
-      qaResults: [],
-      // Cap QA history to the most recent 200 items so the panel — and the
-      // persisted blob in sessionStorage — can't grow unbounded in long
-      // reading sessions.
-      setQAResults: (items) => set({ qaResults: items.slice(-60) }),
-      qaLoading: false,
-      setQALoading: (l) => set({ qaLoading: l }),
-
-      exercise: null,
-      setExercise: (e) => set({ exercise: e }),
-      exerciseLoading: false,
-      setExerciseLoading: (l) => set({ exerciseLoading: l }),
-
-      assumptions: [],
-      setAssumptions: (a) => set({ assumptions: a }),
-      assumptionsLoading: false,
-      setAssumptionsLoading: (l) => set({ assumptionsLoading: l }),
-
-      searchResults: [],
-      setSearchResults: (r) => set({ searchResults: r }),
-      searchLoading: false,
-      setSearchLoading: (l) => set({ searchLoading: l }),
-
-      notes: [],
-      setNotes: (n) => set({ notes: n }),
-      addNote: (n) => set((s) => ({ notes: [...s.notes, n] })),
-      updateNote: (id, text) =>
-        set((s) => ({
-          notes: s.notes.map((n) => (n.id === id ? { ...n, text } : n)),
+      qaResultsByPaper: {},
+      // Cap QA history to the most recent 60 items per paper.
+      setQAResultsForPaper: (paperId, items) =>
+        set((state) => ({
+          qaResultsByPaper: {
+            ...state.qaResultsByPaper,
+            [paperId]: items.slice(-60),
+          },
         })),
-      removeNote: (id) =>
-        set((s) => ({ notes: s.notes.filter((n) => n.id !== id) })),
+      qaLoadingByPaper: {},
+      setQALoadingForPaper: (paperId, loading) =>
+        set((state) => {
+          const next = { ...state.qaLoadingByPaper };
+          if (loading) next[paperId] = true;
+          else delete next[paperId];
+          return { qaLoadingByPaper: next };
+        }),
 
-      summary: null,
-      setSummary: (s) => set({ summary: s }),
+      exerciseByPaper: {},
+      setExerciseForPaper: (paperId, e) =>
+        set((state) => ({
+          exerciseByPaper: { ...state.exerciseByPaper, [paperId]: e },
+        })),
+      exerciseLoadingByPaper: {},
+      setExerciseLoadingForPaper: (paperId, loading) =>
+        set((state) => {
+          const next = { ...state.exerciseLoadingByPaper };
+          if (loading) next[paperId] = true;
+          else delete next[paperId];
+          return { exerciseLoadingByPaper: next };
+        }),
+
+      assumptionsByPaper: {},
+      setAssumptionsForPaper: (paperId, a) =>
+        set((state) => ({
+          assumptionsByPaper: { ...state.assumptionsByPaper, [paperId]: a },
+        })),
+      assumptionsLoadingByPaper: {},
+      setAssumptionsLoadingForPaper: (paperId, loading) =>
+        set((state) => {
+          const next = { ...state.assumptionsLoadingByPaper };
+          if (loading) next[paperId] = true;
+          else delete next[paperId];
+          return { assumptionsLoadingByPaper: next };
+        }),
+
+      searchResultsByPaper: {},
+      setSearchResultsForPaper: (paperId, r) =>
+        set((state) => ({
+          searchResultsByPaper: {
+            ...state.searchResultsByPaper,
+            [paperId]: r,
+          },
+        })),
+      searchLoadingByPaper: {},
+      setSearchLoadingForPaper: (paperId, loading) =>
+        set((state) => {
+          const next = { ...state.searchLoadingByPaper };
+          if (loading) next[paperId] = true;
+          else delete next[paperId];
+          return { searchLoadingByPaper: next };
+        }),
+
+      notesByPaper: {},
+      setNotesForPaper: (paperId, n) =>
+        set((state) => ({
+          notesByPaper: { ...state.notesByPaper, [paperId]: n },
+        })),
+      addNoteForPaper: (paperId, n) =>
+        set((state) => ({
+          notesByPaper: {
+            ...state.notesByPaper,
+            [paperId]: [...(state.notesByPaper[paperId] ?? []), n],
+          },
+        })),
+      updateNoteForPaper: (paperId, id, text) =>
+        set((state) => {
+          const list = state.notesByPaper[paperId] ?? [];
+          return {
+            notesByPaper: {
+              ...state.notesByPaper,
+              [paperId]: list.map((note) =>
+                note.id === id ? { ...note, text } : note,
+              ),
+            },
+          };
+        }),
+      removeNoteForPaper: (paperId, id) =>
+        set((state) => {
+          const list = state.notesByPaper[paperId] ?? [];
+          return {
+            notesByPaper: {
+              ...state.notesByPaper,
+              [paperId]: list.filter((note) => note.id !== id),
+            },
+          };
+        }),
+
+      summaryByPaper: {},
+      setSummaryForPaper: (paperId, summary) =>
+        set((state) => ({
+          summaryByPaper: { ...state.summaryByPaper, [paperId]: summary },
+        })),
       summaryStreamingByPaper: {},
       setSummaryStreamingPartial: (paperId, partial) =>
         set((state) => ({
@@ -621,19 +731,14 @@ export const useStore = create<AppStore>()(
             [paperId]: message,
           },
         })),
-      summaryLoading: false,
-      setSummaryLoading: (l) => set({ summaryLoading: l }),
-
-      resetAnalysisState: () => set({
-        preReading: null,
-        preReadingPaperId: null,
-        assumptions: [], summary: null, summaryStreamingByPaper: {}, summaryErrorByPaper: {},
-        preReadingErrorByPaper: {}, notes: [],
-        selectionHistory: [], selectionResult: null, qaResults: [], questions: [],
-        exercise: null, searchResults: [],
-        preReadingLoading: false, assumptionsLoading: false, summaryLoading: false,
-        selectionLoading: false, qaLoading: false, exerciseLoading: false, searchLoading: false,
-      }),
+      summaryLoadingByPaper: {},
+      setSummaryLoadingForPaper: (paperId, loading) =>
+        set((state) => {
+          const next = { ...state.summaryLoadingByPaper };
+          if (loading) next[paperId] = true;
+          else delete next[paperId];
+          return { summaryLoadingByPaper: next };
+        }),
 
       usageRefreshKey: 0,
       bumpUsageRefresh: () => set((s) => ({ usageRefreshKey: s.usageRefreshKey + 1 })),
@@ -673,6 +778,7 @@ export const useStore = create<AppStore>()(
       // session-only overlays and blob hand-offs.
       partialize: (state) => ({
         sessionPapers: state.sessionPapers,
+        activePaperId: state.activePaperId,
         // TODO(workspaces): restore crossPaperResults persistence when workspaces ship.
         // TODO(backend): sync region highlights via cached_analysis.region_highlights.
         pdfRegionHighlightsByPaper: state.pdfRegionHighlightsByPaper,

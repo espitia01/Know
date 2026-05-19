@@ -31,7 +31,14 @@ function highlightSnippet(snippet: string, q: string) {
 }
 
 export function SearchPanel({ paperId }: SearchPanelProps) {
-  const { searchResults, setSearchResults, searchLoading, setSearchLoading } = useStore();
+  const searchResults = useStore((s) => s.searchResultsByPaper[paperId] ?? []);
+  const setSearchResultsForPaper = useStore((s) => s.setSearchResultsForPaper);
+  const searchLoading = useStore(
+    (s) => s.searchLoadingByPaper[paperId] ?? false,
+  );
+  const setSearchLoadingForPaper = useStore(
+    (s) => s.setSearchLoadingForPaper,
+  );
   const [query, setQuery] = useState("");
 
   const qTrim = useMemo(() => query.trim(), [query]);
@@ -39,14 +46,14 @@ export function SearchPanel({ paperId }: SearchPanelProps) {
   const handleSearch = async () => {
     const q = qTrim;
     if (!q) return;
-    setSearchLoading(true);
+    setSearchLoadingForPaper(paperId, true);
     try {
       const result = await api.search(paperId, q);
-      setSearchResults(result.results);
+      setSearchResultsForPaper(paperId, result.results);
     } catch (e) {
       console.error("Search failed:", e);
     } finally {
-      setSearchLoading(false);
+      setSearchLoadingForPaper(paperId, false);
     }
   };
 
@@ -57,7 +64,7 @@ export function SearchPanel({ paperId }: SearchPanelProps) {
         value={query}
         onChange={(e) => {
           setQuery(e.target.value);
-          if (!e.target.value.trim()) setSearchResults([]);
+          if (!e.target.value.trim()) setSearchResultsForPaper(paperId, []);
         }}
         onKeyDown={(e) => e.key === "Enter" && handleSearch()}
         className="text-[var(--text-md)]"
