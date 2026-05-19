@@ -19,6 +19,7 @@ import { requireUser, AuthError } from "@/lib/server/auth";
 import {
   fetchPaperContext,
   fetchUserModelPrefs,
+  resolveStreamModelOverride,
   reserveUsage,
   releaseUsage,
   upsertCachedAnalysis,
@@ -45,7 +46,7 @@ function jsonError(
 }
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id: paperId } = await params;
@@ -61,6 +62,13 @@ export async function POST(
     return jsonError(401, "unauthorized", "Unauthorized");
   }
 
+  let body: Record<string, unknown> = {};
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    body = {};
+  }
+
   let paper: { title: string; raw_text: string };
   let analysisModel: string;
   try {
@@ -69,7 +77,11 @@ export async function POST(
       fetchUserModelPrefs(user.userId),
     ]);
     paper = { title: ctx.title, raw_text: ctx.raw_text };
-    analysisModel = prefs.analysis_model;
+    analysisModel = await resolveStreamModelOverride(
+      user.userId,
+      body,
+      prefs.analysis_model,
+    );
   } catch (e) {
     if (e instanceof InternalApiError) {
       const status = e.status === 404 ? 404 : 502;

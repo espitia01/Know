@@ -23,37 +23,37 @@ export function OverflowMenu({
   children: ReactNode;
   align?: "start" | "center" | "end";
   sideOffset?: number;
+  /** Applied to the trigger wrapper for layout (e.g. `shrink-0`). */
   className?: string;
   ariaLabel?: string;
 }) {
   const { className: btnClassName, ...restButtonProps } = buttonProps ?? {};
   return (
-    <Popover.Root>
-      <Popover.Trigger
-        render={(triggerProps) => (
-          <button
-            type="button"
-            {...triggerProps}
-            {...restButtonProps}
-            className={cn(triggerProps.className, btnClassName)}
-          >
-            {triggerInner}
-          </button>
-        )}
-      />
-      <Popover.Portal>
-        <Popover.Positioner side="bottom" align={align} sideOffset={sideOffset}>
-          <Popover.Popup
-            aria-label={ariaLabel}
-            className={cn(
-              "z-50 w-56 rounded-[var(--radius-lg)] border border-border bg-popover p-2 text-popover-foreground shadow-[var(--shadow-lg)] outline-none",
-              className,
-            )}
-          >
-            {children}
-          </Popover.Popup>
-        </Popover.Positioner>
-      </Popover.Portal>
-    </Popover.Root>
+    <div className={cn("shrink-0", className)}>
+      <Popover.Root>
+        <Popover.Trigger
+          render={(triggerProps) => (
+            <button
+              type="button"
+              {...triggerProps}
+              {...restButtonProps}
+              className={cn("shrink-0", triggerProps.className, btnClassName)}
+            >
+              {triggerInner}
+            </button>
+          )}
+        />
+        <Popover.Portal>
+          <Popover.Positioner side="bottom" align={align} sideOffset={sideOffset}>
+            <Popover.Popup
+              aria-label={ariaLabel}
+              className="z-50 w-56 rounded-[var(--radius-lg)] border border-border bg-popover p-2 text-popover-foreground shadow-[var(--shadow-lg)] outline-none"
+            >
+              {children}
+            </Popover.Popup>
+          </Popover.Positioner>
+        </Popover.Portal>
+      </Popover.Root>
+    </div>
   );
 }

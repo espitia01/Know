@@ -150,9 +150,13 @@ class SearchResponse(BaseModel):
 class SettingsUpdate(BaseModel):
     analysis_model: str | None = None
     fast_model: str | None = None
+    background_preset: str | None = None
+    background_opacity: float | None = None
 
 
 class SettingsResponse(BaseModel):
     has_anthropic_key: bool
     analysis_model: str
     fast_model: str
+    background_preset: str | None = None
+    background_opacity: float | None = None

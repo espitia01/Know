@@ -253,12 +253,8 @@ function parseBackgroundPayload(raw: string): BackgroundState {
   };
 }
 
-/**
- * Loads saved dashboard background for the signed-in Clerk user.
- * Signed-out sessions return defaults (no layer). Keys are per-`userId`
- * so switching accounts on one browser does not reuse another user's choice.
- */
-export function loadBackgroundStateForUser(userId: string | null): BackgroundState {
+/** Server is source of truth; localStorage is a first-paint cache only. */
+export function readBackgroundCache(userId: string | null): BackgroundState {
   if (typeof window === "undefined" || !userId) return DEFAULT_STATE;
   try {
     const raw = window.localStorage.getItem(backgroundStorageKey(userId));
@@ -269,19 +265,21 @@ export function loadBackgroundStateForUser(userId: string | null): BackgroundSta
   }
 }
 
-export function saveBackgroundStateForUser(
-  state: BackgroundState,
-  userId: string,
-): void {
+export function writeBackgroundCache(state: BackgroundState, userId: string): void {
   if (typeof window === "undefined" || !userId) return;
   try {
     window.localStorage.setItem(backgroundStorageKey(userId), JSON.stringify(state));
     window.localStorage.removeItem(LEGACY_BACKGROUND_STORAGE_KEY);
   } catch {
-    // Quota exceeded (very large custom image). We silently fail so
-    // the user's choice simply doesn't persist across reloads.
+    // Quota exceeded — cache write is best-effort.
   }
 }
+
+/** @deprecated Use {@link readBackgroundCache}. */
+export const loadBackgroundStateForUser = readBackgroundCache;
+
+/** @deprecated Use {@link writeBackgroundCache}. */
+export const saveBackgroundStateForUser = writeBackgroundCache;
 
 /**
  * Downscale an uploaded image to a sensible size and re-encode it as

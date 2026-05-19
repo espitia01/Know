@@ -16,12 +16,17 @@ import { CardMeta } from "@/components/analysis/CardMeta";
 import { ReadMoreProse } from "@/components/analysis/ReadMoreProse";
 import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
 import { useStore } from "@/lib/store";
+import { ModelOverridePill } from "@/components/analysis/ModelOverridePill";
+import { useUserSettings } from "@/lib/UserSettingsContext";
 
 interface SelectionResultPanelProps {
   result: SelectionAnalysisResult | null;
   loading: boolean;
   history: SelectionAnalysisResult[];
   onFollowUp: (question: string, context: string) => Promise<void>;
+  followUpModel?: string;
+  followUpAllowedModels?: string[];
+  onFollowUpModelChange?: (slug: string) => void;
   /** When false, hides the follow-up composer (e.g. anonymous trial). */
   allowFollowUp?: boolean;
   /** Overrides store `openSelectionFromHistory` (e.g. demo uses local React state). */
@@ -93,6 +98,9 @@ export function SelectionResultPanel({
   loading,
   history,
   onFollowUp,
+  followUpModel,
+  followUpAllowedModels,
+  onFollowUpModelChange,
   allowFollowUp = true,
   onFocusHistoryRoot,
 }: SelectionResultPanelProps) {
@@ -190,6 +198,9 @@ export function SelectionResultPanel({
               <FollowUpInput
                 context={activeThread.root.selected_text}
                 onSubmit={onFollowUp}
+                model={followUpModel}
+                allowedModels={followUpAllowedModels}
+                onModelChange={onFollowUpModelChange}
               />
             </div>
           )}
@@ -239,7 +250,22 @@ export function SelectionResultPanel({
   );
 }
 
-function FollowUpInput({ context, onSubmit }: { context: string; onSubmit: (q: string, ctx: string) => Promise<void> }) {
+function FollowUpInput({
+  context,
+  onSubmit,
+  model,
+  allowedModels,
+  onModelChange,
+}: {
+  context: string;
+  onSubmit: (q: string, ctx: string) => Promise<void>;
+  model?: string;
+  allowedModels?: string[];
+  onModelChange?: (slug: string) => void;
+}) {
+  const { fastModel, allowedModels: defaultAllowed } = useUserSettings();
+  const resolvedModel = model ?? fastModel;
+  const resolvedAllowed = allowedModels ?? defaultAllowed;
   const [input, setInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -257,6 +283,13 @@ function FollowUpInput({ context, onSubmit }: { context: string; onSubmit: (q: s
 
   return (
     <div className="flex gap-2">
+      {onModelChange && resolvedAllowed.length > 0 && (
+        <ModelOverridePill
+          model={resolvedModel}
+          allowed={resolvedAllowed}
+          onChange={onModelChange}
+        />
+      )}
       <input
         type="search"
         name="know_selection_followup"
@@ -292,7 +325,10 @@ function ResultCard({
   hideHeader?: boolean;
   hideQuote?: boolean;
 }) {
+  const { fastModel } = useUserSettings();
   const isStreaming = result.streaming;
+  const resolvedModel = result.model ?? fastModel;
+  const modelPending = isStreaming && !result.model;
   const hasContent = !!(result.explanation || result.elaboration || result.answer || result.assumptions?.length || result.steps?.length);
   const action = normalizeSelectionAction(result.action);
   const streamingLabel = action === "followup" ? "Thinking…" : "Generating analysis…";
@@ -310,7 +346,7 @@ function ResultCard({
             {ACTION_LABELS[action] || action}
           </span>
           <div className="flex items-center gap-2">
-            <CardMeta model={result.model} createdAt={result.created_at} />
+            <CardMeta model={resolvedModel} createdAt={result.created_at} pending={modelPending} />
             {isStreaming && (
               <span className="text-[var(--text-xs)] text-muted-foreground/50 motion-safe:animate-pulse">streaming…</span>
             )}

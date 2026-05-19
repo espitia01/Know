@@ -12,6 +12,7 @@ import { experimental_useObject as useObject } from "@ai-sdk/react";
 import { api } from "@/lib/api";
 import { PaperSummarySchema, type PaperSummary } from "@/lib/server/schemas";
 import { useStore } from "@/lib/store";
+import { useUserSettings } from "@/lib/UserSettingsContext";
 import {
   activeSummaryStreamStoppers,
   autoAnalyzedPapers,
@@ -56,6 +57,7 @@ function hasMeaningfulPartial(value: Partial<PaperSummary> | null | undefined): 
 }
 
 export function useSummaryStream(paperId: string) {
+  const { analysisModel } = useUserSettings();
   const setSummary = useStore((s) => s.setSummary);
   const setSummaryLoading = useStore((s) => s.setSummaryLoading);
   const setSummaryError = useStore((s) => s.setSummaryError);
@@ -202,13 +204,12 @@ export function useSummaryStream(paperId: string) {
       obj.stop();
       void runBatchFallback(paperId);
     }, STREAM_FALLBACK_MS);
-    streamModelRef.current = undefined;
-    void api.getSettings().then((s) => {
-      streamModelRef.current = s.analysis_model;
-    });
+    streamModelRef.current = analysisModel;
+    useStore.getState().setSummaryStreamingPartial(paperId, { model: analysisModel });
     obj.submit({});
   }, [
     paperId,
+    analysisModel,
     obj,
     setSummaryLoading,
     setSummaryError,

@@ -377,6 +377,8 @@ export interface SettingsResponse {
   has_anthropic_key: boolean;
   analysis_model: string;
   fast_model: string;
+  background_preset?: string | null;
+  background_opacity?: number | null;
 }
 
 export interface PaperSummary {
@@ -657,6 +659,8 @@ export const api = {
     anthropic_api_key?: string;
     analysis_model?: string;
     fast_model?: string;
+    background_preset?: string;
+    background_opacity?: number;
   }) =>
     request<SettingsResponse>("/api/settings", {
       method: "PUT",

@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { setClerkTokenGetter, clearAuthState } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { UserTierProvider } from "@/lib/UserTierContext";
+import { UserSettingsProvider } from "@/lib/UserSettingsContext";
 import { ModelCapModal } from "@/components/ModelCapModal";
 
 export function ClerkTokenProvider({ children }: { children: React.ReactNode }) {
@@ -32,8 +33,10 @@ export function ClerkTokenProvider({ children }: { children: React.ReactNode }) 
 
   return (
     <UserTierProvider>
-      {children}
-      <ModelCapModal />
+      <UserSettingsProvider>
+        {children}
+        <ModelCapModal />
+      </UserSettingsProvider>
     </UserTierProvider>
   );
 }

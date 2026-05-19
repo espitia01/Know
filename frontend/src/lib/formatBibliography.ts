@@ -169,6 +169,9 @@ export function sanitizeCitationForDisplay(raw: string): string {
   s = s.replace(/\.\s+(?:\d{1,3}\.{0,2}\s+){1,3}(?=\s*\[)/g, ". ");
   s = collapseDuplicateSentenceRuns(s);
   s = s.replace(/\s{2,}/g, " ").trim();
+  if (s.length > 480) {
+    s = `${s.slice(0, 480).replace(/\s+\S*$/, "")}…`;
+  }
   s = clipCitationLineLength(s);
   return s;
 }

@@ -15,12 +15,14 @@ import {
   summaryStreamStarters,
 } from "@/lib/analysisState";
 import { ensureDisplayMath, firstSentence } from "@/lib/text";
+import { useUserSettings } from "@/lib/UserSettingsContext";
 
 interface SummaryPanelProps {
   paperId: string;
 }
 
 export function SummaryPanel({ paperId }: SummaryPanelProps) {
+  const { analysisModel } = useUserSettings();
   const cachedSummary = useStore((s) => s.summary) ?? null;
   const streamingPartial = useStore((s) => s.summaryStreamingByPaper[paperId] ?? null);
   const summaryLoading = useStore((s) => s.summaryLoading);
@@ -110,7 +112,11 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
         <h2 className="font-display text-[var(--text-md)] font-medium tracking-[-0.02em] text-foreground">
           Summary
         </h2>
-        <CardMeta model={s.model} createdAt={s.created_at} />
+        <CardMeta
+          model={s.model ?? analysisModel}
+          createdAt={s.created_at}
+          pending={stillStreaming && !s.model}
+        />
       </div>
 
       {takeaway && (

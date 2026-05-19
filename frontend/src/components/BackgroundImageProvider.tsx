@@ -5,7 +5,7 @@ import { useEffect } from "react";
 import {
   applyBackgroundState,
   backgroundStorageKey,
-  loadBackgroundStateForUser,
+  readBackgroundCache,
 } from "@/lib/backgroundImage";
 import { useTheme } from "@/lib/ThemeProvider";
 
@@ -21,7 +21,7 @@ export function BackgroundImageProvider() {
 
   useEffect(() => {
     if (!isLoaded) return;
-    applyBackgroundState(loadBackgroundStateForUser(userId ?? null), resolvedTheme === "dark");
+    applyBackgroundState(readBackgroundCache(userId ?? null), resolvedTheme === "dark");
   }, [isLoaded, userId, resolvedTheme]);
 
   useEffect(() => {
@@ -30,7 +30,7 @@ export function BackgroundImageProvider() {
     const key = backgroundStorageKey(userId);
     const onStorage = (e: StorageEvent) => {
       if (e.key !== key) return;
-      applyBackgroundState(loadBackgroundStateForUser(userId), resolvedTheme === "dark");
+      applyBackgroundState(readBackgroundCache(userId), resolvedTheme === "dark");
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);

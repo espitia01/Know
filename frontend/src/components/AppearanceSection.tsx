@@ -9,72 +9,85 @@ import {
   BackgroundState,
   DEFAULT_BACKGROUND_STATE,
   applyBackgroundState,
-  loadBackgroundStateForUser,
+  readBackgroundCache,
   presetDisplayImage,
-  saveBackgroundStateForUser,
+  writeBackgroundCache,
 } from "@/lib/backgroundImage";
+import { api } from "@/lib/api";
 import { useTheme } from "@/lib/ThemeProvider";
+import { useUserSettings } from "@/lib/UserSettingsContext";
 
 type Props = {
-  /** The user's subscription tier; controls whether the picker is active. */
   tier: "free" | "scholar" | "researcher";
 };
 
-/**
- * Settings → Appearance section.
- *
- * Scholar+ picker for one of the curated background presets. Custom
- * uploads are intentionally not offered: they were fragile across
- * themes, blew past the localStorage quota with large photos, and got
- * in the way more than they helped. Presets are small SVG/gradient
- * data URLs that ship in the JS bundle, so switching is instant and
- * the result always stays on-theme.
- */
 export function AppearanceSection({ tier }: Props) {
   const entitled = tier === "scholar" || tier === "researcher";
   const { userId } = useAuth();
   const { resolvedTheme } = useTheme();
+  const { backgroundPreset, backgroundOpacity, loaded, refresh } = useUserSettings();
 
   const [state, setState] = useState<BackgroundState>(DEFAULT_BACKGROUND_STATE);
 
   useEffect(() => {
     if (!userId) return;
-    setState(loadBackgroundStateForUser(userId));
+    setState(readBackgroundCache(userId));
   }, [userId]);
 
+  useEffect(() => {
+    if (!userId || !loaded) return;
+    if (backgroundPreset == null && backgroundOpacity == null) return;
+    const cached = readBackgroundCache(userId);
+    const presetId = (backgroundPreset as BackgroundPresetId) || cached.presetId;
+    const next: BackgroundState = {
+      presetId: presetId === "custom" ? cached.presetId : presetId,
+      customImage: presetId === "custom" ? cached.customImage : null,
+      opacity: typeof backgroundOpacity === "number" ? backgroundOpacity : cached.opacity,
+    };
+    setState(next);
+    writeBackgroundCache(next, userId);
+    applyBackgroundState(next, resolvedTheme === "dark");
+  }, [userId, loaded, backgroundPreset, backgroundOpacity, resolvedTheme]);
+
   const persist = useCallback(
-    (next: BackgroundState) => {
+    async (next: BackgroundState) => {
       if (!userId) return;
       setState(next);
-      saveBackgroundStateForUser(next, userId);
+      writeBackgroundCache(next, userId);
       applyBackgroundState(next, resolvedTheme === "dark");
+      if (!entitled) return;
+      try {
+        await api.updateSettings({
+          background_preset: next.presetId,
+          background_opacity: next.opacity,
+        });
+        await refresh();
+      } catch {
+        /* local cache still applied */
+      }
     },
-    [userId, resolvedTheme],
+    [userId, resolvedTheme, entitled, refresh],
   );
 
   const selectPreset = useCallback(
     (id: BackgroundPresetId) => {
       if (!entitled) return;
-      // Any lingering custom data URL from older builds is wiped when
-      // the user picks a preset — no reason to keep bytes we no longer
-      // let them use.
-      persist({ ...state, presetId: id, customImage: null });
+      void persist({ ...state, presetId: id, customImage: null });
     },
     [entitled, state, persist],
   );
 
   const setOpacity = useCallback(
-    (value: number) => persist({ ...state, opacity: value }),
+    (value: number) => {
+      void persist({ ...state, opacity: value });
+    },
     [state, persist],
   );
 
   const resetAll = useCallback(() => {
-    persist(DEFAULT_BACKGROUND_STATE);
+    void persist(DEFAULT_BACKGROUND_STATE);
   }, [persist]);
 
-  // Custom uploads have been retired — surface-level presets were a
-  // more reliable experience. If a user has a stale "custom" value in
-  // localStorage we filter it out here so the UI never renders it.
   const visiblePresets = BACKGROUND_PRESETS.filter((p) => p.id !== "custom");
 
   return (
@@ -157,9 +170,6 @@ export function AppearanceSection({ tier }: Props) {
             })}
           </div>
 
-          {/* Opacity slider — each preset already ships at a quiet
-              baseline, but the user gets a direct dial if even that
-              feels too busy. */}
           <div className="pt-1 space-y-1.5">
             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
               <label htmlFor="bg-opacity">Intensity</label>

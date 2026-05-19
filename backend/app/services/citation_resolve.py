@@ -386,12 +386,52 @@ def split_bibliography_chunks(bib: str) -> dict[str, str]:
     for m in re.finditer(r"(?:^|\n)\s*(\d{1,4})\)\s+(?=[A-Za-z\"“„(\[{])", bib):
         markers.append((m.start(0), str(int(m.group(1)))))
 
+    if not markers:
+        for m in re.finditer(
+            r"(?<=[\s\.\)])(\d{1,4})\.\s+(?=[A-Z\"“„][A-Za-z\.])",
+            bib,
+        ):
+            ctx = bib[max(0, m.start() - 24) : m.start()]
+            if re.search(
+                r"(?:doi:|10\.\d{4,9}/|arxiv\.org|arxiv:\s*\d{3,4}\.)\s*$",
+                ctx,
+                re.I,
+            ):
+                continue
+            markers.append((m.start(0), str(int(m.group(1)))))
+
+        if markers:
+            nums = [int(n) for _, n in markers]
+            good = sum(1 for i in range(1, len(nums)) if nums[i] >= nums[i - 1] - 1)
+            if good / max(1, len(nums) - 1) < 0.75:
+                markers = []
+
     markers.sort(key=lambda item: item[0])
     merged: list[tuple[int, str]] = []
     for pos, n in markers:
         if merged and pos == merged[-1][0]:
             continue
         merged.append((pos, n))
+
+    if len(merged) <= 1 and len(bstrip) >= 80:
+        inline_found: list[tuple[int, str]] = []
+        for m in re.finditer(
+            r"(?:^|(?<=[\s\.\)]))(\d{1,4})\.\s+(?=[A-Z\"“„][A-Za-z\.])",
+            bib,
+        ):
+            ctx = bib[max(0, m.start() - 24) : m.start()]
+            if re.search(
+                r"(?:doi:|10\.\d{4,9}/|arxiv\.org|arxiv:\s*\d{3,4}\.)\s*$",
+                ctx,
+                re.I,
+            ):
+                continue
+            inline_found.append((m.start(0), str(int(m.group(1)))))
+        if len(inline_found) >= 2:
+            nums = [int(n) for _, n in inline_found]
+            good = sum(1 for i in range(1, len(nums)) if nums[i] >= nums[i - 1] - 1)
+            if good / max(1, len(nums) - 1) >= 0.75:
+                merged = inline_found
 
     chunks: dict[str, str] = {}
     for i, (start, num) in enumerate(merged):
@@ -401,6 +441,10 @@ def split_bibliography_chunks(bib: str) -> dict[str, str]:
             chunks[num] = blob
 
     if not chunks and len(bstrip) >= 80:
+        parts = re.split(r"(?<=[.\]])\s+(?=[A-Z][a-z]?[.,]\s+[A-Z])", bstrip)
+        parts = [p.strip() for p in parts if len(p.strip()) >= 30]
+        if len(parts) >= 2:
+            return {str(i + 1): p[:4000] for i, p in enumerate(parts[:120])}
         if re.search(
             r"\b(?:doi:\s*|10\.\d{4,9}/|arXiv:\s*|arxiv\.org/|https?://|"
             r"Vol\.?\s*\d|pp\.\s*\d+|\d{4}\.\d{4,5}(?:v\d+)?|"
@@ -408,8 +452,10 @@ def split_bibliography_chunks(bib: str) -> dict[str, str]:
             bstrip,
             re.I,
         ):
-            cap = 32000
-            return {"1": bstrip[:cap]}
+            return {"1": bstrip[:1200]}
+
+    if not chunks and len(bstrip) >= 30:
+        return {"1": bstrip[:1200]}
 
     return chunks
 

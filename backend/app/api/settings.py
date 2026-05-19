@@ -9,6 +9,7 @@ from ..config import settings
 from ..models.schemas import SettingsResponse, SettingsUpdate
 from ..auth import require_auth
 from ..gating import get_allowed_models, enforce_model, canonicalize_model
+from ..services.appearance import clamp_background_opacity, normalize_background_preset
 from ..services.db import get_user, get_db
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -34,6 +35,13 @@ def _get_user_model_prefs(user_id: str) -> tuple[str, str]:
     analysis = canonicalize_model(user.get("analysis_model")) or settings.analysis_model
     fast = canonicalize_model(user.get("fast_model")) or settings.fast_model
     return analysis, fast
+
+
+def _get_user_background_prefs(user_id: str) -> tuple[str | None, float | None]:
+    user = get_user(user_id) or {}
+    preset = normalize_background_preset(user.get("background_preset"))
+    opacity = clamp_background_opacity(user.get("background_opacity"))
+    return preset, opacity
 
 
 def _save_user_model_prefs(user_id: str, analysis_model: str | None = None, fast_model: str | None = None) -> bool:
@@ -120,6 +128,14 @@ async def update_settings(update: SettingsUpdate, user_id: str = Depends(require
         normalized = enforce_model(user_id, requested_fast)
         ok = _save_user_model_prefs(user_id, fast_model=normalized) and ok
 
+    if update.background_preset is not None:
+        preset = normalize_background_preset(update.background_preset) or "none"
+        ok = _save_user_background_prefs(user_id, background_preset=preset) and ok
+    if update.background_opacity is not None:
+        opacity = clamp_background_opacity(update.background_opacity)
+        if opacity is not None:
+            ok = _save_user_background_prefs(user_id, background_opacity=opacity) and ok
+
     if not ok:
         raise HTTPException(
             status_code=500,
@@ -127,10 +143,13 @@ async def update_settings(update: SettingsUpdate, user_id: str = Depends(require
         )
 
     analysis, fast = _get_user_model_prefs(user_id)
+    bg_preset, bg_opacity = _get_user_background_prefs(user_id)
     return SettingsResponse(
         has_anthropic_key=True,
         analysis_model=analysis,
         fast_model=fast,
+        background_preset=bg_preset,
+        background_opacity=bg_opacity,
     )
 
 

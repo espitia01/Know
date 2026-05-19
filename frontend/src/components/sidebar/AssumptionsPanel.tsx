@@ -5,7 +5,14 @@ import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { Badge } from "@/components/ui/badge";
-import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
+import {
+  autoAnalyzedPapers,
+  clearProgressStart,
+  hasActiveRequest,
+  markRequestEnd,
+  markRequestStart,
+} from "@/lib/analysisState";
+import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { AnalysisSection } from "@/components/analysis/AnalysisSection";
@@ -42,6 +49,7 @@ function assumptionStatementDisplay(statement: string, type: string): string {
 
 export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
   const { assumptions, setAssumptions, assumptionsLoading, setAssumptionsLoading, paper } = useStore();
+  const { user: tierUser } = useUserTier();
   const currentPaperRef = useRef(paperId);
   currentPaperRef.current = paperId;
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +90,24 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
       }
     }
   };
+
+  useEffect(() => {
+    const pid = paperId;
+    const cooldown =
+      (paper?.id === pid ? Number(paper.cached_analysis?.assumptions_cooldown_until || 0) : 0) >
+      Date.now() / 1000;
+    if (
+      assumptions.length === 0 &&
+      !cooldown &&
+      !assumptionsLoading &&
+      !hasActiveRequest(pid, "assumptions") &&
+      !autoAnalyzedPapers.has(`${pid}:assumptions`) &&
+      canAccess(tierUser?.tier || "free", "assumptions")
+    ) {
+      void handleExtract();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount safety net per paper
+  }, [paperId]);
 
   if (assumptionsLoading) {
     return (

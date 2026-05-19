@@ -26,9 +26,10 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { experimental_useObject as useObject } from "@ai-sdk/react";
-import { api, type SelectionAnalysisResult } from "@/lib/api";
+import type { SelectionAnalysisResult } from "@/lib/api";
 import { SelectionResultSchema } from "@/lib/server/schemas";
 import { useStore } from "@/lib/store";
+import { useUserSettings } from "@/lib/UserSettingsContext";
 
 export type SelectionAction = "explain" | "derive" | "followup";
 
@@ -36,6 +37,8 @@ export type StartArgs = {
   action: SelectionAction;
   selectedText: string;
   question?: string;
+  /** Per-request override (follow-up composer); validated server-side. */
+  model?: string;
 };
 
 type StartedState = {
@@ -75,6 +78,7 @@ function describeError(error: unknown): string {
 }
 
 export function useSelectionThread(paperId: string) {
+  const { fastModel } = useUserSettings();
   const setSelectionResult = useStore((s) => s.setSelectionResult);
   const setSelectionLoading = useStore((s) => s.setSelectionLoading);
   const upsertSelectionInHistory = useStore((s) => s.upsertSelectionInHistory);
@@ -165,18 +169,15 @@ export function useSelectionThread(paperId: string) {
       const trimmed = args.selectedText.trim();
       if (!trimmed) return;
       const clientKey = newClientKey();
+      const provisionalModel = args.model ?? fastModel;
       startedRef.current = {
         clientKey,
         action: args.action,
         selectedText: trimmed,
         question: args.question,
+        model: provisionalModel,
       };
       finalizedRef.current = null;
-      void api.getSettings().then((s) => {
-        if (startedRef.current?.clientKey === clientKey) {
-          startedRef.current = { ...startedRef.current, model: s.fast_model };
-        }
-      });
 
       const provisional: SelectionAnalysisResult = {
         action: args.action,
@@ -185,6 +186,7 @@ export function useSelectionThread(paperId: string) {
         explanation: "",
         streaming: true,
         clientKey,
+        model: provisionalModel,
       };
       upsertSelectionInHistory(provisional);
       setSelectionResult(provisional);
@@ -194,9 +196,10 @@ export function useSelectionThread(paperId: string) {
         action: args.action,
         selected_text: trimmed,
         question: args.question,
+        ...(args.model ? { model: args.model } : {}),
       });
     },
-    [obj, setSelectionLoading, setSelectionResult, upsertSelectionInHistory],
+    [obj, fastModel, setSelectionLoading, setSelectionResult, upsertSelectionInHistory],
   );
 
   const abort = useCallback(() => {

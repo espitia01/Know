@@ -120,6 +120,15 @@ async def internal_paper_text(paper_id: str, user_id: str):
 # ----------------------------------------------------------------
 
 
+@router.get("/user/{user_id}/allowed-models", dependencies=[Depends(require_internal_bearer)])
+async def internal_user_allowed_models(user_id: str):
+    """Return tier allow-list for per-request model overrides on Next.js streams."""
+    _validate_id(user_id, "user_id")
+    from ..gating import get_allowed_models
+
+    return {"allowed": get_allowed_models(user_id)}
+
+
 @router.get("/user/{user_id}/models", dependencies=[Depends(require_internal_bearer)])
 async def internal_user_models(user_id: str):
     """Return tier-enforced model slugs for migrated Next.js stream routes.

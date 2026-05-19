@@ -117,6 +117,35 @@ export async function fetchUserModelPrefs(
   return call<UserModelPrefs>(`/api/internal/user/${userId}/models`, { method: "GET" }, signal);
 }
 
+/** Tier allow-list for per-request model overrides on stream routes. */
+export async function fetchAllowedModels(
+  userId: string,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const res = await call<{ allowed: string[] }>(
+    `/api/internal/user/${userId}/allowed-models`,
+    { method: "GET" },
+    signal,
+  );
+  return res.allowed ?? [];
+}
+
+/**
+ * Single-shot stream override: validate `body.model` against the tier
+ * allow-list; never persist to /api/settings.
+ */
+export async function resolveStreamModelOverride(
+  userId: string,
+  body: Record<string, unknown>,
+  defaultModel: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const wanted = typeof body.model === "string" ? body.model.trim() : "";
+  if (!wanted) return defaultModel;
+  const allowed = await fetchAllowedModels(userId, signal);
+  return allowed.includes(wanted) ? wanted : defaultModel;
+}
+
 // ----------------------------------------------------------------
 // Usage reservation
 // ----------------------------------------------------------------

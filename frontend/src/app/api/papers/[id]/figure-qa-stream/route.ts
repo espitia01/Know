@@ -19,6 +19,7 @@ import {
   fetchFigurePng,
   fetchPaperContext,
   fetchUserModelPrefs,
+  resolveStreamModelOverride,
   reserveUsage,
   releaseUsage,
   upsertCachedAnalysis,
@@ -85,7 +86,7 @@ export async function POST(
     ]);
     paper = { title: ctx.title, raw_text: ctx.raw_text };
     figure = png;
-    fastModel = prefs.fast_model;
+    fastModel = await resolveStreamModelOverride(user.userId, body, prefs.fast_model);
   } catch (e) {
     if (e instanceof InternalApiError) {
       if (e.status === 404) return jsonError(404, "not_found", e.message);

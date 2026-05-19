@@ -8,17 +8,19 @@ export function CardMeta({
   model,
   createdAt,
   extra,
+  pending = false,
 }: {
   model?: string | null;
   createdAt?: number | string | null;
   extra?: ReactNode;
+  pending?: boolean;
 }) {
   const rel = relativeTime(createdAt);
   if (!model && !rel && !extra) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-[var(--text-xs)] text-muted-foreground/85">
-      <ModelPill slug={model} />
+      <ModelPill slug={model} pending={pending} />
       {rel && (
         <span
           title={

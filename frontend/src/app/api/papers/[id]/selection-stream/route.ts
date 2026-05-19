@@ -30,6 +30,7 @@ import { requireUser, AuthError } from "@/lib/server/auth";
 import {
   fetchPaperContext,
   fetchUserModelPrefs,
+  resolveStreamModelOverride,
   reserveUsage,
   releaseUsage,
   upsertCachedAnalysis,
@@ -127,7 +128,11 @@ export async function POST(
       fetchUserModelPrefs(user.userId),
     ]);
     paper = { title: ctx.title, raw_text: ctx.raw_text };
-    fastModel = prefs.fast_model;
+    fastModel = await resolveStreamModelOverride(
+      user.userId,
+      body,
+      prefs.fast_model,
+    );
   } catch (e) {
     if (e instanceof InternalApiError) {
       // 404 from internal == not owned. Surface as 404 to the caller.

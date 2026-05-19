@@ -963,17 +963,18 @@ function PaperContent() {
         });
     }
 
-    const serverAssumptions = Array.isArray(cache.assumptions?.assumptions)
-      ? cache.assumptions.assumptions
-      : null;
     const sessionAssumptions = Array.isArray(sessionCache.assumptions?.assumptions)
       ? sessionCache.assumptions.assumptions
       : null;
-    const hasUsableAssumptions = !!(
-      (serverAssumptions && serverAssumptions.length > 0) ||
+    const cacheHasAssumptionsKey = cache.assumptions !== undefined;
+    const cacheNonEmpty = (cache.assumptions?.assumptions?.length ?? 0) > 0;
+    const hasUsableAssumptions =
+      cacheNonEmpty ||
       (sessionAssumptions && sessionAssumptions.length > 0) ||
-      storeSnap.assumptions.length > 0
-    );
+      storeSnap.assumptions.length > 0;
+    if (cacheHasAssumptionsKey && !cacheNonEmpty) {
+      autoAnalyzedPapers.add(`${pid}:assumptions`);
+    }
     if (
       !hasUsableAssumptions &&
       !assumptionsCoolingDown &&
