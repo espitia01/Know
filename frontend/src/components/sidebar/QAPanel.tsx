@@ -9,8 +9,6 @@ import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { SectionHeader } from "@/components/panel/SectionHeader";
 import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
-import { SwitchField } from "@/components/ui/switch";
-
 interface QAPanelProps {
   paperId: string;
 }
@@ -187,9 +185,15 @@ export function QAPanel({ paperId }: QAPanelProps) {
           Queue questions as you read, then answer them all at once.
         </p>
 
-        {/* Cross-paper toggle */}
+        {/* Pointer to the Cross-paper tab — this Q&A panel always
+            scopes to the active paper. For workspace-spanning
+            questions, the user jumps to the Cross-paper tab. */}
         {hasMultiplePapers && (
-          <div className="flex items-start gap-3 rounded-lg border border-border/60 bg-card/20 px-3 py-2.5">
+          <button
+            type="button"
+            onClick={() => useStore.getState().setActiveTab("compare")}
+            className="flex w-full items-start gap-3 rounded-lg border border-border/60 bg-card/20 px-3 py-2.5 text-left transition-colors hover:border-border-strong hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
             <svg
               className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/80"
               fill="none"
@@ -202,19 +206,13 @@ export function QAPanel({ paperId }: QAPanelProps) {
             </svg>
             <div className="min-w-0 flex-1">
               <p className="text-[var(--text-sm)] font-medium leading-tight text-foreground">
-                Cross-Paper Mode
+                Ask across all papers →
               </p>
               <p className="text-[var(--text-xs)] leading-snug text-muted-foreground/80">
-                Ask questions across all {sessionPapers.length} papers in session
+                Open the Cross-paper tab to query all {sessionPapers.length} papers at once.
               </p>
             </div>
-            <SwitchField
-              checked={false}
-              onCheckedChange={() => {}}
-              aria-label="Toggle cross-paper mode"
-              disabled
-            />
-          </div>
+          </button>
         )}
 
         {!qaLoading && (

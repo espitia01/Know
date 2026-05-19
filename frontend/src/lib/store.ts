@@ -12,6 +12,7 @@ import type {
   PaperSummary,
 } from "./api";
 import { selectionKey as selectionResultKey } from "./selectionActions";
+import { MAX_SESSION_PAPERS } from "./workspaceFeatureFlags";
 
 type ReaderPanelPosition = "right" | "left" | "bottom";
 
@@ -80,7 +81,13 @@ interface AppStore {
   setFigureReextractInFlight: (paperId: string, running: boolean) => void;
 
   sessionPapers: { id: string; title: string }[];
-  addSessionPaper: (p: { id: string; title: string }) => void;
+  /**
+   * Add a paper to the workspace session. Returns `true` if it was
+   * added (or was already present — idempotent), `false` when the
+   * MAX_SESSION_PAPERS cap would be exceeded. Callers surface their
+   * own toast/error UI on `false`.
+   */
+  addSessionPaper: (p: { id: string; title: string }) => boolean;
   removeSessionPaper: (id: string) => void;
   clearSession: () => void;
   // Rename a paper in every in-memory representation at once: the
@@ -360,11 +367,13 @@ export const useStore = create<AppStore>()(
         }),
 
       sessionPapers: [],
-      addSessionPaper: (p) =>
-        set((s) => {
-          if (s.sessionPapers.some((sp) => sp.id === p.id)) return s;
-          return { sessionPapers: [...s.sessionPapers, p] };
-        }),
+      addSessionPaper: (p) => {
+        const s = get();
+        if (s.sessionPapers.some((sp) => sp.id === p.id)) return true;
+        if (s.sessionPapers.length >= MAX_SESSION_PAPERS) return false;
+        set({ sessionPapers: [...s.sessionPapers, p] });
+        return true;
+      },
       removeSessionPaper: (id) =>
         set((s) => {
           const papersById = { ...s.papersById };

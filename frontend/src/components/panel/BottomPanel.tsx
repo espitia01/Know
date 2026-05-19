@@ -19,6 +19,7 @@ import { AssumptionsPanel } from "../sidebar/AssumptionsPanel";
 import { NotesPanel } from "../sidebar/NotesPanel";
 import { SummaryPanel } from "../sidebar/SummaryPanel";
 import { FiguresPanel } from "../sidebar/FiguresPanel";
+import { CrossPaperPanel } from "../sidebar/CrossPaperPanel";
 
 export type PanelPosition = "right" | "left" | "bottom";
 
@@ -67,6 +68,11 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
   const selectionHistory = useStore((s) => s.selectionHistoryByPaper[paperId] ?? []);
   const { user } = useUserTier();
   const tier = user?.tier || "free";
+  // Cross-paper QA is a Researcher-only tab that appears once the
+  // session has 2+ papers. Researcher tier owns the "multi-qa" feature.
+  const sessionPapers = useStore((s) => s.sessionPapers);
+  const showCrossPaperTab =
+    canAccess(tier, "multi-qa") && sessionPapers.length >= 2;
 
   // Stage 2: follow-ups stream through the migrated Next.js +
   // AI SDK route via the same hook the selection toolbar uses.
@@ -86,7 +92,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
   const showSelectionTab =
     selectionLoading || selectionResult !== null || selectionHistory.length > 0;
   const effectiveTab =
-    activeTab === "compare"
+    activeTab === "compare" && !showCrossPaperTab
       ? "summary"
       : activeTab === "selection" && !showSelectionTab
         ? "summary"
@@ -150,6 +156,15 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
               </TabsTrigger>
             )}
             <TabsTrigger value="summary" className={TAB_STYLE} title={FEATURE_TOOLTIPS["Summary"]}>Summary</TabsTrigger>
+            {showCrossPaperTab && (
+              <TabsTrigger
+                value="compare"
+                className={TAB_STYLE}
+                title={`Ask questions across all ${sessionPapers.length} papers in this session`}
+              >
+                Cross-paper
+              </TabsTrigger>
+            )}
             {([
               { value: "preread", feature: "prepare", label: "Prepare" },
               { value: "assume", feature: "assumptions", label: "Assumptions" },
@@ -332,6 +347,11 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
           )}
           {mountedTabs.has("summary") && (
             <TabsContent value="summary" className="mt-0"><SummaryPanel paperId={paperId} /></TabsContent>
+          )}
+          {showCrossPaperTab && mountedTabs.has("compare") && (
+            <TabsContent value="compare" className="mt-0">
+              <CrossPaperPanel />
+            </TabsContent>
           )}
           {mountedTabs.has("preread") && (
             <TabsContent value="preread" className="mt-0"><PreReadingPanel paperId={paperId} /></TabsContent>

@@ -23,6 +23,7 @@ import { ComingSoonNavControl } from "@/components/reader/ComingSoonNavControl";
 import {
   WORKSPACE_FEATURES_COMING_SOON_TOOLTIP,
   WORKSPACE_FEATURES_TEMPORARILY_DISABLED,
+  WORKSPACE_PAPER_LIMIT_MESSAGE,
 } from "@/lib/workspaceFeatureFlags";
 import {
   hasActiveRequest,
@@ -327,8 +328,11 @@ function AddPaperPopover({
         // doesn't waste a network round-trip refetching what the
         // upload just returned.
         markPaperFetched(paper.id);
-        addSessionPaper({ id: paper.id, title: paper.title });
-        if (!firstHandled) {
+        const added = addSessionPaper({ id: paper.id, title: paper.title });
+        if (!added && !firstError) {
+          firstError = WORKSPACE_PAPER_LIMIT_MESSAGE;
+        }
+        if (added && !firstHandled) {
           firstHandled = true;
           onAdd(paper.id, paper.title);
         }
@@ -342,7 +346,7 @@ function AddPaperPopover({
     });
 
     await Promise.allSettled(tasks);
-    if (firstError && !firstHandled) setUploadError(firstError);
+    if (firstError) setUploadError(firstError);
     setUploading(false);
     setUploadProgress({ done: 0, total: 0 });
   }, [onAdd]);
@@ -1091,7 +1095,13 @@ function PaperContent() {
 
   const handleAddPaper = useCallback((id: string, title: string) => {
     // Register the paper in the multi-paper session tab bar…
-    addSessionPaper({ id, title });
+    const added = addSessionPaper({ id, title });
+    if (!added) {
+      // Workspace is full — surface the limit and don't navigate.
+      // The popover stays open so the user can see the message.
+      setError(WORKSPACE_PAPER_LIMIT_MESSAGE);
+      return;
+    }
     // …and open it. Track C1: use `router.push` (not `replace`) so the
     // browser back button returns to the previous paper — that closes
     // the "uploaded paper didn't load" loop where users hit back, saw

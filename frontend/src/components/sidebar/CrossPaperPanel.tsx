@@ -1,6 +1,8 @@
 /**
- * @deprecated Cross-paper Q&A is gated behind WORKSPACE_FEATURES_TEMPORARILY_DISABLED.
- * Do not mount this component in product surfaces. Restore when workspaces ship.
+ * Cross-paper Q&A panel (PROMPT_7). Mounted in the analysis pane as the
+ * "Cross-paper" tab for Researcher tier whenever the session has 2 or
+ * more papers. Hits `api.askQuestionsMulti` against every paper id in
+ * the current session.
  */
 "use client";
 
