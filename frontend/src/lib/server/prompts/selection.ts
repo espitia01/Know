@@ -1,19 +1,5 @@
 /**
  * Prompts for the migrated selection-stream route.
- *
- * Replaces the ~60-line LATEX_FORMAT_INSTRUCTIONS blob the Python
- * service used to send. With Streamdown + KaTeX rendering on the
- * client we only need three short rules:
- *
- *   1. Math goes inside $...$ (inline) or $$...$$ (display).
- *   2. Never bare LaTeX commands or Unicode math symbols outside of
- *      math delimiters.
- *   3. Selected PDF text may be mangled (one-glyph-per-line, missing
- *      spaces, broken sub/superscripts) — reconstruct it using the
- *      paper context, don't echo the artifacts.
- *
- * Output goes through `streamObject` so prompts ask for *fields*, not
- * raw markdown — the schema is the contract.
  */
 
 const SHARED_RULES = `Output rules (strict):
@@ -33,7 +19,6 @@ export type SelectionPromptInput = {
   selectedText: string;
   paperTitle: string;
   paperContext: string;
-  /** Free-form follow-up question. Only used when action = "followup". */
   question?: string;
   depth?: PromptDepth;
 };
@@ -49,7 +34,8 @@ function trim(text: string, max: number): string {
 
 export function buildSelectionPrompt(input: SelectionPromptInput): {
   system: string;
-  prompt: string;
+  paperContextText: string;
+  taskText: string;
 } {
   const depthLine = depthSuffix(input.depth);
   const depthBlock = depthLine ? `\n\n${depthLine}` : "";
@@ -57,6 +43,8 @@ export function buildSelectionPrompt(input: SelectionPromptInput): {
   const selectedText = trim(input.selectedText, SELECTION_CHAR_BUDGET);
   const paperContext = trim(input.paperContext, PAPER_CONTEXT_CHAR_BUDGET);
   const paperTitleLine = input.paperTitle ? `Paper: ${input.paperTitle}\n\n` : "";
+  const paperContextText =
+    paperTitleLine + `Paper context (truncated):\n"""\n${paperContext}\n"""`;
 
   if (action === "explain") {
     return {
@@ -71,10 +59,8 @@ export function buildSelectionPrompt(input: SelectionPromptInput): {
         `- "steps", "starting_point", "final_result": leave empty.`,
         depthBlock,
       ].join("\n\n"),
-      prompt: [
-        paperTitleLine + `Selected passage:\n"""\n${selectedText}\n"""`,
-        `Paper context (truncated):\n"""\n${paperContext}\n"""`,
-      ].join("\n\n"),
+      paperContextText,
+      taskText: `Selected passage:\n"""\n${selectedText}\n"""`,
     };
   }
 
@@ -94,15 +80,11 @@ export function buildSelectionPrompt(input: SelectionPromptInput): {
         `- "assumptions": empty array.`,
         depthBlock,
       ].join("\n\n"),
-      prompt: [
-        paperTitleLine + `Selected passage:\n"""\n${selectedText}\n"""`,
-        `Paper context (truncated):\n"""\n${paperContext}\n"""`,
-      ].join("\n\n"),
+      paperContextText,
+      taskText: `Selected passage:\n"""\n${selectedText}\n"""`,
     };
   }
 
-  // followup — `selectedText` is the user's earlier passage + analysis
-  // pasted together by the client; `question` is the new prompt.
   const question = trim(input.question || "", 2000);
   return {
     system: [
@@ -115,10 +97,10 @@ export function buildSelectionPrompt(input: SelectionPromptInput): {
       `- "assumptions", "steps", "starting_point", "final_result": leave empty/[].`,
       depthBlock,
     ].join("\n\n"),
-    prompt: [
-      paperTitleLine + `Earlier passage and what was already said about it:\n"""\n${selectedText}\n"""`,
+    paperContextText,
+    taskText: [
+      `Earlier passage and what was already said about it:\n"""\n${selectedText}\n"""`,
       `Follow-up question:\n"""\n${question}\n"""`,
-      `Paper context (truncated):\n"""\n${paperContext}\n"""`,
     ].join("\n\n"),
   };
 }

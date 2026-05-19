@@ -1,9 +1,5 @@
 /**
  * Prompts for the migrated figure-qa-stream route.
- *
- * Two shapes share the same schema: open-ended figure analysis when
- * `question` is empty, direct Q&A when it isn't. The model fills
- * `answer` only in the Q&A case.
  */
 
 const SHARED_RULES = `Output rules (strict):
@@ -13,17 +9,18 @@ const SHARED_RULES = `Output rules (strict):
 import type { PromptDepth } from "@/lib/server/promptDepth";
 import { depthSuffix } from "@/lib/server/promptDepth";
 
-const PAPER_CHAR_BUDGET = 4000;
+const PAPER_CHAR_BUDGET = 6000;
 
 export function buildFigurePrompt(args: {
   paperContext: string;
   question?: string;
   depth?: PromptDepth;
-}): { system: string; userText: string } {
+}): { system: string; paperContextText: string; taskText: string } {
   const depthLine = depthSuffix(args.depth);
   const depthBlock = depthLine ? `\n\n${depthLine}` : "";
   const paperContext = (args.paperContext || "").slice(0, PAPER_CHAR_BUDGET);
   const q = (args.question || "").trim();
+  const paperContextText = `Paper context (for reference):\n"""\n${paperContext}\n"""`;
 
   if (q) {
     return {
@@ -38,10 +35,8 @@ export function buildFigurePrompt(args: {
         `- "methodology_shown" / "takeaway": optional; include if a method or single-sentence takeaway is appropriate.`,
         depthBlock,
       ].join("\n\n"),
-      userText: [
-        `User question: ${q}`,
-        `Paper context (for reference):\n"""\n${paperContext}\n"""`,
-      ].join("\n\n"),
+      paperContextText,
+      taskText: `User question: ${q}`,
     };
   }
 
@@ -58,6 +53,7 @@ export function buildFigurePrompt(args: {
       `- Leave "answer" empty — there is no question.`,
       depthBlock,
     ].join("\n\n"),
-    userText: `Paper context (for reference):\n"""\n${paperContext}\n"""`,
+    paperContextText,
+    taskText: "Analyze the attached figure using the paper context above.",
   };
 }

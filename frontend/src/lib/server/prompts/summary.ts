@@ -1,9 +1,5 @@
 /**
  * Prompt for the migrated summary-stream route.
- *
- * Streamdown handles math rendering, so we only enforce three rules:
- * markdown body, $ / $$ math delimiters, never echo PDF artifacts.
- * Replaces the much longer system prompt the Python service used.
  */
 
 const SHARED_RULES = `Output rules (strict):
@@ -20,7 +16,7 @@ export function buildSummaryPrompt(args: {
   paperTitle: string;
   paperContext: string;
   depth?: PromptDepth;
-}): { system: string; prompt: string } {
+}): { system: string; paperContextText: string; taskText: string } {
   const depthLine = depthSuffix(args.depth);
   const depthBlock = depthLine ? `\n\n${depthLine}` : "";
   const paperContext = (args.paperContext || "").slice(0, PAPER_CHAR_BUDGET);
@@ -43,10 +39,10 @@ export function buildSummaryPrompt(args: {
     depthBlock,
   ].join("\n\n");
 
-  const prompt = [
-    titleLine + `Paper content (truncated):\n"""\n${paperContext}\n"""`,
-    `Return the structured object. Always include a non-empty "overview". Leave arrays empty when a section does not apply.`,
-  ].join("\n\n");
+  const paperContextText =
+    titleLine + `Paper content (truncated):\n"""\n${paperContext}\n"""`;
+  const taskText =
+    `Return the structured object. Always include a non-empty "overview". Leave arrays empty when a section does not apply.`;
 
-  return { system, prompt };
+  return { system, paperContextText, taskText };
 }

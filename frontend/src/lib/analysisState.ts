@@ -10,6 +10,8 @@ type CacheSlice = NonNullable<ParsedPaper["cached_analysis"]>;
 export type AnalysisKind = "preReading" | "assumptions" | "summary";
 
 export const autoAnalyzedPapers = new Set<string>();
+/** Last auto-Prepare failure per paper — suppress retry storms for 30s. */
+export const preReadingAutoRetryCooldownUntil = new Map<string, number>();
 export const activeRequests = new Map<string, Set<AnalysisKind>>();
 /** In-flight summary stream stop handlers (from `useSummaryStream`). */
 export const activeSummaryStreamStoppers = new Map<string, () => void>();
@@ -69,6 +71,7 @@ export function forgetPaper(paperId: string) {
       autoAnalyzedPapers.delete(key);
     }
   }
+  preReadingAutoRetryCooldownUntil.delete(paperId);
   activeRequests.delete(paperId);
   activeSummaryStreamStoppers.get(paperId)?.();
   activeSummaryStreamStoppers.delete(paperId);
@@ -99,9 +102,7 @@ export function syncAutoAnalyzeGuardsFromCache(
   const hasPre =
     isPreReadingPopulated(cache.pre_reading) ||
     isPreReadingPopulated(sessionCache.pre_reading);
-  const hasPreKey =
-    cache.pre_reading !== undefined || sessionCache.pre_reading !== undefined;
-  if (hasPre || hasPreKey) {
+  if (hasPre) {
     autoAnalyzedPapers.add(`${paperId}:preReading`);
   } else {
     autoAnalyzedPapers.delete(`${paperId}:preReading`);
@@ -109,9 +110,14 @@ export function syncAutoAnalyzeGuardsFromCache(
 
   const cachedAssume =
     getCachedAssumptionItems(cache) ?? getCachedAssumptionItems(sessionCache);
-  const hasAssumeKey =
-    cache.assumptions !== undefined || sessionCache.assumptions !== undefined;
-  if (cachedAssume || hasAssumeKey) {
+  const assumeItems = cache.assumptions?.assumptions;
+  const sessionAssumeItems = sessionCache.assumptions?.assumptions;
+  const hasEmptyAssumeKey =
+    (Array.isArray(assumeItems) && assumeItems.length === 0) ||
+    (Array.isArray(sessionAssumeItems) && sessionAssumeItems.length === 0);
+  if (cachedAssume) {
+    autoAnalyzedPapers.add(`${paperId}:assumptions`);
+  } else if (hasEmptyAssumeKey) {
     autoAnalyzedPapers.add(`${paperId}:assumptions`);
   } else {
     autoAnalyzedPapers.delete(`${paperId}:assumptions`);

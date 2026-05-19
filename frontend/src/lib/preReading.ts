@@ -8,7 +8,6 @@ export function isPreReadingPopulated(pr: unknown): pr is PreReadingAnalysis {
   return (
     n(p.definitions) > 0 ||
     n(p.research_questions) > 0 ||
-    n(p.prior_work) > 0 ||
     n(p.concepts) > 0
   );
 }

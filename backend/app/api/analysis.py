@@ -87,6 +87,14 @@ router = APIRouter(prefix="/api/papers", tags=["analysis"])
 logger = logging.getLogger(__name__)
 
 
+def _is_usable_pre_reading(payload: dict) -> bool:
+    return bool(
+        payload.get("definitions")
+        or payload.get("research_questions")
+        or payload.get("concepts")
+    )
+
+
 @router.post("/{paper_id}/analyze", response_model=PreReadingAnalysis)
 async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
     check_feature_access(user_id, "prepare")
@@ -155,7 +163,7 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
         logger.exception("Analysis failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Analysis failed. Please try again.")
     finally:
-        if analysis_payload is not None:
+        if analysis_payload is not None and _is_usable_pre_reading(analysis_payload):
             try:
                 # Per F-HYDRATION: persist paid-for output even if a
                 # post-LLM response path later fails.

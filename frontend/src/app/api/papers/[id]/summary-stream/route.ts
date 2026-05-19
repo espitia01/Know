@@ -28,6 +28,10 @@ import {
 } from "@/lib/server/internalApi";
 import { PaperSummarySchema, type PaperSummary } from "@/lib/server/schemas";
 import { buildSummaryPrompt } from "@/lib/server/prompts/summary";
+import {
+  ANTHROPIC_CACHE_EPHEMERAL,
+  cachedUserMessages,
+} from "@/lib/server/promptCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -112,7 +116,7 @@ export async function POST(
   }
 
   const depth = promptDepthForModel(analysisModel);
-  const { system, prompt } = buildSummaryPrompt({
+  const { system, paperContextText, taskText } = buildSummaryPrompt({
     paperTitle: paper.title,
     paperContext: paper.raw_text,
     depth,
@@ -133,7 +137,8 @@ export async function POST(
       schemaName: "PaperSummary",
       schemaDescription: "Structured summary of an academic paper.",
       system,
-      prompt,
+      messages: cachedUserMessages(paperContextText, taskText),
+      providerOptions: ANTHROPIC_CACHE_EPHEMERAL,
       temperature: 0.3,
       maxOutputTokens: maxOutputTokensFor(analysisModel, "analysis"),
       onFinish: async (event) => {

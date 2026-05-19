@@ -131,7 +131,9 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
           <p className="text-[var(--text-xs)] font-medium uppercase tracking-[0.12em] text-muted-foreground/85">
             Key takeaway
           </p>
-          <p className="mt-1 text-[var(--text-sm)] leading-relaxed text-foreground/90">{takeaway}</p>
+          <div className="mt-1 text-[var(--text-sm)] leading-relaxed text-foreground/90">
+            <StreamingMarkdown>{takeaway}</StreamingMarkdown>
+          </div>
         </div>
       )}
 

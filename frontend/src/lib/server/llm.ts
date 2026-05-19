@@ -81,7 +81,17 @@ export function modelRouting(): { gateway: boolean; roles: Record<ModelRole, str
 export function maxOutputTokensFor(slug: string, role: ModelRole): number {
   const isOpus = slug.includes("opus");
   const isSonnet = slug.includes("sonnet");
-  if (role === "analysis") return isOpus ? 12000 : isSonnet ? 8000 : 6000;
-  if (role === "fast") return isOpus ? 10000 : isSonnet ? 8000 : 6000;
-  return isOpus ? 6000 : 4000;
+  if (role === "analysis") {
+    if (isOpus) return 8000;
+    if (isSonnet) return 6000;
+    return 4000;
+  }
+  if (role === "fast") {
+    if (isOpus) return 4000;
+    if (isSonnet) return 3000;
+    return 2000;
+  }
+  if (isOpus) return 4000;
+  if (isSonnet) return 3000;
+  return 2000;
 }

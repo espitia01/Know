@@ -28,6 +28,7 @@ import {
 } from "@/lib/server/internalApi";
 import { FigureAnalysisSchema, type FigureAnalysis } from "@/lib/server/schemas";
 import { buildFigurePrompt } from "@/lib/server/prompts/figure";
+import { ANTHROPIC_CACHE_EPHEMERAL } from "@/lib/server/promptCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -116,7 +117,7 @@ export async function POST(
   }
 
   const depth = promptDepthForModel(fastModel);
-  const { system, userText } = buildFigurePrompt({
+  const { system, paperContextText, taskText } = buildFigurePrompt({
     paperContext: paper.raw_text,
     question,
     depth,
@@ -137,13 +138,19 @@ export async function POST(
       schemaName: "FigureAnalysis",
       schemaDescription: "Structured analysis of a figure from an academic paper.",
       system,
+      providerOptions: ANTHROPIC_CACHE_EPHEMERAL,
       maxOutputTokens: maxOutputTokensFor(fastModel, "vision"),
       messages: [
         {
           role: "user",
           content: [
             { type: "image", image: figure.bytes, mediaType: figure.mediaType },
-            { type: "text", text: userText },
+            {
+              type: "text",
+              text: paperContextText,
+              providerOptions: ANTHROPIC_CACHE_EPHEMERAL,
+            },
+            { type: "text", text: taskText },
           ],
         },
       ],

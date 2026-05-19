@@ -42,6 +42,10 @@ import {
   buildSelectionPrompt,
   type SelectionAction,
 } from "@/lib/server/prompts/selection";
+import {
+  ANTHROPIC_CACHE_EPHEMERAL,
+  cachedUserMessages,
+} from "@/lib/server/promptCache";
 
 export const runtime = "nodejs";
 // Streaming responses must not be cached; force fresh execution per call.
@@ -167,7 +171,7 @@ export async function POST(
 
   // 5. Build prompt + stream.
   const depth = promptDepthForModel(fastModel);
-  const { system, prompt } = buildSelectionPrompt({
+  const { system, paperContextText, taskText } = buildSelectionPrompt({
     action: normalizedAction,
     selectedText,
     paperTitle: paper.title,
@@ -192,7 +196,8 @@ export async function POST(
       schemaDescription:
         "Structured analysis of a selected passage from an academic paper.",
       system,
-      prompt,
+      messages: cachedUserMessages(paperContextText, taskText),
+      providerOptions: ANTHROPIC_CACHE_EPHEMERAL,
       // Derive responses with 6–12 step bodies plus assumption arrays
       // can run several thousand tokens. Default cap on Haiku is
       // generous, but explicit beats implicit and the Anthropic
@@ -211,6 +216,12 @@ export async function POST(
               ? String(event.error).slice(0, 500)
               : undefined,
             usage: event.usage,
+            cacheRead:
+              (event.usage as { cacheReadInputTokens?: number } | undefined)
+                ?.cacheReadInputTokens ?? 0,
+            cacheCreation:
+              (event.usage as { cacheCreationInputTokens?: number } | undefined)
+                ?.cacheCreationInputTokens ?? 0,
           }),
         );
         // Schema validation failure mid-stream → release usage,

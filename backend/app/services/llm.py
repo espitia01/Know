@@ -16,6 +16,7 @@ import certifi
 from fastapi import HTTPException
 
 from ..config import settings
+from .paper_excerpt import build_prepare_excerpt
 from .reference_extract import extract_references_section
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,14 @@ def _ssl_context():
 
 class LLMProvider(ABC):
     @abstractmethod
-    async def complete(self, system: str, user: str, max_tokens: int = 4096) -> str: ...
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 4096,
+        *,
+        cache_user_prefix: str | None = None,
+    ) -> str: ...
 
 
 class LLMProviderError(HTTPException):
@@ -165,23 +173,58 @@ class AnthropicProvider(LLMProvider):
         self.model = model
         self.client = _get_shared_client()
 
-    async def complete(self, system: str, user: str, max_tokens: int = 4096) -> str:
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 4096,
+        *,
+        cache_user_prefix: str | None = None,
+    ) -> str:
+        headers = {
+            "x-api-key": self.api_key,
+            "anthropic-version": ANTHROPIC_VERSION,
+            "anthropic-beta": "prompt-caching-2024-07-31",
+            "content-type": "application/json",
+        }
+        if cache_user_prefix:
+            user_content: str | list[dict] = [
+                {
+                    "type": "text",
+                    "text": cache_user_prefix,
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {"type": "text", "text": user},
+            ]
+        else:
+            user_content = user
         response = await self.client.post(
             ANTHROPIC_API_URL,
-            headers={
-                "x-api-key": self.api_key,
-                "anthropic-version": ANTHROPIC_VERSION,
-                "content-type": "application/json",
-            },
+            headers=headers,
             json={
                 "model": self.model,
                 "max_tokens": max_tokens,
-                "system": system,
-                "messages": [{"role": "user", "content": user}],
+                "system": [
+                    {
+                        "type": "text",
+                        "text": system,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                "messages": [{"role": "user", "content": user_content}],
             },
         )
         _raise_for_anthropic(response, model=self.model)
         data = response.json()
+        usage = data.get("usage") or {}
+        logger.info(
+            "anthropic_usage model=%s cache_read=%s cache_creation=%s input=%s output=%s",
+            self.model,
+            usage.get("cache_read_input_tokens", 0),
+            usage.get("cache_creation_input_tokens", 0),
+            usage.get("input_tokens", 0),
+            usage.get("output_tokens", 0),
+        )
         return data["content"][0]["text"]
 
     async def stream_complete(self, system: str, user: str, max_tokens: int = 4096) -> AsyncIterator[str]:
@@ -412,6 +455,30 @@ def _normalize_latex_delimiters(obj):
     if isinstance(obj, list):
         return [_normalize_latex_delimiters(item) for item in obj]
     return obj
+
+
+def _is_usable_prepare_payload(result: dict) -> bool:
+    return bool(
+        result.get("definitions")
+        or result.get("research_questions")
+        or result.get("concepts")
+    )
+
+
+def _try_fence_repair_json(raw: str) -> dict | None:
+    s = raw.strip()
+    if s.startswith("```"):
+        lines = s.split("\n")
+        if len(lines) >= 2 and lines[0].startswith("```"):
+            if lines[-1].strip() == "```":
+                s = "\n".join(lines[1:-1]).strip()
+            else:
+                s = "\n".join(lines[1:]).strip()
+    try:
+        parsed = json.loads(s)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 # ---------------------------------------------------------------------------
@@ -653,7 +720,7 @@ Return JSON:
         "You are an expert science educator. Analyze academic paper content to help students learn. "
         "Return ONLY valid JSON.\n\n" + LATEX_FORMAT_INSTRUCTIONS
     )
-    raw = await provider.complete(system, prompt, max_tokens=8192)
+    raw = await provider.complete(system, prompt, max_tokens=3000)
     result = _safe_parse_json(raw)
     # Explain and legacy assumptions payloads share one shape.
     if action == "explain" or action == "assumptions":
@@ -797,7 +864,7 @@ async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
     """Run pre-reading analysis on paper content."""
     provider = get_provider(user_id)
     paper_text_full = _sanitize_user_text(paper_text, max_chars=200_000)
-    paper_text = paper_text_full[:15000]
+    paper_text = build_prepare_excerpt(paper_text_full, max_chars=15000)
 
     bib_excerpt = extract_references_section(paper_text_full, max_chars=14000)
     bib_for_prompt = bib_excerpt[-12000:] if len(bib_excerpt) > 12000 else bib_excerpt
@@ -843,8 +910,37 @@ REFERENCE LIST excerpt (ground truth for citations — use for matching titles a
 {bib_for_prompt if bib_for_prompt else "(no isolated reference block detected — infer carefully from the body above)"}
 """
 
-    raw = await provider.complete(system, user, max_tokens=8192)
-    return _safe_parse_json(raw)
+    model_slug = getattr(provider, "model", "unknown")
+    raw = await provider.complete(
+        system,
+        "\n",
+        max_tokens=12000,
+        cache_user_prefix=user,
+    )
+    result = _safe_parse_json(raw)
+    if _is_usable_prepare_payload(result):
+        return result
+
+    if len(raw.strip()) < 200:
+        logger.warning(
+            "Prepare empty payload model=%s raw=%s",
+            model_slug,
+            raw.strip()[:200],
+        )
+        raise ValueError("Prepare returned empty payload")
+
+    repaired = _try_fence_repair_json(raw)
+    if repaired:
+        repaired = _normalize_latex_delimiters(repaired)
+        if _is_usable_prepare_payload(repaired):
+            return repaired
+
+    logger.warning(
+        "Prepare unusable JSON model=%s raw_len=%s",
+        model_slug,
+        len(raw),
+    )
+    raise ValueError("Prepare returned empty payload")
 
 
 async def explain_term(paper_text: str, term: str, context: str, user_id: str | None = None) -> dict:
@@ -871,7 +967,7 @@ Return JSON: {{"term": "...", "explanation": "...", "source": "name of source if
 Paper excerpt:
 {paper_text[:10000]}"""
 
-    raw = await provider.complete(system, user, max_tokens=4096)
+    raw = await provider.complete(system, user, max_tokens=3000)
     return _safe_parse_json(raw)
 
 
@@ -908,7 +1004,7 @@ Return JSON:
   ]
 }}"""
 
-    raw = await provider.complete(system, user, max_tokens=4096)
+    raw = await provider.complete(system, user, max_tokens=3000)
     return _safe_parse_json(raw)
 
 
@@ -922,23 +1018,26 @@ async def extract_assumptions(paper_text: str, user_id: str | None = None) -> di
         "stated and those implied. Return ONLY valid JSON.\n\n" + LATEX_FORMAT_INSTRUCTIONS
     )
 
-    user = f"""Analyze this paper and extract all assumptions, both explicit (clearly stated) and implicit (unstated but necessary for the conclusions to hold).
-
-Paper content:
-{paper_text[:6000]}
+    paper_block = f"Paper content:\n{paper_text[:6000]}"
+    task = """Analyze this paper and extract all assumptions, both explicit (clearly stated) and implicit (unstated but necessary for the conclusions to hold).
 
 Return JSON:
-{{
+{
   "assumptions": [
-    {{
+    {
       "statement": "the assumption",
       "type": "explicit" or "implicit",
       "section": "which section this relates to"
-    }}
+    }
   ]
-}}"""
+}"""
 
-    raw = await provider.complete(system, user, max_tokens=4096)
+    raw = await provider.complete(
+        system,
+        task,
+        max_tokens=8192,
+        cache_user_prefix=paper_block,
+    )
     return _safe_parse_json(raw)
 
 
@@ -1206,7 +1305,7 @@ Return JSON:
   "takeaway": "the main conclusion from this figure"
 }}"""
 
-    raw = await provider.complete_with_image(system, user_text, image_b64, max_tokens=2048)
+    raw = await provider.complete_with_image(system, user_text, image_b64, max_tokens=3000)
     return _safe_parse_json(raw)
 
 

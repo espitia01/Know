@@ -104,7 +104,6 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
   const showDerive = selectionLooksLikeEquationSnippet(text);
 
   const visibleActions = actions.filter((a) => {
-    if (a.id === "derive" && !showDerive) return false;
     if (a.id === "note") return canAccess(tier, "notes");
     if (a.id === "explain" || a.id === "derive") return canAccess(tier, "selection");
     return true;
@@ -224,11 +223,20 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
         aria-label="Selection actions"
         className="pointer-events-auto flex items-center gap-0.5 rounded-2xl border border-border/70 bg-popover/97 backdrop-blur-xl px-1 py-1 shadow-2xl shadow-black/12 ring-1 ring-black/[0.06] motion-safe:transition-[box-shadow,transform] dark:shadow-black/50 dark:ring-white/[0.08]"
       >
-        {visibleActions.map((a, i) => (
+        {visibleActions.map((a, i) => {
+          const mutedDerive = a.id === "derive" && !showDerive;
+          const hint =
+            quotaBlocked
+              ? "Demo selection limit reached — create a free account for more."
+              : mutedDerive
+                ? `${a.hint} (also works on prose — step-by-step argument)`
+                : a.hint;
+          return (
           <button
             key={a.id}
             type="button"
             disabled={quotaBlocked}
+            data-secondary={mutedDerive ? "" : undefined}
             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onClick={(e) => {
               e.preventDefault();
@@ -236,20 +244,20 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
               if (quotaBlocked) return;
               onAction(a.id, cleanText);
             }}
-            // `data-tooltip` powers the rich CSS tooltip declared in
-            // globals.css; the native `title` is kept as a fallback for
-            // assistive tech and long-press on touch devices.
-            data-tooltip={quotaBlocked ? "Demo selection limit reached — create a free account for more." : a.hint}
-            title={quotaBlocked ? "Demo selection limit reached — create a free account for more." : a.hint}
-            aria-label={quotaBlocked ? "Demo selection limit reached" : `${a.label} — ${a.hint}`}
-            className={`know-toolbar-btn group flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[12px] font-medium text-muted-foreground whitespace-nowrap hover:bg-accent/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/55 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent active:scale-[0.97] motion-safe:transition-[color,background-color,transform] motion-safe:duration-150 ${
-              i === 0 ? "" : "ml-px"
-            } ${quotaBlocked ? "opacity-40 cursor-not-allowed hover:bg-transparent hover:text-muted-foreground" : ""}`}
+            data-tooltip={hint}
+            title={hint}
+            aria-label={quotaBlocked ? "Demo selection limit reached" : `${a.label} — ${hint}`}
+            className={`know-toolbar-btn group flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[12px] font-medium whitespace-nowrap hover:bg-accent/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/55 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent active:scale-[0.97] motion-safe:transition-[color,background-color,transform] motion-safe:duration-150 ${
+              mutedDerive ? "text-muted-foreground/65" : "text-muted-foreground"
+            } ${i === 0 ? "" : "ml-px"} ${
+              quotaBlocked ? "opacity-40 cursor-not-allowed hover:bg-transparent hover:text-muted-foreground" : ""
+            }`}
           >
             <a.Icon />
             <span className="leading-none">{a.label}</span>
           </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

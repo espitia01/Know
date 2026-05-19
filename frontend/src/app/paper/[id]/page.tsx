@@ -33,6 +33,7 @@ import {
   getCachedAssumptionItems,
   syncAutoAnalyzeGuardsFromCache,
   autoAnalyzedPapers,
+  preReadingAutoRetryCooldownUntil,
   abortActiveSummaryStream,
 } from "@/lib/analysisState";
 import { useSummaryStream, kickoffSummaryStream } from "@/lib/useSummaryStream";
@@ -932,19 +933,17 @@ function PaperContent() {
       Number(sessionCache.assumptions_cooldown_until || 0),
     );
     const assumptionsCoolingDown = cooldownUntil > Date.now() / 1000;
-    const cacheHasPreReadingKey = cache.pre_reading !== undefined;
-    const cachePreReadingPopulated = isPreReadingPopulated(cache.pre_reading);
     const hasPreReading =
-      cachePreReadingPopulated ||
+      isPreReadingPopulated(cache.pre_reading) ||
       isPreReadingPopulated(sessionCache.pre_reading) ||
       (storeSnap.preReadingPaperId === pid &&
         isPreReadingPopulated(storeSnap.preReading));
-    if (cacheHasPreReadingKey && !cachePreReadingPopulated) {
-      autoAnalyzedPapers.add(`${pid}:preReading`);
-    }
+    const preReadingCooldownUntil = preReadingAutoRetryCooldownUntil.get(pid) ?? 0;
+    const preReadingCoolingDown = Date.now() < preReadingCooldownUntil;
 
     if (
       !hasPreReading &&
+      !preReadingCoolingDown &&
       canAccess(tierUser?.tier || "free", "prepare") &&
       !hasActiveRequest(pid, "preReading") &&
       !autoAnalyzedPapers.has(`${pid}:preReading`)
@@ -967,6 +966,8 @@ function PaperContent() {
           const msg =
             err instanceof Error ? err.message : "Prepare failed. Try again.";
           s.setPreReadingError(pid, msg);
+          autoAnalyzedPapers.delete(`${pid}:preReading`);
+          preReadingAutoRetryCooldownUntil.set(pid, Date.now() + 30_000);
         })
         .finally(() => {
           markRequestEnd(pid, "preReading");

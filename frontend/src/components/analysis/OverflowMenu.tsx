@@ -13,9 +13,12 @@ import {
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
+const PADDING = 8;
+const DEFAULT_MENU_W = 224;
+
 /**
  * Analysis-pane dropdown (font scale, family, pane position).
- * Controlled menu + body portal — avoids base-ui Trigger/render quirks in the tab chrome.
+ * Controlled menu + body portal — viewport-clamped positioning.
  */
 export function OverflowMenu({
   triggerInner,
@@ -44,28 +47,51 @@ export function OverflowMenu({
 
   const updatePosition = useCallback(() => {
     const el = triggerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const top = rect.bottom + sideOffset;
-    if (align === "end") {
-      setMenuStyle({ top, left: rect.right, transform: "translateX(-100%)" });
-    } else if (align === "start") {
-      setMenuStyle({ top, left: rect.left });
-    } else {
-      setMenuStyle({ top, left: rect.left + rect.width / 2, transform: "translateX(-50%)" });
+    if (!el || typeof window === "undefined") return;
+    const triggerRect = el.getBoundingClientRect();
+    const menuW = menuRef.current?.offsetWidth ?? DEFAULT_MENU_W;
+    const menuH = menuRef.current?.offsetHeight ?? 0;
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+
+    let left: number;
+    if (align === "end") left = triggerRect.right - menuW;
+    else if (align === "start") left = triggerRect.left;
+    else left = triggerRect.left + triggerRect.width / 2 - menuW / 2;
+
+    left = Math.max(PADDING, Math.min(left, viewportW - menuW - PADDING));
+
+    let top = triggerRect.bottom + sideOffset;
+    if (menuH > 0 && top + menuH > viewportH - PADDING) {
+      const flipTop = triggerRect.top - sideOffset - menuH;
+      if (flipTop >= PADDING) top = flipTop;
+      else top = Math.max(PADDING, viewportH - menuH - PADDING);
     }
+
+    setMenuStyle({ top, left });
   }, [align, sideOffset]);
 
   useEffect(() => {
     if (!open) return;
     updatePosition();
+    const raf = requestAnimationFrame(() => updatePosition());
     const onLayout = () => updatePosition();
     window.addEventListener("resize", onLayout);
     window.addEventListener("scroll", onLayout, true);
     return () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener("resize", onLayout);
       window.removeEventListener("scroll", onLayout, true);
     };
+  }, [open, updatePosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    const menu = menuRef.current;
+    if (!menu || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => updatePosition());
+    ro.observe(menu);
+    return () => ro.disconnect();
   }, [open, updatePosition]);
 
   useEffect(() => {

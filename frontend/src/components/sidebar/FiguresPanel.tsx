@@ -9,7 +9,9 @@ import { useStore } from "@/lib/store";
 // renders via Streamdown.
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { CardMeta } from "@/components/analysis/CardMeta";
+import { ModelOverridePill } from "@/components/analysis/ModelOverridePill";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
+import { useUserSettings } from "@/lib/UserSettingsContext";
 
 interface FiguresPanelProps {
   paperId: string;
@@ -188,6 +190,7 @@ function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: ()
 }
 
 export function FiguresPanel({ paperId }: FiguresPanelProps) {
+  const { fastModel, allowedModels } = useUserSettings();
   const { paper, setPaper } = useStore();
   // Keep the in-memory "instant switch" cache (`papersById`) in sync
   // whenever we mutate figures on the current paper. Without this,
@@ -215,6 +218,8 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   const [selected, setSelected] = useState<FigureInfo | null>(null);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
+  const [streamModel, setStreamModel] = useState<string | null>(null);
+  const [figureModelOverride, setFigureModelOverride] = useState<string | null>(null);
   // "Re-extracting" spinner state lives in the store so a paper
   // switch doesn't hide the running indicator. If the user triggers
   // re-extraction, switches papers, then comes back, the spinner
@@ -249,6 +254,8 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     if (prevPaperIdRef.current !== paperId) {
       abortRef.current?.abort();
       setSelected(null);
+      setStreamModel(null);
+      setFigureModelOverride(null);
       prevPaperIdRef.current = paperId;
     }
   }, [paperId]);
@@ -311,14 +318,16 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   }, [paperId, paper, setPaper, cachePaper, setFigureReextractInFlight]);
 
   const handleAnalyze = useCallback(
-    async (fig: FigureInfo, q: string = "") => {
+    async (fig: FigureInfo, q: string = "", model?: string) => {
       const figId = fig.id;
       const userMsg: ChatMessage = { role: "user", text: q || "Analyze this figure" };
+      const resolvedModel = model ?? figureModelOverride ?? fastModel;
 
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
 
+      setStreamModel(resolvedModel);
       setConversations((prev) => ({
         ...prev,
         [figId]: [...(prev[figId] || []), userMsg],
@@ -335,7 +344,11 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           const res = await fetch(`/api/papers/${paperId}/figure-qa-stream`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ figure_id: figId, question: q }),
+            body: JSON.stringify({
+              figure_id: figId,
+              question: q,
+              model: resolvedModel,
+            }),
             signal: controller.signal,
           });
           if (controller.signal.aborted) return res;
@@ -348,7 +361,8 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
         const res = await streamFigure(0);
         if (controller.signal.aborted) return;
-        const streamModel = res.headers.get("X-Know-Model") ?? undefined;
+        const headerModel = res.headers.get("X-Know-Model");
+        if (headerModel) setStreamModel(headerModel);
 
         if (!res.ok) {
           let detailMessage = `HTTP ${res.status}`;
@@ -439,10 +453,11 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           methodology_shown: finalObj.methodology_shown as string | undefined,
           takeaway: finalObj.takeaway as string | undefined,
           answer: finalObj.answer as string | undefined,
-          model: streamModel,
+          model: headerModel ?? resolvedModel,
           created_at: Date.now(),
         };
         appendFigureAnalysisToCaches(paperId, cacheEntry);
+        setFigureModelOverride(null);
         setConversations((prev) => {
           const msgs = [...(prev[figId] || [])];
           const lastIdx = msgs.length - 1;
@@ -474,7 +489,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         setLoading(false);
       }
     },
-    [paperId]
+    [paperId, fastModel, figureModelOverride]
   );
 
   const ingestFigureBlob = useCallback(
@@ -537,9 +552,10 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
   const handleAsk = useCallback(() => {
     if (!selected || !question.trim()) return;
-    handleAnalyze(selected, question.trim());
+    const model = figureModelOverride ?? fastModel;
+    handleAnalyze(selected, question.trim(), model);
     setQuestion("");
-  }, [selected, question, handleAnalyze]);
+  }, [selected, question, handleAnalyze, figureModelOverride, fastModel]);
 
   // Paper metadata hasn't arrived yet — show a spinner instead of a
   // misleading "no figures" message. This covers both the initial mount
@@ -638,7 +654,11 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
         <div className="flex items-center gap-2 pb-3 border-b border-border/50 shrink-0">
           <button
-            onClick={() => setSelected(null)}
+            onClick={() => {
+              setSelected(null);
+              setStreamModel(null);
+              setFigureModelOverride(null);
+            }}
             className="text-[var(--text-sm)] text-muted-foreground hover:text-foreground transition-colors font-medium"
           >
             &larr; All Figures
@@ -669,12 +689,17 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
           <CardMeta
             model={
-              paper?.cached_analysis?.figure_analyses?.find((a) => a.figure_id === selected.id)
-                ?.model
+              streamModel ??
+              effectivePaper?.cached_analysis?.figure_analyses?.find(
+                (a) => a.figure_id === selected.id,
+              )?.model ??
+              fastModel
             }
+            pending={loading}
             createdAt={
-              paper?.cached_analysis?.figure_analyses?.find((a) => a.figure_id === selected.id)
-                ?.created_at
+              effectivePaper?.cached_analysis?.figure_analyses?.find(
+                (a) => a.figure_id === selected.id,
+              )?.created_at
             }
             extra={
               <span className="text-muted-foreground/75">
@@ -684,12 +709,24 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           />
 
           {chat.length === 0 && !loading && (
-            <button
-              onClick={() => handleAnalyze(selected)}
-              className="btn-primary-glass w-full rounded-lg px-4 py-2 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            >
-              Analyze This Figure
-            </button>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 text-[var(--text-xs)] text-muted-foreground/85">
+                <span>Model</span>
+                <ModelOverridePill
+                  model={figureModelOverride ?? fastModel}
+                  allowed={allowedModels}
+                  onChange={setFigureModelOverride}
+                />
+              </div>
+              <button
+                onClick={() =>
+                  handleAnalyze(selected, "", figureModelOverride ?? fastModel)
+                }
+                className="btn-primary-glass w-full rounded-lg px-4 py-2 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              >
+                Analyze This Figure
+              </button>
+            </div>
           )}
 
           {/* Conversation thread */}
@@ -740,6 +777,13 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
         <div className="shrink-0 pt-2 border-t border-border/50">
           <div className="flex gap-2">
+            {allowedModels.length > 0 && (
+              <ModelOverridePill
+                model={figureModelOverride ?? fastModel}
+                allowed={allowedModels}
+                onChange={setFigureModelOverride}
+              />
+            )}
             <input
               type="search"
               name="know_figure_followup"
