@@ -48,6 +48,7 @@ from ..services.llm import (
     summarize_paper,
     get_fast_provider,
     get_provider,
+    _coerce_assumptions,
     _get_figure_prompt,
     _get_selection_prompt,
     _resize_image_b64,
@@ -389,7 +390,8 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
         # here gives the panel a concrete "retry" target instead of a
         # silent loop.
         raw_items = result.get("assumptions") if isinstance(result, dict) else None
-        if not isinstance(raw_items, list) or len(raw_items) == 0:
+        normalized = _coerce_assumptions(raw_items)
+        if len(normalized) == 0:
             release_usage(token)
             # Per F-HYDRATION: remember empty assumptions briefly so the
             # frontend does not hammer this endpoint every time the user
@@ -412,7 +414,7 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
                 status_code=502,
                 detail="The analysis model didn't return usable assumptions. Please try again.",
             )
-        resp = AssumptionsResponse(assumptions=raw_items)
+        resp = AssumptionsResponse(assumptions=normalized)
         assumptions_payload = resp.model_dump()
         return resp
     except ValueError as exc:

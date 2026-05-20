@@ -10,8 +10,10 @@ import {
   clearProgressStart,
   getCachedAssumptionItems,
   hasActiveRequest,
+  markAssumptionsAttemptFailed,
   markRequestEnd,
   markRequestStart,
+  assumptionsCooldownActive,
 } from "@/lib/analysisState";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
@@ -59,22 +61,31 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
   const setAssumptionsLoadingForPaper = useStore(
     (s) => s.setAssumptionsLoadingForPaper,
   );
+  const setAssumptionsError = useStore((s) => s.setAssumptionsError);
+  const autoError = useStore((s) => s.assumptionsErrorByPaper[paperId] ?? null);
   const paper = useStore((s) => s.paper);
   const updateCachedAnalysis = useStore((s) => s.updateCachedAnalysis);
   const { user: tierUser } = useUserTier();
   const currentPaperRef = useRef(paperId);
   currentPaperRef.current = paperId;
-  const [error, setError] = useState<string | null>(null);
-  const cooldownUntil = Number(paper?.id === paperId ? paper.cached_analysis?.assumptions_cooldown_until || 0 : 0);
-  const coolingDown = cooldownUntil > Date.now() / 1000;
+  const [manualError, setManualError] = useState<string | null>(null);
+  const sessionCache = useStore((s) => s.papersById[paperId]?.cached_analysis);
+  const paperCache = paper?.id === paperId ? paper.cached_analysis : undefined;
+  const coolingDown = assumptionsCooldownActive(paperCache, sessionCache);
+  const displayError = manualError ?? autoError;
 
-  // Reset the local error whenever we switch to a different paper — the
-  // previous paper's failure banner should not bleed into the new one.
-  useEffect(() => { setError(null); }, [paperId]);
+  // Reset manual retry errors when switching papers — auto-analyze errors
+  // live in the store and are keyed per paper.
+  useEffect(() => {
+    setManualError(null);
+  }, [paperId]);
 
   const handleExtract = async () => {
     const targetId = paperId;
-    setError(null);
+    setManualError(null);
+    setAssumptionsError(targetId, null);
+    autoAnalyzedPapers.delete(`${targetId}:assumptions`);
+    updateCachedAnalysis(targetId, { assumptions_cooldown_until: 0 });
     clearProgressStart(targetId, "assumptions");
     markRequestStart(targetId, "assumptions");
     setAssumptionsLoadingForPaper(targetId, true);
@@ -84,18 +95,25 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
       updateCachedAnalysis(targetId, {
         assumptions: { assumptions: result.assumptions },
       });
+      autoAnalyzedPapers.add(`${targetId}:assumptions`);
       if (currentPaperRef.current === targetId) {
         if (result.assumptions.length === 0) {
           // Defensive: if the backend ever relaxes its "no items = 502"
           // rule, still surface a clear message instead of dropping the
           // user back onto a silent "Extract" button.
-          setError("The model didn't find any explicit or implicit assumptions in this paper.");
+          setManualError(
+            "The model didn't find any explicit or implicit assumptions in this paper.",
+          );
         }
       }
     } catch (e) {
       console.error("Assumptions extraction failed:", e);
+      markAssumptionsAttemptFailed(targetId, updateCachedAnalysis);
       if (currentPaperRef.current === targetId) {
-        setError(e instanceof Error ? e.message : "Extraction failed. Please try again.");
+        const msg =
+          e instanceof Error ? e.message : "Extraction failed. Please try again.";
+        setManualError(msg);
+        setAssumptionsError(targetId, msg);
       }
     } finally {
       markRequestEnd(targetId, "assumptions");
@@ -104,35 +122,21 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
     }
   };
 
+  // Hydrate from session/server cache only — auto-extract is owned by the
+  // paper page so we don't double-fire (and loop) on mount.
   useEffect(() => {
     const pid = paperId;
-    const sessionCache = useStore.getState().papersById[pid]?.cached_analysis;
     const cached =
-      getCachedAssumptionItems(
-        paper?.id === pid ? paper.cached_analysis : undefined,
-      ) ?? getCachedAssumptionItems(sessionCache);
+      getCachedAssumptionItems(paperCache) ??
+      getCachedAssumptionItems(sessionCache);
     if (cached && assumptions.length === 0) {
       setAssumptionsForPaper(pid, cached);
       autoAnalyzedPapers.add(`${pid}:assumptions`);
       if (!hasActiveRequest(pid, "assumptions")) {
         setAssumptionsLoadingForPaper(pid, false);
       }
-      return;
     }
-    const cooldown =
-      (paper?.id === pid ? Number(paper.cached_analysis?.assumptions_cooldown_until || 0) : 0) >
-      Date.now() / 1000;
-    if (
-      assumptions.length === 0 &&
-      !cooldown &&
-      !assumptionsLoading &&
-      !hasActiveRequest(pid, "assumptions") &&
-      !autoAnalyzedPapers.has(`${pid}:assumptions`) &&
-      canAccess(tierUser?.tier || "free", "assumptions")
-    ) {
-      void handleExtract();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount safety net per paper
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate once per paper
   }, [paperId]);
 
   // Returning from dashboard can leave `assumptionsLoading` true even though
@@ -159,11 +163,31 @@ export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
   }
 
   if (assumptions.length === 0) {
+    const canExtract =
+      !coolingDown && canAccess(tierUser?.tier || "free", "assumptions");
     return (
       <EmptyState
-        title={coolingDown ? "Assumptions need a short pause" : error ? "Assumption extraction did not return results" : "Extract assumptions"}
-        body={coolingDown ? "The model did not find usable assumptions on the last attempt. Try again in a few minutes." : error || "Identify explicit and implicit assumptions in this paper."}
-        cta={coolingDown ? undefined : { label: error ? "Try again" : "Extract Assumptions", onClick: handleExtract }}
+        title={
+          coolingDown
+            ? "Assumptions need a short pause"
+            : displayError
+              ? "Assumption extraction did not return results"
+              : "Extract assumptions"
+        }
+        body={
+          coolingDown
+            ? "The model did not find usable assumptions on the last attempt. Try again in a few minutes."
+            : displayError ||
+              "Identify explicit and implicit assumptions in this paper."
+        }
+        cta={
+          canExtract
+            ? {
+                label: displayError ? "Try again" : "Extract Assumptions",
+                onClick: handleExtract,
+              }
+            : undefined
+        }
         secondaryAction={
           !coolingDown
             ? {

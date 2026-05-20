@@ -88,6 +88,33 @@ export function getCachedAssumptionItems(
   return Array.isArray(items) && items.length > 0 ? items : null;
 }
 
+/** Matches backend `assumptions_cooldown_until` TTL on empty extraction. */
+export const ASSUMPTIONS_COOLDOWN_SEC = 1800;
+
+/** True when a recent empty extraction should suppress auto-retry. */
+export function assumptionsCooldownActive(
+  cache: CacheSlice | undefined,
+  sessionCache?: CacheSlice,
+): boolean {
+  const until = Math.max(
+    Number(cache?.assumptions_cooldown_until || 0),
+    Number(sessionCache?.assumptions_cooldown_until || 0),
+  );
+  return until > Date.now() / 1000;
+}
+
+/** Persist a local cooldown + guard so auto-analyze does not hammer 502s. */
+export function markAssumptionsAttemptFailed(
+  paperId: string,
+  updateCachedAnalysis: (paperId: string, partial: Record<string, unknown>) => void,
+): void {
+  autoAnalyzedPapers.add(`${paperId}:assumptions`);
+  updateCachedAnalysis(paperId, {
+    assumptions_cooldown_until:
+      Math.floor(Date.now() / 1000) + ASSUMPTIONS_COOLDOWN_SEC,
+  });
+}
+
 /**
  * Align session auto-analyze guards with what is already on disk / in
  * `papersById`. Clears a guard only when that artifact is truly missing
@@ -115,9 +142,10 @@ export function syncAutoAnalyzeGuardsFromCache(
   const hasEmptyAssumeKey =
     (Array.isArray(assumeItems) && assumeItems.length === 0) ||
     (Array.isArray(sessionAssumeItems) && sessionAssumeItems.length === 0);
+  const coolingDown = assumptionsCooldownActive(cache, sessionCache);
   if (cachedAssume) {
     autoAnalyzedPapers.add(`${paperId}:assumptions`);
-  } else if (hasEmptyAssumeKey) {
+  } else if (hasEmptyAssumeKey || coolingDown) {
     autoAnalyzedPapers.add(`${paperId}:assumptions`);
   } else {
     autoAnalyzedPapers.delete(`${paperId}:assumptions`);

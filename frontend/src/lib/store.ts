@@ -203,6 +203,8 @@ interface AppStore {
   setAssumptionsForPaper: (paperId: string, a: Assumption[]) => void;
   assumptionsLoadingByPaper: Record<string, boolean>;
   setAssumptionsLoadingForPaper: (paperId: string, loading: boolean) => void;
+  assumptionsErrorByPaper: Record<string, string | null>;
+  setAssumptionsError: (paperId: string, message: string | null) => void;
 
   searchResultsByPaper: Record<string, SearchResult[]>;
   setSearchResultsForPaper: (paperId: string, r: SearchResult[]) => void;
@@ -670,9 +672,21 @@ export const useStore = create<AppStore>()(
 
       assumptionsByPaper: {},
       setAssumptionsForPaper: (paperId, a) =>
-        set((state) => ({
-          assumptionsByPaper: { ...state.assumptionsByPaper, [paperId]: a },
-        })),
+        set((state) => {
+          const prev = state.assumptionsByPaper[paperId];
+          if (
+            prev === a ||
+            (prev &&
+              a &&
+              prev.length === a.length &&
+              JSON.stringify(prev) === JSON.stringify(a))
+          ) {
+            return state;
+          }
+          return {
+            assumptionsByPaper: { ...state.assumptionsByPaper, [paperId]: a },
+          };
+        }),
       assumptionsLoadingByPaper: {},
       setAssumptionsLoadingForPaper: (paperId, loading) =>
         set((state) => {
@@ -681,6 +695,14 @@ export const useStore = create<AppStore>()(
           else delete next[paperId];
           return { assumptionsLoadingByPaper: next };
         }),
+      assumptionsErrorByPaper: {},
+      setAssumptionsError: (paperId, message) =>
+        set((state) => ({
+          assumptionsErrorByPaper: {
+            ...state.assumptionsErrorByPaper,
+            [paperId]: message,
+          },
+        })),
 
       searchResultsByPaper: {},
       setSearchResultsForPaper: (paperId, r) =>

@@ -1008,6 +1008,25 @@ Return JSON:
     return _safe_parse_json(raw)
 
 
+def _coerce_assumptions(raw_items: object) -> list[dict]:
+    """Normalize LLM assumption rows; drop empty or malformed entries."""
+    if not isinstance(raw_items, list):
+        return []
+    out: list[dict] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        statement = str(item.get("statement") or "").strip()
+        if not statement:
+            continue
+        type_val = str(item.get("type") or "implicit").strip().lower()
+        if type_val not in ("explicit", "implicit"):
+            type_val = "implicit"
+        section = str(item.get("section") or "").strip()
+        out.append({"statement": statement, "type": type_val, "section": section})
+    return out
+
+
 async def extract_assumptions(paper_text: str, user_id: str | None = None) -> dict:
     """Extract explicit and implicit assumptions."""
     provider = get_provider(user_id)
@@ -1015,7 +1034,8 @@ async def extract_assumptions(paper_text: str, user_id: str | None = None) -> di
 
     system = (
         "You are an expert science educator. Identify all assumptions in the paper, both those explicitly "
-        "stated and those implied. Return ONLY valid JSON.\n\n" + LATEX_FORMAT_INSTRUCTIONS
+        "stated and those implied. Return ONLY valid JSON with no markdown fences.\n\n"
+        + LATEX_FORMAT_INSTRUCTIONS
     )
 
     paper_block = f"Paper content:\n{paper_text[:6000]}"
@@ -1030,7 +1050,9 @@ Return JSON:
       "section": "which section this relates to"
     }
   ]
-}"""
+}
+
+Include at least 3 assumptions when the paper has substantive claims."""
 
     raw = await provider.complete(
         system,
@@ -1038,7 +1060,25 @@ Return JSON:
         max_tokens=8192,
         cache_user_prefix=paper_block,
     )
-    return _safe_parse_json(raw)
+    items = _coerce_assumptions(_safe_parse_json(raw).get("assumptions"))
+    if items:
+        return {"assumptions": items}
+
+    # One retry with a stricter, shorter instruction when the model returns
+    # malformed JSON or an empty list — common on first pass after upload.
+    retry_task = (
+        task
+        + "\n\nYour previous response was not usable. Return ONLY the JSON object "
+        "above with a non-empty assumptions array."
+    )
+    raw_retry = await provider.complete(
+        system,
+        retry_task,
+        max_tokens=8192,
+        cache_user_prefix=paper_block,
+    )
+    items = _coerce_assumptions(_safe_parse_json(raw_retry).get("assumptions"))
+    return {"assumptions": items}
 
 
 async def generate_derivation_exercise(paper_text: str, section: str, user_id: str | None = None) -> dict:

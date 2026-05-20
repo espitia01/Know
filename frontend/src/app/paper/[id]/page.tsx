@@ -45,6 +45,8 @@ import {
   syncAutoAnalyzeGuardsFromCache,
   autoAnalyzedPapers,
   preReadingAutoRetryCooldownUntil,
+  markAssumptionsAttemptFailed,
+  assumptionsCooldownActive,
 } from "@/lib/analysisState";
 import { useSummaryStream, kickoffSummaryStream } from "@/lib/useSummaryStream";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
@@ -608,6 +610,7 @@ function PaperContent() {
   useSummaryStream(activePaperId);
   const initialLoadDone = useRef(false);
   const summaryKickoffForRef = useRef<string | null>(null);
+  const assumptionsKickoffForRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (typeof document !== "undefined" && document.fullscreenElement && !focusMode) {
@@ -1023,11 +1026,7 @@ function PaperContent() {
     if (cachedAssumptions && liveAssumptionsSlot.length === 0) {
       setAssumptionsForPaper(pid, cachedAssumptions);
     }
-    const cooldownUntil = Math.max(
-      Number(cache.assumptions_cooldown_until || 0),
-      Number(sessionCache.assumptions_cooldown_until || 0),
-    );
-    const assumptionsCoolingDown = cooldownUntil > Date.now() / 1000;
+    const assumptionsCoolingDown = assumptionsCooldownActive(cache, sessionCache);
     const hasPreReading =
       isPreReadingPopulated(cache.pre_reading) ||
       isPreReadingPopulated(sessionCache.pre_reading) ||
@@ -1085,10 +1084,13 @@ function PaperContent() {
       !assumptionsCoolingDown &&
       canAccess(tierUser?.tier || "free", "assumptions") &&
       !hasActiveRequest(pid, "assumptions") &&
-      !autoAnalyzedPapers.has(`${pid}:assumptions`)
+      !autoAnalyzedPapers.has(`${pid}:assumptions`) &&
+      assumptionsKickoffForRef.current !== pid
     ) {
+      assumptionsKickoffForRef.current = pid;
       markRequestStart(pid, "assumptions");
       setAssumptionsLoadingForPaper(pid, true);
+      useStore.getState().setAssumptionsError(pid, null);
       api
         .getAssumptions(pid)
         .then((r) => {
@@ -1096,14 +1098,27 @@ function PaperContent() {
           useStore.getState().updateCachedAnalysis(pid, {
             assumptions: { assumptions: r.assumptions },
           });
+          useStore.getState().setAssumptionsError(pid, null);
           autoAnalyzedPapers.add(`${pid}:assumptions`);
         })
-        .catch(() => {})
+        .catch((err) => {
+          markAssumptionsAttemptFailed(
+            pid,
+            useStore.getState().updateCachedAnalysis,
+          );
+          const msg =
+            err instanceof Error
+              ? err.message
+              : "Extraction failed. Please try again.";
+          useStore.getState().setAssumptionsError(pid, msg);
+        })
         .finally(() => {
           markRequestEnd(pid, "assumptions");
           clearProgressStart(pid, "assumptions");
           setAssumptionsLoadingForPaper(pid, false);
         });
+    } else if (hasUsableAssumptions || assumptionsCoolingDown) {
+      assumptionsKickoffForRef.current = null;
     }
 
     const liveSummary = useStore.getState().summaryByPaper[pid] ?? null;
