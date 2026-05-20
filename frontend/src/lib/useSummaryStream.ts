@@ -247,7 +247,14 @@ export function useSummaryStream(paperId: string) {
     const pid = liteStartedFor.current;
     if (!pid) return;
     const partial = liteObj.object as Partial<PaperSummaryLite> | undefined;
+    // Terminal empty stream — onFinish may not run; release the ref so we
+    // don't keep re-running this effect on every `object` reference churn.
+    if (!liteObj.isLoading && !partial) {
+      liteStartedFor.current = null;
+      return;
+    }
     if (!partial || !(partial.overview || partial.tl_dr || partial.key_contributions?.length)) {
+      if (!liteObj.isLoading) liteStartedFor.current = null;
       return;
     }
     const mergeKey = JSON.stringify(partial);
@@ -257,7 +264,7 @@ export function useSummaryStream(paperId: string) {
       ...partial,
       model: liteModelRef.current,
     });
-  }, [liteObj.object, mergeIntoPaperSlot]);
+  }, [liteObj.object, liteObj.isLoading, mergeIntoPaperSlot]);
 
   // ---- Deep phase ---------------------------------------------------
   const deepObj = useObject({
@@ -302,7 +309,12 @@ export function useSummaryStream(paperId: string) {
     const pid = deepStartedFor.current;
     if (!pid) return;
     const partial = deepObj.object as Partial<PaperSummaryDeep> | undefined;
+    if (!deepObj.isLoading && !partial) {
+      deepStartedFor.current = null;
+      return;
+    }
     if (!partial || !(partial.methodology || partial.main_results || partial.discussion)) {
+      if (!deepObj.isLoading) deepStartedFor.current = null;
       return;
     }
     const mergeKey = JSON.stringify(partial);
@@ -312,7 +324,7 @@ export function useSummaryStream(paperId: string) {
       ...partial,
       model: deepModelRef.current,
     });
-  }, [deepObj.object, mergeIntoPaperSlot]);
+  }, [deepObj.object, deepObj.isLoading, mergeIntoPaperSlot]);
 
   // ---- Public starters ---------------------------------------------
   const startDeep = useCallback(

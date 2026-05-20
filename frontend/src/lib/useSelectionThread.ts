@@ -109,6 +109,7 @@ export function useSelectionThread(paperId: string) {
 
   const startedRef = useRef<StartedState | null>(null);
   const finalizedRef = useRef<string | null>(null);
+  const lastSyncKey = useRef("");
 
   const writeErrorResult = useCallback(
     (started: StartedState, message: string) => {
@@ -125,6 +126,8 @@ export function useSelectionThread(paperId: string) {
       setSelectionResultForPaper(paperId, errResult);
       setSelectionLoadingForPaper(paperId, false);
       finalizedRef.current = started.clientKey;
+      startedRef.current = null;
+      lastSyncKey.current = "";
     },
     [paperId, setSelectionResultForPaper, setSelectionLoadingForPaper, upsertSelectionInHistoryForPaper],
   );
@@ -166,6 +169,13 @@ export function useSelectionThread(paperId: string) {
     const started = startedRef.current;
     if (!started) return;
 
+    // Stream already finalized for this clientKey — stop syncing. Without
+    // this guard (and clearing startedRef below) every new `obj.object`
+    // reference from useObject re-writes the store and triggers React #185.
+    if (finalizedRef.current === started.clientKey && !obj.isLoading) {
+      return;
+    }
+
     const partial = obj.object as SelectionPartial | undefined;
 
     const isStillStreaming = obj.isLoading;
@@ -194,9 +204,22 @@ export function useSelectionThread(paperId: string) {
       created_at: isStillStreaming ? undefined : Date.now(),
     };
 
+    const syncKey = JSON.stringify(result);
+    if (syncKey === lastSyncKey.current) {
+      if (!isStillStreaming) {
+        finalizedRef.current = started.clientKey;
+        startedRef.current = null;
+      }
+      return;
+    }
+    lastSyncKey.current = syncKey;
+
     upsertSelectionInHistoryForPaper(paperId, result);
     setSelectionResultForPaper(paperId, result);
-    if (!isStillStreaming) finalizedRef.current = started.clientKey;
+    if (!isStillStreaming) {
+      finalizedRef.current = started.clientKey;
+      startedRef.current = null;
+    }
   }, [
     obj.object,
     obj.isLoading,
@@ -221,6 +244,7 @@ export function useSelectionThread(paperId: string) {
         model: provisionalModel,
       };
       finalizedRef.current = null;
+      lastSyncKey.current = "";
 
       const provisional: SelectionAnalysisResult = {
         action: args.action,

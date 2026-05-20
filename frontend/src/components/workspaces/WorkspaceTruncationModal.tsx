@@ -47,7 +47,7 @@ export function WorkspaceTruncationModal({
     if (!open) return;
     setSelected(new Set(papers.slice(0, cap).map((p) => p.id)));
     setRemember(false);
-  }, [open, paperIdsKey, cap, papers]);
+  }, [open, paperIdsKey, cap]);
 
   useEffect(() => {
     if (!open) return;
