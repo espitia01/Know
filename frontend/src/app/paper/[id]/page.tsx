@@ -894,19 +894,22 @@ function PaperContent() {
       // Notes: merge additively so locally-added notes (not yet flushed
       // into parsedPaper.notes) survive a server refetch.
       if (notes) {
-        useStore.setState((s) => {
-          const existing = s.notesByPaper[pid] ?? [];
-          const ids = new Set(notes!.map((n) => n.id));
-          const onlyLocal = existing.filter((n) => !ids.has(n.id));
-          const merged = [...notes!, ...onlyLocal];
-          merged.sort((a, b) => {
-            const d = Number(a.created_at) - Number(b.created_at);
-            return d !== 0 ? d : a.id.localeCompare(b.id);
-          });
-          return {
-            notesByPaper: { ...s.notesByPaper, [pid]: merged },
-          };
+        const existing = snap.notesByPaper[pid] ?? [];
+        const ids = new Set(notes.map((n) => n.id));
+        const onlyLocal = existing.filter((n) => !ids.has(n.id));
+        const merged = [...notes, ...onlyLocal];
+        merged.sort((a, b) => {
+          const d = Number(a.created_at) - Number(b.created_at);
+          return d !== 0 ? d : a.id.localeCompare(b.id);
         });
+        const unchanged =
+          merged.length === existing.length &&
+          merged.every((n, i) => n.id === existing[i]?.id);
+        if (!unchanged) {
+          useStore.setState((s) => ({
+            notesByPaper: { ...s.notesByPaper, [pid]: merged },
+          }));
+        }
       }
 
       // Selections: additive merge per F-HYDRATION §11.3.
@@ -944,26 +947,48 @@ function PaperContent() {
             } as PaperSummary)
           : null;
       const isSummaryLoading = snap.summaryLoadingByPaper[pid] ?? false;
+      const currentSummary = snap.summaryByPaper[pid] ?? null;
       if (merged && !isSummaryLoading) {
-        useStore.getState().setSummaryForPaper(pid, merged);
+        const mergedJson = JSON.stringify(merged);
+        const currentJson = currentSummary ? JSON.stringify(currentSummary) : "";
+        if (mergedJson !== currentJson) {
+          useStore.getState().setSummaryForPaper(pid, merged);
+        }
       }
 
       if (cache.qa_sessions && cache.qa_sessions.length > 0) {
         const allItems = cache.qa_sessions.flatMap(
           (session: { items?: { question: string; answer: string }[] }) => session.items || [],
         );
-        useStore.getState().setQAResultsForPaper(pid, allItems);
+        const liveQa = snap.qaResultsByPaper[pid] ?? [];
+        const qaSame =
+          liveQa.length === allItems.length &&
+          liveQa.every((item, i) => item.question === allItems[i]?.question);
+        if (!qaSame) {
+          useStore.getState().setQAResultsForPaper(pid, allItems);
+        }
       }
 
       const isPreLoading = snap.preReadingLoadingByPaper[pid] ?? false;
-      if (!isPreLoading && isPreReadingPopulated(cache.pre_reading)) {
+      const livePre = snap.preReadingByPaper[pid] ?? null;
+      if (
+        !isPreLoading &&
+        isPreReadingPopulated(cache.pre_reading) &&
+        JSON.stringify(livePre) !== JSON.stringify(cache.pre_reading)
+      ) {
         setPreReadingForPaper(pid, cache.pre_reading);
       }
 
       const serverAssumptions = Array.isArray(cache.assumptions?.assumptions)
         ? cache.assumptions.assumptions
         : null;
-      if (serverAssumptions && serverAssumptions.length > 0) {
+      const liveAssumptions = snap.assumptionsByPaper[pid] ?? [];
+      if (
+        serverAssumptions &&
+        serverAssumptions.length > 0 &&
+        (liveAssumptions.length !== serverAssumptions.length ||
+          JSON.stringify(liveAssumptions) !== JSON.stringify(serverAssumptions))
+      ) {
         setAssumptionsForPaper(pid, serverAssumptions);
       }
     },
@@ -973,14 +998,21 @@ function PaperContent() {
   useEffect(() => {
     if (!loadedPaperId || loadedPaperId !== activePaperId) return;
     if (!cacheHydrateSig) return;
-    hydrateFromCachedAnalysis(loadedPaperCache || {}, loadedPaperNotes || []);
-  }, [loadedPaperId, activePaperId, cacheHydrateSig, loadedPaperCache, loadedPaperNotes, hydrateFromCachedAnalysis]);
+    const live = useStore.getState().paper;
+    if (!live || live.id !== activePaperId) return;
+    hydrateFromCachedAnalysis(live.cached_analysis || {}, live.notes || []);
+    // Keyed on cacheHydrateSig only — not `loadedPaperCache` refs (React #185).
+  }, [loadedPaperId, activePaperId, cacheHydrateSig, hydrateFromCachedAnalysis]);
 
   useEffect(() => {
     if (!loadedPaperId || loadedPaperId !== activePaperId || tierLoading) return;
 
     const pid = activePaperId;
-    const cache = loadedPaperCache || {};
+    const livePaper = useStore.getState().paper;
+    const cache =
+      (livePaper?.id === pid ? livePaper.cached_analysis : null) ||
+      useStore.getState().papersById[pid]?.cached_analysis ||
+      {};
     const sessionCache = useStore.getState().papersById[pid]?.cached_analysis || {};
     syncAutoAnalyzeGuardsFromCache(pid, cache, sessionCache);
     const storeSnap = useStore.getState();
@@ -1094,7 +1126,7 @@ function PaperContent() {
   }, [
     loadedPaperId,
     activePaperId,
-    loadedPaperCache,
+    cacheHydrateSig,
     tierLoading,
     tierUser?.tier,
     setPreReadingForPaper,

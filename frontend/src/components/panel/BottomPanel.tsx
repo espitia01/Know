@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useUserSettings } from "@/lib/UserSettingsContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useStore } from "@/lib/store";
@@ -105,13 +105,22 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
     next.add("assume");
     return next;
   });
+  const handleTabChange = useCallback(
+    (tab: string) => {
+      if (tab === "compare" && !showCrossPaperTab) return;
+      if (tab === "selection" && !showSelectionTab) return;
+      setActiveTab(tab);
+    },
+    [showCrossPaperTab, showSelectionTab, setActiveTab],
+  );
+
   useEffect(() => {
-    // Keep store in sync when a tab is hidden (e.g. Cross-paper with <2
-    // papers) so Radix controlled `value` does not fight `activeTab`.
-    if (activeTab !== effectiveTab) {
-      setActiveTab(effectiveTab);
+    if (activeTab === "compare" && !showCrossPaperTab) {
+      setActiveTab("summary");
+    } else if (activeTab === "selection" && !showSelectionTab) {
+      setActiveTab("summary");
     }
-  }, [activeTab, effectiveTab, setActiveTab]);
+  }, [activeTab, showCrossPaperTab, showSelectionTab, setActiveTab]);
 
   useEffect(() => {
     // Per audit §4.1/§6.3: inactive Radix tabs stay mounted by default,
@@ -143,7 +152,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
   return (
     <Tabs
       value={effectiveTab}
-      onValueChange={setActiveTab}
+      onValueChange={handleTabChange}
       className="analysis-panel-tabs flex h-full flex-col"
     >
       <div className="flex h-10 min-w-0 shrink-0 items-center gap-1 border-b border-border/40 bg-muted/[0.06] px-3 dark:bg-muted/[0.08]">
