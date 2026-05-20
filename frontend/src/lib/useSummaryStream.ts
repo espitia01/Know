@@ -241,17 +241,22 @@ export function useSummaryStream(paperId: string) {
   });
 
   litePartialRef.current = liteObj.object as Partial<PaperSummaryLite> | undefined;
+  const lastLiteMergeKey = useRef("");
 
   useEffect(() => {
     const pid = liteStartedFor.current;
     if (!pid) return;
     const partial = liteObj.object as Partial<PaperSummaryLite> | undefined;
-    if (partial && (partial.overview || partial.tl_dr || partial.key_contributions?.length)) {
-      mergeIntoPaperSlot(pid, {
-        ...partial,
-        model: liteModelRef.current,
-      });
+    if (!partial || !(partial.overview || partial.tl_dr || partial.key_contributions?.length)) {
+      return;
     }
+    const mergeKey = JSON.stringify(partial);
+    if (mergeKey === lastLiteMergeKey.current) return;
+    lastLiteMergeKey.current = mergeKey;
+    mergeIntoPaperSlot(pid, {
+      ...partial,
+      model: liteModelRef.current,
+    });
   }, [liteObj.object, mergeIntoPaperSlot]);
 
   // ---- Deep phase ---------------------------------------------------
@@ -291,17 +296,22 @@ export function useSummaryStream(paperId: string) {
   });
 
   deepPartialRef.current = deepObj.object as Partial<PaperSummaryDeep> | undefined;
+  const lastDeepMergeKey = useRef("");
 
   useEffect(() => {
     const pid = deepStartedFor.current;
     if (!pid) return;
     const partial = deepObj.object as Partial<PaperSummaryDeep> | undefined;
-    if (partial && (partial.methodology || partial.main_results || partial.discussion)) {
-      mergeIntoPaperSlot(pid, {
-        ...partial,
-        model: deepModelRef.current,
-      });
+    if (!partial || !(partial.methodology || partial.main_results || partial.discussion)) {
+      return;
     }
+    const mergeKey = JSON.stringify(partial);
+    if (mergeKey === lastDeepMergeKey.current) return;
+    lastDeepMergeKey.current = mergeKey;
+    mergeIntoPaperSlot(pid, {
+      ...partial,
+      model: deepModelRef.current,
+    });
   }, [deepObj.object, mergeIntoPaperSlot]);
 
   // ---- Public starters ---------------------------------------------
@@ -311,6 +321,7 @@ export function useSummaryStream(paperId: string) {
       deepFallbackStarted.current = false;
       deepStartedFor.current = pid;
       deepModelRef.current = analysisModel;
+      lastDeepMergeKey.current = "";
       setSummaryLoadingForPaper(pid, true);
       clearDeepTimer();
       deepFallbackTimer.current = setTimeout(() => {
@@ -353,6 +364,8 @@ export function useSummaryStream(paperId: string) {
     liteFallbackStarted.current = false;
     liteStartedFor.current = pid;
     liteModelRef.current = fastModel;
+    lastLiteMergeKey.current = "";
+    lastDeepMergeKey.current = "";
     markRequestStart(pid, "summary");
     activeSummaryStreamStoppers.set(pid, () => {
       clearLiteTimer();

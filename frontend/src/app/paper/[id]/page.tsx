@@ -2130,24 +2130,25 @@ function PaperContent() {
         label={bibtexModal.label}
       />
 
-      <WorkspaceTruncationModal
-        open={!!workspaceTruncation}
-        workspaceId={workspaceTruncation?.workspace.id ?? ""}
-        workspaceUpdatedAt={workspaceTruncation?.workspace.updated_at ?? ""}
-        requested={workspaceTruncation?.requested ?? 0}
-        missingCount={workspaceTruncation?.missingCount ?? 0}
-        cap={MAX_SESSION_PAPERS}
-        papers={workspaceTruncation?.loaded ?? []}
-        onClose={() => setWorkspaceTruncation(null)}
-        onConfirm={(selected) => {
-          if (!workspaceTruncation) return;
-          finalizeWorkspaceLoad(
-            selected,
-            workspaceTruncation.workspace,
-            workspaceTruncation.missingCount,
-          );
-        }}
-      />
+      {workspaceTruncation && (
+        <WorkspaceTruncationModal
+          open
+          workspaceId={workspaceTruncation.workspace.id}
+          workspaceUpdatedAt={workspaceTruncation.workspace.updated_at}
+          requested={workspaceTruncation.requested}
+          missingCount={workspaceTruncation.missingCount}
+          cap={MAX_SESSION_PAPERS}
+          papers={workspaceTruncation.loaded}
+          onClose={() => setWorkspaceTruncation(null)}
+          onConfirm={(selected) => {
+            finalizeWorkspaceLoad(
+              selected,
+              workspaceTruncation.workspace,
+              workspaceTruncation.missingCount,
+            );
+          }}
+        />
+      )}
     </>
   );
 }

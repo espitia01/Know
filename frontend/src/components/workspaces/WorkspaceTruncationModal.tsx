@@ -35,19 +35,19 @@ export function WorkspaceTruncationModal({
   onClose,
   onConfirm,
 }: WorkspaceTruncationModalProps) {
-  const defaultSelected = useMemo(
-    () => new Set(papers.slice(0, cap).map((p) => p.id)),
-    [papers, cap],
+  const paperIdsKey = useMemo(
+    () => papers.map((p) => p.id).join(","),
+    [papers],
   );
 
-  const [selected, setSelected] = useState<Set<string>>(defaultSelected);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [remember, setRemember] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setSelected(new Set(papers.slice(0, cap).map((p) => p.id)));
     setRemember(false);
-  }, [open, papers, cap]);
+  }, [open, paperIdsKey, cap, papers]);
 
   useEffect(() => {
     if (!open) return;

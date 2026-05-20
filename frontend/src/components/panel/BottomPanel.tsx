@@ -106,6 +106,14 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
     return next;
   });
   useEffect(() => {
+    // Keep store in sync when a tab is hidden (e.g. Cross-paper with <2
+    // papers) so Radix controlled `value` does not fight `activeTab`.
+    if (activeTab !== effectiveTab) {
+      setActiveTab(effectiveTab);
+    }
+  }, [activeTab, effectiveTab, setActiveTab]);
+
+  useEffect(() => {
     // Per audit §4.1/§6.3: inactive Radix tabs stay mounted by default,
     // which lets hidden panels hydrate and fetch data before the user
     // opens them. Mount each tab on first visit, then keep it hot.
