@@ -158,6 +158,8 @@ export function useSelectionThread(paperId: string) {
       }
 
       bumpUsageRefresh();
+      startedRef.current = null;
+      lastSyncKey.current = "";
     },
   });
 

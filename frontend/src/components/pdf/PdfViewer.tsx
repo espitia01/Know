@@ -5,7 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import { Document, Page, pdfjs } from "react-pdf";
 import { api, getAuthHeadersSync, SelectionAnalysisResult } from "@/lib/api";
 import { useStore, type PdfRegionHighlight } from "@/lib/store";
-import { normalizeSelectionAction } from "@/lib/selectionActions";
+import { normalizeSelectionAction, selectionKey } from "@/lib/selectionActions";
 import { snapshotDomRect } from "@/lib/domRect";
 import { capturePdfViewportUnionToBlob } from "@/lib/pdfSelectionCapture";
 
@@ -484,8 +484,27 @@ export function PdfViewer({
   // entire viewer every time a new analysis streams in; we only need a
   // stable reference to `selectionHistory` when drawing, so we pull it
   // from the store lazily inside the draw callback via `getState`.
-  const selectionHistoryLength = useStore(
-    (s) => (paperId ? (s.selectionHistoryByPaper[paperId]?.length ?? 0) : 0),
+  /** Content digest — length-only deps miss streaming body updates. */
+  const selectionHistorySig = useStore(
+    useShallow((s) => {
+      const list = paperId ? s.selectionHistoryByPaper[paperId] : undefined;
+      if (!list?.length) return "";
+      return list
+        .map(
+          (h) =>
+            `${selectionKey(h)}:${h.streaming ? 1 : 0}:${(h.explanation ?? "").length}:${(h.final_result ?? "").length}`,
+        )
+        .join("\x1f");
+    }),
+  );
+  const regionSig = useStore(
+    useShallow((s) => {
+      const list = paperId ? s.pdfRegionHighlightsByPaper[paperId] : undefined;
+      if (!list?.length) return "";
+      return list
+        .map((r) => `${r.pageNum}:${r.xPct}:${r.yPct}:${r.wPct}:${r.hPct}`)
+        .join("\x1f");
+    }),
   );
   const openSelectionFromHistory = useStore((s) => s.openSelectionFromHistory);
   const removeSelectionFromHistoryForPaper = useStore(
@@ -499,11 +518,6 @@ export function PdfViewer({
   const setPendingFigureCaption = useStore((s) => s.setPendingFigureCaption);
   const setPdfTextLayerEmpty = useStore((s) => s.setPdfTextLayerEmpty);
   const isScannedPdf = useStore((s) => !!(paperId && s.pdfTextLayerEmptyByPaper[paperId]));
-  const pdfRegionHighlights = useStore(
-    useShallow((s) =>
-      paperId ? (s.pdfRegionHighlightsByPaper[paperId] ?? EMPTY_REGIONS) : EMPTY_REGIONS,
-    ),
-  );
   const addPdfRegionHighlight = useStore((s) => s.addPdfRegionHighlight);
   const setActiveTab = useStore((s) => s.setActiveTab);
 
@@ -1391,7 +1405,7 @@ export function PdfViewer({
       const pageNum = parseInt(pageEl.getAttribute("data-page-number") || "0", 10);
       if (pageNum > 0) drawRegionHighlightsForPage(pageEl, pageNum, regions);
     });
-  }, [selectionHistoryLength, pdfRegionHighlights, drawUnderlinesForPage, drawRegionHighlightsForPage, paperId, scale]);
+  }, [selectionHistorySig, regionSig, drawUnderlinesForPage, drawRegionHighlightsForPage, paperId, scale]);
 
   const handlePageRender = useCallback((pageNum: number) => {
     const el = containerRef.current?.querySelector(`[data-page-number="${pageNum}"]`) as HTMLElement | null;

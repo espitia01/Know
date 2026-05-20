@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
-import { useStore } from "@/lib/store";
+import { useStore, EMPTY_QA_LIST } from "@/lib/store";
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { Textarea } from "@/components/ui/textarea";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
@@ -32,7 +32,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
     sessionPapers, bumpUsageRefresh,
     uiPrefs, setHideQaSuggestions, setQADraft,
   } = useStore();
-  const qaResults = useStore((s) => s.qaResultsByPaper[paperId] ?? []);
+  const qaResults = useStore((s) => s.qaResultsByPaper[paperId] ?? EMPTY_QA_LIST);
   const setQAResultsForPaper = useStore((s) => s.setQAResultsForPaper);
   const qaLoading = useStore((s) => s.qaLoadingByPaper[paperId] ?? false);
   const setQALoadingForPaper = useStore((s) => s.setQALoadingForPaper);

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useUserSettings } from "@/lib/UserSettingsContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useStore } from "@/lib/store";
-import { useSelectionThread } from "@/lib/useSelectionThread";
+import type { useSelectionThread } from "@/lib/useSelectionThread";
+import { EMPTY_SELECTION_LIST } from "@/lib/store";
 import { FEATURE_TOOLTIPS } from "@/lib/tooltips";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { OverflowMenu } from "@/components/analysis/OverflowMenu";
@@ -23,10 +24,13 @@ import { CrossPaperPanel } from "../sidebar/CrossPaperPanel";
 
 export type PanelPosition = "right" | "left" | "bottom";
 
+type SelectionThread = ReturnType<typeof useSelectionThread>;
+
 interface AnalysisPanelProps {
   paperId: string;
   position: PanelPosition;
   onCyclePosition: () => void;
+  selectionThread: SelectionThread;
 }
 
 const POSITION_LABEL: Record<PanelPosition, string> = {
@@ -57,7 +61,7 @@ const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
   },
 };
 
-export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPanelProps) {
+export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThread }: AnalysisPanelProps) {
   const {
     activeTab, setActiveTab,
     analysisFontScale, bumpAnalysisFontScale, setAnalysisFontScale,
@@ -65,7 +69,9 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
   } = useStore();
   const selectionResult = useStore((s) => s.selectionResultByPaper[paperId] ?? null);
   const selectionLoading = useStore((s) => s.selectionLoadingByPaper[paperId] ?? false);
-  const selectionHistory = useStore((s) => s.selectionHistoryByPaper[paperId] ?? []);
+  const selectionHistory = useStore(
+    (s) => s.selectionHistoryByPaper[paperId] ?? EMPTY_SELECTION_LIST,
+  );
   const { user } = useUserTier();
   const tier = user?.tier || "free";
   // Cross-paper QA is a Researcher-only tab that appears once the
@@ -74,11 +80,8 @@ export function AnalysisPanel({ paperId, position, onCyclePosition }: AnalysisPa
   const showCrossPaperTab =
     canAccess(tier, "multi-qa") && sessionPapers.length >= 2;
 
-  // Stage 2: follow-ups stream through the migrated Next.js +
-  // AI SDK route via the same hook the selection toolbar uses.
-  // Hook handles abort, history upsert, error formatting, and usage
-  // refresh — `handleFollowUp` only has to call .start().
-  const selectionThread = useSelectionThread(paperId);
+  // Follow-ups use the page-level `useSelectionThread` instance so we
+  // never mount two `useObject` hooks with the same stream id.
   const { fastModel, allowedModels } = useUserSettings();
   const [followUpModelOverride, setFollowUpModelOverride] = useState<string | null>(null);
 

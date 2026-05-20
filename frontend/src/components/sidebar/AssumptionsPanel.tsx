@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { useStore } from "@/lib/store";
+import { useStore, EMPTY_ASSUMPTIONS_LIST } from "@/lib/store";
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -49,7 +49,9 @@ function assumptionStatementDisplay(statement: string, type: string): string {
 }
 
 export function AssumptionsPanel({ paperId }: AssumptionsPanelProps) {
-  const assumptions = useStore((s) => s.assumptionsByPaper[paperId] ?? []);
+  const assumptions = useStore(
+    (s) => s.assumptionsByPaper[paperId] ?? EMPTY_ASSUMPTIONS_LIST,
+  );
   const setAssumptionsForPaper = useStore((s) => s.setAssumptionsForPaper);
   const assumptionsLoading = useStore(
     (s) => s.assumptionsLoadingByPaper[paperId] ?? false,

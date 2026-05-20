@@ -15,6 +15,20 @@ import type {
 import { selectionKey as selectionResultKey } from "./selectionActions";
 import { MAX_SESSION_PAPERS } from "./workspaceFeatureFlags";
 
+/** Stable empty arrays for Zustand selectors — `?? []` creates a new ref every read. */
+export const EMPTY_SELECTION_LIST: SelectionAnalysisResult[] = [];
+export const EMPTY_QA_LIST: QAItem[] = [];
+export const EMPTY_NOTES_LIST: Note[] = [];
+export const EMPTY_ASSUMPTIONS_LIST: Assumption[] = [];
+export const EMPTY_SEARCH_LIST: SearchResult[] = [];
+
+function selectionRowsEqual(
+  a: SelectionAnalysisResult,
+  b: SelectionAnalysisResult,
+): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 type ReaderPanelPosition = "right" | "left" | "bottom";
 
 export type AnalysisFontFamily = "sans" | "serif" | "mono" | "times" | "arial";
@@ -232,6 +246,7 @@ export const useStore = create<AppStore>()(
       // folder change, figure re-extract) only replace `paper`.
       setPaper: (p) =>
         set((s) => {
+          if (s.paper === p) return s;
           const prevId = s.paper?.id ?? null;
           const nextId = p?.id ?? null;
           if (prevId === nextId) {
@@ -460,7 +475,7 @@ export const useStore = create<AppStore>()(
       setLoading: (l) => set({ loading: l }),
 
       activeTab: "summary",
-      setActiveTab: (t) => set({ activeTab: t }),
+      setActiveTab: (t) => set((s) => (s.activeTab === t ? s : { activeTab: t })),
 
       marqueeMode: false,
       setMarqueeMode: (v) => set({ marqueeMode: v }),
@@ -503,7 +518,7 @@ export const useStore = create<AppStore>()(
       setHeaderHidden: (v) => set({ headerHidden: v }),
       toggleHeader: () => set((s) => ({ headerHidden: !s.headerHidden })),
       focusMode: false,
-      setFocusMode: (v) => set({ focusMode: v }),
+      setFocusMode: (v) => set((s) => (s.focusMode === v ? s : { focusMode: v })),
       toggleFocusMode: () => set((s) => ({ focusMode: !s.focusMode })),
 
       analysisFontScale: 1,
@@ -519,12 +534,17 @@ export const useStore = create<AppStore>()(
 
       selectionResultByPaper: {},
       setSelectionResultForPaper: (paperId, r) =>
-        set((state) => ({
-          selectionResultByPaper: {
-            ...state.selectionResultByPaper,
-            [paperId]: r,
-          },
-        })),
+        set((state) => {
+          const cur = state.selectionResultByPaper[paperId] ?? null;
+          if (cur === r) return state;
+          if (cur && r && selectionRowsEqual(cur, r)) return state;
+          return {
+            selectionResultByPaper: {
+              ...state.selectionResultByPaper,
+              [paperId]: r,
+            },
+          };
+        }),
       selectionLoadingByPaper: {},
       setSelectionLoadingForPaper: (paperId, loading) =>
         set((state) => {
@@ -536,12 +556,14 @@ export const useStore = create<AppStore>()(
       selectionHistoryByPaper: {},
       upsertSelectionInHistoryForPaper: (paperId, r) =>
         set((state) => {
-          const list = state.selectionHistoryByPaper[paperId] ?? [];
+          const list = state.selectionHistoryByPaper[paperId] ?? EMPTY_SELECTION_LIST;
           if (r.clientKey) {
             const idx = list.findIndex((h) => h.clientKey === r.clientKey);
             if (idx >= 0) {
+              const merged = { ...list[idx], ...r };
+              if (selectionRowsEqual(list[idx], merged)) return state;
               const next = [...list];
-              next[idx] = { ...next[idx], ...r };
+              next[idx] = merged;
               return {
                 selectionHistoryByPaper: {
                   ...state.selectionHistoryByPaper,
@@ -714,9 +736,16 @@ export const useStore = create<AppStore>()(
 
       summaryByPaper: {},
       setSummaryForPaper: (paperId, summary) =>
-        set((state) => ({
-          summaryByPaper: { ...state.summaryByPaper, [paperId]: summary },
-        })),
+        set((state) => {
+          const cur = state.summaryByPaper[paperId] ?? null;
+          if (cur === summary) return state;
+          if (cur && summary && JSON.stringify(cur) === JSON.stringify(summary)) {
+            return state;
+          }
+          return {
+            summaryByPaper: { ...state.summaryByPaper, [paperId]: summary },
+          };
+        }),
       summaryStreamingByPaper: {},
       setSummaryStreamingPartial: (paperId, partial) =>
         set((state) => ({

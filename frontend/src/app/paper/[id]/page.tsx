@@ -607,12 +607,13 @@ function PaperContent() {
   const selectionThread = useSelectionThread(activePaperId);
   useSummaryStream(activePaperId);
   const initialLoadDone = useRef(false);
+  const summaryKickoffForRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (typeof document !== "undefined" && document.fullscreenElement) {
+    if (typeof document !== "undefined" && document.fullscreenElement && !focusMode) {
       setFocusMode(true);
     }
-  }, [activePaperId, setFocusMode]);
+  }, [activePaperId, focusMode, setFocusMode]);
 
   useEffect(() => {
     if (paper?.id && paper.id === paperId) {
@@ -1121,7 +1122,12 @@ function PaperContent() {
       !hasActiveRequest(pid, "summary") &&
       !autoAnalyzedPapers.has(`${pid}:summary`)
     ) {
-      kickoffSummaryStream(pid);
+      if (summaryKickoffForRef.current !== pid) {
+        summaryKickoffForRef.current = pid;
+        kickoffSummaryStream(pid);
+      }
+    } else {
+      summaryKickoffForRef.current = null;
     }
   }, [
     loadedPaperId,
@@ -1589,6 +1595,7 @@ function PaperContent() {
         paperId={activePaperId}
         position={panelPos}
         onCyclePosition={cyclePosition}
+        selectionThread={selectionThread}
       />
     </div>
   );

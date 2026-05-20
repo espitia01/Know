@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { useStore } from "@/lib/store";
+import { useStore, EMPTY_NOTES_LIST, EMPTY_SELECTION_LIST } from "@/lib/store";
 import { Md } from "@/components/ui/Md";
 import { SectionHeader } from "@/components/panel/SectionHeader";
 import { NoteMarkdownEditor } from "@/components/notes/NoteMarkdownEditor";
@@ -24,7 +24,7 @@ function formatNoteDate(ts: number) {
 
 function stripPdfHistoryForNote(paperId: string, noteId: string) {
   useStore.setState((s) => {
-    const history = s.selectionHistoryByPaper[paperId] ?? [];
+    const history = s.selectionHistoryByPaper[paperId] ?? EMPTY_SELECTION_LIST;
     const current = s.selectionResultByPaper[paperId] ?? null;
     return {
       selectionHistoryByPaper: {
@@ -47,7 +47,7 @@ function stripPdfHistoryForNote(paperId: string, noteId: string) {
 }
 
 export function NotesPanel({ paperId }: NotesPanelProps) {
-  const notes = useStore((s) => s.notesByPaper[paperId] ?? []);
+  const notes = useStore((s) => s.notesByPaper[paperId] ?? EMPTY_NOTES_LIST);
   const addNoteForPaper = useStore((s) => s.addNoteForPaper);
   const updateNoteForPaper = useStore((s) => s.updateNoteForPaper);
   const removeNoteForPaper = useStore((s) => s.removeNoteForPaper);
@@ -88,7 +88,7 @@ export function NotesPanel({ paperId }: NotesPanelProps) {
     try {
       await api.updateNote(paperId, noteId, text);
       useStore.setState((s) => {
-        const history = s.selectionHistoryByPaper[paperId] ?? [];
+        const history = s.selectionHistoryByPaper[paperId] ?? EMPTY_SELECTION_LIST;
         const current = s.selectionResultByPaper[paperId] ?? null;
         return {
           selectionHistoryByPaper: {

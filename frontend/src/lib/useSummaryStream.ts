@@ -130,6 +130,9 @@ export function useSummaryStream(paperId: string) {
     (pid: string, patch: Partial<PaperSummary>) => {
       const prev = useStore.getState().summaryByPaper[pid] ?? null;
       const next = mergeSummary(prev, patch);
+      const prevJson = prev ? JSON.stringify(prev) : "";
+      const nextJson = JSON.stringify(next);
+      if (prevJson === nextJson) return;
       setSummaryForPaper(pid, next);
     },
     [setSummaryForPaper],
