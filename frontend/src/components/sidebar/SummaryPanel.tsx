@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { AnalysisSection } from "@/components/analysis/AnalysisSection";
@@ -37,15 +37,38 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   const summaryLoading = useStore(
     (s) => s.summaryLoadingByPaper[paperId] ?? false,
   );
-  const paperCachedSummary = useStore((s) => {
-    const p = s.papersById[paperId];
-    if (!p) return null;
-    const ca = p.cached_analysis || {};
-    const lite = (ca.summary_lite as PaperSummary | undefined) ?? null;
-    const deep = (ca.summary_deep as PaperSummary | undefined) ?? null;
-    const legacy = (ca.summary as PaperSummary | undefined) ?? null;
-    return { ...(legacy ?? {}), ...(deep ?? {}), ...(lite ?? {}) };
-  });
+  // Select stable slice references only — Zustand's `useSyncExternalStore`
+  // calls the snapshot getter twice per render to detect tearing, and
+  // returning a freshly-spread object here triggers React error #185 the
+  // moment the store updates during streaming. Merge inside `useMemo`.
+  const cachedSummaryLite = useStore(
+    (s) =>
+      (s.papersById[paperId]?.cached_analysis?.summary_lite as
+        | PaperSummary
+        | undefined) ?? null,
+  );
+  const cachedSummaryDeep = useStore(
+    (s) =>
+      (s.papersById[paperId]?.cached_analysis?.summary_deep as
+        | PaperSummary
+        | undefined) ?? null,
+  );
+  const cachedSummaryLegacy = useStore(
+    (s) =>
+      (s.papersById[paperId]?.cached_analysis?.summary as
+        | PaperSummary
+        | undefined) ?? null,
+  );
+  const paperCachedSummary = useMemo<PaperSummary | null>(() => {
+    if (!cachedSummaryLite && !cachedSummaryDeep && !cachedSummaryLegacy) {
+      return null;
+    }
+    return {
+      ...(cachedSummaryLegacy ?? {}),
+      ...(cachedSummaryDeep ?? {}),
+      ...(cachedSummaryLite ?? {}),
+    } as PaperSummary;
+  }, [cachedSummaryLite, cachedSummaryDeep, cachedSummaryLegacy]);
   const storedError = useStore((s) => s.summaryErrorByPaper[paperId] ?? null);
   const [manualError, setManualError] = useState<string | null>(null);
   const summaryRaw = (summaryFromStore ??

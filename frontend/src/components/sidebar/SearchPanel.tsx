@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import { useStore } from "@/lib/store";
+import { useStore, EMPTY_SEARCH_LIST } from "@/lib/store";
 import { Input } from "@/components/ui/input";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { Badge } from "@/components/ui/badge";
@@ -31,7 +31,9 @@ function highlightSnippet(snippet: string, q: string) {
 }
 
 export function SearchPanel({ paperId }: SearchPanelProps) {
-  const searchResults = useStore((s) => s.searchResultsByPaper[paperId] ?? []);
+  const searchResults = useStore(
+    (s) => s.searchResultsByPaper[paperId] ?? EMPTY_SEARCH_LIST,
+  );
   const setSearchResultsForPaper = useStore((s) => s.setSearchResultsForPaper);
   const searchLoading = useStore(
     (s) => s.searchLoadingByPaper[paperId] ?? false,
