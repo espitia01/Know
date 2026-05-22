@@ -21,6 +21,18 @@ export const EMPTY_SELECTION_LIST: SelectionAnalysisResult[] = [];
 export const EMPTY_QA_LIST: QAItem[] = [];
 export const EMPTY_NOTES_LIST: Note[] = [];
 export const EMPTY_HIGHLIGHTS_LIST: Highlight[] = [];
+
+export type ReadingState = {
+  last_page: number;
+  last_tab: string | null;
+  scroll_pct: number | null;
+};
+
+export type PendingPassage = {
+  snippet: string;
+  paper_id?: string;
+  ts: number;
+};
 export const EMPTY_ASSUMPTIONS_LIST: Assumption[] = [];
 export const EMPTY_SEARCH_LIST: SearchResult[] = [];
 
@@ -52,6 +64,7 @@ interface UiPrefs {
   hideQaSuggestions: boolean;
   scrollByPaper: Record<string, number>;
   qaDraftByPaper: Record<string, string>;
+  relatedView?: "graph" | "list";
 }
 
 interface AppStore {
@@ -80,6 +93,7 @@ interface AppStore {
   uiPrefs: UiPrefs;
   setPanelPosition: (pos: ReaderPanelPosition) => void;
   setPanelSize: (pos: ReaderPanelPosition, size: number) => void;
+  setRelatedView: (view: "graph" | "list") => void;
   setHideQaSuggestions: (hidden: boolean) => void;
   setPdfScroll: (paperId: string, ratio: number) => void;
   setQADraft: (paperId: string, draft: string) => void;
@@ -225,6 +239,12 @@ interface AppStore {
   removeHighlightForPaper: (paperId: string, id: string) => void;
   updateHighlightForPaper: (paperId: string, id: string, patch: Partial<Highlight>) => void;
 
+  readingStateByPaper: Record<string, ReadingState | null>;
+  setReadingStateForPaper: (paperId: string, state: ReadingState | null) => void;
+
+  pendingPassageByPaper: Record<string, PendingPassage | null>;
+  setPendingPassage: (paperId: string, passage: PendingPassage | null) => void;
+
   summaryByPaper: Record<string, PaperSummary | null>;
   setSummaryForPaper: (paperId: string, s: PaperSummary | null) => void;
   /**
@@ -334,6 +354,7 @@ export const useStore = create<AppStore>()(
         hideQaSuggestions: false,
         scrollByPaper: {},
         qaDraftByPaper: {},
+        relatedView: "graph",
       },
       setPanelPosition: (pos) =>
         set((s) => ({ uiPrefs: { ...s.uiPrefs, panelPos: pos } })),
@@ -352,6 +373,10 @@ export const useStore = create<AppStore>()(
             ...s.uiPrefs,
             scrollByPaper: { ...s.uiPrefs.scrollByPaper, [paperId]: ratio },
           },
+        })),
+      setRelatedView: (view) =>
+        set((s) => ({
+          uiPrefs: { ...s.uiPrefs, relatedView: view },
         })),
       setQADraft: (paperId, draft) =>
         set((s) => {
@@ -451,6 +476,8 @@ export const useStore = create<AppStore>()(
           summaryLoadingByPaper: {},
           notesByPaper: {},
           highlightsByPaper: {},
+          readingStateByPaper: {},
+          pendingPassageByPaper: {},
           selectionResultByPaper: {},
           selectionHistoryByPaper: {},
           selectionLoadingByPaper: {},
@@ -792,6 +819,18 @@ export const useStore = create<AppStore>()(
               h.id === id ? { ...h, ...patch } : h,
             ),
           },
+        })),
+
+      readingStateByPaper: {},
+      setReadingStateForPaper: (paperId, state) =>
+        set((s) => ({
+          readingStateByPaper: { ...s.readingStateByPaper, [paperId]: state },
+        })),
+
+      pendingPassageByPaper: {},
+      setPendingPassage: (paperId, passage) =>
+        set((s) => ({
+          pendingPassageByPaper: { ...s.pendingPassageByPaper, [paperId]: passage },
         })),
 
       summaryByPaper: {},

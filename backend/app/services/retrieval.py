@@ -111,9 +111,22 @@ async def retrieve_for_paper(
             snippet = snippet[:remaining]
         parts.append(snippet)
         dist = hit.get("distance")
+        # Anchored Q&A: keep a short preview of the chunk text alongside the
+        # already-stored chunk_index. Frontend uses the preview as the
+        # tooltip on the source chip and as the needle when fuzzy-anchoring
+        # back into the PDF.
+        preview = snippet[:240].strip()
+        # If the chunk happens to start with the section heading we stamped
+        # on it during embedding, strip the duplicate so the preview reads
+        # as body text.
+        section = hit.get("section")
+        if isinstance(section, str) and section and preview.lower().startswith(section.lower()):
+            preview = preview[len(section):].lstrip(" :\n-")
         meta.append({
             "paper_id": hit.get("paper_id"),
             "chunk_index": hit.get("chunk_index"),
+            "section": section,
+            "snippet": preview,
             "similarity": (1.0 - float(dist)) if dist is not None else None,
         })
         total += len(snippet) + 2

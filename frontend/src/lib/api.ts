@@ -344,6 +344,7 @@ export interface DerivationExercise {
 export interface QAItem {
   question: string;
   answer: string;
+  sources?: QASourceHit[];
 }
 
 export interface ExplainResponse {
@@ -401,6 +402,23 @@ export interface Highlight {
   created_at?: string;
 }
 
+export interface ReadingStateRow {
+  user_id?: string;
+  paper_id?: string;
+  last_page: number;
+  last_tab: string | null;
+  scroll_pct: number | null;
+  updated_at?: string;
+}
+
+export interface QASourceHit {
+  paper_id: string;
+  chunk_index: number;
+  snippet: string;
+  section?: string | null;
+  similarity?: number | null;
+}
+
 export interface CitedByItem {
   title: string;
   year?: number | null;
@@ -455,6 +473,8 @@ export interface CrossPaperQA {
   asked_against_titles?: string[];
   /** Unix ms timestamp the answer was generated. */
   created_at?: number;
+  /** Retrieved chunks that grounded this answer (Anchored Q&A). */
+  sources?: QASourceHit[];
 }
 
 export interface WorkspaceRecord {
@@ -732,6 +752,21 @@ export const api = {
   deleteHighlight: (id: string, highlightId: string) =>
     request<{ status: string }>(`/api/papers/${id}/highlights/${highlightId}`, {
       method: "DELETE",
+    }),
+
+  getReadingState: (id: string) =>
+    // First visit returns 404; persistent infra glitch returns 5xx. Either way
+    // we just want defaults — restore is best-effort, never a hard failure.
+    getRequest<ReadingStateRow | null>(`/api/papers/${id}/reading-state`).catch(() => null),
+
+  putReadingState: (
+    id: string,
+    body: { last_page?: number; last_tab?: string | null; scroll_pct?: number | null },
+  ) =>
+    request<ReadingStateRow>(`/api/papers/${id}/reading-state`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     }),
 
   getSettings: () => getRequest<SettingsResponse>("/api/settings"),

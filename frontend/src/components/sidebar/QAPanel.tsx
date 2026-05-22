@@ -9,6 +9,7 @@ import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { SectionHeader } from "@/components/panel/SectionHeader";
 import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
+import { QASourceChips } from "@/components/sidebar/QASourceChips";
 interface QAPanelProps {
   paperId: string;
 }
@@ -414,6 +415,7 @@ export function QAPanel({ paperId }: QAPanelProps) {
                 }
               >
                 <StreamingMarkdown>{item.answer}</StreamingMarkdown>
+                <QASourceChips paperId={paperId} sources={item.sources} />
               </AnalysisAccordionRow>
             );
           })}

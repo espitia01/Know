@@ -322,9 +322,10 @@ async def delete_paper(paper_id: str, user_id: str = Depends(require_auth)):
 
     cloud_storage.delete_paper_files(user_id, paper_id)
 
-    from ..services.db import delete_paper_meta, increment_paper_count
+    from ..services.db import delete_paper_meta, increment_paper_count, delete_reading_state
     delete_paper_meta(paper_id, user_id)
     increment_paper_count(user_id, delta=-1)
+    delete_reading_state(user_id, paper_id)
 
     # L8: drop the in-memory per-paper lock now that the paper is gone; otherwise
     # _paper_locks would grow unboundedly in long-lived workers as users churn
@@ -695,6 +696,54 @@ async def update_paper_highlight(
     row = update_highlight(user_id, paper_id, highlight_id, color=color, note=note)
     if not row:
         raise HTTPException(status_code=404, detail="Highlight not found")
+    return row
+
+
+@router.get("/{paper_id}/reading-state")
+async def get_paper_reading_state(paper_id: str, user_id: str = Depends(require_auth)):
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    from ..services.db import get_reading_state
+
+    row = get_reading_state(user_id, paper_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="No reading state")
+    return row
+
+
+@router.put("/{paper_id}/reading-state")
+async def put_paper_reading_state(
+    paper_id: str, body: dict, user_id: str = Depends(require_auth),
+):
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    from ..services.db import ALLOWED_READING_TABS, upsert_reading_state
+
+    last_page_raw = body.get("last_page", 1)
+    try:
+        last_page = max(1, int(last_page_raw))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="last_page must be a positive integer")
+
+    last_tab_raw = body.get("last_tab")
+    if last_tab_raw is not None and last_tab_raw not in ALLOWED_READING_TABS:
+        raise HTTPException(status_code=400, detail="invalid last_tab")
+    last_tab = last_tab_raw if isinstance(last_tab_raw, str) else None
+
+    scroll_pct: float | None = None
+    sp = body.get("scroll_pct")
+    if sp is not None:
+        try:
+            scroll_pct = max(0.0, min(1.0, float(sp)))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="scroll_pct must be a float")
+
+    row = upsert_reading_state(
+        user_id, paper_id,
+        last_page=last_page, last_tab=last_tab, scroll_pct=scroll_pct,
+    )
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to save reading state")
     return row
 
 

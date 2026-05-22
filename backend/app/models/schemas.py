@@ -94,9 +94,18 @@ class DerivationExercise(BaseModel):
     steps: list[DerivationStep]
 
 
+class QASourceHit(BaseModel):
+    paper_id: str
+    chunk_index: int
+    snippet: str
+    section: str | None = None
+    similarity: float | None = None
+
+
 class QAItem(BaseModel):
     question: str
     answer: str = ""
+    sources: list[QASourceHit] = []
 
 
 class QARequest(BaseModel):

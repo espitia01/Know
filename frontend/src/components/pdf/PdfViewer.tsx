@@ -8,6 +8,7 @@ import { useStore, type PdfRegionHighlight } from "@/lib/store";
 import { normalizeSelectionAction, selectionKey } from "@/lib/selectionActions";
 import { snapshotDomRect } from "@/lib/domRect";
 import { capturePdfViewportUnionToBlob } from "@/lib/pdfSelectionCapture";
+import { useReadingState } from "@/hooks/useReadingState";
 
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -474,6 +475,8 @@ export function PdfViewer({
   );
   const [, setCurrentPage] = useState(1);
   const [pageInput, setPageInput] = useState("1");
+  const { saveProgress: saveReadingProgress } = useReadingState(paperId);
+  const lastReportedPageRef = useRef<number>(0);
   const [loadError, setLoadError] = useState("");
   const [visibleRange, setVisibleRange] = useState({ start: 1, end: 5 });
   const containerRef = useRef<HTMLDivElement>(null);
@@ -707,6 +710,23 @@ export function PdfViewer({
               // persisted store so they can be GC'd with the paper.
               setPdfScroll(paperId, +pageRatio.toFixed(4));
             }
+            // Cloud sync: persist `last_page` + a doc-wide `scroll_pct` so
+            // a different device can resume in the same place. The hook
+            // does its own 1.5 s debounce on top of this 250 ms throttle.
+            const denom = container.scrollHeight - container.clientHeight;
+            const docPct = denom > 0 ? container.scrollTop / denom : 0;
+            const stride = pageHeightRef.current + PAGE_GAP;
+            const visiblePage = stride > 0
+              ? Math.max(1, Math.floor(container.scrollTop / stride) + 1)
+              : 1;
+            const patch: { last_page?: number; scroll_pct: number } = {
+              scroll_pct: Math.max(0, Math.min(1, +docPct.toFixed(4))),
+            };
+            if (visiblePage !== lastReportedPageRef.current) {
+              lastReportedPageRef.current = visiblePage;
+              patch.last_page = visiblePage;
+            }
+            saveReadingProgress(patch);
           } catch { /* quota / private mode — non-fatal */ }
         }, 250);
       }
@@ -716,7 +736,7 @@ export function PdfViewer({
       container.removeEventListener("scroll", onScroll);
       if (saveTimer) clearTimeout(saveTimer);
     };
-  }, [updateVisibleRange, paperId, setPdfScroll]);
+  }, [updateVisibleRange, paperId, setPdfScroll, saveReadingProgress]);
 
   // Reset the restoration flag whenever we switch to a different paper or
   // reload the same one — the next page render should re-apply the saved
@@ -1457,6 +1477,7 @@ export function PdfViewer({
     if (!scrollRestoredRef.current && paperId && containerRef.current) {
       const container = containerRef.current;
       const savedRatio = savedScrollByPaper[paperId] || 0;
+      const cloudState = useStore.getState().readingStateByPaper[paperId];
       if (savedRatio > 0 && Number.isFinite(savedRatio)) {
         const pageStride = pageHeightRef.current + PAGE_GAP;
         const target = Math.round(savedRatio * pageStride);
@@ -1465,6 +1486,20 @@ export function PdfViewer({
         // relying purely on the scroll event is flaky when React batches
         // the update with the initial paint.
         updateVisibleRange();
+      } else if (cloudState && container.scrollHeight > container.clientHeight) {
+        // No localStorage offset (first visit on this device) — fall back to
+        // the server-persisted reading state for cross-device resume.
+        const denom = container.scrollHeight - container.clientHeight;
+        let target = 0;
+        if (typeof cloudState.scroll_pct === "number" && cloudState.scroll_pct > 0) {
+          target = Math.round(cloudState.scroll_pct * denom);
+        } else if (cloudState.last_page && cloudState.last_page > 1) {
+          target = Math.round((cloudState.last_page - 1) * (pageHeightRef.current + PAGE_GAP));
+        }
+        if (target > 0) {
+          container.scrollTop = target;
+          updateVisibleRange();
+        }
       }
       scrollRestoredRef.current = true;
     }
@@ -1799,6 +1834,58 @@ export function PdfViewer({
       containerRef.current.scrollTop = (page - 1) * totalHeight;
     }
   };
+
+  // Anchored Q&A: when a Q&A source chip is clicked, the panel writes a
+  // pending passage into the store. We locate the passage in the raw text,
+  // scroll the PDF to the corresponding page, paint a transient highlight,
+  // and clear the pending value so it doesn't re-fire on re-render.
+  const pendingPassage = useStore((s) => (paperId ? s.pendingPassageByPaper[paperId] : null));
+  const setPendingPassage = useStore((s) => s.setPendingPassage);
+  const addHighlightForPaper = useStore((s) => s.addHighlightForPaper);
+  const removeHighlightForPaper = useStore((s) => s.removeHighlightForPaper);
+  useEffect(() => {
+    if (!paperId || !pendingPassage || !pendingPassage.snippet) return;
+    if (pendingPassage.paper_id && pendingPassage.paper_id !== paperId) return;
+    const paper = useStore.getState().papersById[paperId];
+    const text = paper?.raw_text || "";
+    let scrolled = false;
+    if (text && numPages > 0) {
+      const needle = pendingPassage.snippet.slice(0, 80).replace(/\s+/g, " ").trim();
+      if (needle) {
+        const haystack = text.replace(/\s+/g, " ");
+        const idx = haystack.toLowerCase().indexOf(needle.toLowerCase());
+        if (idx >= 0 && haystack.length > 0) {
+          const fraction = idx / haystack.length;
+          const targetPage = Math.max(1, Math.min(numPages, Math.floor(fraction * numPages) + 1));
+          scrollToPage(targetPage);
+          scrolled = true;
+        }
+      }
+    }
+    // Paint a transient blue highlight via the existing painter pipeline.
+    // Use a `passage-flash-` id prefix so we can clean up reliably even if
+    // the user clicks a chip multiple times in quick succession.
+    const transientId = `passage-flash-${pendingPassage.ts}`;
+    addHighlightForPaper(paperId, {
+      id: transientId,
+      paper_id: paperId,
+      selected_text: pendingPassage.snippet,
+      color: "blue",
+      note: null,
+      page_hint: null,
+    });
+    setPendingPassage(paperId, null);
+    const cleanup = window.setTimeout(() => {
+      removeHighlightForPaper(paperId, transientId);
+    }, scrolled ? 2200 : 1800);
+    return () => {
+      window.clearTimeout(cleanup);
+      removeHighlightForPaper(paperId, transientId);
+    };
+  }, [
+    paperId, pendingPassage, numPages,
+    addHighlightForPaper, removeHighlightForPaper, setPendingPassage,
+  ]);
 
   const handlePageInputSubmit = () => {
     const p = parseInt(pageInput);

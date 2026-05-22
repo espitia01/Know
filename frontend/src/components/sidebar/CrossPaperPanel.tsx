@@ -13,6 +13,7 @@ import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { Textarea } from "@/components/ui/textarea";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { SectionHeader } from "@/components/panel/SectionHeader";
+import { QASourceChips } from "@/components/sidebar/QASourceChips";
 
 const PROMPTS = [
   "Compare the methodologies",
@@ -42,9 +43,10 @@ export function CrossPaperPanel() {
       const res = await api.askQuestionsMulti(paperIds, [q]);
       const ids = [...paperIds].sort();
       const titlesById = new Map(sessionPapers.map((p) => [p.id, p.title]));
-      const answers = res.items.map((item: { question: string; answer: string }) => ({
+      const answers = res.items.map((item) => ({
         question: item.question,
         answer: item.answer,
+        sources: item.sources,
         asked_against: ids,
         asked_against_titles: ids.map((id) => titlesById.get(id) ?? "Unknown paper"),
         created_at: Date.now(),
@@ -193,6 +195,7 @@ export function CrossPaperPanel() {
                   )}
                 </div>
                 <StreamingMarkdown>{r.answer}</StreamingMarkdown>
+                <QASourceChips sources={r.sources} sessionPapers={sessionPapers} />
               </div>
             );
           })}

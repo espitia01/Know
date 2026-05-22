@@ -1017,6 +1017,82 @@ def insert_paper_chunks(paper_id: str, user_id: str, rows: list[dict]) -> None:
         raise
 
 
+# ----------------------------------------------------------------
+# Continue-reading memory (Track B / Prompt 10)
+# ----------------------------------------------------------------
+
+ALLOWED_READING_TABS = frozenset({
+    "prepare", "summary", "assumptions", "qa", "notes",
+    "figures", "selection", "cross", "related",
+})
+
+
+def get_reading_state(user_id: str, paper_id: str) -> dict | None:
+    client = get_db()
+    if not client:
+        return None
+    return _safe_single(
+        client.table("paper_reading_state")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("paper_id", paper_id)
+    )
+
+
+def upsert_reading_state(
+    user_id: str,
+    paper_id: str,
+    *,
+    last_page: int,
+    last_tab: str | None,
+    scroll_pct: float | None,
+) -> dict | None:
+    client = get_db()
+    if not client:
+        return None
+    page = max(1, int(last_page or 1))
+    pct: float | None = None
+    if scroll_pct is not None:
+        try:
+            pct = max(0.0, min(1.0, float(scroll_pct)))
+        except (TypeError, ValueError):
+            pct = None
+    tab = last_tab if last_tab in ALLOWED_READING_TABS else None
+    from datetime import datetime, timezone
+
+    row = {
+        "user_id": user_id,
+        "paper_id": paper_id,
+        "last_page": page,
+        "last_tab": tab,
+        "scroll_pct": pct,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        res = (
+            client.table("paper_reading_state")
+            .upsert(row, on_conflict="user_id,paper_id")
+            .execute()
+        )
+        if res and res.data:
+            return res.data[0] if isinstance(res.data, list) else res.data
+    except Exception as exc:
+        logger.error("upsert_reading_state failed: %s", exc.__class__.__name__)
+    return row
+
+
+def delete_reading_state(user_id: str, paper_id: str) -> None:
+    client = get_db()
+    if not client:
+        return
+    try:
+        client.table("paper_reading_state").delete().eq(
+            "user_id", user_id
+        ).eq("paper_id", paper_id).execute()
+    except Exception as exc:
+        logger.debug("delete_reading_state failed: %s", exc.__class__.__name__)
+
+
 def match_paper_chunks(
     paper_ids: list[str],
     query_embedding: list[float],

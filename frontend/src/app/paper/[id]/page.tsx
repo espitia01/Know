@@ -1447,6 +1447,33 @@ function PaperContent() {
     return () => { cancelled = true; };
   }, [activePaperId]);
 
+  // Restore last-read tab + page. Idempotent: if the user has already
+  // clicked another tab in the ~200 ms it takes to hydrate, do nothing.
+  const restoredTabForPaperRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activePaperId) return;
+    if (restoredTabForPaperRef.current === activePaperId) return;
+    let cancelled = false;
+    void api.getReadingState(activePaperId).then((row) => {
+      if (cancelled || !row) return;
+      if (restoredTabForPaperRef.current === activePaperId) return;
+      restoredTabForPaperRef.current = activePaperId;
+      useStore.getState().setReadingStateForPaper(activePaperId, {
+        last_page: row.last_page,
+        last_tab: row.last_tab,
+        scroll_pct: row.scroll_pct,
+      });
+      const currentTab = useStore.getState().activeTab;
+      // Only restore the tab when the user hasn't picked one yet this
+      // session. `activeTab` defaults to "prepare" in the store, so we
+      // treat that as "untouched" — same heuristic auto-analyze uses.
+      if (row.last_tab && currentTab === "prepare" && row.last_tab !== currentTab) {
+        useStore.getState().setActiveTab(row.last_tab);
+      }
+    }).catch(() => { /* best-effort */ });
+    return () => { cancelled = true; };
+  }, [activePaperId]);
+
   const handleTextSelected = useCallback((text: string, rect: DOMRect) => {
     setSelection({ text, rect });
   }, []);

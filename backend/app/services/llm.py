@@ -1166,10 +1166,11 @@ async def answer_questions(
     questions = [_sanitize_user_text(q, max_chars=2000) for q in questions]
 
     context_block = ""
+    retrieval_hits: list[dict] = []
     if paper_id:
         try:
             from .retrieval import retrieve_for_paper
-            context_block, _ = await retrieve_for_paper(
+            context_block, retrieval_hits = await retrieve_for_paper(
                 [paper_id], " ".join(questions), max_chars=ctx_cap,
             )
         except Exception:
@@ -1210,7 +1211,16 @@ Return JSON:
 }}"""
 
     raw = await provider.complete(system, user, max_tokens=8192)
-    return _safe_parse_json(raw)
+    parsed = _safe_parse_json(raw)
+    # Stamp retrieval hits on each item so the UI can render "Show passage"
+    # chips. The model didn't pick per-question hits — Track D retrieves once
+    # for the whole batch — so each answer carries the same set. A future
+    # iteration can re-rank per-question if needed.
+    if isinstance(parsed, dict) and isinstance(parsed.get("items"), list) and retrieval_hits:
+        for item in parsed["items"]:
+            if isinstance(item, dict):
+                item["sources"] = retrieval_hits
+    return parsed
 
 
 MULTI_QA_TOTAL_CHAR_BUDGET = 30_000
@@ -1249,6 +1259,7 @@ async def answer_questions_multi(
     n_papers = max(1, len(paper_texts))
     chars_per_paper = max(2000, MULTI_QA_TOTAL_CHAR_BUDGET // n_papers)
     query_text = " ".join(questions)
+    all_hits: list[dict] = []
     for i, (title, text) in enumerate(paper_texts):
         safe_title = _sanitize_user_text(title or "", max_chars=200)
         safe_text = ""
@@ -1256,11 +1267,13 @@ async def answer_questions_multi(
         if pid:
             try:
                 from .retrieval import retrieve_for_paper
-                retrieved, _ = await retrieve_for_paper(
+                retrieved, hits = await retrieve_for_paper(
                     [pid], query_text, max_chars=chars_per_paper,
                 )
                 if retrieved:
                     safe_text = retrieved
+                if hits:
+                    all_hits.extend(hits)
             except Exception:
                 pass
         if not safe_text:
@@ -1285,7 +1298,15 @@ Return JSON:
 }}"""
 
     raw = await provider.complete(system, user, max_tokens=8192)
-    return _safe_parse_json(raw)
+    parsed = _safe_parse_json(raw)
+    # Stamp the union of per-paper retrieval hits on every answer. Cross-paper
+    # answers don't have a 1:1 mapping between question and source paper, so
+    # we let the UI render every retrieved chunk and group by paper id there.
+    if isinstance(parsed, dict) and isinstance(parsed.get("items"), list) and all_hits:
+        for item in parsed["items"]:
+            if isinstance(item, dict):
+                item["sources"] = all_hits
+    return parsed
 
 
 async def summarize_paper(paper_text: str, model_override: str | None = None, user_id: str | None = None) -> dict:

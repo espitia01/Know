@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useUserSettings } from "@/lib/UserSettingsContext";
+import { useReadingState } from "@/hooks/useReadingState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useStore } from "@/lib/store";
 import type { useSelectionThread } from "@/lib/useSelectionThread";
@@ -67,6 +68,20 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
     analysisFontScale, bumpAnalysisFontScale, setAnalysisFontScale,
     analysisFontFamily, setAnalysisFontFamily,
   } = useStore();
+  const { saveProgress: saveReadingProgress } = useReadingState(paperId);
+  // First tab value we observe is whatever the paper page restored (or the
+  // store's default) — don't report it back, the server already knows.
+  const lastReportedTabRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!paperId || !activeTab) return;
+    if (lastReportedTabRef.current === null) {
+      lastReportedTabRef.current = activeTab;
+      return;
+    }
+    if (lastReportedTabRef.current === activeTab) return;
+    lastReportedTabRef.current = activeTab;
+    saveReadingProgress({ last_tab: activeTab });
+  }, [activeTab, paperId, saveReadingProgress]);
   const selectionResult = useStore((s) => s.selectionResultByPaper[paperId] ?? null);
   const selectionLoading = useStore((s) => s.selectionLoadingByPaper[paperId] ?? false);
   const selectionHistory = useStore(
