@@ -8,7 +8,7 @@ import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
-import { scholarSearchHrefFromPriorWork } from "@/lib/priorWorkLinks";
+import { priorWorkExternalHref, referenceIndexLabel } from "@/lib/priorWorkLinks";
 import {
   sanitizeCitationForDisplay,
   sanitizeRelatedClusterSummaryMarkdown,
@@ -19,7 +19,7 @@ interface RelatedWorkPanelProps {
 }
 
 const RELATED_TAB_INTRO =
-  "Tap a citation to search Google Scholar. Reference lines come from this paper’s bibliography when we can extract them.";
+  "Tap a citation to open its DOI, arXiv, or PubMed link when we have one — otherwise Google Scholar. Numbers match this paper’s bibliography when we can parse them.";
 
 function showThemeHeading(t: string): boolean {
   const s = (t || "").trim();
@@ -40,7 +40,7 @@ function CitationIndex({ n }: { n: number }) {
 }
 
 function VerbatimCitationLink({ work }: { work: PriorWork }) {
-  const scholarHref = scholarSearchHrefFromPriorWork(work);
+  const href = priorWorkExternalHref(work);
   const raw =
     (typeof work.citation_display === "string" && work.citation_display.trim()) ||
     work.title.trim() ||
@@ -49,9 +49,9 @@ function VerbatimCitationLink({ work }: { work: PriorWork }) {
   const linkCls =
     "block text-[var(--text-sm)] leading-relaxed text-foreground/90 underline decoration-border underline-offset-[3px] hover:decoration-foreground/60 text-pretty hyphens-auto [overflow-wrap:anywhere]";
 
-  if (scholarHref) {
+  if (href) {
     return (
-      <a href={scholarHref} target="_blank" rel="noopener noreferrer" className={linkCls}>
+      <a href={href} target="_blank" rel="noopener noreferrer" className={linkCls}>
         {display}
       </a>
     );
@@ -72,14 +72,18 @@ function CitationList({
 }) {
   return (
     <ol className="mt-3 list-none space-y-2 p-0">
-      {items.map((p, i) => (
-        <li key={`${p.bib_label ?? p.title}-${startIndex + i}`} className="flex items-start gap-2.5">
-          <CitationIndex n={startIndex + i + 1} />
-          <div className="min-w-0 flex-1 pt-px">
-            <VerbatimCitationLink work={p} />
-          </div>
-        </li>
-      ))}
+      {items.map((p, i) => {
+        const sequential = startIndex + i + 1;
+        const indexLabel = referenceIndexLabel(p, sequential);
+        return (
+          <li key={`${p.bib_label ?? p.ref_id ?? p.title}-${indexLabel}`} className="flex items-start gap-2.5">
+            <CitationIndex n={indexLabel} />
+            <div className="min-w-0 flex-1 pt-px">
+              <VerbatimCitationLink work={p} />
+            </div>
+          </li>
+        );
+      })}
     </ol>
   );
 }

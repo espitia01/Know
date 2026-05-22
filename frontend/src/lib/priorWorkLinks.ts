@@ -80,3 +80,21 @@ export function scholarSearchHrefFromPriorWork(work: PriorWork): string | null {
   if (q.length < 6) return null;
   return `https://scholar.google.com/scholar?q=${encodeURIComponent(q.slice(0, 520))}`;
 }
+
+/** Prefer the bibliography index from extraction; fall back to list position. */
+export function referenceIndexLabel(work: PriorWork, sequentialFallback: number): number {
+  for (const candidate of [work.bib_label, work.ref_id]) {
+    if (candidate == null) continue;
+    const raw = String(candidate).trim();
+    const digits = raw.match(/^(\d{1,4})$/);
+    if (digits) return parseInt(digits[1], 10);
+    const bracketed = raw.match(/^\[(\d{1,4})\]$/);
+    if (bracketed) return parseInt(bracketed[1], 10);
+  }
+  return sequentialFallback;
+}
+
+/** Direct DOI/arXiv/PubMed link when known; otherwise Scholar search. */
+export function priorWorkExternalHref(work: PriorWork): string | null {
+  return priorWorkHref(work) ?? scholarSearchHrefFromPriorWork(work);
+}

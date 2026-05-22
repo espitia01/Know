@@ -611,6 +611,8 @@ function PaperContent() {
   const initialLoadDone = useRef(false);
   const summaryKickoffForRef = useRef<string | null>(null);
   const assumptionsKickoffForRef = useRef<string | null>(null);
+  /** Tab clicks set activePaperId immediately; block URL sync from reverting until navigation lands. */
+  const pendingNavRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (typeof document !== "undefined" && document.fullscreenElement && !focusMode) {
@@ -625,13 +627,22 @@ function PaperContent() {
   }, [paper?.id, paperId]);
 
   useEffect(() => {
+    const pending = pendingNavRef.current;
+    if (pending !== null) {
+      // Optimistic tab switch in flight — ignore stale URL until it catches up.
+      if (paperId === pending) {
+        pendingNavRef.current = null;
+        const nextCache =
+          useStore.getState().papersById[paperId]?.cached_analysis ?? {};
+        syncAutoAnalyzeGuardsFromCache(paperId, nextCache, nextCache);
+        if (activePaperId !== paperId) {
+          setActivePaperId(paperId);
+        }
+      }
+      return;
+    }
     if (paperId !== activePaperId) {
-      // Track A+B: per-paper analysis state means we no longer reset
-      // anything on switch. Streams for the previous paper keep running
-      // and write into their own slot. The freshness gate (Track B1)
-      // decides whether to refetch the new paper or trust the in-memory
-      // cache. Auto-analyze retry guards are still synced per-paper so a
-      // previously-failed Prepare can re-run on re-entry.
+      // External navigation (library link, browser back) — URL is source of truth.
       const nextCache =
         useStore.getState().papersById[paperId]?.cached_analysis ?? {};
       syncAutoAnalyzeGuardsFromCache(paperId, nextCache, nextCache);
@@ -1157,8 +1168,21 @@ function PaperContent() {
     setSummaryLoadingForPaper,
   ]);
 
+  const prefetchSessionPaper = useCallback((id: string) => {
+    if (!id || id === activePaperId) return;
+    if (useStore.getState().papersById[id] && isPaperFresh(id)) return;
+    if (isPaperFresh(id)) return;
+    void api
+      .getPaper(id)
+      .then((p) => {
+        useStore.getState().cachePaper(p);
+        markPaperFetched(id);
+      })
+      .catch(() => {});
+  }, [activePaperId]);
+
   const handleSwitchPaper = useCallback((id: string) => {
-    if (id === activePaperId) return;
+    if (id === activePaperId && id === paperId) return;
     // Track A+B: per-paper state means no global reset on switch, and
     // streams for the previous paper keep running into their own slot.
     // We only sync auto-analyze guards so a paper whose first-pass
@@ -1171,7 +1195,10 @@ function PaperContent() {
     // polluting history on every tab click — browser back skips over
     // tabs and returns to whatever was open before the workspace.
     if (typeof window !== "undefined" && id !== paperId) {
+      pendingNavRef.current = id;
       router.replace(`/paper/${id}`);
+    } else {
+      pendingNavRef.current = null;
     }
   }, [activePaperId, paperId, router]);
 
@@ -1192,6 +1219,7 @@ function PaperContent() {
       const nextCache = useStore.getState().papersById[id]?.cached_analysis ?? {};
       syncAutoAnalyzeGuardsFromCache(id, nextCache, nextCache);
       setActivePaperId(id);
+      pendingNavRef.current = id;
       router.push(`/paper/${id}`);
     }
     setShowAddPaper(false);
@@ -1272,7 +1300,10 @@ function PaperContent() {
       const firstId = papers[0].id;
       setActivePaperId(firstId);
       if (firstId !== paperId) {
+        pendingNavRef.current = firstId;
         router.push(`/paper/${firstId}`);
+      } else {
+        pendingNavRef.current = null;
       }
       setShowWorkspaceMenu(false);
       setActiveWorkspaceName(
@@ -1980,6 +2011,8 @@ function PaperContent() {
                 <button
                   type="button"
                   onClick={() => handleSwitchPaper(sp.id)}
+                  onMouseEnter={() => prefetchSessionPaper(sp.id)}
+                  onFocus={() => prefetchSessionPaper(sp.id)}
                   className="pl-3 pr-1.5 py-1 flex items-center rounded-l-full"
                   aria-current={sp.id === activePaperId ? "page" : undefined}
                 >
@@ -2134,6 +2167,8 @@ function PaperContent() {
                 <button
                   type="button"
                   onClick={() => handleSwitchPaper(sp.id)}
+                  onMouseEnter={() => prefetchSessionPaper(sp.id)}
+                  onFocus={() => prefetchSessionPaper(sp.id)}
                   className="pl-3 pr-1.5 py-1 flex items-center rounded-l-full"
                   aria-current={sp.id === activePaperId ? "page" : undefined}
                 >
