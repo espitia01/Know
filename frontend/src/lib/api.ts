@@ -70,7 +70,7 @@ const MODEL_CAP_DETAIL_RE =
   /Daily limit reached for (\S+) \((\d+)\/day on (\S+) plan\)/;
 
 type StructuredErrorDetail = {
-  code?: "daily_cap" | "model_cap" | "paper_cap";
+  code?: "daily_cap" | "model_cap" | "paper_cap" | "daily_export_cap" | "export_tier" | "export_concurrent";
   model?: string;
   limit?: number;
   tier?: string;
@@ -381,6 +381,7 @@ export interface SelectionAnalysisResult {
 
 export interface SettingsResponse {
   has_anthropic_key: boolean;
+  has_openai_key?: boolean;
   analysis_model: string;
   fast_model: string;
   background_preset?: string | null;
@@ -409,6 +410,22 @@ export interface ReadingStateRow {
   last_tab: string | null;
   scroll_pct: number | null;
   updated_at?: string;
+}
+
+export interface ExportRow {
+  id: string;
+  paper_id: string;
+  format: "pdf" | "pptx" | "podcast";
+  status: "pending" | "running" | "completed" | "failed";
+  sections: string[];
+  storage_path: string | null;
+  byte_size: number | null;
+  duration_s: number | null;
+  error_code: string | null;
+  error_message: string | null;
+  requested_at: string;
+  completed_at: string | null;
+  download_url?: string | null;
 }
 
 export interface QASourceHit {
@@ -768,6 +785,28 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }),
+
+  requestExport: (
+    paperId: string,
+    body: {
+      format: "pdf" | "pptx" | "podcast";
+      sections: string[];
+      options?: Record<string, unknown>;
+    },
+  ) =>
+    request<{ export_id: string }>(`/api/papers/${paperId}/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  getExport: (exportId: string) => getRequest<ExportRow>(`/api/exports/${exportId}`),
+
+  listExports: (limit = 20) =>
+    getRequest<{ items: ExportRow[] }>(`/api/exports?limit=${limit}`),
+
+  deleteExport: (exportId: string) =>
+    request<{ status: string }>(`/api/exports/${exportId}`, { method: "DELETE" }),
 
   getSettings: () => getRequest<SettingsResponse>("/api/settings"),
 

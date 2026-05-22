@@ -220,7 +220,7 @@ function CancellationBanner({ user }: { user: UserInfo | null }) {
 
 export const TIER_FEATURES: Record<string, Set<string>> = {
   free: new Set(["summary", "qa", "selection"]),
-  scholar: new Set(["summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex"]),
+  scholar: new Set(["summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "export-pdf", "export-pptx"]),
   researcher: new Set([
     "summary",
     "prepare",
@@ -231,8 +231,10 @@ export const TIER_FEATURES: Record<string, Set<string>> = {
     "selection",
     "bibtex",
     "multi-qa",
-    // PROMPT_7: workspaces (multi-paper sessions + saved workspaces).
     "workspace",
+    "export-pdf",
+    "export-pptx",
+    "export-podcast",
   ]),
 };
 

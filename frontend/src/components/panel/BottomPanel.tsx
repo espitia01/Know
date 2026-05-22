@@ -22,6 +22,9 @@ import { NotesHost } from "../sidebar/NotesHost";
 import { SummaryPanel } from "../sidebar/SummaryPanel";
 import { FiguresPanel } from "../sidebar/FiguresPanel";
 import { CrossPaperPanel } from "../sidebar/CrossPaperPanel";
+import { ExportModal } from "../export/ExportModal";
+import { ExportsMenu } from "../export/ExportsMenu";
+import { api } from "@/lib/api";
 
 export type PanelPosition = "right" | "left" | "bottom";
 
@@ -69,6 +72,16 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
     analysisFontFamily, setAnalysisFontFamily,
   } = useStore();
   const { saveProgress: saveReadingProgress } = useReadingState(paperId);
+  const exportUnreadBadge = useStore((s) => s.exportUnreadBadge);
+  const setExportUnreadBadge = useStore((s) => s.setExportUnreadBadge);
+  const exportToast = useStore((s) => s.exportToast);
+  const setExportToast = useStore((s) => s.setExportToast);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [hasOpenAiKey, setHasOpenAiKey] = useState(true);
+
+  useEffect(() => {
+    void api.getSettings().then((s) => setHasOpenAiKey(Boolean(s.has_openai_key ?? true)));
+  }, []);
   // First tab value we observe is whatever the paper page restored (or the
   // store's default) — don't report it back, the server already knows.
   const lastReportedTabRef = useRef<string | null>(null);
@@ -168,6 +181,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
   };
 
   return (
+    <>
     <Tabs
       value={effectiveTab}
       onValueChange={handleTabChange}
@@ -245,27 +259,33 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
             "aria-label": "Panel options",
           }}
           triggerInner={
-            <svg
-              className="h-3.5 w-3.5"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.5}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <line x1="4" x2="4" y1="21" y2="14" />
-              <line x1="4" x2="4" y1="10" y2="3" />
-              <line x1="12" x2="12" y1="21" y2="12" />
-              <line x1="12" x2="12" y1="8" y2="3" />
-              <line x1="20" x2="20" y1="21" y2="16" />
-              <line x1="20" x2="20" y1="12" y2="3" />
-              <line x1="1" x2="7" y1="14" y2="14" />
-              <line x1="9" x2="15" y1="8" y2="8" />
-              <line x1="17" x2="23" y1="16" y2="16" />
-            </svg>
+            <span className="relative inline-flex">
+              <svg
+                className="h-3.5 w-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <line x1="4" x2="4" y1="21" y2="14" />
+                <line x1="4" x2="4" y1="10" y2="3" />
+                <line x1="12" x2="12" y1="21" y2="12" />
+                <line x1="12" x2="12" y1="8" y2="3" />
+                <line x1="20" x2="20" y1="21" y2="16" />
+                <line x1="20" x2="20" y1="12" y2="3" />
+                <line x1="1" x2="7" y1="14" y2="14" />
+                <line x1="9" x2="15" y1="8" y2="8" />
+                <line x1="17" x2="23" y1="16" y2="16" />
+              </svg>
+              {exportUnreadBadge && (
+                <span className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-foreground/50" />
+              )}
+            </span>
           }
+          className="w-64"
         >
           <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">
             Text size
@@ -332,6 +352,29 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
                 {f.label}
               </button>
             ))}
+          </div>
+
+          <div className="my-1 mx-1 h-px bg-border/70" />
+
+          <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">
+            Export
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setExportUnreadBadge(false);
+              setExportModalOpen(true);
+            }}
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[var(--text-sm)] hover:bg-accent transition-colors text-left"
+          >
+            Export analysis…
+          </button>
+          <div
+            onClick={() => setExportUnreadBadge(false)}
+            onKeyDown={() => {}}
+            role="presentation"
+          >
+            <ExportsMenu />
           </div>
 
           <div className="my-1 mx-1 h-px bg-border/70" />
@@ -409,5 +452,24 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
         </div>
       </div>
     </Tabs>
+      <ExportModal
+        paperId={paperId}
+        open={exportModalOpen}
+        onClose={() => setExportModalOpen(false)}
+        hasOpenAiKey={hasOpenAiKey}
+      />
+      {exportToast && (
+        <div className="fixed bottom-4 right-4 z-[200] max-w-sm rounded-[var(--radius-lg)] border border-border/50 bg-popover px-3 py-2 text-[var(--text-sm)] shadow-[var(--shadow-sm)]">
+          <p>{exportToast}</p>
+          <button
+            type="button"
+            className="mt-1 text-[var(--text-xs)] text-muted-foreground underline"
+            onClick={() => setExportToast(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+    </>
   );
 }

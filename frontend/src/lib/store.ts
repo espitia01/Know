@@ -9,6 +9,7 @@ import type {
   SearchResult,
   Note,
   Highlight,
+  ExportRow,
   SelectionAnalysisResult,
   PaperSummary,
   CrossPaperQA,
@@ -262,6 +263,16 @@ interface AppStore {
 
   usageRefreshKey: number;
   bumpUsageRefresh: () => void;
+
+  exportsById: Record<string, ExportRow>;
+  setExport: (row: ExportRow) => void;
+  removeExport: (id: string) => void;
+  exportMenuOpen: boolean;
+  setExportMenuOpen: (open: boolean) => void;
+  exportUnreadBadge: boolean;
+  setExportUnreadBadge: (v: boolean) => void;
+  exportToast: string | null;
+  setExportToast: (msg: string | null) => void;
 }
 
 export const useStore = create<AppStore>()(
@@ -878,6 +889,22 @@ export const useStore = create<AppStore>()(
 
       usageRefreshKey: 0,
       bumpUsageRefresh: () => set((s) => ({ usageRefreshKey: s.usageRefreshKey + 1 })),
+
+      exportsById: {},
+      setExport: (row) =>
+        set((s) => ({ exportsById: { ...s.exportsById, [row.id]: row } })),
+      removeExport: (id) =>
+        set((s) => {
+          const next = { ...s.exportsById };
+          delete next[id];
+          return { exportsById: next };
+        }),
+      exportMenuOpen: false,
+      setExportMenuOpen: (open) => set({ exportMenuOpen: open }),
+      exportUnreadBadge: false,
+      setExportUnreadBadge: (v) => set({ exportUnreadBadge: v }),
+      exportToast: null,
+      setExportToast: (msg) => set({ exportToast: msg }),
     }),
     {
       name: "know-paper-store",
