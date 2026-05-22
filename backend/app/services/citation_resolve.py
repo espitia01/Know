@@ -625,3 +625,113 @@ def build_prior_work_topics_from_clusters(rows: list[dict[str, Any]], clusters_i
         out_topics.append({"theme": "Other references", "summary": "", "items": other_items})
 
     return out_topics
+
+
+_S2_PAPER = "https://api.semanticscholar.org/graph/v1/paper"
+_S2_CITATIONS = "https://api.semanticscholar.org/graph/v1/paper/{paper_id}/citations"
+_CITATION_FIELDS = "title,year,authors,url,externalIds,citationCount,paperId"
+
+
+async def resolve_paper_s2_id(
+    title: str,
+    doi: str | None = None,
+    arxiv: str | None = None,
+) -> str | None:
+    """Return the Semantic Scholar paperId for this manuscript."""
+    headers = {"User-Agent": "KnowPaperReader/1.0 (+https://github.com/espitia01/Know)"}
+    try:
+        async with httpx.AsyncClient(timeout=_S2_TIMEOUT) as client:
+            if doi:
+                d = _doi_norm(doi)
+                if d:
+                    r = await client.get(
+                        f"{_S2_PAPER}/DOI:{d}",
+                        params={"fields": "paperId,title"},
+                        headers=headers,
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        if isinstance(data, dict) and data.get("paperId"):
+                            return str(data["paperId"])
+            if arxiv:
+                a = _arxiv_norm(arxiv)
+                if a:
+                    r = await client.get(
+                        f"{_S2_PAPER}/arXiv:{a}",
+                        params={"fields": "paperId,title"},
+                        headers=headers,
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        if isinstance(data, dict) and data.get("paperId"):
+                            return str(data["paperId"])
+            t = (title or "").strip()
+            if len(t) >= 12:
+                r = await client.get(
+                    _S2_SEARCH,
+                    params={"query": t[:350], "limit": 1, "fields": "paperId,title"},
+                    headers=headers,
+                )
+                if r.status_code == 200:
+                    rows = (r.json().get("data") or [])
+                    if rows and isinstance(rows[0], dict) and rows[0].get("paperId"):
+                        return str(rows[0]["paperId"])
+    except Exception as e:
+        logger.debug("resolve_paper_s2_id failed: %s", e)
+    return None
+
+
+async def fetch_cited_by(s2_id: str, limit: int = 50) -> list[dict]:
+    """Hit /paper/{paperId}/citations and return normalized rows."""
+    if not s2_id:
+        return []
+    headers = {"User-Agent": "KnowPaperReader/1.0 (+https://github.com/espitia01/Know)"}
+    url = _S2_CITATIONS.format(paper_id=s2_id)
+    params = {
+        "fields": _CITATION_FIELDS,
+        "limit": min(max(1, limit), 50),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_S2_TIMEOUT) as client:
+            r = await client.get(url, params=params, headers=headers)
+            if r.status_code == 429:
+                await asyncio.sleep(2.2)
+                r = await client.get(url, params=params, headers=headers)
+            if r.status_code != 200:
+                logger.warning("S2 cited-by HTTP %s for %s", r.status_code, s2_id)
+                return []
+            data = r.json()
+    except Exception as e:
+        logger.warning("fetch_cited_by failed: %s", e)
+        return []
+
+    out: list[dict] = []
+    for row in (data.get("data") or [])[:limit]:
+        citing = row.get("citingPaper") if isinstance(row, dict) else None
+        if not isinstance(citing, dict):
+            continue
+        authors_raw = citing.get("authors") or []
+        authors = [
+            (a.get("name") or "").strip()
+            for a in authors_raw
+            if isinstance(a, dict) and a.get("name")
+        ]
+        ext = citing.get("externalIds") if isinstance(citing.get("externalIds"), dict) else {}
+        doi = ext.get("DOI") or ""
+        arx = ext.get("ArXiv") or ""
+        url_out = citing.get("url") or ""
+        if not url_out and doi:
+            url_out = f"https://doi.org/{doi}"
+        elif not url_out and arx:
+            url_out = f"https://arxiv.org/abs/{arx}"
+        out.append({
+            "title": (citing.get("title") or "").strip(),
+            "year": citing.get("year"),
+            "authors": authors,
+            "url": url_out,
+            "doi": doi,
+            "arxiv": arx,
+            "s2_id": citing.get("paperId") or "",
+            "citation_count": citing.get("citationCount"),
+        })
+    return out

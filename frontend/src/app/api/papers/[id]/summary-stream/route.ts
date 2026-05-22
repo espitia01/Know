@@ -18,7 +18,6 @@ import { promptDepthForModel } from "@/lib/modelLabels";
 import { requireUser, AuthError } from "@/lib/server/auth";
 import {
   fetchPaperContext,
-  fetchUserModelPrefs,
   resolveStreamModelOverride,
   reserveUsage,
   releaseUsage,
@@ -26,6 +25,7 @@ import {
   InternalApiError,
   type UsageToken,
 } from "@/lib/server/internalApi";
+import { fetchUserPrefs } from "@/lib/server/userPrefs";
 import {
   PaperSummaryDeepSchema,
   type PaperSummaryDeep,
@@ -78,12 +78,14 @@ export async function POST(
 
   let paper: { title: string; raw_text: string };
   let analysisModel: string;
+  let deepAnalysis = false;
   try {
     const [ctx, prefs] = await Promise.all([
       fetchPaperContext(paperId, user.userId),
-      fetchUserModelPrefs(user.userId),
+      fetchUserPrefs(user.userId),
     ]);
     paper = { title: ctx.title, raw_text: ctx.raw_text };
+    deepAnalysis = prefs.deep_analysis;
     analysisModel = await resolveStreamModelOverride(
       user.userId,
       body,
@@ -123,6 +125,7 @@ export async function POST(
     paperTitle: paper.title,
     paperContext: paper.raw_text,
     depth,
+    deepAnalysis,
   });
 
   let releasedOnError = false;

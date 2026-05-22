@@ -384,6 +384,32 @@ export interface SettingsResponse {
   fast_model: string;
   background_preset?: string | null;
   background_opacity?: number | null;
+  deep_analysis_enabled?: boolean;
+  deep_analysis_allowed?: boolean;
+  deep_multiplier?: number;
+  tier?: string;
+  tier_limits?: Record<string, unknown> | null;
+}
+
+export interface Highlight {
+  id: string;
+  paper_id: string;
+  selected_text: string;
+  color: "yellow" | "green" | "blue" | "pink";
+  note?: string | null;
+  page_hint?: number | null;
+  created_at?: string;
+}
+
+export interface CitedByItem {
+  title: string;
+  year?: number | null;
+  authors?: string[];
+  url?: string;
+  doi?: string;
+  arxiv?: string;
+  s2_id?: string;
+  citation_count?: number | null;
 }
 
 export interface PaperSummary {
@@ -678,6 +704,36 @@ export const api = {
       `/api/papers/${id}/search?q=${encodeURIComponent(query)}`
     ),
 
+  getCitedBy: (id: string) =>
+    getRequest<{ items: CitedByItem[]; cached?: boolean; error?: string }>(
+      `/api/papers/${id}/cited_by`,
+    ),
+
+  listHighlights: (id: string) =>
+    getRequest<{ items: Highlight[] }>(`/api/papers/${id}/highlights`),
+
+  createHighlight: (
+    id: string,
+    body: { selected_text: string; color: string; note?: string; page_hint?: number },
+  ) =>
+    request<Highlight>(`/api/papers/${id}/highlights`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  updateHighlight: (id: string, highlightId: string, body: { color?: string; note?: string }) =>
+    request<Highlight>(`/api/papers/${id}/highlights/${highlightId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  deleteHighlight: (id: string, highlightId: string) =>
+    request<{ status: string }>(`/api/papers/${id}/highlights/${highlightId}`, {
+      method: "DELETE",
+    }),
+
   getSettings: () => getRequest<SettingsResponse>("/api/settings"),
 
   updateSettings: (data: {
@@ -686,6 +742,7 @@ export const api = {
     fast_model?: string;
     background_preset?: string;
     background_opacity?: number;
+    deep_analysis_enabled?: boolean;
   }) =>
     request<SettingsResponse>("/api/settings", {
       method: "PUT",

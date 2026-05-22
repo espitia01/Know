@@ -36,7 +36,7 @@ from fastapi import APIRouter, Body, Depends, Header, HTTPException
 from fastapi.responses import FileResponse, Response
 
 from ..config import settings
-from ..gating import enforce_model, reserve_usage, release_usage
+from ..gating import enforce_model, reserve_usage, release_usage, get_usage_multiplier, resolve_deep_analysis, get_user_tier
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +145,21 @@ async def internal_user_models(user_id: str):
     }
 
 
+@router.get("/user/{user_id}/preferences", dependencies=[Depends(require_internal_bearer)])
+async def internal_user_preferences(user_id: str):
+    """Model prefs + tier + deep-analysis flag for Next.js stream routes."""
+    _validate_id(user_id, "user_id")
+    from ..gating import resolve_analysis_model, resolve_fast_model
+
+    return {
+        "analysis_model": resolve_analysis_model(user_id),
+        "fast_model": resolve_fast_model(user_id),
+        "tier": get_user_tier(user_id),
+        "deep_analysis": resolve_deep_analysis(user_id),
+        "usage_multiplier": get_usage_multiplier(user_id),
+    }
+
+
 # ----------------------------------------------------------------
 # Usage reservation / release
 # ----------------------------------------------------------------
@@ -173,6 +188,10 @@ async def internal_usage_reserve(body: dict = Body(...)):
 
     if model:
         model = enforce_model(user_id, model)
+
+    deep_kinds = {"qa", "selection", "summary", "figure"}
+    if kind in deep_kinds:
+        count = count * get_usage_multiplier(user_id)
 
     token = reserve_usage(
         user_id=user_id,
@@ -299,6 +318,78 @@ async def internal_cached_analysis_upsert(body: dict = Body(...)):
         logger.exception("cached-analysis upsert failed for %s/%s", paper_id, key)
         raise HTTPException(status_code=500, detail="Failed to persist cached analysis")
     return {"ok": True, "appended": appended}
+
+
+# ----------------------------------------------------------------
+# Retrieval (Track D)
+# ----------------------------------------------------------------
+
+
+@router.post("/retrieve", dependencies=[Depends(require_internal_bearer)])
+async def internal_retrieve(body: dict = Body(...)):
+    """Embed query and return top matching paper chunks."""
+    user_id = (body.get("user_id") or "").strip()
+    paper_ids = body.get("paper_ids") or []
+    query = (body.get("query") or "").strip()
+    max_chars = int(body.get("max_chars") or 8000)
+    top_k = int(body.get("top_k") or 8)
+
+    if not user_id or not query or not isinstance(paper_ids, list):
+        raise HTTPException(status_code=400, detail="Missing user_id, query, or paper_ids")
+
+    from ..services.db import get_paper_meta
+    validated: list[str] = []
+    for pid in paper_ids[:20]:
+        if not isinstance(pid, str):
+            continue
+        _validate_id(pid, "paper_id")
+        if get_paper_meta(pid, user_id=user_id):
+            validated.append(pid)
+    if not validated:
+        raise HTTPException(status_code=404, detail="No accessible papers")
+
+    from ..services.retrieval import retrieve_for_paper
+
+    try:
+        context, hits = await retrieve_for_paper(
+            validated, query, max_chars=max_chars, top_k=top_k,
+        )
+    except Exception:
+        logger.exception("internal retrieve failed")
+        return {"context": "", "hits": [], "passage_count": 0}
+
+    return {"context": context, "hits": hits, "passage_count": len(hits)}
+
+
+@router.post("/papers/{paper_id}/embed", dependencies=[Depends(require_internal_bearer)])
+async def internal_embed_paper(paper_id: str, body: dict = Body(...)):
+    """Chunk + embed a paper (post-upload or backfill)."""
+    _validate_id(paper_id, "paper_id")
+    user_id = (body.get("user_id") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Missing user_id")
+
+    from ..services.db import get_paper_meta
+    if not get_paper_meta(paper_id, user_id=user_id):
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    from ..services.pdf_parser import get_paper
+    from ..services.retrieval import embed_paper
+    from ..services.embeddings import EmbeddingProviderError
+
+    paper = get_paper(paper_id, user_id=user_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    try:
+        n = await embed_paper(paper_id, user_id, paper.raw_text or "")
+    except EmbeddingProviderError as exc:
+        raise HTTPException(status_code=503, detail={"code": exc.code, "message": exc.message})
+    except Exception:
+        logger.exception("embed failed for %s", paper_id)
+        raise HTTPException(status_code=500, detail="Embedding failed")
+
+    return {"ok": True, "chunks": n}
 
 
 # ----------------------------------------------------------------

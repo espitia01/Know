@@ -17,7 +17,7 @@ import { PreReadingPanel } from "../sidebar/PreReadingPanel";
 import { RelatedWorkPanel } from "../sidebar/RelatedWorkPanel";
 import { QAPanel } from "../sidebar/QAPanel";
 import { AssumptionsPanel } from "../sidebar/AssumptionsPanel";
-import { NotesPanel } from "../sidebar/NotesPanel";
+import { NotesHost } from "../sidebar/NotesHost";
 import { SummaryPanel } from "../sidebar/SummaryPanel";
 import { FiguresPanel } from "../sidebar/FiguresPanel";
 import { CrossPaperPanel } from "../sidebar/CrossPaperPanel";
@@ -386,7 +386,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
             <TabsContent value="figures" className="mt-0"><FiguresPanel paperId={paperId} /></TabsContent>
           )}
           {mountedTabs.has("notes") && (
-            <TabsContent value="notes" className="mt-0"><NotesPanel paperId={paperId} /></TabsContent>
+            <TabsContent value="notes" className="mt-0"><NotesHost paperId={paperId} /></TabsContent>
           )}
           {mountedTabs.has("sources") && (
             <TabsContent value="sources" className="mt-0"><RelatedWorkPanel paperId={paperId} /></TabsContent>

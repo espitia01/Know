@@ -8,17 +8,26 @@ const SHARED_RULES = `Output rules (strict):
 
 import type { PromptDepth } from "@/lib/server/promptDepth";
 import { depthSuffix } from "@/lib/server/promptDepth";
-
-const PAPER_CHAR_BUDGET = 6000;
+import { buildPaperExcerpt } from "@/lib/server/paperExcerpt";
+import { contextBudget } from "@/lib/server/promptBudgets";
 
 export function buildFigurePrompt(args: {
   paperContext: string;
   question?: string;
   depth?: PromptDepth;
+  deepAnalysis?: boolean;
+  /** When set (RAG), use retrieved passages instead of excerpting raw text. */
+  retrievedContext?: string;
 }): { system: string; paperContextText: string; taskText: string } {
   const depthLine = depthSuffix(args.depth);
   const depthBlock = depthLine ? `\n\n${depthLine}` : "";
-  const paperContext = (args.paperContext || "").slice(0, PAPER_CHAR_BUDGET);
+  const maxChars = contextBudget("figure", args.deepAnalysis ?? false);
+  const paperContext =
+    args.retrievedContext?.trim() ||
+    buildPaperExcerpt(args.paperContext || "", {
+      maxChars,
+      profile: "summary",
+    });
   const q = (args.question || "").trim();
   const paperContextText = `Paper context (for reference):\n"""\n${paperContext}\n"""`;
 

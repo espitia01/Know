@@ -628,6 +628,23 @@
 [data-action="question"]    { --highlight-rgb: 16  185 129; /* legacy alias of followup */ }
 /* Saved-note highlights: vivid enough on both light PDF and dark overlays */
 [data-action="note"]        { --highlight-rgb: 251 146 60; /* orange-400 */ }
+
+.know-highlight-rect {
+  position: absolute;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  border-radius: 2px;
+  border-bottom: none;
+}
+.know-highlight-rect[data-color="yellow"] { background: rgb(254 240 138 / 0.55); }
+.know-highlight-rect[data-color="green"]  { background: rgb(167 243 208 / 0.55); }
+.know-highlight-rect[data-color="blue"]   { background: rgb(186 230 253 / 0.55); }
+.know-highlight-rect[data-color="pink"]   { background: rgb(251 207 232 / 0.55); }
+.dark .know-highlight-rect[data-color="yellow"] { background: rgb(253 224 71 / 0.30); }
+.dark .know-highlight-rect[data-color="green"]  { background: rgb(110 231 183 / 0.30); }
+.dark .know-highlight-rect[data-color="blue"]   { background: rgb(125 211 252 / 0.30); }
+.dark .know-highlight-rect[data-color="pink"]   { background: rgb(244 114 182 / 0.30); }
+
 /* Selection toolbar tooltips — anchored below buttons so they don’t cover fresh selections. */
 .know-toolbar-btn { position: relative; }
 .know-toolbar-btn::after {

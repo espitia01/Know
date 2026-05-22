@@ -411,13 +411,6 @@ def resolve_analysis_model(user_id: str) -> str:
     return enforce_model(user_id, analysis)
 
 
-def resolve_fast_model(user_id: str) -> str:
-    """Return the fast model that will actually be used for ``user_id``."""
-    from .api.settings import _get_user_model_prefs
-    _, fast = _get_user_model_prefs(user_id)
-    return enforce_model(user_id, fast)
-
-
 def get_per_model_daily_usage(user_id: str) -> list[dict]:
     """Return today's per-model usage rows for the user, restricted to the
     models the current tier has any cap for. Each row is
@@ -440,3 +433,30 @@ def get_per_model_daily_usage(user_id: str) -> list[dict]:
             used = 0
         out.append({"model": model, "used": int(used or 0), "limit": int(cap)})
     return out
+
+
+def resolve_deep_analysis(user_id: str) -> bool:
+    """Researcher-only opt-in for expanded prompt budgets."""
+    user = get_user(user_id)
+    if not user:
+        return False
+    if (user.get("tier") or "free") != "researcher":
+        return False
+    return bool(user.get("deep_analysis_enabled"))
+
+
+DEEP_USAGE_MULTIPLIER = 2
+
+
+def get_usage_multiplier(user_id: str | None) -> int:
+    """How many quota units a single call consumes (2 when deep analysis is on)."""
+    if user_id and resolve_deep_analysis(user_id):
+        return DEEP_USAGE_MULTIPLIER
+    return 1
+
+
+def resolve_fast_model(user_id: str) -> str:
+    """Return the fast model that will actually be used for ``user_id``."""
+    from .api.settings import _get_user_model_prefs
+    _, fast = _get_user_model_prefs(user_id)
+    return enforce_model(user_id, fast)

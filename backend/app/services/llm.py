@@ -22,6 +22,30 @@ from .reference_extract import extract_references_section
 logger = logging.getLogger(__name__)
 _warned_missing_key = False
 
+from ..gating import resolve_deep_analysis
+
+DEEP_MULTIPLIER = 2
+STD_BUDGETS = {
+    "summary": {"context": 12000, "selection": 0, "history": 0},
+    "selection": {"context": 6000, "selection": 4000, "history": 0},
+    "qa": {"context": 6000, "selection": 0, "history": 0},
+    "figure": {"context": 6000, "selection": 0, "history": 0},
+    "assumptions": {"context": 6000, "selection": 0, "history": 0},
+}
+
+
+def _scale_budget(budget: dict, factor: int) -> dict:
+    return {k: (v * factor if v else 0) for k, v in budget.items()}
+
+
+DEEP_BUDGETS = {k: _scale_budget(v, DEEP_MULTIPLIER) for k, v in STD_BUDGETS.items()}
+
+
+def get_budgets(kind: str, user_id: str | None) -> dict:
+    deep = bool(user_id) and resolve_deep_analysis(user_id)
+    table = DEEP_BUDGETS if deep else STD_BUDGETS
+    return table.get(kind, STD_BUDGETS["qa"])
+
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 # Current Anthropic model aliases as of April 2026. The previous Opus
@@ -622,10 +646,9 @@ async def polish_note_from_selection(
 async def analyze_selection(paper_text: str, selected_text: str, action: str, user_id: str | None = None) -> dict:
     """Analyze a user-highlighted selection from the PDF using the fast provider."""
     provider = get_fast_provider(user_id)
-    selected_text = _sanitize_user_text(selected_text)
-    paper_text = _sanitize_user_text(paper_text, max_chars=6000)
-
-    paper_text = _sanitize_user_text(paper_text, max_chars=6000)
+    budget = get_budgets("selection", user_id)
+    selected_text = _sanitize_user_text(selected_text, max_chars=budget["selection"])
+    paper_text = _sanitize_user_text(paper_text, max_chars=budget["context"])
 
     passage_explain_assumptions_json = f"""Explain the following passage from an academic paper clearly and thoroughly.
 
@@ -1030,7 +1053,7 @@ def _coerce_assumptions(raw_items: object) -> list[dict]:
 async def extract_assumptions(paper_text: str, user_id: str | None = None) -> dict:
     """Extract explicit and implicit assumptions."""
     provider = get_provider(user_id)
-    paper_text = _sanitize_user_text(paper_text, max_chars=6000)
+    paper_text = _sanitize_user_text(paper_text, max_chars=get_budgets("assumptions", user_id)["context"])
 
     system = (
         "You are an expert science educator. Identify all assumptions in the paper, both those explicitly "
@@ -1130,11 +1153,30 @@ Return JSON:
     return _safe_parse_json(raw)
 
 
-async def answer_questions(paper_text: str, questions: list[str], user_id: str | None = None) -> list[dict]:
+async def answer_questions(
+    paper_text: str,
+    questions: list[str],
+    user_id: str | None = None,
+    paper_id: str | None = None,
+) -> list[dict]:
     """Answer a batch of questions about the paper."""
     provider = get_provider(user_id)
-    paper_text = _sanitize_user_text(paper_text, max_chars=6000)
+    budget = get_budgets("qa", user_id)
+    ctx_cap = budget["context"]
     questions = [_sanitize_user_text(q, max_chars=2000) for q in questions]
+
+    context_block = ""
+    if paper_id:
+        try:
+            from .retrieval import retrieve_for_paper
+            context_block, _ = await retrieve_for_paper(
+                [paper_id], " ".join(questions), max_chars=ctx_cap,
+            )
+        except Exception:
+            pass
+    if not context_block:
+        paper_text = _sanitize_user_text(paper_text, max_chars=ctx_cap)
+        context_block = paper_text[:ctx_cap]
 
     system = (
         "You are an expert science educator. Answer each question helpfully whether or not every detail appears in "
@@ -1155,7 +1197,7 @@ Questions:
 {q_list}
 
 Paper text (possibly truncated excerpts):
-{paper_text[:6000]}
+{context_block}
 
 Return JSON:
 {{
@@ -1174,7 +1216,12 @@ Return JSON:
 MULTI_QA_TOTAL_CHAR_BUDGET = 30_000
 
 
-async def answer_questions_multi(paper_texts: list[tuple[str, str]], questions: list[str], user_id: str | None = None) -> list[dict]:
+async def answer_questions_multi(
+    paper_texts: list[tuple[str, str]],
+    questions: list[str],
+    user_id: str | None = None,
+    paper_ids: list[str] | None = None,
+) -> list[dict]:
     """Answer questions using context from multiple papers.
     paper_texts: list of (title, raw_text) tuples.
 
@@ -1184,6 +1231,7 @@ async def answer_questions_multi(paper_texts: list[tuple[str, str]], questions: 
     of the budget, with at least 2k chars each and a floor of 1 paper.
     """
     provider = get_provider(user_id)
+    budget = get_budgets("qa", user_id)
     questions = [_sanitize_user_text(q, max_chars=2000) for q in questions]
 
     system = (
@@ -1200,9 +1248,23 @@ async def answer_questions_multi(paper_texts: list[tuple[str, str]], questions: 
     papers_context = ""
     n_papers = max(1, len(paper_texts))
     chars_per_paper = max(2000, MULTI_QA_TOTAL_CHAR_BUDGET // n_papers)
+    query_text = " ".join(questions)
     for i, (title, text) in enumerate(paper_texts):
         safe_title = _sanitize_user_text(title or "", max_chars=200)
-        safe_text = _sanitize_user_text(text or "", max_chars=chars_per_paper)
+        safe_text = ""
+        pid = (paper_ids[i] if paper_ids and i < len(paper_ids) else None)
+        if pid:
+            try:
+                from .retrieval import retrieve_for_paper
+                retrieved, _ = await retrieve_for_paper(
+                    [pid], query_text, max_chars=chars_per_paper,
+                )
+                if retrieved:
+                    safe_text = retrieved
+            except Exception:
+                pass
+        if not safe_text:
+            safe_text = _sanitize_user_text(text or "", max_chars=chars_per_paper)
         papers_context += f"\n--- Paper {i+1}: {safe_title} ---\n{safe_text}\n"
 
     user = f"""Answer these questions. Use synthesis across papers when helpful. When the session materials are silent or incomplete on a point, note the gap, answer with labeled general knowledge where appropriate, and suggest search phrases or papers to look up.
@@ -1236,7 +1298,7 @@ async def summarize_paper(paper_text: str, model_override: str | None = None, us
     else:
         provider = get_provider(user_id)
 
-    paper_text = _sanitize_user_text(paper_text, max_chars=12000)
+    paper_text = _sanitize_user_text(paper_text, max_chars=get_budgets("summary", user_id)["context"])
 
     system = (
         "You are an expert science educator and researcher. Produce an extremely detailed, structured summary "
@@ -1259,7 +1321,7 @@ Structure your summary with ALL of the following sections:
 10. **key_figures_and_tables**: Array of descriptions of the most important figures/tables: {{"id": "Fig. 1", "description": "what it shows and why it matters"}}.
 
 Paper content:
-{paper_text[:12000]}
+{paper_text[: get_budgets("summary", user_id)["context"]]}
 
 Return JSON with all the above fields."""
 
@@ -1295,14 +1357,30 @@ def _resize_image_b64(image_b64: str, max_dim: int = MAX_IMAGE_DIMENSION) -> str
         return image_b64
 
 
-async def analyze_figure(paper_text: str, image_b64: str, question: str = "", user_id: str | None = None) -> dict:
+async def analyze_figure(
+    paper_text: str,
+    image_b64: str,
+    question: str = "",
+    user_id: str | None = None,
+    paper_id: str | None = None,
+) -> dict:
     """Analyze a figure from the paper using Claude's vision capability."""
     provider = get_fast_provider(user_id)
     if not isinstance(provider, AnthropicProvider):
         raise ValueError("Figure analysis requires an Anthropic provider with vision support.")
 
     image_b64 = _resize_image_b64(image_b64)
-    paper_text = _sanitize_user_text(paper_text, max_chars=4000)
+    ctx_cap = get_budgets("figure", user_id)["context"]
+    context_block = ""
+    if paper_id:
+        try:
+            from .retrieval import retrieve_for_paper
+            q = question or "figure methods results"
+            context_block, _ = await retrieve_for_paper([paper_id], q, max_chars=ctx_cap)
+        except Exception:
+            pass
+    if not context_block:
+        context_block = _sanitize_user_text(paper_text, max_chars=ctx_cap)[:ctx_cap]
     question = _sanitize_user_text(question, max_chars=2000)
 
     system = (
@@ -1317,7 +1395,7 @@ async def analyze_figure(paper_text: str, image_b64: str, question: str = "", us
 User's question: {question}
 
 Paper context (for reference):
-{paper_text[:4000]}
+{context_block}
 
 Analyze the figure and answer the question thoroughly.
 
@@ -1332,7 +1410,7 @@ Return JSON:
         user_text = f"""Analyze this figure from an academic paper in detail.
 
 Paper context (for reference):
-{paper_text[:4000]}
+{context_block}
 
 Describe what the figure shows, what the axes/labels mean, and how it relates to the paper.
 
@@ -1365,14 +1443,14 @@ def _get_figure_prompt(paper_text: str, question: str) -> tuple[str, str]:
 User's question: {question}
 
 Paper context (for reference):
-{paper_text[:4000]}
+{context_block}
 
 Answer the question thoroughly, referencing specific elements of the figure. Use markdown formatting."""
     else:
         user_text = f"""Analyze this figure from an academic paper in detail.
 
 Paper context (for reference):
-{paper_text[:4000]}
+{context_block}
 
 Describe what the figure shows, what the axes/labels mean, the key takeaways, and how it relates to the paper. Use markdown formatting."""
 

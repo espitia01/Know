@@ -10,13 +10,13 @@ import { selectionLooksLikeEquationSnippet } from "@/lib/selectionMathHeuristic"
 // the underlying prompt was the same shape. It's now folded into
 // Explain — users who want a question-first framing just type it
 // directly into the follow-up box on the resulting card.
-export type SelectionAction = "explain" | "derive" | "note";
+export type SelectionAction = "explain" | "derive" | "note" | "highlight";
 
 /** Snapshot only — live `DOMRect` from callers can mutate before React paints. */
 interface SelectionToolbarProps {
   text: string;
   rect: DOMRectReadOnly;
-  onAction: (action: SelectionAction, text: string) => void;
+  onAction: (action: SelectionAction, text: string, meta?: { highlightColor?: string }) => void;
   onDismiss: () => void;
   /** Demo / quota: when `used &gt;= limit`, actions are disabled. */
   selectionQuota?: { used: number; limit: number };
@@ -96,6 +96,8 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
     }
     return { top: Math.max(EDGE, top), left };
   });
+  const [highlightColor, setHighlightColor] = useState<"yellow" | "green" | "blue" | "pink">("yellow");
+  const [swatchOpen, setSwatchOpen] = useState(false);
   const [portalReady, setPortalReady] = useState(false);
   const mountedAt = useRef(Date.now());
   const { user } = useUserTier();
@@ -258,6 +260,46 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
           </button>
           );
         })}
+        {canAccess(tier, "notes") && (
+          <div className="relative flex items-center">
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onAction("highlight", cleanText, { highlightColor });
+              }}
+              data-tooltip="Mark this passage with a colored highlight — saved to Highlights."
+              className="know-toolbar-btn flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-[var(--text-xs)] font-medium text-foreground/90 transition-colors motion-safe:duration-150 hover:bg-accent/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              <span className={`inline-block h-2.5 w-2.5 rounded-full bg-yellow-200/80 ring-1 ring-border/40 ${highlightColor === "green" ? "!bg-emerald-200/80" : ""} ${highlightColor === "blue" ? "!bg-sky-200/80" : ""} ${highlightColor === "pink" ? "!bg-pink-200/80" : ""}`} />
+              Highlight
+            </button>
+            <button
+              type="button"
+              aria-label="Choose highlight color"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setSwatchOpen((v) => !v); }}
+              className="rounded-lg px-1 py-1.5 text-muted-foreground hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+            >
+              ▾
+            </button>
+            {swatchOpen && (
+              <div className="absolute bottom-full left-0 mb-1 flex gap-1 rounded-lg border border-border/60 bg-popover p-1 shadow-sm">
+                {(["yellow", "green", "blue", "pink"] as const).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    aria-label={c}
+                    onClick={() => { setHighlightColor(c); setSwatchOpen(false); }}
+                    className={`h-5 w-5 rounded-full ring-1 ring-border/50 ${c === "yellow" ? "bg-yellow-200/80" : c === "green" ? "bg-emerald-200/80" : c === "blue" ? "bg-sky-200/80" : "bg-pink-200/80"}`}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

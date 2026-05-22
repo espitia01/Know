@@ -13,6 +13,8 @@ export type SelectionAction = "explain" | "derive" | "followup";
 
 import type { PromptDepth } from "@/lib/server/promptDepth";
 import { depthSuffix } from "@/lib/server/promptDepth";
+import { buildPaperExcerpt } from "@/lib/server/paperExcerpt";
+import { contextBudget, selectionTextBudget } from "@/lib/server/promptBudgets";
 
 export type SelectionPromptInput = {
   action: SelectionAction;
@@ -21,10 +23,8 @@ export type SelectionPromptInput = {
   paperContext: string;
   question?: string;
   depth?: PromptDepth;
+  deepAnalysis?: boolean;
 };
-
-const PAPER_CONTEXT_CHAR_BUDGET = 6000;
-const SELECTION_CHAR_BUDGET = 4000;
 
 function trim(text: string, max: number): string {
   if (!text) return "";
@@ -40,11 +40,16 @@ export function buildSelectionPrompt(input: SelectionPromptInput): {
   const depthLine = depthSuffix(input.depth);
   const depthBlock = depthLine ? `\n\n${depthLine}` : "";
   const action = input.action;
-  const selectedText = trim(input.selectedText, SELECTION_CHAR_BUDGET);
-  const paperContext = trim(input.paperContext, PAPER_CONTEXT_CHAR_BUDGET);
+  const selBudget = selectionTextBudget(input.deepAnalysis ?? false);
+  const ctxBudget = contextBudget("selection", input.deepAnalysis ?? false);
+  const selectedText = trim(input.selectedText, selBudget);
+  const paperContext = buildPaperExcerpt(input.paperContext || "", {
+    maxChars: ctxBudget,
+    profile: "selection",
+  });
   const paperTitleLine = input.paperTitle ? `Paper: ${input.paperTitle}\n\n` : "";
   const paperContextText =
-    paperTitleLine + `Paper context (truncated):\n"""\n${paperContext}\n"""`;
+    paperTitleLine + `Paper context (section-aware excerpt):\n"""\n${paperContext}\n"""`;
 
   if (action === "explain") {
     return {

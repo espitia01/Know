@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # running until the cron is verified.
     disable_internal_cron_fallback: str = ""
 
+    # OpenAI embeddings for RAG (Track D)
+    embedding_provider: str = "openai"
+    embedding_model: str = "text-embedding-3-small"
+    openai_api_key: str = ""
+
     model_config = {"env_prefix": "KNOW_", "env_file": ".env", "extra": "ignore"}
 
 

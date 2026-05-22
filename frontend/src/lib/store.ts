@@ -8,6 +8,7 @@ import type {
   Assumption,
   SearchResult,
   Note,
+  Highlight,
   SelectionAnalysisResult,
   PaperSummary,
   CrossPaperQA,
@@ -19,6 +20,7 @@ import { MAX_SESSION_PAPERS } from "./workspaceFeatureFlags";
 export const EMPTY_SELECTION_LIST: SelectionAnalysisResult[] = [];
 export const EMPTY_QA_LIST: QAItem[] = [];
 export const EMPTY_NOTES_LIST: Note[] = [];
+export const EMPTY_HIGHLIGHTS_LIST: Highlight[] = [];
 export const EMPTY_ASSUMPTIONS_LIST: Assumption[] = [];
 export const EMPTY_SEARCH_LIST: SearchResult[] = [];
 
@@ -216,6 +218,12 @@ interface AppStore {
   addNoteForPaper: (paperId: string, n: Note) => void;
   updateNoteForPaper: (paperId: string, id: string, text: string) => void;
   removeNoteForPaper: (paperId: string, id: string) => void;
+
+  highlightsByPaper: Record<string, Highlight[]>;
+  setHighlightsForPaper: (paperId: string, highlights: Highlight[]) => void;
+  addHighlightForPaper: (paperId: string, highlight: Highlight) => void;
+  removeHighlightForPaper: (paperId: string, id: string) => void;
+  updateHighlightForPaper: (paperId: string, id: string, patch: Partial<Highlight>) => void;
 
   summaryByPaper: Record<string, PaperSummary | null>;
   setSummaryForPaper: (paperId: string, s: PaperSummary | null) => void;
@@ -755,6 +763,35 @@ export const useStore = create<AppStore>()(
             },
           };
         }),
+
+      highlightsByPaper: {},
+      setHighlightsForPaper: (paperId, highlights) =>
+        set((state) => ({
+          highlightsByPaper: { ...state.highlightsByPaper, [paperId]: highlights },
+        })),
+      addHighlightForPaper: (paperId, highlight) =>
+        set((state) => ({
+          highlightsByPaper: {
+            ...state.highlightsByPaper,
+            [paperId]: [highlight, ...(state.highlightsByPaper[paperId] ?? [])],
+          },
+        })),
+      removeHighlightForPaper: (paperId, id) =>
+        set((state) => ({
+          highlightsByPaper: {
+            ...state.highlightsByPaper,
+            [paperId]: (state.highlightsByPaper[paperId] ?? []).filter((h) => h.id !== id),
+          },
+        })),
+      updateHighlightForPaper: (paperId, id, patch) =>
+        set((state) => ({
+          highlightsByPaper: {
+            ...state.highlightsByPaper,
+            [paperId]: (state.highlightsByPaper[paperId] ?? []).map((h) =>
+              h.id === id ? { ...h, ...patch } : h,
+            ),
+          },
+        })),
 
       summaryByPaper: {},
       setSummaryForPaper: (paperId, summary) =>

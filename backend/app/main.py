@@ -695,6 +695,20 @@ def _cap_cross_paper_results(items: list) -> list:
     return capped
 
 
+def _backfill_cross_paper_provenance(items: list, paper_ids: list[str]) -> list:
+    """Ensure saved cross-paper rows carry asked_against when missing."""
+    out: list = []
+    for item in items:
+        if not isinstance(item, dict):
+            out.append(item)
+            continue
+        row = dict(item)
+        if not row.get("asked_against"):
+            row["asked_against"] = list(paper_ids)
+        out.append(row)
+    return out
+
+
 @app.post("/api/workspaces")
 async def save_user_workspace(body: dict, user_id: str = Depends(require_auth)):
     """Create or update a workspace.
@@ -740,7 +754,9 @@ async def save_user_workspace(body: dict, user_id: str = Depends(require_auth)):
     raw_results = body.get("cross_paper_results", [])
     if not isinstance(raw_results, list):
         raw_results = []
-    capped_results = _cap_cross_paper_results(raw_results)
+    capped_results = _cap_cross_paper_results(
+        _backfill_cross_paper_provenance(raw_results, validated_ids)
+    )
 
     result = save_workspace(
         user_id=user_id,

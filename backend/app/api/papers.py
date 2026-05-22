@@ -24,7 +24,7 @@ from ..services.pdf_parser import (
     save_paper,
     _forget_paper_lock,
 )
-from ..services.llm import extract_metadata, polish_note_from_selection
+from ..services.llm import extract_metadata, polish_note_from_selection, _sanitize_user_text
 from ..services import storage as cloud_storage
 from ..auth import require_auth
 from ..gating import (
@@ -158,6 +158,7 @@ async def upload_paper(
         save_paper(paper, user_id=user_id)
 
         background_tasks.add_task(_mirror_upload_to_storage, user_id, paper_id, content)
+        background_tasks.add_task(_embed_paper_background, user_id, paper_id)
 
         slot_reserved = False
         return paper
@@ -616,3 +617,96 @@ async def reextract_figures(paper_id: str, user_id: str = Depends(require_auth))
         except Exception:
             pass
         raise
+
+
+async def _embed_paper_background(user_id: str, paper_id: str) -> None:
+    try:
+        from ..services.retrieval import embed_paper
+        from ..services.embeddings import EmbeddingProviderError
+
+        paper = get_paper(paper_id, user_id=user_id)
+        if not paper or not (paper.raw_text or "").strip():
+            return
+        await embed_paper(paper_id, user_id, paper.raw_text)
+    except EmbeddingProviderError:
+        logger.info("Skipping embed for %s — provider not configured", paper_id)
+    except Exception:
+        logger.debug("Background embed failed for %s", paper_id, exc_info=True)
+
+
+_HIGHLIGHT_COLORS = frozenset({"yellow", "green", "blue", "pink"})
+
+
+@router.get("/{paper_id}/highlights")
+async def list_paper_highlights(paper_id: str, user_id: str = Depends(require_auth)):
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    from ..services.db import list_highlights
+
+    return {"items": list_highlights(user_id, paper_id)}
+
+
+@router.post("/{paper_id}/highlights")
+async def create_paper_highlight(paper_id: str, body: dict, user_id: str = Depends(require_auth)):
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    from ..services.db import create_highlight
+
+    selected = _sanitize_user_text(str(body.get("selected_text") or ""), max_chars=4000)
+    if not selected:
+        raise HTTPException(status_code=400, detail="selected_text required")
+    color = str(body.get("color") or "yellow").strip().lower()
+    if color not in _HIGHLIGHT_COLORS:
+        color = "yellow"
+    note_raw = body.get("note")
+    note = _sanitize_user_text(str(note_raw), max_chars=2000) if note_raw else None
+    page_hint = body.get("page_hint")
+    page = int(page_hint) if isinstance(page_hint, int) or (
+        isinstance(page_hint, str) and str(page_hint).isdigit()
+    ) else None
+
+    row = create_highlight(
+        user_id, paper_id,
+        selected_text=selected, color=color, note=note, page_hint=page,
+    )
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to create highlight")
+    return row
+
+
+@router.patch("/{paper_id}/highlights/{highlight_id}")
+async def update_paper_highlight(
+    paper_id: str, highlight_id: str, body: dict, user_id: str = Depends(require_auth),
+):
+    _validate_id(paper_id, "paper_id")
+    _validate_id(highlight_id, "highlight_id")
+    _verify_paper_owner(paper_id, user_id)
+    from ..services.db import update_highlight
+
+    color = body.get("color")
+    if color is not None:
+        color = str(color).strip().lower()
+        if color not in _HIGHLIGHT_COLORS:
+            color = "yellow"
+    note = body.get("note")
+    if note is not None:
+        note = _sanitize_user_text(str(note), max_chars=2000)
+
+    row = update_highlight(user_id, paper_id, highlight_id, color=color, note=note)
+    if not row:
+        raise HTTPException(status_code=404, detail="Highlight not found")
+    return row
+
+
+@router.delete("/{paper_id}/highlights/{highlight_id}")
+async def delete_paper_highlight(
+    paper_id: str, highlight_id: str, user_id: str = Depends(require_auth),
+):
+    _validate_id(paper_id, "paper_id")
+    _validate_id(highlight_id, "highlight_id")
+    _verify_paper_owner(paper_id, user_id)
+    from ..services.db import delete_highlight
+
+    if not delete_highlight(user_id, paper_id, highlight_id):
+        raise HTTPException(status_code=404, detail="Highlight not found")
+    return {"status": "deleted"}

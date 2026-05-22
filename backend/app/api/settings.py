@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..config import settings
 from ..models.schemas import SettingsResponse, SettingsUpdate
 from ..auth import require_auth
-from ..gating import get_allowed_models, enforce_model, canonicalize_model
+from ..gating import get_allowed_models, enforce_model, canonicalize_model, get_user_tier, TIER_LIMITS, DEEP_USAGE_MULTIPLIER, resolve_deep_analysis
 from ..services.appearance import clamp_background_opacity, normalize_background_preset
 from ..services.db import get_user, get_db
 
@@ -70,16 +70,45 @@ def _save_user_model_prefs(user_id: str, analysis_model: str | None = None, fast
         return False
 
 
+def _save_user_deep_analysis(user_id: str, enabled: bool) -> bool:
+    client = get_db()
+    if not client:
+        return False
+    try:
+        client.table("users").update({"deep_analysis_enabled": enabled}).eq("user_id", user_id).execute()
+        return True
+    except Exception as exc:
+        logger.error("Failed to save deep_analysis for %s: %s", user_id, exc.__class__.__name__)
+        return False
+
+
+def _settings_payload(user_id: str, analysis: str, fast: str) -> SettingsResponse:
+    tier = get_user_tier(user_id)
+    bg_preset, bg_opacity = _get_user_background_prefs(user_id)
+    user = get_user(user_id) or {}
+    deep_enabled = bool(user.get("deep_analysis_enabled"))
+    deep_allowed = tier == "researcher"
+    limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+    return SettingsResponse(
+        has_anthropic_key=True,
+        analysis_model=analysis,
+        fast_model=fast,
+        background_preset=bg_preset,
+        background_opacity=bg_opacity,
+        deep_analysis_enabled=deep_enabled if deep_allowed else False,
+        deep_analysis_allowed=deep_allowed,
+        deep_multiplier=DEEP_USAGE_MULTIPLIER,
+        tier=tier,
+        tier_limits=limits,
+    )
+
+
 @router.get("", response_model=SettingsResponse)
 async def get_settings(user_id: str = Depends(require_auth)):
     analysis, fast = _get_user_model_prefs(user_id)
     enforced_analysis = enforce_model(user_id, analysis)
     enforced_fast = enforce_model(user_id, fast)
-    return SettingsResponse(
-        has_anthropic_key=True,
-        analysis_model=enforced_analysis,
-        fast_model=enforced_fast,
-    )
+    return _settings_payload(user_id, enforced_analysis, enforced_fast)
 
 
 @router.put("", response_model=SettingsResponse)
@@ -136,6 +165,15 @@ async def update_settings(update: SettingsUpdate, user_id: str = Depends(require
         if opacity is not None:
             ok = _save_user_background_prefs(user_id, background_opacity=opacity) and ok
 
+    if update.deep_analysis_enabled is not None:
+        tier = get_user_tier(user_id)
+        if update.deep_analysis_enabled and tier != "researcher":
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "feature_locked", "message": "Deep analysis requires Researcher tier."},
+            )
+        ok = _save_user_deep_analysis(user_id, bool(update.deep_analysis_enabled)) and ok
+
     if not ok:
         raise HTTPException(
             status_code=500,
@@ -143,14 +181,7 @@ async def update_settings(update: SettingsUpdate, user_id: str = Depends(require
         )
 
     analysis, fast = _get_user_model_prefs(user_id)
-    bg_preset, bg_opacity = _get_user_background_prefs(user_id)
-    return SettingsResponse(
-        has_anthropic_key=True,
-        analysis_model=analysis,
-        fast_model=fast,
-        background_preset=bg_preset,
-        background_opacity=bg_opacity,
-    )
+    return _settings_payload(user_id, analysis, fast)
 
 
 @router.get("/models")

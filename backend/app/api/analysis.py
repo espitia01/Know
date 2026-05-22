@@ -81,6 +81,7 @@ from ..gating import (
     release_usage,
     resolve_analysis_model,
     resolve_fast_model,
+    get_usage_multiplier,
 )
 from ..api.papers import _validate_id, _verify_paper_owner
 
@@ -205,7 +206,8 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
         raise HTTPException(status_code=400, detail="No text selected")
 
     token = reserve_usage(
-        user_id, paper_id, "selection", model=resolve_fast_model(user_id)
+        user_id, paper_id, "selection", model=resolve_fast_model(user_id),
+        count=get_usage_multiplier(user_id),
     )
     try:
         result = await analyze_selection(paper.raw_text, selected_text, action, user_id=user_id)
@@ -310,7 +312,8 @@ async def explain(paper_id: str, req: ExplainRequest, user_id: str = Depends(req
         raise HTTPException(status_code=404, detail="Paper not found")
 
     token = reserve_usage(
-        user_id, paper_id, "selection", model=resolve_analysis_model(user_id)
+        user_id, paper_id, "selection", model=resolve_analysis_model(user_id),
+        count=get_usage_multiplier(user_id),
     )
     try:
         result = await explain_term(paper.raw_text, req.term, req.context, user_id=user_id)
@@ -345,7 +348,8 @@ async def skipped_steps(paper_id: str, body: dict, user_id: str = Depends(requir
     section_content = body.get("section", "")[:10000]
 
     token = reserve_usage(
-        user_id, paper_id, "selection", model=resolve_analysis_model(user_id)
+        user_id, paper_id, "selection", model=resolve_analysis_model(user_id),
+        count=get_usage_multiplier(user_id),
     )
     try:
         result = await find_skipped_steps(paper.raw_text, section_content, user_id=user_id)
@@ -454,7 +458,8 @@ async def derivation_exercise(paper_id: str, body: dict, user_id: str = Depends(
     section_content = body.get("section", "")[:10000]
 
     token = reserve_usage(
-        user_id, paper_id, "selection", model=resolve_analysis_model(user_id)
+        user_id, paper_id, "selection", model=resolve_analysis_model(user_id),
+        count=get_usage_multiplier(user_id),
     )
     try:
         result = await generate_derivation_exercise(paper.raw_text, section_content, user_id=user_id)
@@ -545,12 +550,15 @@ async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)
     # and the per-paper Q&A cap — otherwise users could bypass the cap by
     # clicking "Answer all" with many queued questions.
     n_questions = max(1, len(req.questions))
+    units = n_questions * get_usage_multiplier(user_id)
     token = reserve_usage(
         user_id, paper_id, "qa",
-        model=resolve_analysis_model(user_id), count=n_questions,
+        model=resolve_analysis_model(user_id), count=units,
     )
     try:
-        result = await answer_questions(paper.raw_text, req.questions, user_id=user_id)
+        result = await answer_questions(
+            paper.raw_text, req.questions, user_id=user_id, paper_id=paper_id,
+        )
         if isinstance(result, dict) and "items" in result:
             resp = QAResponse(**result)
         else:
@@ -656,10 +664,13 @@ async def figure_qa(paper_id: str, body: dict, user_id: str = Depends(require_au
     # Figure Q&A is a real Q&A call on the paper — count it against the
     # user's per-paper qa quota so figure questions can't bypass the cap.
     token = reserve_usage(
-        user_id, paper_id, "qa", model=resolve_fast_model(user_id)
+        user_id, paper_id, "qa", model=resolve_fast_model(user_id),
+        count=get_usage_multiplier(user_id),
     )
     try:
-        result = await analyze_figure(paper.raw_text, image_b64, question, user_id=user_id)
+        result = await analyze_figure(
+            paper.raw_text, image_b64, question, user_id=user_id, paper_id=paper_id,
+        )
         result["figure_id"] = fig_id
         result["question"] = question
 
@@ -732,13 +743,14 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
 
     model = resolve_analysis_model(user_id)
     n_questions = max(1, len(questions))
+    units = n_questions * get_usage_multiplier(user_id)
 
     tokens: list[dict] = []
     try:
         for idx, pid in enumerate(paper_ids):
             tokens.append(reserve_usage(
                 user_id, pid, "qa",
-                model=model, count=n_questions,
+                model=model, count=units,
                 record_daily=(idx == 0),
             ))
     except HTTPException:
@@ -747,7 +759,9 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
         raise
 
     try:
-        result = await answer_questions_multi(paper_texts, questions, user_id=user_id)
+        result = await answer_questions_multi(
+            paper_texts, questions, user_id=user_id, paper_ids=paper_ids,
+        )
         if isinstance(result, dict) and "items" in result:
             return result
         return {"items": result}
@@ -765,3 +779,51 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
             release_usage(t)
         logger.exception("Multi-paper Q&A failed")
         raise HTTPException(status_code=500, detail="Multi-paper Q&A failed. Please try again.")
+
+
+_CITED_BY_TTL_SECONDS = 7 * 24 * 3600
+
+
+@router.get("/{paper_id}/cited_by")
+async def get_cited_by(paper_id: str, user_id: str = Depends(require_auth)):
+    """Return cached cited_by; refetch if missing or older than 7 days."""
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    paper = get_paper(paper_id, user_id=user_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    cached = paper.cached_analysis.get("cited_by") if paper.cached_analysis else None
+    now = int(time.time())
+    if isinstance(cached, dict):
+        fetched_at = int(cached.get("fetched_at") or 0)
+        items = cached.get("items")
+        if fetched_at and (now - fetched_at) < _CITED_BY_TTL_SECONDS and isinstance(items, list):
+            return {"items": items, "cached": True, "fetched_at": fetched_at}
+
+    from ..services.citation_resolve import (
+        resolve_paper_s2_id,
+        fetch_cited_by,
+        _doi_norm,
+        _arxiv_from_blob,
+    )
+
+    head = (paper.raw_text or "")[:12000]
+    doi = _doi_norm(head) or ""
+    arxiv = _arxiv_from_blob(head) or ""
+    s2_id = await resolve_paper_s2_id(paper.title or "", doi or None, arxiv or None)
+    if not s2_id:
+        return {"items": [], "cached": False, "error": "s2_not_found"}
+
+    items = await fetch_cited_by(s2_id)
+    payload = {"items": items, "fetched_at": now, "s2_id": s2_id}
+
+    def _apply(p):
+        p.cached_analysis["cited_by"] = payload
+
+    try:
+        mutate_paper(paper_id, user_id, _apply)
+    except Exception:
+        logger.exception("Failed to persist cited_by for %s", paper_id)
+
+    return {"items": items, "cached": False, "fetched_at": now}

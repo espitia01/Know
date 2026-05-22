@@ -152,6 +152,7 @@ class SettingsUpdate(BaseModel):
     fast_model: str | None = None
     background_preset: str | None = None
     background_opacity: float | None = None
+    deep_analysis_enabled: bool | None = None
 
 
 class SettingsResponse(BaseModel):
@@ -160,3 +161,8 @@ class SettingsResponse(BaseModel):
     fast_model: str
     background_preset: str | None = None
     background_opacity: float | None = None
+    deep_analysis_enabled: bool = False
+    deep_analysis_allowed: bool = False
+    deep_multiplier: int = 2
+    tier: str = "free"
+    tier_limits: dict | None = None

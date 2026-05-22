@@ -866,3 +866,176 @@ def is_stripe_event_processed(event_id: str) -> bool:
     except Exception as e:
         logger.debug("is_stripe_event_processed check failed: %s", e)
         return False
+
+
+# ----------------------------------------------------------------
+# Highlights (Track C)
+# ----------------------------------------------------------------
+
+_HIGHLIGHT_COLORS = frozenset({"yellow", "green", "blue", "pink"})
+_MAX_HIGHLIGHTS = 200
+
+
+def list_highlights(user_id: str, paper_id: str) -> list[dict]:
+    client = get_db()
+    if not client:
+        return []
+    try:
+        res = (
+            client.table("highlights")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("paper_id", paper_id)
+            .order("created_at", desc=True)
+            .limit(_MAX_HIGHLIGHTS)
+            .execute()
+        )
+        return (res.data if res else None) or []
+    except Exception as e:
+        logger.warning("list_highlights failed: %s", e)
+        return []
+
+
+def create_highlight(
+    user_id: str,
+    paper_id: str,
+    *,
+    selected_text: str,
+    color: str = "yellow",
+    note: str | None = None,
+    page_hint: int | None = None,
+) -> dict | None:
+    client = get_db()
+    if not client:
+        return None
+    if color not in _HIGHLIGHT_COLORS:
+        color = "yellow"
+    row = {
+        "user_id": user_id,
+        "paper_id": paper_id,
+        "selected_text": selected_text,
+        "color": color,
+        "note": note,
+        "page_hint": page_hint,
+    }
+    try:
+        res = client.table("highlights").insert(row).execute()
+        if res and res.data:
+            return res.data[0] if isinstance(res.data, list) else res.data
+    except Exception as e:
+        logger.error("create_highlight failed: %s", e)
+    return None
+
+
+def update_highlight(
+    user_id: str,
+    paper_id: str,
+    highlight_id: str,
+    *,
+    color: str | None = None,
+    note: str | None = None,
+) -> dict | None:
+    client = get_db()
+    if not client:
+        return None
+    patch: dict[str, Any] = {}
+    if color is not None:
+        patch["color"] = color if color in _HIGHLIGHT_COLORS else "yellow"
+    if note is not None:
+        patch["note"] = note
+    if not patch:
+        return _safe_single(
+            client.table("highlights")
+            .select("*")
+            .eq("id", highlight_id)
+            .eq("user_id", user_id)
+            .eq("paper_id", paper_id)
+        )
+    try:
+        res = (
+            client.table("highlights")
+            .update(patch)
+            .eq("id", highlight_id)
+            .eq("user_id", user_id)
+            .eq("paper_id", paper_id)
+            .execute()
+        )
+        if res and res.data:
+            return res.data[0] if isinstance(res.data, list) else res.data
+    except Exception as e:
+        logger.error("update_highlight failed: %s", e)
+    return None
+
+
+def delete_highlight(user_id: str, paper_id: str, highlight_id: str) -> bool:
+    client = get_db()
+    if not client:
+        return False
+    try:
+        client.table("highlights").delete().eq("id", highlight_id).eq(
+            "user_id", user_id
+        ).eq("paper_id", paper_id).execute()
+        return True
+    except Exception as e:
+        logger.error("delete_highlight failed: %s", e)
+        return False
+
+
+# ----------------------------------------------------------------
+# Paper chunks / pgvector (Track D)
+# ----------------------------------------------------------------
+
+
+def delete_paper_chunks(paper_id: str) -> None:
+    client = get_db()
+    if not client:
+        return
+    try:
+        client.table("paper_chunks").delete().eq("paper_id", paper_id).execute()
+    except Exception as e:
+        logger.warning("delete_paper_chunks failed: %s", e)
+
+
+def insert_paper_chunks(paper_id: str, user_id: str, rows: list[dict]) -> None:
+    client = get_db()
+    if not client or not rows:
+        return
+    payload = []
+    for row in rows:
+        payload.append({
+            "paper_id": paper_id,
+            "user_id": user_id,
+            "chunk_index": row["chunk_index"],
+            "section": row.get("section"),
+            "text": row["text"],
+            "embedding": row["embedding"],
+        })
+    try:
+        client.table("paper_chunks").insert(payload).execute()
+    except Exception as e:
+        logger.error("insert_paper_chunks failed: %s", e)
+        raise
+
+
+def match_paper_chunks(
+    paper_ids: list[str],
+    query_embedding: list[float],
+    *,
+    match_count: int = 8,
+) -> list[dict]:
+    client = get_db()
+    if not client or not paper_ids:
+        return []
+    try:
+        res = client.rpc(
+            "match_paper_chunks",
+            {
+                "query_embedding": query_embedding,
+                "paper_ids": paper_ids,
+                "match_count": match_count,
+            },
+        ).execute()
+        return (res.data if res else None) or []
+    except Exception as e:
+        logger.info("match_paper_chunks RPC failed: %s", e)
+        return []

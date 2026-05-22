@@ -172,12 +172,26 @@ export function CrossPaperPanel() {
                       .map((t) => (t.length > 28 ? `${t.slice(0, 28)}…` : t))
                       .join(", ")}
                     {stale && (
-                      <span className="ml-1.5 rounded-md border border-border/55 bg-muted/[0.10] px-1.5 py-0.5 text-[var(--text-xs)] uppercase tracking-[0.06em] text-muted-foreground/80">
-                        Different papers
+                      <span
+                        className="ml-1.5 rounded-md border border-border/55 bg-muted/[0.08] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/85"
+                        title={`Asked against: ${(r.asked_against_titles ?? []).join(" • ")}`}
+                      >
+                        Stale membership
                       </span>
                     )}
                   </p>
                 )}
+                <div className="flex items-center justify-end gap-2">
+                  {stale && (
+                    <button
+                      type="button"
+                      onClick={() => void handleAsk(r.question)}
+                      className="text-[var(--text-xs)] font-medium text-muted-foreground transition-colors motion-safe:duration-150 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    >
+                      Rerun against current session
+                    </button>
+                  )}
+                </div>
                 <StreamingMarkdown>{r.answer}</StreamingMarkdown>
               </div>
             );

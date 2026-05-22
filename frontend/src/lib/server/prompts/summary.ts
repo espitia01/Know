@@ -19,21 +19,28 @@ const SHARED_RULES = `Output rules (strict):
 
 import type { PromptDepth } from "@/lib/server/promptDepth";
 import { depthSuffix } from "@/lib/server/promptDepth";
+import { buildPaperExcerpt } from "@/lib/server/paperExcerpt";
+import { contextBudget } from "@/lib/server/promptBudgets";
 
-const PAPER_CHAR_BUDGET = 8000;
-
-function buildContext(paperTitle: string, paperContext: string): string {
+function buildContext(
+  paperTitle: string,
+  paperContext: string,
+  deepAnalysis = false,
+): string {
   const titleLine = paperTitle ? `Paper title: ${paperTitle}\n\n` : "";
-  return (
-    titleLine +
-    `Paper content (truncated):\n"""\n${(paperContext || "").slice(0, PAPER_CHAR_BUDGET)}\n"""`
-  );
+  const maxChars = contextBudget("summary", deepAnalysis);
+  const excerpt = buildPaperExcerpt(paperContext || "", {
+    maxChars,
+    profile: "summary",
+  });
+  return titleLine + `Paper content (excerpt — section-aware):\n"""\n${excerpt}\n"""`;
 }
 
 export function buildSummaryLitePrompt(args: {
   paperTitle: string;
   paperContext: string;
   depth?: PromptDepth;
+  deepAnalysis?: boolean;
 }): { system: string; paperContextText: string; taskText: string } {
   const depthLine = depthSuffix(args.depth);
   const depthBlock = depthLine ? `\n\n${depthLine}` : "";
@@ -50,7 +57,7 @@ export function buildSummaryLitePrompt(args: {
     depthBlock,
   ].join("\n\n");
 
-  const paperContextText = buildContext(args.paperTitle, args.paperContext);
+  const paperContextText = buildContext(args.paperTitle, args.paperContext, args.deepAnalysis);
   const taskText = `Return the structured object. Always include a non-empty "overview" and "key_contributions".`;
 
   return { system, paperContextText, taskText };
@@ -60,6 +67,7 @@ export function buildSummaryDeepPrompt(args: {
   paperTitle: string;
   paperContext: string;
   depth?: PromptDepth;
+  deepAnalysis?: boolean;
 }): { system: string; paperContextText: string; taskText: string } {
   const depthLine = depthSuffix(args.depth);
   const depthBlock = depthLine ? `\n\n${depthLine}` : "";
@@ -78,7 +86,7 @@ export function buildSummaryDeepPrompt(args: {
     depthBlock,
   ].join("\n\n");
 
-  const paperContextText = buildContext(args.paperTitle, args.paperContext);
+  const paperContextText = buildContext(args.paperTitle, args.paperContext, args.deepAnalysis);
   const taskText = `Return the structured object. Always include non-empty "motivation", "methodology", "main_results", "discussion". Leave arrays empty when a section truly does not apply.`;
 
   return { system, paperContextText, taskText };

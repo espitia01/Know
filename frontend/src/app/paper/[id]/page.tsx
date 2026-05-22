@@ -1442,7 +1442,11 @@ function PaperContent() {
     setSelection(null);
   }, []);
 
-  const handleSelectionAction = useCallback(async (action: SelectionAction, text: string) => {
+  const handleSelectionAction = useCallback(async (
+    action: SelectionAction,
+    text: string,
+    meta?: { highlightColor?: string },
+  ) => {
     setSelection(null);
     window.getSelection()?.removeAllRanges();
 
@@ -1453,6 +1457,20 @@ function PaperContent() {
     const startedFor = activePaperId;
     const stillOnStartedPaper = () =>
       useStore.getState().paper?.id === startedFor;
+
+    if (action === "highlight") {
+      const color = meta?.highlightColor ?? "yellow";
+      try {
+        const row = await api.createHighlight(startedFor, {
+          selected_text: text,
+          color,
+        });
+        useStore.getState().addHighlightForPaper(startedFor, row);
+      } catch (e) {
+        console.error("Failed to save highlight:", e);
+      }
+      return;
+    }
 
     if (action === "note") {
       setPanelVisible(true);

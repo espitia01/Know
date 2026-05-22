@@ -29,7 +29,6 @@ import { promptDepthForModel } from "@/lib/modelLabels";
 import { requireUser, AuthError } from "@/lib/server/auth";
 import {
   fetchPaperContext,
-  fetchUserModelPrefs,
   resolveStreamModelOverride,
   reserveUsage,
   releaseUsage,
@@ -37,6 +36,7 @@ import {
   InternalApiError,
   type UsageToken,
 } from "@/lib/server/internalApi";
+import { fetchUserPrefs } from "@/lib/server/userPrefs";
 import { SelectionResultSchema, type SelectionResult } from "@/lib/server/schemas";
 import {
   buildSelectionPrompt,
@@ -126,12 +126,14 @@ export async function POST(
   // 3. Fetch paper context + Settings model prefs (selection = fast model).
   let paper: { title: string; raw_text: string };
   let fastModel: string;
+  let deepAnalysis = false;
   try {
     const [ctx, prefs] = await Promise.all([
       fetchPaperContext(paperId, user.userId),
-      fetchUserModelPrefs(user.userId),
+      fetchUserPrefs(user.userId),
     ]);
     paper = { title: ctx.title, raw_text: ctx.raw_text };
+    deepAnalysis = prefs.deep_analysis;
     fastModel = await resolveStreamModelOverride(
       user.userId,
       body,
@@ -178,6 +180,7 @@ export async function POST(
     paperContext: paper.raw_text,
     question,
     depth,
+    deepAnalysis,
   });
 
   let releasedOnError = false;

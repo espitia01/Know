@@ -497,6 +497,13 @@ export function PdfViewer({
         .join("\x1f");
     }),
   );
+  const highlightsSig = useStore(
+    useShallow((s) => {
+      const list = paperId ? s.highlightsByPaper[paperId] : undefined;
+      if (!list?.length) return "";
+      return list.map((h) => `${h.id}:${h.color}:${h.selected_text.length}`).join("\x1f");
+    }),
+  );
   const regionSig = useStore(
     useShallow((s) => {
       const list = paperId ? s.pdfRegionHighlightsByPaper[paperId] : undefined;
@@ -1061,12 +1068,21 @@ export function PdfViewer({
       const localRects: Array<{ x: number; y: number; w: number; h: number }> = [];
       for (const r of rects) {
         const div = document.createElement("div");
-        div.className = "know-selection-underline";
-        // `data-action` drives the per-action highlight tint declared
-        // in globals.css. Falling back to "explain" preserves the
-        // original blue for any legacy cached entries that pre-date
-        // the action field.
-        div.setAttribute("data-action", action);
+        div.className = (entry as SelectionAnalysisResult & { highlight_color?: string }).highlight_color
+          ? "know-highlight-rect"
+          : "know-selection-underline";
+        if ((entry as SelectionAnalysisResult & { highlight_color?: string }).highlight_color) {
+          div.setAttribute(
+            "data-color",
+            (entry as SelectionAnalysisResult & { highlight_color?: string }).highlight_color!,
+          );
+        } else {
+          // `data-action` drives the per-action highlight tint declared
+          // in globals.css. Falling back to "explain" preserves the
+          // original blue for any legacy cached entries that pre-date
+          // the action field.
+          div.setAttribute("data-action", action);
+        }
         const x = r.left - pageRect.left;
         const y = r.top - pageRect.top;
         div.style.left = `${x}px`;
@@ -1316,9 +1332,17 @@ export function PdfViewer({
       pending = new Set();
       const history =
         useStore.getState().selectionHistoryByPaper[paperId ?? ""] ?? [];
+      const highlights = useStore.getState().highlightsByPaper[paperId ?? ""] ?? [];
+      const highlightEntries = highlights.map((h) => ({
+        action: "note" as const,
+        selected_text: h.selected_text,
+        highlight_color: h.color,
+        clientKey: h.id,
+      }));
+      const paintHistory = [...history, ...highlightEntries];
       const regions = useStore.getState().pdfRegionHighlightsByPaper[paperId ?? ""] ?? EMPTY_REGIONS;
       for (const el of items) {
-        drawUnderlinesForPage(el, history);
+        drawUnderlinesForPage(el, paintHistory);
         const pageNum = parseInt(el.getAttribute("data-page-number") || "0", 10);
         if (pageNum > 0) drawRegionHighlightsForPage(el, pageNum, regions);
       }
@@ -1399,13 +1423,21 @@ export function PdfViewer({
     if (!container) return;
     const history =
       useStore.getState().selectionHistoryByPaper[paperId ?? ""] ?? [];
+    const highlights = useStore.getState().highlightsByPaper[paperId ?? ""] ?? [];
+    const highlightEntries = highlights.map((h) => ({
+      action: "note" as const,
+      selected_text: h.selected_text,
+      highlight_color: h.color,
+      clientKey: h.id,
+    }));
+    const paintHistory = [...history, ...highlightEntries];
     const regions = useStore.getState().pdfRegionHighlightsByPaper[paperId ?? ""] ?? EMPTY_REGIONS;
     container.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]").forEach((pageEl) => {
-      drawUnderlinesForPage(pageEl, history);
+      drawUnderlinesForPage(pageEl, paintHistory);
       const pageNum = parseInt(pageEl.getAttribute("data-page-number") || "0", 10);
       if (pageNum > 0) drawRegionHighlightsForPage(pageEl, pageNum, regions);
     });
-  }, [selectionHistorySig, regionSig, drawUnderlinesForPage, drawRegionHighlightsForPage, paperId, scale]);
+  }, [selectionHistorySig, highlightsSig, regionSig, drawUnderlinesForPage, drawRegionHighlightsForPage, paperId, scale]);
 
   const handlePageRender = useCallback((pageNum: number) => {
     const el = containerRef.current?.querySelector(`[data-page-number="${pageNum}"]`) as HTMLElement | null;

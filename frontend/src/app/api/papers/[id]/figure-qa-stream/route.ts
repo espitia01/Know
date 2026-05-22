@@ -18,7 +18,6 @@ import { requireUser, AuthError } from "@/lib/server/auth";
 import {
   fetchFigurePng,
   fetchPaperContext,
-  fetchUserModelPrefs,
   resolveStreamModelOverride,
   reserveUsage,
   releaseUsage,
@@ -26,6 +25,9 @@ import {
   InternalApiError,
   type UsageToken,
 } from "@/lib/server/internalApi";
+import { fetchUserPrefs } from "@/lib/server/userPrefs";
+import { retrievePaperContext } from "@/lib/server/retrieval";
+import { contextBudget } from "@/lib/server/promptBudgets";
 import { FigureAnalysisSchema, type FigureAnalysis } from "@/lib/server/schemas";
 import { buildFigurePrompt } from "@/lib/server/prompts/figure";
 import { ANTHROPIC_CACHE_EPHEMERAL } from "@/lib/server/promptCache";
@@ -79,14 +81,16 @@ export async function POST(
   let paper: { title: string; raw_text: string };
   let figure: { bytes: Uint8Array; mediaType: string };
   let fastModel: string;
+  let deepAnalysis = false;
   try {
     const [ctx, png, prefs] = await Promise.all([
       fetchPaperContext(paperId, user.userId),
       fetchFigurePng(paperId, figureId, user.userId),
-      fetchUserModelPrefs(user.userId),
+      fetchUserPrefs(user.userId),
     ]);
     paper = { title: ctx.title, raw_text: ctx.raw_text };
     figure = png;
+    deepAnalysis = prefs.deep_analysis;
     fastModel = await resolveStreamModelOverride(user.userId, body, prefs.fast_model);
   } catch (e) {
     if (e instanceof InternalApiError) {
@@ -117,10 +121,18 @@ export async function POST(
   }
 
   const depth = promptDepthForModel(fastModel);
+  const retrieval = await retrievePaperContext({
+    userId: user.userId,
+    paperIds: [paperId],
+    query: question || "figure methods results discussion",
+    maxChars: contextBudget("figure", deepAnalysis),
+  });
   const { system, paperContextText, taskText } = buildFigurePrompt({
     paperContext: paper.raw_text,
     question,
     depth,
+    deepAnalysis,
+    retrievedContext: retrieval.context || undefined,
   });
 
   let releasedOnError = false;

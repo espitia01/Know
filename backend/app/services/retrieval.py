@@ -1,0 +1,119 @@
+"""pgvector retrieval over paper_chunks with excerpt fallback."""
+
+from __future__ import annotations
+
+import logging
+import re
+from typing import Sequence
+
+from .embeddings import EmbeddingProviderError, embed_query
+from .db import get_db, match_paper_chunks
+
+logger = logging.getLogger(__name__)
+
+_CHUNK_SIZE = 1200
+_CHUNK_OVERLAP = 200
+
+
+def _chunk_text(raw: str) -> list[str]:
+    """Split paper text into overlapping chunks for embedding."""
+    text = (raw or "").strip()
+    if not text:
+        return []
+    # Prefer paragraph boundaries
+    paras = re.split(r"\n\s*\n", text)
+    chunks: list[str] = []
+    buf = ""
+    for para in paras:
+        para = para.strip()
+        if not para:
+            continue
+        candidate = f"{buf}\n\n{para}".strip() if buf else para
+        if len(candidate) <= _CHUNK_SIZE:
+            buf = candidate
+            continue
+        if buf:
+            chunks.append(buf)
+        # Long paragraph: hard-split
+        while len(para) > _CHUNK_SIZE:
+            chunks.append(para[:_CHUNK_SIZE])
+            para = para[_CHUNK_SIZE - _CHUNK_OVERLAP :]
+        buf = para
+    if buf:
+        chunks.append(buf)
+    return chunks
+
+
+async def embed_paper(paper_id: str, user_id: str, raw_text: str) -> int:
+    """Chunk and embed a paper. Returns number of chunks stored."""
+    from .embeddings import embed_texts
+    from .db import delete_paper_chunks, insert_paper_chunks
+
+    chunks = _chunk_text(raw_text)
+    if not chunks:
+        return 0
+    try:
+        vectors = await embed_texts(chunks)
+    except EmbeddingProviderError:
+        raise
+    delete_paper_chunks(paper_id)
+    rows = [
+        {"chunk_index": i, "text": c, "embedding": v, "section": None}
+        for i, (c, v) in enumerate(zip(chunks, vectors))
+    ]
+    insert_paper_chunks(paper_id, user_id, rows)
+    return len(rows)
+
+
+async def retrieve_for_paper(
+    paper_ids: Sequence[str],
+    query: str,
+    *,
+    max_chars: int = 8000,
+    top_k: int = 8,
+) -> tuple[str, list[dict]]:
+    """Return concatenated retrieved context and hit metadata.
+
+    On embedding/pgvector failure, returns ("", []) so callers can fall back.
+    """
+    q = (query or "").strip()
+    if not q or not paper_ids:
+        return "", []
+
+    try:
+        query_vec = await embed_query(q)
+    except EmbeddingProviderError as exc:
+        logger.info("Retrieval skipped (embed): %s", exc.code)
+        return "", []
+
+    hits = match_paper_chunks(list(paper_ids), query_vec, match_count=top_k)
+    if not hits:
+        return "", []
+
+    parts: list[str] = []
+    meta: list[dict] = []
+    total = 0
+    for hit in hits:
+        content = (hit.get("text") or hit.get("content") or "").strip()
+        if not content:
+            continue
+        snippet = content
+        if total + len(snippet) > max_chars:
+            remaining = max_chars - total
+            if remaining <= 200:
+                break
+            snippet = snippet[:remaining]
+        parts.append(snippet)
+        dist = hit.get("distance")
+        meta.append({
+            "paper_id": hit.get("paper_id"),
+            "chunk_index": hit.get("chunk_index"),
+            "similarity": (1.0 - float(dist)) if dist is not None else None,
+        })
+        total += len(snippet) + 2
+        if total >= max_chars:
+            break
+
+    if not parts:
+        return "", []
+    return "\n\n---\n\n".join(parts), meta

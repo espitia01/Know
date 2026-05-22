@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { api, type PriorWork } from "@/lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, type CitedByItem, type PriorWork } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { AnalysisSection } from "@/components/analysis/AnalysisSection";
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
@@ -101,6 +101,26 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
   const currentPaperRef = useRef(paperId);
   currentPaperRef.current = paperId;
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [citedBy, setCitedBy] = useState<CitedByItem[]>([]);
+  const [citedLoading, setCitedLoading] = useState(false);
+  const [citedError, setCitedError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCitedLoading(true);
+    setCitedError(null);
+    void api.getCitedBy(paperId).then((res) => {
+      if (cancelled) return;
+      setCitedBy(res.items ?? []);
+      if (res.error === "s2_not_found") setCitedError("not_found");
+      setCitedLoading(false);
+    }).catch(() => {
+      if (cancelled) return;
+      setCitedError("fetch_failed");
+      setCitedLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [paperId]);
 
   const handleRunPrepare = async () => {
     const targetId = paperId;
@@ -179,6 +199,40 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
   return (
     <div className="space-y-8 motion-safe:animate-fade-in">
       <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground">{RELATED_TAB_INTRO}</p>
+
+      <AnalysisSection title="Cited by" count={citedBy.length}>
+        {citedLoading ? (
+          <p className="text-[var(--text-sm)] text-muted-foreground">Loading citing papers…</p>
+        ) : citedError === "not_found" ? (
+          <EmptyState title="Couldn't find this paper on Semantic Scholar." body="" />
+        ) : citedBy.length === 0 ? (
+          <EmptyState title="No known papers cite this one yet." body="" />
+        ) : (
+          <ol className="mt-3 list-none space-y-2 p-0">
+            {citedBy.map((item, i) => {
+              const authors = (item.authors ?? []).slice(0, 3).join(", ");
+              const href =
+                (item.doi ? `https://doi.org/${item.doi}` : "") ||
+                (item.arxiv ? `https://arxiv.org/abs/${item.arxiv}` : "") ||
+                item.url ||
+                (item.s2_id ? `https://www.semanticscholar.org/paper/${item.s2_id}` : "");
+              const label = `${i + 1}. ${authors}${authors ? " " : ""}(${item.year ?? "n.d."}) — ${item.title}`;
+              return (
+                <li key={item.s2_id || item.title} className="text-[var(--text-sm)] leading-relaxed text-foreground/90">
+                  {href ? (
+                    <a href={href} target="_blank" rel="noopener noreferrer" className="underline decoration-border underline-offset-[3px] hover:decoration-foreground/60">
+                      {label}
+                    </a>
+                  ) : (
+                    label
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </AnalysisSection>
+
       {topicalClusters?.length ? (
         topicalClusters.map((sec, si) => {
           const items = sec.items ?? [];

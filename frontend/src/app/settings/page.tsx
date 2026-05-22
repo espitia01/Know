@@ -30,6 +30,18 @@ const MODEL_SHORT: Record<string, string> = {
   "claude-opus-4-7": "Opus",
 };
 
+function formatLimit(value: unknown): string {
+  if (value === -1) return "Unlimited";
+  if (typeof value === "number") return String(value);
+  return "—";
+}
+
+function formatDeepLimit(value: unknown, mult: number): string {
+  if (value === -1) return "Unlimited";
+  if (typeof value === "number" && value > 0) return String(Math.floor(value / mult));
+  return "—";
+}
+
 function UsageBar({ label, used, limit, hint }: { label: string; used: number; limit: number; hint?: string }) {
   const unlimited = limit === -1;
   const pct = unlimited ? 0 : Math.min(100, limit > 0 ? (used / limit) * 100 : 0);
@@ -68,6 +80,10 @@ function SettingsContent() {
   const [models, setModels] = useState<string[]>([]);
   const [analysisModel, setAnalysisModel] = useState("");
   const [fastModel, setFastModel] = useState("");
+  const [deepAnalysis, setDeepAnalysis] = useState(false);
+  const [deepAllowed, setDeepAllowed] = useState(false);
+  const [deepMultiplier, setDeepMultiplier] = useState(2);
+  const [tierLimits, setTierLimits] = useState<Record<string, unknown> | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -106,6 +122,10 @@ function SettingsContent() {
     api.getSettings().then((s) => {
       setAnalysisModel(s.analysis_model);
       setFastModel(s.fast_model);
+      setDeepAnalysis(!!s.deep_analysis_enabled);
+      setDeepAllowed(!!s.deep_analysis_allowed);
+      setDeepMultiplier(s.deep_multiplier ?? 2);
+      setTierLimits((s.tier_limits as Record<string, unknown>) ?? null);
     }).catch(() => setLoadError("Failed to load settings."));
     api.getModels().then((r) => setModels(r.models)).catch(() => {});
   }, [showModels, tier]);
@@ -125,12 +145,14 @@ function SettingsContent() {
     setSaved(false);
     setSaveError("");
     try {
-      const update: Record<string, string> = {};
+      const update: Record<string, string | boolean> = {};
       if (analysisModel) update.analysis_model = analysisModel;
       if (fastModel) update.fast_model = fastModel;
+      if (deepAllowed) update.deep_analysis_enabled = deepAnalysis;
       const result = await api.updateSettings(update);
       setAnalysisModel(result.analysis_model);
       setFastModel(result.fast_model);
+      setDeepAnalysis(!!result.deep_analysis_enabled);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
@@ -245,6 +267,39 @@ function SettingsContent() {
                     View plans
                   </button>
                 </p>
+              )}
+            </div>
+
+            <div className="glass rounded-2xl p-6 space-y-4">
+              <p className="text-[14px] font-semibold text-foreground">Deep analysis (Researcher)</p>
+              <p className="text-[12px] text-muted-foreground leading-relaxed">
+                Use 2× larger prompt budgets across Summary, Selection, Q&A, Assumptions, and Figure Q&A — more of the paper reaches the model. Each call consumes 2× your per-paper quota.
+              </p>
+              <label className={`flex items-center gap-3 ${!deepAllowed ? "opacity-50" : ""}`}>
+                <input
+                  type="checkbox"
+                  checked={deepAnalysis}
+                  disabled={!deepAllowed}
+                  onChange={(e) => setDeepAnalysis(e.target.checked)}
+                  className="accent-foreground"
+                />
+                <span className="text-[13px] text-foreground">Enable deep analysis</span>
+              </label>
+              {tierLimits && (
+                <div className="grid grid-cols-2 gap-3 pt-2 text-[11px] text-muted-foreground">
+                  <div>
+                    <p className="font-medium text-foreground/90 mb-1">Standard</p>
+                    <p>Q&A {formatLimit(tierLimits.qa_per_paper)} / paper</p>
+                    <p>Selections {formatLimit(tierLimits.selections_per_paper)} / paper</p>
+                    <p>Context ~3k tokens / call</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground/90 mb-1">Deep ({deepMultiplier}×)</p>
+                    <p>Q&A {formatDeepLimit(tierLimits.qa_per_paper, deepMultiplier)} / paper</p>
+                    <p>Selections {formatDeepLimit(tierLimits.selections_per_paper, deepMultiplier)} / paper</p>
+                    <p>Context ~6k tokens / call</p>
+                  </div>
+                </div>
               )}
             </div>
 
