@@ -1,0 +1,125 @@
+@page {
+  size: var(--paper-size, Letter);
+  margin: 2cm;
+  @bottom-center {
+    content: counter(page);
+    font-size: 9pt;
+    color: #666;
+  }
+}
+
+:root {
+  --paper-size: Letter;
+}
+
+body {
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 11pt;
+  line-height: 1.55;
+  color: #111;
+}
+
+.cover {
+  page-break-after: always;
+  text-align: center;
+  padding-top: 30%;
+}
+
+.cover h1 {
+  font-size: 22pt;
+  font-weight: 600;
+  margin-bottom: 0.5em;
+}
+
+.cover .authors {
+  font-size: 12pt;
+  color: #444;
+}
+
+.cover .meta {
+  margin-top: 2em;
+  font-size: 10pt;
+  color: #666;
+}
+
+section[data-key] {
+  page-break-before: always;
+}
+
+section[data-key] h2 {
+  font-size: 16pt;
+  font-weight: 600;
+  border-bottom: 1px solid #ddd;
+  padding-bottom: 0.3em;
+  margin-bottom: 1em;
+}
+
+.placeholder {
+  color: #888;
+  font-style: italic;
+}
+
+.math-display {
+  display: block;
+  text-align: center;
+  overflow-x: auto;
+  margin: 0.8em 0;
+}
+
+.math-inline {
+  display: inline;
+  vertical-align: baseline;
+}
+
+ul, ol {
+  padding-left: 1.4em;
+}
+
+li {
+  margin-bottom: 0.35em;
+}
+
+figure {
+  margin: 1em 0;
+  text-align: center;
+}
+
+figure img {
+  max-width: 100%;
+  max-height: 400px;
+}
+
+figure figcaption {
+  font-size: 9pt;
+  color: #555;
+  margin-top: 0.4em;
+}
+
+.qa-item {
+  margin-bottom: 1.2em;
+}
+
+.qa-item .question {
+  font-weight: 600;
+}
+
+.toc {
+  page-break-after: always;
+}
+
+.toc h2 {
+  font-size: 14pt;
+}
+
+.toc ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.toc li {
+  margin-bottom: 0.4em;
+}
+
+.compact h2 {
+  font-size: 13pt;
+}
