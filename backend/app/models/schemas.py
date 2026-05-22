@@ -166,6 +166,7 @@ class SettingsUpdate(BaseModel):
 
 class SettingsResponse(BaseModel):
     has_anthropic_key: bool
+    has_openai_key: bool = False
     analysis_model: str
     fast_model: str
     background_preset: str | None = None

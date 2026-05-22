@@ -30,10 +30,14 @@ from .services.db import (
     get_daily_model_count,
     reserve_daily_api_usage,
     reserve_daily_model_usage,
+    reserve_daily_export_usage,
+    release_daily_export_usage,
     reserve_paper_usage,
     release_daily_api_usage,
     release_daily_model_usage,
     release_paper_usage,
+    count_active_exports,
+    _MAX_ACTIVE_EXPORTS,
 )
 
 ALL_MODELS = [
@@ -85,6 +89,7 @@ TIER_LIMITS: dict[str, dict] = {
         "models": {"claude-haiku-4-5"},
         "best_model": "claude-haiku-4-5",
         "daily_api_calls": 10,
+        "export_daily": {"pdf": 0, "pptx": 0, "podcast": 0},
         "per_model_daily": {
             "claude-haiku-4-5": 10,
         },
@@ -93,10 +98,11 @@ TIER_LIMITS: dict[str, dict] = {
         "max_papers": 25,
         "qa_per_paper": 100,
         "selections_per_paper": 100,
-        "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex"},
+        "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "export-pdf", "export-pptx"},
         "models": {"claude-haiku-4-5", "claude-sonnet-4-6"},
         "best_model": "claude-sonnet-4-6",
         "daily_api_calls": 100,
+        "export_daily": {"pdf": 5, "pptx": 3, "podcast": 0},
         "per_model_daily": {
             "claude-haiku-4-5": 100,
             "claude-sonnet-4-6": 40,
@@ -106,10 +112,11 @@ TIER_LIMITS: dict[str, dict] = {
         "max_papers": -1,
         "qa_per_paper": -1,
         "selections_per_paper": -1,
-        "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "multi-qa"},
+        "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "multi-qa", "export-pdf", "export-pptx", "export-podcast"},
         "models": {"claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7"},
         "best_model": "claude-opus-4-7",
         "daily_api_calls": 300,
+        "export_daily": {"pdf": 20, "pptx": 10, "podcast": 3},
         "per_model_daily": {
             "claude-haiku-4-5": 300,
             "claude-sonnet-4-6": 150,
@@ -435,6 +442,76 @@ def get_per_model_daily_usage(user_id: str) -> list[dict]:
     return out
 
 
+_EXPORT_FEATURE_MAP = {"pdf": "export-pdf", "pptx": "export-pptx", "podcast": "export-podcast"}
+
+
+def reserve_export_usage(user_id: str, fmt: str) -> dict:
+    """Atomically check tier access and reserve one daily export slot."""
+    feature = _EXPORT_FEATURE_MAP.get(fmt)
+    if not feature:
+        raise HTTPException(status_code=400, detail=f"Unknown export format: {fmt}")
+
+    tier = check_feature_access(user_id, feature)
+    limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+    export_daily = limits.get("export_daily") or {}
+    max_for_fmt = int(export_daily.get(fmt, 0))
+    if max_for_fmt <= 0:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "export_tier",
+                "format": fmt,
+                "tier": tier,
+                "message": f"Export to {fmt.upper()} requires a higher plan.",
+            },
+        )
+
+    active = count_active_exports(user_id)
+    if active >= _MAX_ACTIVE_EXPORTS:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "export_concurrent",
+                "limit": _MAX_ACTIVE_EXPORTS,
+                "message": "Too many exports in progress. Wait for one to finish.",
+            },
+        )
+
+    today = _today_iso()
+    res = reserve_daily_export_usage(user_id, today, fmt, 1, max_for_fmt)
+    if res == -1:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "daily_export_cap",
+                "format": fmt,
+                "limit": max_for_fmt,
+                "tier": tier,
+                "message": (
+                    f"Daily {fmt.upper()} export limit reached "
+                    f"({max_for_fmt}/day on {tier} plan)."
+                ),
+            },
+        )
+
+    return {"user_id": user_id, "format": fmt, "today": today, "count": 1}
+
+
+def release_export_usage(token: dict | None) -> None:
+    if not token:
+        return
+    user_id = token.get("user_id") or ""
+    fmt = token.get("format") or ""
+    today = token.get("today") or _today_iso()
+    count = int(token.get("count") or 1)
+    if not user_id or not fmt:
+        return
+    try:
+        release_daily_export_usage(user_id, today, fmt, count)
+    except Exception:
+        pass
+
+
 def resolve_deep_analysis(user_id: str) -> bool:
     """Researcher-only opt-in for expanded prompt budgets."""
     user = get_user(user_id)
@@ -449,7 +526,11 @@ DEEP_USAGE_MULTIPLIER = 2
 
 
 def get_usage_multiplier(user_id: str | None) -> int:
-    """How many quota units a single call consumes (2 when deep analysis is on)."""
+    """How many quota units a single call consumes (2 when deep analysis is on).
+
+    Export jobs do NOT use this multiplier — they have separate per-format
+    daily caps via ``reserve_export_usage``.
+    """
     if user_id and resolve_deep_analysis(user_id):
         return DEEP_USAGE_MULTIPLIER
     return 1

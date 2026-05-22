@@ -1115,3 +1115,194 @@ def match_paper_chunks(
     except Exception as e:
         logger.info("match_paper_chunks RPC failed: %s", e)
         return []
+
+
+# ----------------------------------------------------------------
+# Exports (Prompt 11)
+# ----------------------------------------------------------------
+
+ALLOWED_EXPORT_SECTIONS = frozenset({
+    "prepare", "summary", "assumptions", "qa", "notes", "highlights",
+    "figures", "selection", "cross", "related",
+})
+
+_EXPORT_FORMATS = frozenset({"pdf", "pptx", "podcast"})
+_MAX_ACTIVE_EXPORTS = 2
+
+
+def reserve_daily_export_usage(
+    user_id: str, today_str: str, fmt: str, delta: int, max_calls: int
+) -> int:
+    if delta <= 0 or fmt not in _EXPORT_FORMATS:
+        return 0
+    client = get_db()
+    if not client:
+        return -1
+    res = client.rpc("reserve_daily_export_usage", {
+        "p_user_id": user_id,
+        "p_date": today_str,
+        "p_format": fmt,
+        "p_delta": int(delta),
+        "p_max": int(max_calls),
+    }).execute()
+    if res and res.data is not None:
+        data = res.data
+        if isinstance(data, list) and data:
+            data = list(data[0].values())[0] if isinstance(data[0], dict) else data[0]
+        return int(data)
+    return -1
+
+
+def release_daily_export_usage(
+    user_id: str, today_str: str, fmt: str, delta: int
+) -> None:
+    if delta <= 0 or fmt not in _EXPORT_FORMATS:
+        return
+    client = get_db()
+    if not client:
+        return
+    try:
+        client.rpc("release_daily_export_usage", {
+            "p_user_id": user_id,
+            "p_date": today_str,
+            "p_format": fmt,
+            "p_delta": int(delta),
+        }).execute()
+    except Exception as e:
+        logger.error("release_daily_export_usage failed for %s: %s", user_id, e)
+
+
+def count_active_exports(user_id: str) -> int:
+    client = get_db()
+    if not client:
+        return 0
+    try:
+        res = (
+            client.table("exports")
+            .select("id", count="exact")
+            .eq("user_id", user_id)
+            .in_("status", ["pending", "running"])
+            .execute()
+        )
+        return int(res.count or 0) if res else 0
+    except Exception as e:
+        logger.warning("count_active_exports failed: %s", e)
+        return 0
+
+
+def create_export_row(
+    user_id: str,
+    paper_id: str,
+    fmt: str,
+    sections: list[str],
+    options: dict,
+) -> dict | None:
+    client = get_db()
+    if not client:
+        return None
+    row = {
+        "user_id": user_id,
+        "paper_id": paper_id,
+        "format": fmt,
+        "status": "pending",
+        "sections": sections,
+        "options": options or {},
+    }
+    try:
+        res = client.table("exports").insert(row).execute()
+        if res and res.data:
+            return res.data[0] if isinstance(res.data, list) else res.data
+    except Exception as e:
+        logger.error("create_export_row failed: %s", e)
+    return None
+
+
+def get_export_row(export_id: str, user_id: str) -> dict | None:
+    client = get_db()
+    if not client:
+        return None
+    return _safe_single(
+        client.table("exports")
+        .select("*")
+        .eq("id", export_id)
+        .eq("user_id", user_id)
+    )
+
+
+def get_export_row_by_id(export_id: str) -> dict | None:
+    client = get_db()
+    if not client:
+        return None
+    return _safe_single(client.table("exports").select("*").eq("id", export_id))
+
+
+def list_export_rows(user_id: str, *, limit: int = 20) -> list[dict]:
+    client = get_db()
+    if not client:
+        return []
+    try:
+        res = (
+            client.table("exports")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("requested_at", desc=True)
+            .limit(min(limit, 50))
+            .execute()
+        )
+        return (res.data if res else None) or []
+    except Exception as e:
+        logger.warning("list_export_rows failed: %s", e)
+        return []
+
+
+def update_export_row(export_id: str, user_id: str, patch: dict) -> dict | None:
+    client = get_db()
+    if not client or not patch:
+        return None
+    try:
+        res = (
+            client.table("exports")
+            .update(patch)
+            .eq("id", export_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if res and res.data:
+            return res.data[0] if isinstance(res.data, list) else res.data
+    except Exception as e:
+        logger.error("update_export_row failed: %s", e)
+    return None
+
+
+def delete_export_row(export_id: str, user_id: str) -> bool:
+    client = get_db()
+    if not client:
+        return False
+    try:
+        client.table("exports").delete().eq("id", export_id).eq(
+            "user_id", user_id
+        ).execute()
+        return True
+    except Exception as e:
+        logger.error("delete_export_row failed: %s", e)
+        return False
+
+
+def list_stale_exports(cutoff_iso: str, *, limit: int = 200) -> list[dict]:
+    """Return completed exports older than cutoff for TTL cleanup."""
+    client = get_db()
+    if not client:
+        return []
+    try:
+        res = (
+            client.table("exports")
+            .select("id, user_id, storage_path")
+            .eq("status", "completed")
+            .lt("completed_at", cutoff_iso)
+            .limit(limit)
+            .execute()
+        )
+        return (res.data if res else None) or []
+    except Exception as e:
+        logger.warning("list_stale_exports failed: %s", e)
+        return []

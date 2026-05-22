@@ -73,6 +73,20 @@ def create_signed_url(user_id: str, path: str, expires_in: int = 600) -> str | N
         return None
 
 
+def delete_file(user_id: str, path: str) -> bool:
+    """Delete a single object from Supabase Storage. Returns True on success."""
+    bucket = _get_bucket()
+    if not bucket:
+        return False
+    full_path = f"{user_id}/{path}"
+    try:
+        bucket.remove([full_path])
+        return True
+    except Exception as e:
+        logger.error("Storage delete failed for %s: %s", full_path, e)
+        return False
+
+
 def delete_paper_files(user_id: str, paper_id: str) -> None:
     """Delete the PDF and all figures for a paper from Supabase Storage."""
     bucket = _get_bucket()

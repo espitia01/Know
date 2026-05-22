@@ -117,6 +117,7 @@ def _settings_payload(user_id: str, analysis: str, fast: str) -> SettingsRespons
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
     return SettingsResponse(
         has_anthropic_key=True,
+        has_openai_key=bool((settings.openai_api_key or "").strip()),
         analysis_model=analysis,
         fast_model=fast,
         background_preset=bg_preset,
