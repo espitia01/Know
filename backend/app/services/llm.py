@@ -1448,6 +1448,82 @@ Return JSON:
     return _safe_parse_json(raw)
 
 
+PODCAST_FORBIDDEN = [
+    "yeah", "right?", "so...", "basically", "honestly", "totally",
+    "kind of", "you know", "let's dive in", "deep dive", "wow",
+]
+
+
+async def generate_podcast_script(
+    paper,
+    sections: list[str],
+    *,
+    target_minutes: int = 8,
+    user_id: str | None = None,
+    cache: dict | None = None,
+) -> tuple[list[dict], dict]:
+    """Generate segmented podcast script JSON. Returns (segments, meta)."""
+    from .paper_excerpt import build_prepare_excerpt
+    from .exports.podcast_render import validate_podcast_script
+
+    provider = get_provider(user_id)
+    target_words = target_minutes * 150
+    paper_text = build_prepare_excerpt(paper.raw_text or "", max_chars=6000)
+
+    section_blocks = []
+    content = cache or {}
+    for key in sections:
+        from .exports.podcast_render import build_section_text
+
+        text = build_section_text(key, {}, content)
+        if text.strip():
+            section_blocks.append(f"[{key}]\n{text[:2500]}")
+
+    system = (
+        f"You are scripting a single-speaker ~{target_minutes}-minute audio walkthrough "
+        "of an academic paper. The narrator is an experienced researcher giving a "
+        "graduate-level seminar talk. The tone is precise, calm, and academically rigorous — "
+        "closer to a methodical lecturer than a friendly explainer. No co-host, no rhetorical "
+        "questions to a partner. The narrator is alone with the listener.\n\n"
+        f"Output ONLY valid JSON: {{\"segments\": [{{\"segment\": \"...\", \"text\": \"...\"}}]}}.\n"
+        f"Total spoken text: ~{target_words} words.\n"
+        "Segment IDs: intro, section:summary, section:qa, section:notes, section:highlights, "
+        "section:selection, section:assumptions, section:figures, section:cross, section:related, outro.\n"
+        "Include only segments whose source data is present. intro ≤60 words; outro ≤50 words.\n"
+        "No LaTeX. No markdown. Speak math out loud.\n"
+        "Forbidden: Yeah, Right?, Basically, let's dive in, deep dive, wow, co-host phrasing.\n"
+        "Use first-person singular or third-person on authors. Per-segment 40–220 words; split with :a/:b if longer."
+    )
+
+    user = (
+        f"Paper: {paper.title}\nAuthors: {', '.join(paper.authors or [])}\n\n"
+        f"Paper excerpt:\n{paper_text}\n\n"
+        f"Section content:\n" + "\n\n".join(section_blocks)
+    )
+
+    meta = {"regenerations": 0, "words_total": 0, "model_tokens_in": 0, "model_tokens_out": 0}
+    segments: list[dict] = []
+
+    for attempt in range(2):
+        raw = await provider.complete(system, user, max_tokens=4000, cache_user_prefix=user)
+        parsed = _safe_parse_json(raw)
+        segs = parsed.get("segments") if isinstance(parsed, dict) else []
+        if not isinstance(segs, list):
+            segs = []
+        segments = [
+            {"segment": s.get("segment", f"part:{i}"), "text": s.get("text", "")}
+            for i, s in enumerate(segs)
+            if isinstance(s, dict)
+        ]
+        ok, _ = validate_podcast_script(segments)
+        if ok:
+            break
+        meta["regenerations"] += 1
+
+    meta["words_total"] = sum(len(s.get("text", "").split()) for s in segments)
+    return segments, meta
+
+
 def _get_figure_prompt(paper_text: str, question: str) -> tuple[str, str]:
     """Return (system, user_text) for figure analysis."""
     paper_text = _sanitize_user_text(paper_text, max_chars=4000)
