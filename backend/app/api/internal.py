@@ -181,6 +181,11 @@ async def internal_usage_reserve(body: dict = Body(...)):
     model = body.get("model")
     count = int(body.get("count") or 1)
     record_daily = bool(body.get("record_daily", True))
+    # Callers can opt out of the deep multiplier when they've already applied
+    # it client-side (e.g. a future batched stream that pre-scales count by
+    # the question count × deep factor). Default is False so today's Next.js
+    # streams keep getting the multiplier applied here.
+    apply_deep_multiplier = bool(body.get("apply_deep_multiplier", True))
 
     if not user_id or not kind:
         raise HTTPException(status_code=400, detail="Missing user_id or kind")
@@ -190,7 +195,7 @@ async def internal_usage_reserve(body: dict = Body(...)):
         model = enforce_model(user_id, model)
 
     deep_kinds = {"qa", "selection", "summary", "figure"}
-    if kind in deep_kinds:
+    if apply_deep_multiplier and kind in deep_kinds:
         count = count * get_usage_multiplier(user_id)
 
     token = reserve_usage(

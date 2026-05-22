@@ -135,30 +135,36 @@ export function buildPaperExcerpt(
     return text.slice(0, maxChars);
   }
 
-  const sections: { name: string; body: string; prio: number }[] = [];
+  type Section = { name: string; body: string; prio: number; order: number };
+  const sections: Section[] = [];
   for (let i = 0; i < matches.length; i++) {
     const start = matches[i].start;
     const end = i + 1 < matches.length ? matches[i + 1].start : text.length;
     const name = matches[i].name;
     const body = text.slice(start, end).trim();
-    sections.push({ name, body, prio: sectionPriority(name) });
+    sections.push({ name, body, prio: sectionPriority(name), order: i });
   }
 
-  sections.sort((a, b) => a.prio - b.prio);
-
-  const chunks: string[] = [];
+  // Pick which sections fit using priority (so high-signal sections survive
+  // a tight budget), then render them in the paper's original order — that
+  // way the excerpt still reads like the source instead of an LLM-only,
+  // Methods-first reshuffle that a human auditor would find disorienting.
+  const byPriority = [...sections].sort((a, b) => a.prio - b.prio);
+  const selected = new Map<number, { name: string; body: string }>();
   let used = head.length + 2;
-
-  for (const { name, body } of sections) {
+  for (const { name, body, order } of byPriority) {
     const nameL = name.toLowerCase();
     const full = isFullSection(profile, nameL);
     const piece = pieceForSection(profile, name, body, full);
     const block = `## ${name}\n${piece}`.trim();
     if (used + block.length + 4 > maxChars) continue;
-    chunks.push(block);
+    selected.set(order, { name, body: block });
     used += block.length + 4;
     if (used >= maxChars - 200) break;
   }
+  const chunks = [...selected.keys()]
+    .sort((a, b) => a - b)
+    .map((k) => selected.get(k)!.body);
 
   if (chunks.length === 0) {
     return text.slice(0, maxChars);

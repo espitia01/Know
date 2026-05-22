@@ -96,7 +96,21 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
     }
     return { top: Math.max(EDGE, top), left };
   });
-  const [highlightColor, setHighlightColor] = useState<"yellow" | "green" | "blue" | "pink">("yellow");
+  type HighlightColor = "yellow" | "green" | "blue" | "pink";
+  // Persist the user's last picked highlight color across selections. The
+  // toolbar unmounts/remounts on each new drag, so without this every pick
+  // would reset to yellow even when the user just deliberately chose green.
+  const [highlightColor, setHighlightColorState] = useState<HighlightColor>(() => {
+    if (typeof window === "undefined") return "yellow";
+    const saved = window.localStorage.getItem("know.highlightColor");
+    return saved === "green" || saved === "blue" || saved === "pink" ? saved : "yellow";
+  });
+  const setHighlightColor = useCallback((c: HighlightColor) => {
+    setHighlightColorState(c);
+    if (typeof window !== "undefined") {
+      try { window.localStorage.setItem("know.highlightColor", c); } catch { /* quota / private mode */ }
+    }
+  }, []);
   const [swatchOpen, setSwatchOpen] = useState(false);
   const [portalReady, setPortalReady] = useState(false);
   const mountedAt = useRef(Date.now());

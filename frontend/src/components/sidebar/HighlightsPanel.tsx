@@ -23,6 +23,9 @@ export function HighlightsPanel({ paperId }: HighlightsPanelProps) {
   const updateHighlightForPaper = useStore((s) => s.updateHighlightForPaper);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Local draft so the textarea reflects external updates (delete-then-re-add,
+  // or a future inline editor) while still letting the user type freely.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -49,9 +52,11 @@ export function HighlightsPanel({ paperId }: HighlightsPanelProps) {
   };
 
   const handleNoteBlur = async (h: Highlight, note: string) => {
-    updateHighlightForPaper(paperId, h.id, { note });
+    const trimmed = note.trim();
+    if (trimmed === (h.note ?? "")) return;
+    updateHighlightForPaper(paperId, h.id, { note: trimmed });
     try {
-      await api.updateHighlight(paperId, h.id, { note });
+      await api.updateHighlight(paperId, h.id, { note: trimmed });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
     }
@@ -89,10 +94,18 @@ export function HighlightsPanel({ paperId }: HighlightsPanelProps) {
             </span>
           </div>
           <textarea
-            defaultValue={h.note ?? ""}
+            value={drafts[h.id] ?? h.note ?? ""}
+            onChange={(e) => setDrafts((d) => ({ ...d, [h.id]: e.target.value }))}
             placeholder="Add a note…"
             rows={2}
-            onBlur={(e) => void handleNoteBlur(h, e.target.value.trim())}
+            onBlur={(e) => {
+              void handleNoteBlur(h, e.target.value);
+              setDrafts((d) => {
+                const { [h.id]: _unused, ...rest } = d;
+                void _unused;
+                return rest;
+              });
+            }}
             className="w-full resize-none rounded-md border border-border/50 bg-transparent px-2 py-1.5 text-[var(--text-sm)] text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           />
           <button

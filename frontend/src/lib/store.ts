@@ -450,6 +450,7 @@ export const useStore = create<AppStore>()(
           summaryErrorByPaper: {},
           summaryLoadingByPaper: {},
           notesByPaper: {},
+          highlightsByPaper: {},
           selectionResultByPaper: {},
           selectionHistoryByPaper: {},
           selectionLoadingByPaper: {},

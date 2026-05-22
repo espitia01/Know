@@ -808,9 +808,20 @@ async def get_cited_by(paper_id: str, user_id: str = Depends(require_auth)):
         _arxiv_from_blob,
     )
 
-    head = (paper.raw_text or "")[:12000]
-    doi = _doi_norm(head) or ""
-    arxiv = _arxiv_from_blob(head) or ""
+    # Prefer DOI/arXiv that Prepare already extracted into prior_work — those
+    # are scoped to the paper's own front-matter, not a citation buried in the
+    # references list. Fall back to the very top of raw_text (first ~800 chars)
+    # so we still catch the masthead block on papers without cached metadata.
+    cached_meta = (paper.cached_analysis or {}).get("paper_metadata") if paper.cached_analysis else None
+    doi = ""
+    arxiv = ""
+    if isinstance(cached_meta, dict):
+        doi = (cached_meta.get("doi") or "").strip()
+        arxiv = (cached_meta.get("arxiv") or "").strip()
+    if not doi and not arxiv:
+        head = (paper.raw_text or "")[:800]
+        doi = _doi_norm(head) or ""
+        arxiv = _arxiv_from_blob(head) or ""
     s2_id = await resolve_paper_s2_id(paper.title or "", doi or None, arxiv or None)
     if not s2_id:
         return {"items": [], "cached": False, "error": "s2_not_found"}

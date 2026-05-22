@@ -70,6 +70,32 @@ def _save_user_model_prefs(user_id: str, analysis_model: str | None = None, fast
         return False
 
 
+def _save_user_background_prefs(
+    user_id: str,
+    *,
+    background_preset: str | None = None,
+    background_opacity: float | None = None,
+) -> bool:
+    """Persist appearance prefs. Each call writes only the supplied field so
+    the route's two-step preset/opacity update doesn't clobber the other."""
+    client = get_db()
+    if not client:
+        return False
+    updates: dict = {}
+    if background_preset is not None:
+        updates["background_preset"] = background_preset
+    if background_opacity is not None:
+        updates["background_opacity"] = float(background_opacity)
+    if not updates:
+        return True
+    try:
+        client.table("users").update(updates).eq("user_id", user_id).execute()
+        return True
+    except Exception as exc:
+        logger.error("Failed to save background prefs for %s: %s", user_id, exc.__class__.__name__)
+        return False
+
+
 def _save_user_deep_analysis(user_id: str, enabled: bool) -> bool:
     client = get_db()
     if not client:

@@ -13,6 +13,11 @@ logger = logging.getLogger(__name__)
 
 _CHUNK_SIZE = 1200
 _CHUNK_OVERLAP = 200
+# Hard ceiling on raw_text fed into chunking. The internal-paper endpoint
+# already caps at 200k chars; we keep a parallel ceiling here so a direct
+# script-level call (backfill, retry) can't generate an unbounded
+# embedding bill on a pathologically large paper.
+_MAX_EMBED_CHARS = 300_000
 
 
 def _chunk_text(raw: str) -> list[str]:
@@ -49,7 +54,8 @@ async def embed_paper(paper_id: str, user_id: str, raw_text: str) -> int:
     from .embeddings import embed_texts
     from .db import delete_paper_chunks, insert_paper_chunks
 
-    chunks = _chunk_text(raw_text)
+    capped = (raw_text or "")[:_MAX_EMBED_CHARS]
+    chunks = _chunk_text(capped)
     if not chunks:
         return 0
     try:

@@ -1434,6 +1434,19 @@ function PaperContent() {
 
   useEffect(() => { refreshUsage(); }, [refreshUsage, usageRefreshKey]);
 
+  useEffect(() => {
+    if (!activePaperId) return;
+    let cancelled = false;
+    void api
+      .listHighlights(activePaperId)
+      .then((res) => {
+        if (cancelled) return;
+        useStore.getState().setHighlightsForPaper(activePaperId, res.items ?? []);
+      })
+      .catch(() => { /* highlights are best-effort hydration */ });
+    return () => { cancelled = true; };
+  }, [activePaperId]);
+
   const handleTextSelected = useCallback((text: string, rect: DOMRect) => {
     setSelection({ text, rect });
   }, []);

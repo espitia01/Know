@@ -31,9 +31,9 @@ async def main() -> None:
 
     paper_ids: list[str] = list(args.paper_id or [])
     if args.all:
-        from app.services.db import list_papers
+        from app.services.db import list_papers_meta
 
-        rows = list_papers(args.user_id, limit=500)
+        rows = list_papers_meta(args.user_id, limit=500)
         paper_ids = [r["id"] for r in rows if r.get("id")]
 
     total = 0
