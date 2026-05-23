@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useCallback, type CSSProperties }
 import { Streamdown } from "streamdown";
 import { createMathPlugin } from "@streamdown/math";
 import { code } from "@streamdown/code";
-import { api, getAuthHeadersSync } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { READER_FAMILY_TO_VAR } from "@/lib/readerFont";
 import { selectionHasMath } from "@/lib/selectionMath";
@@ -15,9 +15,6 @@ import { ReaderFontMenu } from "./ReaderFontMenu";
 
 const math = createMathPlugin({ singleDollarTextMath: true });
 const STREAMDOWN_PLUGINS = { math, code };
-
-const OCR_IMAGE_RE = /^(?:p\d+-img-\d+|fig-\d+)\.png$/;
-const ocrBlobCache = new Map<string, string>();
 
 /**
  * Streamdown's default URL transform blocks `blob:` and `data:` URLs in
@@ -30,12 +27,6 @@ function readerUrlTransform(url: string): string | null {
   if (url.startsWith("/") || url.startsWith("#")) return url;
   if (url.startsWith("https://") || url.startsWith("http://")) return url;
   if (url.startsWith("mailto:")) return url;
-  // Bare OCR image ids (e.g. `p0-img-0.png`, `fig-1.png`) are NOT
-  // safe URLs but our custom <img> component below knows how to fetch
-  // them through the authenticated proxy. We pass them through here
-  // unchanged; if we returned null, Streamdown would strip the src
-  // before the custom component ever ran.
-  if (OCR_IMAGE_RE.test(url)) return url;
   return null;
 }
 
@@ -353,55 +344,38 @@ function stripPageNumberFooters(markdown: string): string {
 }
 
 /**
- * Pre-fetch every OCR image referenced in the markdown and replace its
- * id with the resulting blob: URL. This is far more reliable than
- * passing a custom `img` component to Streamdown — at least one
- * version of Streamdown silently bypasses user-provided img overrides,
- * and the browser's "[alt]" fallback for failed image loads is what
- * the user kept seeing.
+ * Rewrite every OCR image id in the markdown to its same-origin proxy
+ * URL. Previous approaches (custom <img> component, async fetch +
+ * blob:URL hydration, urlTransform whitelist) all had a single point
+ * of failure: if anything went wrong in JS land — Bearer token stale,
+ * Streamdown bypassing components.img, proxy hot-reloading — the raw
+ * `p0-img-0.png` id was left in the markdown and the browser tried to
+ * load it as a relative URL, showing the broken-image alt text.
  *
- * Blob URLs sail through Streamdown's defaultUrlTransform untouched
- * AND don't need auth headers (the blob is already in memory by the
- * time the `<img>` element mounts).
+ * Rewriting to `/api/papers/{paperId}/ocr-image/{imageId}` lets the
+ * browser load the image with a plain <img> request, which sends the
+ * Clerk session cookie same-origin. No Bearer header needed, no
+ * fetch lifecycle, no async race. If the user is signed in, the
+ * image loads; if not, the proxy returns 401 and we still show a
+ * better fallback than the raw id.
  */
-async function hydrateOcrImageReferences(
+function rewriteOcrImageReferences(
   markdown: string,
   paperId: string,
   trial: boolean,
-): Promise<string> {
-  const referenced = new Set<string>();
-  // Capture both markdown image syntax `(p0-img-0.png)` and bare
-  // identifiers that may appear in alt-text positions.
-  const re = /(?:p\d+-img-\d+|fig-\d+)\.png/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(markdown)) !== null) {
-    referenced.add(match[0]);
-  }
-  if (referenced.size === 0) return markdown;
+): string {
+  // Process longer ids first so a substring (e.g. `p1-img-1.png`) of a
+  // longer one (e.g. `p1-img-10.png`) doesn't get rewritten by mistake.
+  const ids = Array.from(
+    new Set(markdown.match(/(?:p\d+-img-\d+|fig-\d+)\.png/g) ?? []),
+  ).sort((a, b) => b.length - a.length);
+  if (ids.length === 0) return markdown;
 
-  const headers = trial ? undefined : getAuthHeadersSync();
   let out = markdown;
-  await Promise.all(
-    [...referenced].map(async (id) => {
-      const cacheKey = `${paperId}:${id}`;
-      let blobUrl = ocrBlobCache.get(cacheKey);
-      if (!blobUrl) {
-        try {
-          const res = await fetch(api.getOcrImageUrl(paperId, id, trial), {
-            headers,
-            cache: "force-cache",
-          });
-          if (!res.ok) return;
-          const blob = await res.blob();
-          blobUrl = URL.createObjectURL(blob);
-          ocrBlobCache.set(cacheKey, blobUrl);
-        } catch {
-          return;
-        }
-      }
-      out = out.split(id).join(blobUrl);
-    }),
-  );
+  for (const id of ids) {
+    const proxied = api.getOcrImageUrl(paperId, id, trial);
+    out = out.split(id).join(proxied);
+  }
   return out;
 }
 
@@ -486,7 +460,7 @@ export function MarkdownReader({
         joined = wrapBylineParagraph(joined);
         joined = wrapFigureCaptions(joined);
         joined = collapseFragmentedMathParagraphs(joined);
-        joined = await hydrateOcrImageReferences(joined, paperId, trial);
+        joined = rewriteOcrImageReferences(joined, paperId, trial);
 
         if (!cancelled) {
           setBody(joined);
