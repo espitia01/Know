@@ -8,7 +8,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from ...models.schemas import ParsedPaper
-from ..pdf_parser import get_figure_path
+from ..pdf_parser import resolve_figure_path
 from .content import SECTION_LABELS, gather_export_context, slugify_title
 from .markdown_html import markdown_to_html
 
@@ -42,7 +42,7 @@ def render_pdf(export_row: dict, paper: ParsedPaper, cache: dict) -> tuple[bytes
         fid = f.get("id") if isinstance(f, dict) else getattr(f, "id", None)
         entry = dict(f) if isinstance(f, dict) else f.model_dump()
         if fid and include_figures:
-            p = get_figure_path(paper.id, fid)
+            p = resolve_figure_path(paper.id, fid, export_row["user_id"])
             if p and p.exists():
                 entry["local_path"] = str(p.resolve())
         enriched.append(entry)

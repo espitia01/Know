@@ -61,6 +61,7 @@ from ..services.pdf_parser import (
     append_cached_analysis_local,
     get_paper,
     get_figure_path,
+    load_figure_png_bytes,
     mutate_paper,
 )
 from ..services.citation_resolve import (
@@ -549,7 +550,9 @@ async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)
     # A batch of N questions consumes N units against both the daily budget
     # and the per-paper Q&A cap — otherwise users could bypass the cap by
     # clicking "Answer all" with many queued questions.
-    n_questions = max(1, len(req.questions))
+    if not req.questions:
+        raise HTTPException(status_code=400, detail="At least one question is required")
+    n_questions = len(req.questions)
     units = n_questions * get_usage_multiplier(user_id)
     token = reserve_usage(
         user_id, paper_id, "qa",
@@ -655,11 +658,11 @@ async def figure_qa(paper_id: str, body: dict, user_id: str = Depends(require_au
         raise HTTPException(status_code=400, detail="No figure_id provided")
     _validate_id(fig_id, "fig_id")
 
-    fig_path = get_figure_path(paper_id, fig_id)
-    if not fig_path:
+    fig_bytes = load_figure_png_bytes(paper_id, fig_id, user_id)
+    if not fig_bytes:
         raise HTTPException(status_code=404, detail="Figure not found")
 
-    image_b64 = base64.b64encode(fig_path.read_bytes()).decode("utf-8")
+    image_b64 = base64.b64encode(fig_bytes).decode("utf-8")
 
     # Figure Q&A is a real Q&A call on the paper — count it against the
     # user's per-paper qa quota so figure questions can't bypass the cap.
@@ -747,12 +750,11 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
 
     tokens: list[dict] = []
     try:
-        for idx, pid in enumerate(paper_ids):
-            tokens.append(reserve_usage(
-                user_id, pid, "qa",
-                model=model, count=units,
-                record_daily=(idx == 0),
-            ))
+        tokens.append(reserve_usage(
+            user_id, paper_ids[0], "qa",
+            model=model, count=units,
+            record_daily=True,
+        ))
     except HTTPException:
         for t in tokens:
             release_usage(t)
@@ -762,6 +764,19 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
         result = await answer_questions_multi(
             paper_texts, questions, user_id=user_id, paper_ids=paper_ids,
         )
+        payload = result if isinstance(result, dict) and "items" in result else {"items": result}
+        primary_id = paper_ids[0]
+
+        def _apply_cross(p):
+            entry = {
+                "questions": questions,
+                "items": payload.get("items") or [],
+                "paper_ids": paper_ids,
+            }
+            append_capped(p.cached_analysis, "cross_paper_qa", entry)
+
+        mutate_paper(primary_id, user_id, _apply_cross)
+
         if isinstance(result, dict) and "items" in result:
             return result
         return {"items": result}

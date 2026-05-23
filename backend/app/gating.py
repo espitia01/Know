@@ -167,7 +167,13 @@ def check_paper_limit(user_id: str) -> str:
         return tier
 
     from .services.db import check_and_increment_paper_count
-    if not check_and_increment_paper_count(user_id, max_papers):
+    slot = check_and_increment_paper_count(user_id, max_papers)
+    if slot is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Database unavailable — cannot verify paper limit.",
+        )
+    if not slot:
         raise HTTPException(
             status_code=403,
             detail=f"Paper limit reached ({max_papers} papers on {tier} plan). Upgrade to add more.",

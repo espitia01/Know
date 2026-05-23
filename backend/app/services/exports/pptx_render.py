@@ -11,7 +11,7 @@ from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Pt
 
 from ...models.schemas import ParsedPaper
-from ..pdf_parser import get_figure_path
+from ..pdf_parser import resolve_figure_path
 from .content import SECTION_LABELS, gather_export_context, slugify_title
 from .math_render import _INLINE_RE, _DISPLAY_RE, render_math_png_bytes
 
@@ -163,7 +163,7 @@ def render_pptx(export_row: dict, paper: ParsedPaper, cache: dict) -> tuple[byte
                 fid = f.get("id") if isinstance(f, dict) else getattr(f, "id", None)
                 slide = prs.slides.add_slide(prs.slide_layouts[6])
                 _set_slide_bg(slide, theme["bg"])
-                path = get_figure_path(paper.id, fid) if fid else None
+                path = resolve_figure_path(paper.id, fid, export_row["user_id"]) if fid else None
                 if path and path.exists():
                     slide.shapes.add_picture(str(path), Inches(0.5), Inches(1), height=Inches(5))
                 cap = f.get("caption") if isinstance(f, dict) else getattr(f, "caption", "")

@@ -662,7 +662,17 @@ function PaperContent() {
   const startCoord = useRef(0);
   const startSize = useRef(0);
 
-  const [selection, setSelection] = useState<{ text: string; rect: DOMRect } | null>(null);
+  const [selection, setSelection] = useState<{
+    text: string;
+    rect: DOMRect;
+    regions?: Array<{
+      pageNum: number;
+      xPct: number;
+      yPct: number;
+      wPct: number;
+      hPct: number;
+    }>;
+  } | null>(null);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [allFolders, setAllFolders] = useState<string[]>([]);
   const [folderInput, setFolderInput] = useState("");
@@ -822,7 +832,8 @@ function PaperContent() {
       setPaper(cached);
       initialLoadDone.current = true;
       setLoading(false);
-    } else if (!initialLoadDone.current) {
+    } else {
+      setPaper(null);
       setLoading(true);
     }
 
@@ -976,6 +987,9 @@ function PaperContent() {
           (session: { items?: { question: string; answer: string }[] }) => session.items || [],
         );
         const liveQa = snap.qaResultsByPaper[pid] ?? [];
+        // Server cache can lag behind in-session answers — never replace a
+        // longer live list with a shorter stale hydrate payload.
+        if (liveQa.length > allItems.length) return;
         const qaSame =
           liveQa.length === allItems.length &&
           liveQa.every((item, i) => item.question === allItems[i]?.question);
@@ -1437,10 +1451,18 @@ function PaperContent() {
   useEffect(() => {
     if (!activePaperId) return;
     let cancelled = false;
+    const epochAtStart =
+      useStore.getState().highlightsFetchEpochByPaper[activePaperId] ?? 0;
     void api
       .listHighlights(activePaperId)
       .then((res) => {
         if (cancelled) return;
+        if (
+          (useStore.getState().highlightsFetchEpochByPaper[activePaperId] ?? 0) !==
+          epochAtStart
+        ) {
+          return;
+        }
         useStore.getState().setHighlightsForPaper(activePaperId, res.items ?? []);
       })
       .catch(() => { /* highlights are best-effort hydration */ });
@@ -1464,18 +1486,22 @@ function PaperContent() {
         scroll_pct: row.scroll_pct,
       });
       const currentTab = useStore.getState().activeTab;
-      // Only restore the tab when the user hasn't picked one yet this
-      // session. `activeTab` defaults to "prepare" in the store, so we
-      // treat that as "untouched" — same heuristic auto-analyze uses.
-      if (row.last_tab && currentTab === "prepare" && row.last_tab !== currentTab) {
+      // Only restore when the user hasn't picked a tab yet this session.
+      // Store default is "summary"; treat summary/prepare as untouched.
+      const untouched = currentTab === "summary" || currentTab === "prepare";
+      if (row.last_tab && untouched && row.last_tab !== currentTab) {
         useStore.getState().setActiveTab(row.last_tab);
       }
     }).catch(() => { /* best-effort */ });
     return () => { cancelled = true; };
   }, [activePaperId]);
 
-  const handleTextSelected = useCallback((text: string, rect: DOMRect) => {
-    setSelection({ text, rect });
+  const handleTextSelected = useCallback((
+    text: string,
+    rect: DOMRect,
+    capture?: { regions: Array<{ pageNum: number; xPct: number; yPct: number; wPct: number; hPct: number }> },
+  ) => {
+    setSelection({ text, rect, regions: capture?.regions });
   }, []);
 
   const handleSelectionClear = useCallback(() => {
@@ -1487,6 +1513,7 @@ function PaperContent() {
     text: string,
     meta?: { highlightColor?: string },
   ) => {
+    const capturedRegions = selection?.regions;
     setSelection(null);
     window.getSelection()?.removeAllRanges();
 
@@ -1496,16 +1523,26 @@ function PaperContent() {
     // paper B once the user switches.
     const startedFor = activePaperId;
     const stillOnStartedPaper = () =>
-      useStore.getState().paper?.id === startedFor;
+      useStore.getState().activePaperId === startedFor;
 
     if (action === "highlight") {
+      if (!startedFor) return;
       const color = meta?.highlightColor ?? "yellow";
+      const regions = capturedRegions;
       try {
         const row = await api.createHighlight(startedFor, {
           selected_text: text,
           color,
         });
         useStore.getState().addHighlightForPaper(startedFor, row);
+        if (regions?.length) {
+          useStore.getState().addPdfRegionHighlightsForHighlight(
+            startedFor,
+            row.id,
+            color as "yellow" | "green" | "blue" | "pink",
+            regions,
+          );
+        }
       } catch (e) {
         console.error("Failed to save highlight:", e);
       }
@@ -1567,7 +1604,7 @@ function PaperContent() {
       action: action as "explain" | "derive",
       selectedText: text,
     });
-  }, [activePaperId, setPanelVisible, setActiveTab, selectionThread, setSelectionResultForPaper, upsertSelectionInHistoryForPaper]);
+  }, [activePaperId, selection, setPanelVisible, setActiveTab, selectionThread, setSelectionResultForPaper, upsertSelectionInHistoryForPaper]);
 
   const onDragStart = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {

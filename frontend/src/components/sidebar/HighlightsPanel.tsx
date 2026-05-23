@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api, type Highlight } from "@/lib/api";
 import { useStore, EMPTY_HIGHLIGHTS_LIST } from "@/lib/store";
+import { isPersistedHighlight } from "@/lib/highlightUtils";
 import { EmptyState } from "@/components/ui/EmptyState";
 
 const COLOR_LABEL: Record<string, string> = {
@@ -18,35 +19,22 @@ interface HighlightsPanelProps {
 
 export function HighlightsPanel({ paperId }: HighlightsPanelProps) {
   const highlights = useStore((s) => s.highlightsByPaper[paperId] ?? EMPTY_HIGHLIGHTS_LIST);
-  const setHighlightsForPaper = useStore((s) => s.setHighlightsForPaper);
+  const visibleHighlights = highlights.filter(isPersistedHighlight);
   const removeHighlightForPaper = useStore((s) => s.removeHighlightForPaper);
+  const addHighlightForPaper = useStore((s) => s.addHighlightForPaper);
+  const bumpHighlightsFetchEpoch = useStore((s) => s.bumpHighlightsFetchEpoch);
   const updateHighlightForPaper = useStore((s) => s.updateHighlightForPaper);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  // Local draft so the textarea reflects external updates (delete-then-re-add,
-  // or a future inline editor) while still letting the user type freely.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    void api.listHighlights(paperId).then((res) => {
-      if (cancelled) return;
-      setHighlightsForPaper(paperId, res.items ?? []);
-      setLoading(false);
-    }).catch((e) => {
-      if (cancelled) return;
-      setError(e instanceof Error ? e.message : "Failed to load highlights");
-      setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [paperId, setHighlightsForPaper]);
-
   const handleDelete = async (id: string) => {
+    const snapshot = highlights.find((h) => h.id === id);
+    bumpHighlightsFetchEpoch(paperId);
     removeHighlightForPaper(paperId, id);
     try {
       await api.deleteHighlight(paperId, id);
     } catch (e) {
+      if (snapshot) addHighlightForPaper(paperId, snapshot);
       setError(e instanceof Error ? e.message : "Delete failed");
     }
   };
@@ -62,11 +50,7 @@ export function HighlightsPanel({ paperId }: HighlightsPanelProps) {
     }
   };
 
-  if (loading && highlights.length === 0) {
-    return <p className="py-4 text-center text-[var(--text-sm)] text-muted-foreground">Loading highlights…</p>;
-  }
-
-  if (!loading && highlights.length === 0) {
+  if (visibleHighlights.length === 0) {
     return (
       <EmptyState
         title="No highlights yet"
@@ -80,7 +64,7 @@ export function HighlightsPanel({ paperId }: HighlightsPanelProps) {
       {error && (
         <p role="alert" className="text-[var(--text-xs)] text-destructive">{error}</p>
       )}
-      {highlights.map((h) => (
+      {visibleHighlights.map((h) => (
         <div
           key={h.id}
           className="space-y-2 rounded-lg border border-border/60 bg-card/30 px-4 py-3"

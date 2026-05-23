@@ -56,6 +56,10 @@ export type PdfRegionHighlight = {
   yPct: number;
   wPct: number;
   hPct: number;
+  /** User text-highlight color (yellow/green/blue/pink). */
+  color?: Highlight["color"];
+  /** Links geometry to a saved highlight row for cleanup. */
+  highlightId?: string;
 };
 
 interface UiPrefs {
@@ -143,6 +147,12 @@ interface AppStore {
   /** Page-local region boxes from marquee capture (scanned PDFs). Persisted in localStorage. */
   pdfRegionHighlightsByPaper: Record<string, PdfRegionHighlight[]>;
   addPdfRegionHighlight: (paperId: string, highlight: Omit<PdfRegionHighlight, "id">) => void;
+  addPdfRegionHighlightsForHighlight: (
+    paperId: string,
+    highlightId: string,
+    color: Highlight["color"],
+    regions: Array<Omit<PdfRegionHighlight, "id" | "color" | "highlightId">>,
+  ) => void;
 
   /** Viewer hands off marquee captures; FiguresPanel uploads then clears — not persisted */
   pendingFigureBlob: Blob | null;
@@ -235,6 +245,9 @@ interface AppStore {
   removeNoteForPaper: (paperId: string, id: string) => void;
 
   highlightsByPaper: Record<string, Highlight[]>;
+  /** Bumped when highlights are mutated locally so stale list fetches are ignored. */
+  highlightsFetchEpochByPaper: Record<string, number>;
+  bumpHighlightsFetchEpoch: (paperId: string) => void;
   setHighlightsForPaper: (paperId: string, highlights: Highlight[]) => void;
   addHighlightForPaper: (paperId: string, highlight: Highlight) => void;
   removeHighlightForPaper: (paperId: string, id: string) => void;
@@ -487,6 +500,7 @@ export const useStore = create<AppStore>()(
           summaryLoadingByPaper: {},
           notesByPaper: {},
           highlightsByPaper: {},
+          highlightsFetchEpochByPaper: {},
           readingStateByPaper: {},
           pendingPassageByPaper: {},
           selectionResultByPaper: {},
@@ -550,6 +564,23 @@ export const useStore = create<AppStore>()(
             pdfRegionHighlightsByPaper: {
               ...s.pdfRegionHighlightsByPaper,
               [paperId]: [...prev, { ...highlight, id }],
+            },
+          };
+        }),
+      addPdfRegionHighlightsForHighlight: (paperId, highlightId, color, regions) =>
+        set((s) => {
+          if (regions.length === 0) return s;
+          const prev = s.pdfRegionHighlightsByPaper[paperId] ?? [];
+          const additions = regions.map((r, i) => ({
+            ...r,
+            id: `hl-${highlightId}-${i}`,
+            color,
+            highlightId,
+          }));
+          return {
+            pdfRegionHighlightsByPaper: {
+              ...s.pdfRegionHighlightsByPaper,
+              [paperId]: [...prev, ...additions],
             },
           };
         }),
@@ -804,10 +835,34 @@ export const useStore = create<AppStore>()(
         }),
 
       highlightsByPaper: {},
-      setHighlightsForPaper: (paperId, highlights) =>
+      highlightsFetchEpochByPaper: {},
+      bumpHighlightsFetchEpoch: (paperId) =>
         set((state) => ({
-          highlightsByPaper: { ...state.highlightsByPaper, [paperId]: highlights },
+          highlightsFetchEpochByPaper: {
+            ...state.highlightsFetchEpochByPaper,
+            [paperId]: (state.highlightsFetchEpochByPaper[paperId] ?? 0) + 1,
+          },
         })),
+      setHighlightsForPaper: (paperId, highlights) =>
+        set((state) => {
+          const existing = state.highlightsByPaper[paperId] ?? [];
+          const incomingIds = new Set(highlights.map((h) => h.id));
+          // Keep optimistic rows that landed while a stale list fetch was in flight.
+          const optimistic = existing.filter(
+            (h) => !incomingIds.has(h.id) && !h.id.startsWith("passage-flash-"),
+          );
+          const merged = [...optimistic, ...highlights];
+          const ids = new Set(merged.map((h) => h.id));
+          return {
+            highlightsByPaper: { ...state.highlightsByPaper, [paperId]: merged },
+            pdfRegionHighlightsByPaper: {
+              ...state.pdfRegionHighlightsByPaper,
+              [paperId]: (state.pdfRegionHighlightsByPaper[paperId] ?? []).filter(
+                (r) => !r.highlightId || ids.has(r.highlightId),
+              ),
+            },
+          };
+        }),
       addHighlightForPaper: (paperId, highlight) =>
         set((state) => ({
           highlightsByPaper: {
@@ -820,6 +875,12 @@ export const useStore = create<AppStore>()(
           highlightsByPaper: {
             ...state.highlightsByPaper,
             [paperId]: (state.highlightsByPaper[paperId] ?? []).filter((h) => h.id !== id),
+          },
+          pdfRegionHighlightsByPaper: {
+            ...state.pdfRegionHighlightsByPaper,
+            [paperId]: (state.pdfRegionHighlightsByPaper[paperId] ?? []).filter(
+              (r) => r.highlightId !== id,
+            ),
           },
         })),
       updateHighlightForPaper: (paperId, id, patch) =>

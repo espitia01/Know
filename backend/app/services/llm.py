@@ -1528,6 +1528,7 @@ def _get_figure_prompt(paper_text: str, question: str) -> tuple[str, str]:
     """Return (system, user_text) for figure analysis."""
     paper_text = _sanitize_user_text(paper_text, max_chars=4000)
     question = _sanitize_user_text(question, max_chars=2000)
+    context_block = paper_text[:4000]
     system = (
         "You are an expert science educator analyzing figures from academic papers. "
         "Provide clear, thorough, educational explanations. Use markdown formatting. "

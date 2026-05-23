@@ -582,6 +582,13 @@
   pointer-events: none;
   z-index: 4;
 }
+/* Saved text highlights — non-interactive; geometry-based or text-search fallback. */
+.know-highlight-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
 .know-region-highlight {
   position: absolute;
   --highlight-rgb: 251 146 60;

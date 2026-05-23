@@ -123,19 +123,15 @@ def increment_paper_count(user_id: str, delta: int = 1) -> None:
             logger.error("increment_paper_count retry also failed for user %s", user_id)
 
 
-def check_and_increment_paper_count(user_id: str, max_papers: int) -> bool:
-    """Atomically check the paper limit and increment if under. Returns True on
-    success, False when the cap is reached or the DB is unreachable.
+def check_and_increment_paper_count(user_id: str, max_papers: int) -> bool | None:
+    """Atomically check the paper limit and increment if under.
 
-    Enforcement is centralized in the SQL function (migration 009): one
-    ``UPDATE ... WHERE paper_count < max`` with ``RETURNING`` gives us check
-    and increment in a single statement, so concurrent uploads can't race past
-    the cap. Previously a Python fallback read the count and then wrote it
-    separately, which was a TOCTOU window under any concurrency.
+    Returns True on success, False when the cap is reached, None when the DB
+    is unreachable (callers should surface 503, not 403).
     """
     client = get_db()
     if not client:
-        return False
+        return None
 
     try:
         res = client.rpc("check_and_increment_paper_count", {
@@ -145,10 +141,10 @@ def check_and_increment_paper_count(user_id: str, max_papers: int) -> bool:
         logger.error(
             "check_and_increment_paper_count RPC failed for %s: %s", user_id, e,
         )
-        return False
+        return None
 
     if not res or res.data is None:
-        return False
+        return None
 
     data = res.data
     if isinstance(data, list) and data:
@@ -1175,7 +1171,7 @@ def release_daily_export_usage(
 def count_active_exports(user_id: str) -> int:
     client = get_db()
     if not client:
-        return 0
+        return _MAX_ACTIVE_EXPORTS
     try:
         res = (
             client.table("exports")
@@ -1187,7 +1183,7 @@ def count_active_exports(user_id: str) -> int:
         return int(res.count or 0) if res else 0
     except Exception as e:
         logger.warning("count_active_exports failed: %s", e)
-        return 0
+        return _MAX_ACTIVE_EXPORTS
 
 
 def create_export_row(
@@ -1200,18 +1196,25 @@ def create_export_row(
     client = get_db()
     if not client:
         return None
-    row = {
-        "user_id": user_id,
-        "paper_id": paper_id,
-        "format": fmt,
-        "status": "pending",
-        "sections": sections,
-        "options": options or {},
-    }
     try:
-        res = client.table("exports").insert(row).execute()
-        if res and res.data:
-            return res.data[0] if isinstance(res.data, list) else res.data
+        res = client.rpc("create_export_job_bounded", {
+            "p_user_id": user_id,
+            "p_paper_id": paper_id,
+            "p_format": fmt,
+            "p_sections": sections,
+            "p_options": options or {},
+            "p_max_active": _MAX_ACTIVE_EXPORTS,
+        }).execute()
+        if res and res.data is not None:
+            data = res.data
+            if isinstance(data, str):
+                import json
+                return json.loads(data)
+            if isinstance(data, dict):
+                return data
+            if isinstance(data, list) and data:
+                row = data[0]
+                return row if isinstance(row, dict) else None
     except Exception as e:
         logger.error("create_export_row failed: %s", e)
     return None

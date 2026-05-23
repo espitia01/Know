@@ -8,6 +8,7 @@ import { useStore, type PdfRegionHighlight } from "@/lib/store";
 import { normalizeSelectionAction, selectionKey } from "@/lib/selectionActions";
 import { snapshotDomRect } from "@/lib/domRect";
 import { capturePdfViewportUnionToBlob } from "@/lib/pdfSelectionCapture";
+import { captureTextSelectionRegions, pageRangeForSelectionRect } from "@/lib/pdfHighlightRegions";
 import { useReadingState } from "@/hooks/useReadingState";
 
 import "react-pdf/dist/Page/TextLayer.css";
@@ -20,11 +21,28 @@ function highlightPointerKey(entry: SelectionAnalysisResult): string {
 
 const EMPTY_REGIONS: PdfRegionHighlight[] = [];
 
+/** Text-search fallback entries for highlights without saved geometry. */
+function textHighlightEntriesForPaper(paperId: string) {
+  const highlights = useStore.getState().highlightsByPaper[paperId] ?? [];
+  const regions = useStore.getState().pdfRegionHighlightsByPaper[paperId] ?? [];
+  const withGeometry = new Set(
+    regions.map((r) => r.highlightId).filter((id): id is string => !!id),
+  );
+  return highlights
+    .filter((h) => !withGeometry.has(h.id))
+    .map((h) => ({
+      action: "note" as const,
+      selected_text: h.selected_text,
+      highlight_color: h.color,
+      clientKey: h.id,
+    }));
+}
+
 /** MutationObserver helper: overlays must not participate in repaint loops */
 function isUnderSelectionOverlay(node: Node | null | undefined): boolean {
   const el =
     node?.nodeType === Node.ELEMENT_NODE ? (node as Element) : (node?.parentElement ?? null);
-  return !!(el && el.closest(".know-selection-overlay, .know-region-overlay"));
+  return !!(el && el.closest(".know-selection-overlay, .know-region-overlay, .know-highlight-overlay"));
 }
 
 /** Page-local rect for a marquee box (container scroll coordinates). */
@@ -70,7 +88,11 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 interface PdfViewerProps {
   url: string;
   paperId?: string;
-  onTextSelected?: (text: string, rect: DOMRect) => void;
+  onTextSelected?: (
+    text: string,
+    rect: DOMRect,
+    capture?: { regions: Array<Omit<PdfRegionHighlight, "id" | "color" | "highlightId">> },
+  ) => void;
   onSelectionClear?: () => void;
   /** When true, leave room on the right of the mini toolbar — e.g. floating
    *  “show nav bar” control so “Select text to analyze” is not covered. */
@@ -512,7 +534,7 @@ export function PdfViewer({
       const list = paperId ? s.pdfRegionHighlightsByPaper[paperId] : undefined;
       if (!list?.length) return "";
       return list
-        .map((r) => `${r.pageNum}:${r.xPct}:${r.yPct}:${r.wPct}:${r.hPct}`)
+        .map((r) => `${r.id}:${r.highlightId ?? ""}:${r.color ?? ""}:${r.pageNum}:${r.xPct}:${r.yPct}`)
         .join("\x1f");
     }),
   );
@@ -793,8 +815,13 @@ export function PdfViewer({
           continue;
         }
         const box = document.createElement("div");
-        box.className = "know-region-highlight";
-        box.setAttribute("data-action", "note");
+        if (r.color) {
+          box.className = "know-highlight-rect";
+          box.setAttribute("data-color", r.color);
+        } else {
+          box.className = "know-region-highlight";
+          box.setAttribute("data-action", "note");
+        }
         box.style.left = `${r.xPct * pw}px`;
         box.style.top = `${r.yPct * ph}px`;
         box.style.width = `${r.wPct * pw}px`;
@@ -806,7 +833,17 @@ export function PdfViewer({
     [],
   );
 
-  const drawUnderlinesForPage = useCallback((pageEl: HTMLElement, history: SelectionAnalysisResult[]) => {
+  const drawUnderlinesForPage = useCallback((
+    pageEl: HTMLElement,
+    history: SelectionAnalysisResult[],
+    mode: "selection" | "highlight" = "selection",
+  ) => {
+    const overlaySelector =
+      mode === "highlight" ? ".know-highlight-overlay" : ".know-selection-overlay";
+    const overlayClass =
+      mode === "highlight" ? "know-highlight-overlay" : "know-selection-overlay";
+    const interactive = mode === "selection";
+
     const textLayer = pageEl.querySelector(".react-pdf__Page__textContent, .textLayer") as HTMLElement | null;
 
     const peekHost = pageEl as HTMLElement & {
@@ -817,8 +854,8 @@ export function PdfViewer({
     };
 
     if (!textLayer || history.length === 0) {
-      pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
-      peekHost.__knowHighlights = [];
+      pageEl.querySelectorAll(overlaySelector).forEach((n) => n.remove());
+      if (interactive) peekHost.__knowHighlights = [];
       return;
     }
     // pdfjs inserts the layer shell before the text spans arrive. Redrawing
@@ -848,8 +885,8 @@ export function PdfViewer({
       combined += text;
     }
     if (!combined || slices.length === 0) {
-      pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
-      peekHost.__knowHighlights = [];
+      pageEl.querySelectorAll(overlaySelector).forEach((n) => n.remove());
+      if (interactive) peekHost.__knowHighlights = [];
       return;
     }
 
@@ -886,8 +923,8 @@ export function PdfViewer({
       }
     }
     if (!normalized) {
-      pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
-      peekHost.__knowHighlights = [];
+      pageEl.querySelectorAll(overlaySelector).forEach((n) => n.remove());
+      if (interactive) peekHost.__knowHighlights = [];
       return;
     }
 
@@ -901,10 +938,10 @@ export function PdfViewer({
       return null;
     };
 
-    pageEl.querySelectorAll(".know-selection-overlay").forEach((n) => n.remove());
+    pageEl.querySelectorAll(overlaySelector).forEach((n) => n.remove());
 
     const overlay = document.createElement("div");
-    overlay.className = "know-selection-overlay";
+    overlay.className = overlayClass;
     const pageRect = pageEl.getBoundingClientRect();
 
     // Per-highlight rect geometry, recorded in page-local coordinates
@@ -935,16 +972,17 @@ export function PdfViewer({
     };
 
     let painted = 0;
+    const minTextLen = mode === "highlight" ? 2 : 4;
     for (let i = 0; i < history.length && painted < 32; i++) {
       const entry = history[i];
       const raw = entry.selected_text?.trim();
-      if (!raw || raw.length < 4) continue;
+      if (!raw || raw.length < minTextLen) continue;
 
       // Needle is normalized the same way as the haystack so ligatures,
       // smart quotes, and em-dashes from the LLM-submitted text don't
       // silently miss the PDF's rendering of the same passage.
       const needleNorm = normalizeForSearch(raw).toLowerCase();
-      if (needleNorm.length < 4) continue;
+      if (needleNorm.length < minTextLen) continue;
 
       // Match strategy:
       //
@@ -1115,6 +1153,11 @@ export function PdfViewer({
       pageHits.push({ entry, rects: localRects });
 
       painted++;
+    }
+
+    if (!interactive) {
+      if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
+      return;
     }
 
     // Delegated click / double-click / contextmenu on pageEl —
@@ -1350,19 +1393,13 @@ export function PdfViewer({
       raf = null;
       const items = Array.from(pending);
       pending = new Set();
-      const history =
-        useStore.getState().selectionHistoryByPaper[paperId ?? ""] ?? [];
-      const highlights = useStore.getState().highlightsByPaper[paperId ?? ""] ?? [];
-      const highlightEntries = highlights.map((h) => ({
-        action: "note" as const,
-        selected_text: h.selected_text,
-        highlight_color: h.color,
-        clientKey: h.id,
-      }));
-      const paintHistory = [...history, ...highlightEntries];
-      const regions = useStore.getState().pdfRegionHighlightsByPaper[paperId ?? ""] ?? EMPTY_REGIONS;
+      const pid = paperId ?? "";
+      const history = useStore.getState().selectionHistoryByPaper[pid] ?? [];
+      const textHighlights = textHighlightEntriesForPaper(pid);
+      const regions = useStore.getState().pdfRegionHighlightsByPaper[pid] ?? EMPTY_REGIONS;
       for (const el of items) {
-        drawUnderlinesForPage(el, paintHistory);
+        drawUnderlinesForPage(el, history, "selection");
+        drawUnderlinesForPage(el, textHighlights, "highlight");
         const pageNum = parseInt(el.getAttribute("data-page-number") || "0", 10);
         if (pageNum > 0) drawRegionHighlightsForPage(el, pageNum, regions);
       }
@@ -1441,19 +1478,13 @@ export function PdfViewer({
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const history =
-      useStore.getState().selectionHistoryByPaper[paperId ?? ""] ?? [];
-    const highlights = useStore.getState().highlightsByPaper[paperId ?? ""] ?? [];
-    const highlightEntries = highlights.map((h) => ({
-      action: "note" as const,
-      selected_text: h.selected_text,
-      highlight_color: h.color,
-      clientKey: h.id,
-    }));
-    const paintHistory = [...history, ...highlightEntries];
-    const regions = useStore.getState().pdfRegionHighlightsByPaper[paperId ?? ""] ?? EMPTY_REGIONS;
+    const pid = paperId ?? "";
+    const history = useStore.getState().selectionHistoryByPaper[pid] ?? [];
+    const textHighlights = textHighlightEntriesForPaper(pid);
+    const regions = useStore.getState().pdfRegionHighlightsByPaper[pid] ?? EMPTY_REGIONS;
     container.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]").forEach((pageEl) => {
-      drawUnderlinesForPage(pageEl, paintHistory);
+      drawUnderlinesForPage(pageEl, history, "selection");
+      drawUnderlinesForPage(pageEl, textHighlights, "highlight");
       const pageNum = parseInt(pageEl.getAttribute("data-page-number") || "0", 10);
       if (pageNum > 0) drawRegionHighlightsForPage(pageEl, pageNum, regions);
     });
@@ -1529,11 +1560,13 @@ export function PdfViewer({
       }
     }
 
-    drawUnderlinesForPage(
-      el,
-      useStore.getState().selectionHistoryByPaper[paperId ?? ""] ?? [],
-    );
-    drawRegionHighlightsForPage(el, pageNum, useStore.getState().pdfRegionHighlightsByPaper[paperId ?? ""] ?? []);
+    const pid = paperId ?? "";
+    const history = useStore.getState().selectionHistoryByPaper[pid] ?? [];
+    const textHighlights = textHighlightEntriesForPaper(pid);
+    const regions = useStore.getState().pdfRegionHighlightsByPaper[pid] ?? [];
+    drawUnderlinesForPage(el, history, "selection");
+    drawUnderlinesForPage(el, textHighlights, "highlight");
+    drawRegionHighlightsForPage(el, pageNum, regions);
   }, [drawUnderlinesForPage, drawRegionHighlightsForPage, paperId, setMarqueeMode, setPdfTextLayerEmpty]);
 
   const handleMarqueeDown = useCallback(
@@ -1695,8 +1728,32 @@ export function PdfViewer({
     // anchors to the new selection, not the pre-snap drag endpoint.
     const range = sel.getRangeAt(0);
     const rect = snapshotDomRect(unionBoundingRectFromRange(range));
-    onTextSelected?.(text, rect);
-  }, [onTextSelected, onSelectionClear]);
+    const container = containerRef.current;
+    const stride = pageHeightRef.current + PAGE_GAP;
+    const captureOpts = {
+      numPages,
+      pageStride: stride,
+      pageGap: PAGE_GAP,
+    };
+
+    const finishCapture = () => {
+      const regions = captureTextSelectionRegions(container, captureOpts);
+      onTextSelected?.(text, rect, regions.length > 0 ? { regions } : undefined);
+    };
+
+    if (container && numPages > 0 && stride > PAGE_GAP) {
+      const pageSpan = pageRangeForSelectionRect(container, rect, captureOpts);
+      if (pageSpan && (pageSpan.start < visibleRange.start || pageSpan.end > visibleRange.end)) {
+        setVisibleRange((prev) => ({
+          start: Math.min(prev.start, pageSpan.start),
+          end: Math.max(prev.end, pageSpan.end),
+        }));
+        requestAnimationFrame(() => requestAnimationFrame(finishCapture));
+        return;
+      }
+    }
+    finishCapture();
+  }, [onTextSelected, onSelectionClear, numPages, visibleRange.start, visibleRange.end]);
 
   const handleMouseUp = useCallback(() => {
     if (marqueeMode) return;

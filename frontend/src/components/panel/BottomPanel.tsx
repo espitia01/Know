@@ -77,6 +77,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
   const exportToast = useStore((s) => s.exportToast);
   const setExportToast = useStore((s) => s.setExportToast);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [panelMenuOpen, setPanelMenuOpen] = useState(false);
   const [hasOpenAiKey, setHasOpenAiKey] = useState(true);
 
   useEffect(() => {
@@ -252,6 +253,8 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
 
         <OverflowMenu
           ariaLabel="Panel options"
+          open={panelMenuOpen}
+          onOpenChange={setPanelMenuOpen}
           buttonProps={{
             className:
               "shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground data-[popup-open]:bg-accent/60 motion-safe:duration-150",
@@ -363,6 +366,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
             type="button"
             onClick={() => {
               setExportUnreadBadge(false);
+              setPanelMenuOpen(false);
               setExportModalOpen(true);
             }}
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[var(--text-sm)] hover:bg-accent transition-colors text-left"
@@ -459,7 +463,7 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
         hasOpenAiKey={hasOpenAiKey}
       />
       {exportToast && (
-        <div className="fixed bottom-4 right-4 z-[200] max-w-sm rounded-[var(--radius-lg)] border border-border/50 bg-popover px-3 py-2 text-[var(--text-sm)] shadow-[var(--shadow-sm)]">
+        <div className="fixed bottom-4 right-4 z-[300] max-w-sm rounded-[var(--radius-lg)] border border-border/50 bg-popover px-3 py-2 text-[var(--text-sm)] shadow-[var(--shadow-sm)]">
           <p>{exportToast}</p>
           <button
             type="button"

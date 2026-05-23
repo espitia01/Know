@@ -307,7 +307,7 @@ async def internal_cached_analysis_upsert(body: dict = Body(...)):
     if not get_paper_meta(paper_id, user_id=user_id):
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    from ..services.pdf_parser import mutate_local_paper, append_capped
+    from ..services.pdf_parser import mutate_paper, append_capped
 
     appended = key in {"selections", "qa_history", "figure_analyses", "qa_sessions"}
 
@@ -318,7 +318,7 @@ async def internal_cached_analysis_upsert(body: dict = Body(...)):
             p.cached_analysis[key] = value
 
     try:
-        mutate_local_paper(paper_id, _apply)
+        mutate_paper(paper_id, user_id, _apply)
     except Exception:
         logger.exception("cached-analysis upsert failed for %s/%s", paper_id, key)
         raise HTTPException(status_code=500, detail="Failed to persist cached analysis")

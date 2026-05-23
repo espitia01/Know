@@ -1,3 +1,5 @@
+import { invalidatePaper } from "@/lib/papersFreshness";
+
 let _getToken: (() => Promise<string | null>) | null = null;
 let _cachedToken: string | null = null;
 let _tokenRefreshInterval: ReturnType<typeof setInterval> | null = null;
@@ -532,29 +534,38 @@ export const api = {
   deletePaper: (id: string) =>
     request<{ status: string }>(`/api/papers/${id}`, { method: "DELETE" }),
 
-  updateTags: (id: string, tags: string[]) =>
-    request<{ status: string }>(`/api/papers/${id}/tags`, {
+  updateTags: async (id: string, tags: string[]) => {
+    const res = await request<{ status: string }>(`/api/papers/${id}/tags`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tags }),
-    }),
+    });
+    invalidatePaper(id);
+    return res;
+  },
 
-  updateFolder: (id: string, folder: string) =>
-    request<{ status: string }>(`/api/papers/${id}/folder`, {
+  updateFolder: async (id: string, folder: string) => {
+    const res = await request<{ status: string }>(`/api/papers/${id}/folder`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ folder }),
-    }),
+    });
+    invalidatePaper(id);
+    return res;
+  },
 
-  updateTitle: (id: string, title: string) =>
-    request<{ status: string; id: string; title: string }>(
+  updateTitle: async (id: string, title: string) => {
+    const res = await request<{ status: string; id: string; title: string }>(
       `/api/papers/${id}/title`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title }),
       },
-    ),
+    );
+    invalidatePaper(id);
+    return res;
+  },
 
   addNote: (id: string, text: string, section: string = "", refine = false) =>
     request<Note>(`/api/papers/${id}/notes`, {
@@ -687,11 +698,14 @@ export const api = {
   getFigureUrl: (paperId: string, figId: string) =>
     `${API_BASE}/api/papers/${paperId}/figures/${figId}`,
 
-  reextractFigures: (id: string) =>
-    request<{ status: string; figures_count: number; figures: FigureInfo[] }>(
+  reextractFigures: async (id: string) => {
+    const res = await request<{ status: string; figures_count: number; figures: FigureInfo[] }>(
       `/api/papers/${id}/reextract-figures`,
-      { method: "POST" }
-    ),
+      { method: "POST" },
+    );
+    invalidatePaper(id);
+    return res;
+  },
 
   uploadFigureFromSelection: async (paperId: string, png: Blob) => {
     const form = new FormData();

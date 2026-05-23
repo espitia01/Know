@@ -12,6 +12,9 @@ import { priorWorkExternalHref, referenceIndexLabel } from "@/lib/priorWorkLinks
 import {
   sanitizeCitationForDisplay,
   sanitizeRelatedClusterSummaryMarkdown,
+  filterUsablePriorWork,
+  isUsableClusterTheme,
+  isGarbledBibliographyLine,
 } from "@/lib/formatBibliography";
 import { CitationGraph } from "@/components/sidebar/CitationGraph";
 
@@ -21,13 +24,6 @@ interface RelatedWorkPanelProps {
 
 const RELATED_TAB_INTRO =
   "Tap a citation to open its DOI, arXiv, or PubMed link when we have one — otherwise Google Scholar. Numbers match this paper’s bibliography when we can parse them.";
-
-function showThemeHeading(t: string): boolean {
-  const s = (t || "").trim();
-  if (!s) return false;
-  if (/^other\s+references?$/i.test(s)) return false;
-  return true;
-}
 
 function CitationIndex({ n }: { n: number }) {
   return (
@@ -46,7 +42,9 @@ function VerbatimCitationLink({ work }: { work: PriorWork }) {
     (typeof work.citation_display === "string" && work.citation_display.trim()) ||
     work.title.trim() ||
     "Reference";
+  if (isGarbledBibliographyLine(raw)) return null;
   const display = sanitizeCitationForDisplay(raw);
+  if (!display || display.length < 12) return null;
   const linkCls =
     "block text-[var(--text-sm)] leading-relaxed text-foreground/90 underline decoration-border underline-offset-[3px] hover:decoration-foreground/60 text-pretty hyphens-auto [overflow-wrap:anywhere]";
 
@@ -71,9 +69,10 @@ function CitationList({
   items: PriorWork[];
   startIndex?: number;
 }) {
+  const usable = filterUsablePriorWork(items);
   return (
     <ol className="mt-3 list-none space-y-2 p-0">
-      {items.map((p, i) => {
+      {usable.map((p, i) => {
         const sequential = startIndex + i + 1;
         const indexLabel = referenceIndexLabel(p, sequential);
         return (
@@ -166,6 +165,11 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
     });
   }, [topicalClusters]);
 
+  const priorList = useMemo(
+    () => filterUsablePriorWork(preReading?.prior_work ?? []),
+    [preReading?.prior_work],
+  );
+
   if (preReadingLoading) {
     return (
       <div className="space-y-3 py-8 motion-safe:animate-fade-in">
@@ -179,8 +183,6 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
       </div>
     );
   }
-
-  const priorList = preReading?.prior_work ?? [];
 
   if (!preReading || priorList.length === 0) {
     return (
@@ -268,17 +270,21 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
 
       {topicalClusters?.length ? (
         topicalClusters.map((sec, si) => {
-          const items = sec.items ?? [];
+          const items = filterUsablePriorWork(sec.items ?? []);
+          if (!items.length) return null;
           const theme = (sec.theme ?? "").trim();
-          const summary = (sec.summary || "").trim();
-          const title = showThemeHeading(theme) ? theme : "References";
+          const summaryRaw = (sec.summary || "").trim();
+          const summary = summaryRaw
+            ? sanitizeRelatedClusterSummaryMarkdown(summaryRaw)
+            : "";
+          const showSummary =
+            summary.length >= 40 && !isGarbledBibliographyLine(summary);
+          const title = isUsableClusterTheme(theme) ? theme : "References";
           return (
             <AnalysisSection key={`cluster-${si}`} title={title} count={items.length}>
-              {summary ? (
-                <div className="[&_.analysis-content]:text-[var(--text-sm)] [&_.analysis-content]:leading-relaxed">
-                  <StreamingMarkdown>
-                    {sanitizeRelatedClusterSummaryMarkdown(summary)}
-                  </StreamingMarkdown>
+              {showSummary ? (
+                <div className="mb-3 rounded-md border border-border/40 bg-muted/[0.06] px-3 py-2 [&_.analysis-content]:text-[var(--text-sm)] [&_.analysis-content]:leading-relaxed">
+                  <StreamingMarkdown>{summary}</StreamingMarkdown>
                 </div>
               ) : null}
               <CitationList items={items} startIndex={clusterGlobalStarts[si] ?? 0} />

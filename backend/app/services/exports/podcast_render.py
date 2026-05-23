@@ -128,6 +128,14 @@ async def render_podcast(
     return out.getvalue(), "audio/mpeg", filename, duration_s
 
 
+def _plain(obj) -> str:
+    if obj is None:
+        return ""
+    if isinstance(obj, str):
+        return obj.strip()
+    return str(obj).strip()
+
+
 def build_section_text(key: str, data: dict, content: dict) -> str:
     """Plain-text summary of a section for the script prompt."""
     if key == "summary":
@@ -140,4 +148,65 @@ def build_section_text(key: str, data: dict, content: dict) -> str:
             for item in session.get("items") or []:
                 lines.append(f"Question: {item.get('question', '')} Answer: {item.get('answer', '')}")
         return " ".join(lines)
-    return str(data)[:3000]
+    if key == "prepare":
+        pr = content.get("prepare") or {}
+        chunks: list[str] = []
+        for d in pr.get("definitions") or []:
+            chunks.append(f"{d.get('term', '')}: {d.get('definition', '')}")
+        for c in pr.get("concepts") or []:
+            chunks.append(f"{c.get('name', c.get('term', ''))}: {c.get('explanation', c.get('definition', ''))}")
+        for rq in pr.get("research_questions") or []:
+            chunks.append(_plain(rq.get("question") if isinstance(rq, dict) else rq))
+        return " ".join(x for x in chunks if x)
+    if key == "assumptions":
+        raw = content.get("assumptions")
+        items = raw.get("assumptions") if isinstance(raw, dict) else raw
+        if not isinstance(items, list):
+            items = []
+        return " ".join(
+            _plain(a.get("statement") if isinstance(a, dict) else a) for a in items
+        )
+    if key == "notes":
+        return " ".join(
+            _plain(n.get("text") or n.get("content"))
+            for n in (content.get("notes") or [])
+        )
+    if key == "highlights":
+        return " ".join(
+            f"{h.get('color', '')}: {h.get('selected_text', '')}"
+            for h in (content.get("highlights") or [])
+        )
+    if key == "selection":
+        parts = []
+        for item in content.get("selection") or []:
+            if isinstance(item, dict):
+                parts.append(_plain(item.get("explanation") or item.get("body") or item.get("result")))
+            else:
+                parts.append(_plain(item))
+        return " ".join(p for p in parts if p)
+    if key == "figures":
+        fig = content.get("figures") or {}
+        lines = []
+        for a in fig.get("analyses") or []:
+            lines.append(_plain(a.get("description") or a.get("answer")))
+        return " ".join(lines)
+    if key == "cross":
+        lines = []
+        for item in content.get("cross") or []:
+            if isinstance(item, dict) and item.get("items"):
+                for sub in item.get("items") or []:
+                    q = sub.get("question", "") if isinstance(sub, dict) else ""
+                    a = sub.get("answer", "") if isinstance(sub, dict) else _plain(sub)
+                    lines.append(f"Question: {q} Answer: {a}")
+            elif isinstance(item, dict):
+                lines.append(f"Question: {item.get('question', '')} Answer: {item.get('answer', '')}")
+            else:
+                lines.append(_plain(item))
+        return " ".join(lines)
+    if key == "related":
+        rel = content.get("related") or {}
+        lines = []
+        for pw in rel.get("prior_work") or []:
+            lines.append(_plain(pw.get("title") if isinstance(pw, dict) else pw))
+        return " ".join(lines)
+    return _plain(data)[:3000]

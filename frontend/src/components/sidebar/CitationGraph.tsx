@@ -1,31 +1,31 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { CitedByItem, PriorWork } from "@/lib/api";
+import { extractCitationShortLabel } from "@/lib/formatBibliography";
 import { priorWorkExternalHref, referenceIndexLabel } from "@/lib/priorWorkLinks";
 
 /**
- * Small interactive citation graph for the Related pane. Center node is the
- * current paper; outbound (Prepare's prior_work) fans out on the left arc,
- * inbound (Cited-by) fans out on the right arc. Hand-rolled SVG — no graph
- * library, no new design tokens.
+ * Citation map for the Related pane: references this paper cites (left) and
+ * papers that cite it (right). Deliberately minimal — orientation, not analytics.
  */
 
-const MAX_PER_SIDE = 30;
-const VIEW_W = 360;
-const VIEW_H = 340;
+const MAX_PER_SIDE = 24;
+const VIEW_W = 520;
+const VIEW_H = 300;
 const CENTER_X = VIEW_W / 2;
 const CENTER_Y = VIEW_H / 2;
-const CENTER_RADIUS = 12;
-const NODE_RADIUS = 6;
+const LEFT_X = 88;
+const RIGHT_X = VIEW_W - 88;
+const NODE_H = 22;
+const NODE_GAP = 6;
 
 interface GraphNode {
   id: string;
   label: string;
-  detail: string;
+  sublabel: string;
   href: string | null;
-  direction: "self" | "outbound" | "inbound";
-  /** 1-indexed position in source list (for label alignment with the flat list). */
+  direction: "outbound" | "inbound";
   index?: number;
 }
 
@@ -35,17 +35,12 @@ function nodeIdForPrior(work: PriorWork, fallback: number): string {
     work.arxiv?.trim() ||
     work.ref_id?.trim() ||
     work.bib_label?.trim() ||
-    `${work.title?.slice(0, 32) ?? "ref"}-${fallback}`
+    `ref-${fallback}`
   );
 }
 
 function nodeIdForCited(item: CitedByItem, fallback: number): string {
-  return (
-    item.s2_id?.trim() ||
-    item.doi?.trim() ||
-    item.arxiv?.trim() ||
-    `${item.title?.slice(0, 32) ?? "cite"}-${fallback}`
-  );
+  return item.s2_id?.trim() || item.doi?.trim() || `cite-${fallback}`;
 }
 
 function citedByHref(item: CitedByItem): string | null {
@@ -56,14 +51,23 @@ function citedByHref(item: CitedByItem): string | null {
   return null;
 }
 
-function shortLabel(s: string, max = 40): string {
-  const t = (s || "").replace(/\s+/g, " ").trim();
+function citedByLabel(item: CitedByItem): string {
+  const authors = (item.authors ?? []).slice(0, 2).join(", ");
+  const year = item.year ? ` (${item.year})` : "";
+  const title = (item.title || "Citing paper").slice(0, 42);
+  if (authors) return `${authors}${year}`;
+  return `${title}${year}`;
+}
+
+function shortPaperTitle(title: string, max = 36): string {
+  const t = (title || "This paper").replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
 
-/** Deterministic point on a circular arc. Inputs in radians. */
-function arcPoint(cx: number, cy: number, r: number, angle: number): { x: number; y: number } {
-  return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
+function stackY(count: number, index: number): number {
+  const totalH = count * NODE_H + (count - 1) * NODE_GAP;
+  const startY = CENTER_Y - totalH / 2 + NODE_H / 2;
+  return startY + index * (NODE_H + NODE_GAP);
 }
 
 interface CitationGraphProps {
@@ -80,59 +84,48 @@ export function CitationGraph({
   onHoverIndex,
 }: CitationGraphProps) {
   const [focusedId, setFocusedId] = useState<string | null>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
 
-  // Build node lists. The fact that we slice to MAX_PER_SIDE here means the
-  // graph is for orientation — the flat list below the graph stays the
-  // authoritative source for exhaustive citation accounting.
   const { outboundNodes, inboundNodes } = useMemo(() => {
-    const o: GraphNode[] = outbound.slice(0, MAX_PER_SIDE).map((w, i) => ({
-      id: nodeIdForPrior(w, i),
-      label: shortLabel(w.title || w.citation_display || w.ref_id || `Ref ${i + 1}`, 36),
-      detail: w.citation_display || w.title || "Reference",
-      href: priorWorkExternalHref(w),
-      direction: "outbound",
-      index: referenceIndexLabel(w, i + 1),
-    }));
-    const ino: GraphNode[] = inbound.slice(0, MAX_PER_SIDE).map((c, i) => ({
+    const o: GraphNode[] = outbound.slice(0, MAX_PER_SIDE).map((w, i) => {
+      const raw = w.citation_display || w.title || "";
+      return {
+        id: nodeIdForPrior(w, i),
+        label: extractCitationShortLabel(raw),
+        sublabel: `[${referenceIndexLabel(w, i + 1)}]`,
+        href: priorWorkExternalHref(w),
+        direction: "outbound" as const,
+        index: referenceIndexLabel(w, i + 1),
+      };
+    });
+    const inn: GraphNode[] = inbound.slice(0, MAX_PER_SIDE).map((c, i) => ({
       id: nodeIdForCited(c, i),
-      label: shortLabel(c.title || "Citing paper", 36),
-      detail: c.title || "Citing paper",
+      label: citedByLabel(c),
+      sublabel: "Cites this paper",
       href: citedByHref(c),
-      direction: "inbound",
+      direction: "inbound" as const,
       index: i + 1,
     }));
-    return { outboundNodes: o, inboundNodes: ino };
+    return { outboundNodes: o, inboundNodes: inn };
   }, [outbound, inbound]);
 
-  // Concentric deterministic layout: outbound on the left arc, inbound on
-  // the right arc. Both arcs share the same radius so neither side feels
-  // visually heavier when one list is much longer than the other.
   const layout = useMemo(() => {
-    const radius = Math.min(VIEW_W, VIEW_H) * 0.42;
-    const outboundStart = (Math.PI * 110) / 180;
-    const outboundEnd = (Math.PI * 250) / 180;
-    const inboundStart = (Math.PI * 290) / 180;
-    const inboundEnd = (Math.PI * (360 + 70)) / 180;
-    function place(nodes: GraphNode[], start: number, end: number) {
-      if (nodes.length === 0) return [] as Array<GraphNode & { x: number; y: number }>;
-      const span = end - start;
-      const step = nodes.length === 1 ? 0 : span / (nodes.length - 1);
-      return nodes.map((n, i) => {
-        const angle = nodes.length === 1 ? (start + end) / 2 : start + step * i;
-        return { ...n, ...arcPoint(CENTER_X, CENTER_Y, radius, angle) };
-      });
-    }
-    return {
-      outbound: place(outboundNodes, outboundStart, outboundEnd),
-      inbound: place(inboundNodes, inboundStart, inboundEnd),
-    };
+    const outbound = outboundNodes.map((n, i) => ({
+      ...n,
+      x: LEFT_X,
+      y: stackY(outboundNodes.length, i),
+    }));
+    const inbound = inboundNodes.map((n, i) => ({
+      ...n,
+      x: RIGHT_X,
+      y: stackY(inboundNodes.length, i),
+    }));
+    return { outbound, inbound };
   }, [outboundNodes, inboundNodes]);
 
   const handleEnter = useCallback(
     (n: GraphNode) => {
       setFocusedId(n.id);
-      if (n.direction !== "self" && typeof n.index === "number") {
+      if (typeof n.index === "number") {
         onHoverIndex?.({ direction: n.direction, index: n.index });
       }
     },
@@ -143,121 +136,123 @@ export function CitationGraph({
     onHoverIndex?.(null);
   }, [onHoverIndex]);
 
-  const totalOmitted =
+  const omitted =
     Math.max(0, outbound.length - MAX_PER_SIDE) + Math.max(0, inbound.length - MAX_PER_SIDE);
 
   return (
-    <div className="relative w-full overflow-hidden rounded-lg border border-border/55 bg-card/30 px-2 py-3">
+    <div className="rounded-lg border border-border/50 bg-card/30">
+      <div className="border-b border-border/40 px-4 py-3">
+        <h3 className="font-display text-[var(--text-sm)] font-semibold tracking-[-0.02em] text-foreground">
+          Citation map
+        </h3>
+        <p className="mt-1 text-[var(--text-xs)] leading-relaxed text-muted-foreground/85">
+          Left: references listed in this paper&apos;s bibliography ({outbound.length}). Center: the
+          paper you are reading. Right: later papers that cite it ({inbound.length}), from Semantic
+          Scholar when available.
+        </p>
+      </div>
+
       <svg
-        ref={svgRef}
         role="img"
-        aria-label="Citation graph: outbound and inbound papers"
+        aria-label="Citation map showing bibliography references and citing papers"
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-        className="mx-auto block w-full max-w-[420px]"
+        className="mx-auto block w-full max-w-[540px] px-2 py-3"
       >
-        {/* Edges first so nodes paint on top. */}
-        <g>
+        {/* Column guides */}
+        <text x={LEFT_X} y={18} textAnchor="middle" className="fill-muted-foreground text-[9px] font-medium uppercase tracking-wider">
+          References cited
+        </text>
+        <text x={RIGHT_X} y={18} textAnchor="middle" className="fill-muted-foreground text-[9px] font-medium uppercase tracking-wider">
+          Cited by
+        </text>
+
+        {/* Edges */}
+        <g stroke="currentColor" className="text-border/70">
           {layout.outbound.map((n) => (
             <line
-              key={`edge-out-${n.id}`}
-              x1={CENTER_X}
+              key={`e-out-${n.id}`}
+              x1={CENTER_X - 36}
               y1={CENTER_Y}
-              x2={n.x}
+              x2={LEFT_X + 70}
               y2={n.y}
-              data-action="explain"
-              stroke="rgb(var(--highlight-rgb) / 0.45)"
-              strokeWidth={focusedId === n.id ? 1.6 : 0.9}
+              strokeWidth={focusedId === n.id ? 1.4 : 0.9}
               className="motion-safe:transition-[stroke-width] motion-safe:duration-150"
             />
           ))}
           {layout.inbound.map((n) => (
             <line
-              key={`edge-in-${n.id}`}
-              x1={CENTER_X}
+              key={`e-in-${n.id}`}
+              x1={CENTER_X + 36}
               y1={CENTER_Y}
-              x2={n.x}
+              x2={RIGHT_X - 70}
               y2={n.y}
-              data-action="followup"
-              stroke="rgb(var(--highlight-rgb) / 0.45)"
-              strokeWidth={focusedId === n.id ? 1.6 : 0.9}
+              strokeWidth={focusedId === n.id ? 1.4 : 0.9}
               className="motion-safe:transition-[stroke-width] motion-safe:duration-150"
             />
           ))}
         </g>
 
-        {/* Center node. */}
+        {/* Center node */}
         <g>
-          <circle
-            cx={CENTER_X}
-            cy={CENTER_Y}
-            r={CENTER_RADIUS}
-            className="fill-foreground/85 stroke-background"
+          <rect
+            x={CENTER_X - 72}
+            y={CENTER_Y - 22}
+            width={144}
+            height={44}
+            rx={8}
+            className="fill-foreground/90 stroke-background"
             strokeWidth={1.5}
           />
-          <text
-            x={CENTER_X}
-            y={CENTER_Y + CENTER_RADIUS + 14}
-            textAnchor="middle"
-            className="fill-foreground text-[10px] font-medium"
-          >
-            {shortLabel(paperTitle || "This paper", 32)}
+          <text x={CENTER_X} y={CENTER_Y - 4} textAnchor="middle" className="fill-background text-[9px] font-semibold uppercase tracking-wide">
+            This paper
+          </text>
+          <text x={CENTER_X} y={CENTER_Y + 12} textAnchor="middle" className="fill-background text-[10px] font-medium">
+            {shortPaperTitle(paperTitle)}
           </text>
         </g>
 
-        {/* Outbound + inbound nodes. */}
+        {/* Side nodes */}
         {[...layout.outbound, ...layout.inbound].map((n) => {
+          const isLeft = n.direction === "outbound";
+          const w = 140;
+          const x = isLeft ? LEFT_X - w / 2 : RIGHT_X - w / 2;
           const isFocused = focusedId === n.id;
-          const handlers = {
-            tabIndex: 0,
-            onFocus: () => handleEnter(n),
-            onBlur: handleLeave,
-            onMouseEnter: () => handleEnter(n),
-            onMouseLeave: handleLeave,
-            className: "focus:outline-none cursor-pointer",
-          } as const;
           const inner = (
             <>
-              <circle
-                cx={n.x}
-                cy={n.y}
-                r={isFocused ? NODE_RADIUS + 1.5 : NODE_RADIUS}
-                data-action={n.direction === "outbound" ? "explain" : "followup"}
-                fill="rgb(var(--highlight-rgb) / 0.85)"
-                stroke="rgb(var(--highlight-rgb))"
-                strokeWidth={1.2}
-                className="motion-safe:transition-[r] motion-safe:duration-150"
+              <rect
+                x={x}
+                y={n.y - NODE_H / 2}
+                width={w}
+                height={NODE_H}
+                rx={5}
+                className={isFocused ? "fill-card stroke-foreground/30" : "fill-muted/[0.12] stroke-border/60"}
+                strokeWidth={1}
               />
-              {isFocused && (
-                <g>
-                  <rect
-                    x={n.x - 80}
-                    y={n.y + NODE_RADIUS + 3}
-                    width={160}
-                    height={22}
-                    rx={4}
-                    className="fill-popover stroke-border/60"
-                    strokeWidth={0.5}
-                  />
-                  <text
-                    x={n.x}
-                    y={n.y + NODE_RADIUS + 18}
-                    textAnchor="middle"
-                    className="fill-foreground text-[10px]"
-                  >
-                    {n.label}
-                  </text>
-                </g>
-              )}
+              <text
+                x={isLeft ? x + 6 : x + w - 6}
+                y={n.y + 1}
+                textAnchor={isLeft ? "start" : "end"}
+                dominantBaseline="middle"
+                className="fill-foreground text-[9px] font-medium"
+              >
+                {n.label.length > 34 ? `${n.label.slice(0, 33)}…` : n.label}
+              </text>
             </>
           );
+          const handlers = {
+            onMouseEnter: () => handleEnter(n),
+            onMouseLeave: handleLeave,
+            onFocus: () => handleEnter(n),
+            onBlur: handleLeave,
+          };
           if (n.href) {
             return (
               <a
-                key={`node-${n.id}`}
+                key={n.id}
                 href={n.href}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label={`${n.direction} citation: ${n.detail}`}
+                aria-label={`${n.direction === "outbound" ? "Reference" : "Citing paper"}: ${n.label}`}
                 {...handlers}
               >
                 {inner}
@@ -265,30 +260,16 @@ export function CitationGraph({
             );
           }
           return (
-            <g
-              key={`node-${n.id}`}
-              role="button"
-              aria-label={`${n.direction} citation: ${n.detail}`}
-              {...handlers}
-            >
+            <g key={n.id} role="img" aria-label={n.label} {...handlers}>
               {inner}
             </g>
           );
         })}
       </svg>
-      <div className="mt-1 flex items-center justify-between px-1 text-[10px] text-muted-foreground/80">
-        <span>
-          <span className="mr-1 inline-block h-2 w-2 rounded-full" data-action="explain" style={{ background: "rgb(var(--highlight-rgb) / 0.85)" }} />
-          Outbound · {outbound.length}
-        </span>
-        <span>
-          Inbound · {inbound.length}
-          <span className="ml-1 inline-block h-2 w-2 rounded-full" data-action="followup" style={{ background: "rgb(var(--highlight-rgb) / 0.85)" }} />
-        </span>
-      </div>
-      {totalOmitted > 0 && (
-        <p className="mt-1 text-center text-[10px] text-muted-foreground/70">
-          + {totalOmitted} more in the list below
+
+      {omitted > 0 && (
+        <p className="border-t border-border/40 px-4 py-2 text-center text-[10px] text-muted-foreground/75">
+          Showing {MAX_PER_SIDE} per side · {omitted} more in the lists below
         </p>
       )}
     </div>

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from ...models.schemas import ParsedPaper
+from ...gating import release_export_usage
 from .. import storage as cloud_storage
 from ..db import get_export_row_by_id, update_export_row
 from ..pdf_parser import get_paper
@@ -102,6 +102,12 @@ async def run_export_job(export_id: str) -> None:
             "export_failed export_id=%s format=%s error_code=%s",
             export_id, fmt, code,
         )
+        release_export_usage({
+            "user_id": user_id,
+            "format": fmt,
+            "today": datetime.now(timezone.utc).date().isoformat(),
+            "count": 1,
+        })
         update_export_row(
             export_id,
             user_id,

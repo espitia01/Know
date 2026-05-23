@@ -15,6 +15,22 @@ from .auth import require_auth
 TRIAL_SELECTION_CAP = 2
 
 
+class _TrialCapExceeded(Exception):
+    """Raised when a trial paper has exhausted its selection quota."""
+
+
+def _reserve_trial_selection(p):
+    prev = int(p.cached_analysis.get("trial_selections_used") or 0)
+    if prev >= TRIAL_SELECTION_CAP:
+        raise _TrialCapExceeded()
+    p.cached_analysis["trial_selections_used"] = prev + 1
+
+
+def _release_trial_selection(p):
+    prev = int(p.cached_analysis.get("trial_selections_used") or 0)
+    p.cached_analysis["trial_selections_used"] = max(0, prev - 1)
+
+
 import logging as _logging
 
 _main_logger = _logging.getLogger("know.main")
@@ -552,12 +568,15 @@ async def trial_selection_stream(request: Request, body: dict):
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    used = int(paper.cached_analysis.get("trial_selections_used") or 0)
-    if used >= TRIAL_SELECTION_CAP:
+    try:
+        mutate_local_paper(paper_id, _reserve_trial_selection)
+    except _TrialCapExceeded:
         raise HTTPException(
             status_code=429,
             detail="You've used both selections in this demo. Create a free account to continue.",
         )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Paper not found")
 
     provider = get_fast_provider(None)
     if not isinstance(provider, AnthropicProvider):
@@ -568,6 +587,7 @@ async def trial_selection_stream(request: Request, body: dict):
     async def event_stream():
         full_text = ""
         disconnected = False
+        completed = False
         try:
             async for chunk in provider.stream_complete(system, user_text, max_tokens=2048):
                 if await request.is_disconnected():
@@ -590,20 +610,27 @@ async def trial_selection_stream(request: Request, body: dict):
             }
 
             def _apply(p):
-                prev = int(p.cached_analysis.get("trial_selections_used") or 0)
-                p.cached_analysis["trial_selections_used"] = prev + 1
                 append_capped(p.cached_analysis, "selections", result)
 
             try:
                 mutate_local_paper(paper_id, _apply)
             except Exception:
                 _main_logger.exception("trial selection persist failed for %s", paper_id)
+            completed = True
         except asyncio.CancelledError:
             raise
         except Exception:
             _main_logger.exception("Trial selection stream error for %s", paper_id)
             yield f"data: {_json.dumps({'type': 'error', 'message': 'Analysis failed. Please try again.'})}\n\n"
             yield f"data: {_json.dumps({'type': 'done', 'full_text': ''})}\n\n"
+        finally:
+            if not completed:
+                try:
+                    mutate_local_paper(paper_id, _release_trial_selection)
+                except Exception:
+                    _main_logger.exception(
+                        "trial selection quota release failed for %s", paper_id,
+                    )
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

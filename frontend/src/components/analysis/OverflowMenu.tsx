@@ -28,6 +28,8 @@ export function OverflowMenu({
   sideOffset = 6,
   className,
   ariaLabel,
+  open: openProp,
+  onOpenChange,
 }: {
   triggerInner: ReactNode;
   buttonProps?: ButtonHTMLAttributes<HTMLButtonElement>;
@@ -36,11 +38,24 @@ export function OverflowMenu({
   sideOffset?: number;
   className?: string;
   ariaLabel?: string;
+  /** When set with ``onOpenChange``, controls menu visibility from the parent. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const menuId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
+  const [openUncontrolled, setOpenUncontrolled] = useState(false);
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : openUncontrolled;
+  const setOpen = useCallback(
+    (next: boolean | ((v: boolean) => boolean)) => {
+      const value = typeof next === "function" ? next(open) : next;
+      if (!isControlled) setOpenUncontrolled(value);
+      onOpenChange?.(value);
+    },
+    [isControlled, onOpenChange, open],
+  );
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
 
   const { className: btnClassName, onClick: btnOnClick, ...restButtonProps } = buttonProps ?? {};
@@ -110,7 +125,7 @@ export function OverflowMenu({
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleKey);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   const menu =
     open && typeof document !== "undefined"
@@ -146,7 +161,7 @@ export function OverflowMenu({
         onClick={(e) => {
           btnOnClick?.(e);
           if (e.defaultPrevented) return;
-          setOpen((v) => !v);
+          setOpen(!open);
         }}
       >
         {triggerInner}

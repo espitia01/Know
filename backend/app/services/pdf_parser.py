@@ -792,6 +792,49 @@ def get_figure_path(paper_id: str, fig_id: str) -> Path | None:
     return None
 
 
+def load_figure_png_bytes(paper_id: str, fig_id: str, user_id: str | None) -> bytes | None:
+    """Load figure PNG bytes from local disk or Supabase Storage (with local cache)."""
+    fig_path = get_figure_path(paper_id, fig_id)
+    if fig_path:
+        try:
+            return fig_path.read_bytes()
+        except OSError:
+            logger.warning("Failed to read local figure %s/%s", paper_id, fig_id, exc_info=True)
+
+    if not user_id:
+        return None
+
+    from . import storage as cloud_storage
+
+    fig_bytes = cloud_storage.download_file(user_id, f"{paper_id}/figures/{fig_id}.png")
+    if not fig_bytes:
+        return None
+
+    local_dir = settings.papers_dir / paper_id / "figures"
+    local_dir.mkdir(parents=True, exist_ok=True)
+    cached = local_dir / f"{fig_id}.png"
+    try:
+        cached.write_bytes(fig_bytes)
+    except OSError:
+        logger.warning(
+            "Could not cache figure %s/%s locally; using in-memory bytes",
+            paper_id,
+            fig_id,
+            exc_info=True,
+        )
+    return fig_bytes
+
+
+def resolve_figure_path(paper_id: str, fig_id: str, user_id: str | None) -> Path | None:
+    """Return a local path to a figure PNG, fetching from cloud storage if needed."""
+    existing = get_figure_path(paper_id, fig_id)
+    if existing:
+        return existing
+    if load_figure_png_bytes(paper_id, fig_id, user_id):
+        return get_figure_path(paper_id, fig_id)
+    return None
+
+
 def list_papers(user_id: str | None = None) -> list[dict]:
     """List all parsed papers. When user_id is given and Supabase is configured, scope by user."""
     if user_id:

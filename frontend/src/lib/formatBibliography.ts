@@ -58,6 +58,14 @@ function truncateAfterBibliographyBleed(s: string): string {
       return s.slice(0, cut).trim();
     }
   }
+  /** Table / figure rows glued into bibliography (common in physics PDFs). */
+  const tableRow =
+    /\s\d{1,3}\.\d{1,2}\s+(?:Excited|Ground|State|Figure|Table)\b/i.exec(s) ||
+    /\bRe\s*\([^)]{0,12}\)\s*!?\s*e\s*\(\s*cm/i.exec(s) ||
+    /\bTe\s*\([^)]{0,12}\)\s*(?:CLDA|eV)\b/i.exec(s);
+  if (tableRow && tableRow.index !== undefined && tableRow.index > 40) {
+    return s.slice(0, tableRow.index).trim();
+  }
   /** Numbered line immediately followed by another paper title starting with "Attention …" (transformer-artifact glue) */
   const att = /(?:^|[\s.])(?:\d{1,3}\s+Attention\s+is\b)/i.exec(s);
   if (att && att.index !== undefined && att.index > 50) return s.slice(0, att.index).trim();
@@ -174,4 +182,64 @@ export function sanitizeCitationForDisplay(raw: string): string {
   }
   s = clipCitationLineLength(s);
   return s;
+}
+
+/** True when a line is table junk, a bare index, or otherwise not a bibliography entry. */
+export function isGarbledBibliographyLine(raw: string): boolean {
+  const s = normalizeBibliographyCitationLine(raw);
+  if (!s || s.length < 10) return true;
+  if (/^[\d.\s()[\]{}]+$/.test(s)) return true;
+  if (/^\d{1,3}\.\d{1,2}\s+[A-Za-z(~]/.test(s) && !/\b(?:doi|arxiv|vol\.|pp\.|press|journal|rev\.|lett\.|phys\.|chem\.)/i.test(s)) {
+    return true;
+  }
+  if (/\bRe\s*\([^)]*\)\s*!?\s*e\s*\(\s*cm/i.test(s)) return true;
+  if (/\bTe\s*\([^)]*\)\s*(?:CLDA|eV)\b/i.test(s)) return true;
+  if (/~A1|!e\s*\(|\uFFFD/.test(s)) return true;
+  const digits = (s.match(/\d/g) || []).length;
+  if (digits / s.length > 0.38 && s.length < 100) return true;
+  const alpha = (s.match(/[a-zA-Z]/g) || []).length;
+  if (alpha < 8) return true;
+  return false;
+}
+
+/** Cluster headings from the model should read like prose, not PDF table fragments. */
+export function isUsableClusterTheme(theme: string): boolean {
+  const t = (theme || "").trim();
+  if (!t || /^other\s+references?$/i.test(t)) return false;
+  if (t.length < 8 || t.length > 110) return false;
+  if (isGarbledBibliographyLine(t)) return false;
+  if (/^references$/i.test(t)) return false;
+  return true;
+}
+
+/** Compact author + year label for graphs and chips. */
+export function extractCitationShortLabel(raw: string): string {
+  let s = normalizeBibliographyCitationLine(raw);
+  s = s.replace(/^\[\d{1,4}\]\s*/, "").trim();
+  if (!s) return "Reference";
+
+  const yearMatch = s.match(/\((19|20)\d{2}\)/) || s.match(/,\s*(19|20)\d{2}\./);
+  const year = yearMatch
+    ? (yearMatch[0].match(/(19|20)\d{2}/)?.[0] ?? null)
+    : null;
+
+  const splitRe = /,\s*(?:Phys\.|Rev\.|J\.|Nature|Proc\.|Appl\.|Chem\.|Lett\.|Mag\.|Acta|Trans\.|arXiv|doi:|http)/i;
+  let authors = s.split(splitRe)[0]?.trim() || s.split(",")[0]?.trim() || s;
+  authors = authors.replace(/\s{2,}/g, " ").trim();
+  if (authors.length > 52) authors = `${authors.slice(0, 51)}…`;
+
+  return year ? `${authors} (${year})` : authors.slice(0, 58);
+}
+
+export function filterUsablePriorWork<T extends { citation_display?: string; title?: string }>(
+  items: T[],
+): T[] {
+  return items.filter((w) => {
+    const raw =
+      (typeof w.citation_display === "string" && w.citation_display.trim()) ||
+      (w.title || "").trim();
+    if (!raw) return false;
+    if (isGarbledBibliographyLine(raw)) return false;
+    return sanitizeCitationForDisplay(raw).length >= 12;
+  });
 }

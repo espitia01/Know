@@ -113,7 +113,13 @@ async def create_export(
         token = reserve_export_usage(user_id, fmt)
         row = create_export_row(user_id, paper_id, fmt, sections, options)
         if not row:
-            raise HTTPException(status_code=503, detail="Failed to create export job")
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "export_concurrent",
+                    "message": "Too many exports in progress. Wait for one to finish.",
+                },
+            )
         export_id = row["id"]
 
         if fmt == "podcast":

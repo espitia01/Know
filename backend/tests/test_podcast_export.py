@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services.exports.podcast_render import (
+    build_section_text,
     filter_segments,
     validate_podcast_script,
 )
@@ -35,6 +36,15 @@ def test_filter_segments_drops_short():
     ]
     out = filter_segments(segs)
     assert len(out) == 1
+
+
+def test_build_section_text_prepare():
+    text = build_section_text(
+        "prepare",
+        {},
+        {"prepare": {"definitions": [{"term": "SGD", "definition": "Stochastic gradient descent"}]}},
+    )
+    assert "SGD" in text
 
 
 @pytest.mark.asyncio
