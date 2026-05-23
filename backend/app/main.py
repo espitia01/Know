@@ -815,36 +815,13 @@ async def delete_user_workspace(workspace_id: str, user_id: str = Depends(requir
 # BibTeX export (paid tiers only)
 # ----------------------------------------------------------------
 
-def _escape_bibtex(text: str) -> str:
-    """Escape BibTeX special characters."""
-    text = text.replace('\\', '\\textbackslash{}')
-    for ch in ('&', '%', '#', '_', '~', '^', '$'):
-        text = text.replace(ch, f'\\{ch}')
-    text = text.replace('{', '\\{').replace('}', '\\}')
-    return text
-
-
-def _paper_to_bibtex(paper_meta: dict) -> str:
-    """Convert a paper metadata dict to a BibTeX entry."""
-    pid = paper_meta.get("id", "unknown")
-    title = _escape_bibtex(paper_meta.get("title", "Untitled"))
-    authors = paper_meta.get("authors", [])
-    author_str = _escape_bibtex(" and ".join(authors) if authors else "Unknown")
-    safe_id = "".join(c if c.isalnum() else "_" for c in pid)
-
-    return (
-        f"@article{{{safe_id},\n"
-        f"  title = {{{title}}},\n"
-        f"  author = {{{author_str}}},\n"
-        f"}}\n"
-    )
-
-
 @app.post("/api/export/bibtex")
 async def export_bibtex(body: dict, user_id: str = Depends(require_auth)):
     """Export BibTeX for given paper IDs. Paid tiers only."""
     from .gating import get_user_tier
+    from .services.bibtex_export import paper_to_bibtex
     from .services.db import list_papers_meta, get_workspace
+    from .services.pdf_parser import get_paper
 
     tier = get_user_tier(user_id)
     if tier == "free":
@@ -873,5 +850,16 @@ async def export_bibtex(body: dict, user_id: str = Depends(require_auth)):
     if not all_papers:
         raise HTTPException(status_code=404, detail="No papers found for export.")
 
-    bibtex = "\n".join(_paper_to_bibtex(p) for p in all_papers)
+    used_keys: set[str] = set()
+    entries: list[str] = []
+    for meta in all_papers:
+        paper = get_paper(meta["id"], user_id=user_id)
+        title = meta.get("title") or (paper.title if paper else "") or "Untitled"
+        authors = meta.get("authors") or (paper.authors if paper else []) or []
+        raw_text = (paper.raw_text if paper else "") or ""
+        entries.append(
+            paper_to_bibtex(title=title, authors=authors, raw_text=raw_text, used_keys=used_keys)
+        )
+
+    bibtex = "\n\n".join(entries)
     return {"bibtex": bibtex, "count": len(all_papers)}

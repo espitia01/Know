@@ -51,8 +51,6 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
   const { saveProgress: saveReadingProgress } = useReadingState(paperId);
   const exportUnreadBadge = useStore((s) => s.exportUnreadBadge);
   const setExportUnreadBadge = useStore((s) => s.setExportUnreadBadge);
-  const exportToast = useStore((s) => s.exportToast);
-  const setExportToast = useStore((s) => s.setExportToast);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [panelMenuOpen, setPanelMenuOpen] = useState(false);
   const [hasOpenAiKey, setHasOpenAiKey] = useState(true);
@@ -301,18 +299,6 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
         onClose={() => setExportModalOpen(false)}
         hasOpenAiKey={hasOpenAiKey}
       />
-      {exportToast && (
-        <div className="fixed bottom-4 right-4 z-[300] max-w-sm rounded-[var(--radius-lg)] border border-border/50 bg-popover px-3 py-2 text-[var(--text-sm)] shadow-[var(--shadow-sm)]">
-          <p>{exportToast}</p>
-          <button
-            type="button"
-            className="mt-1 text-[var(--text-xs)] text-muted-foreground underline"
-            onClick={() => setExportToast(null)}
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
     </>
   );
 }

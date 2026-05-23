@@ -108,10 +108,12 @@ export function ExportsMenu() {
               {row.status === "completed" && row.download_url && (
                 <a
                   href={row.download_url}
-                  download
+                  {...(row.format === "pdf"
+                    ? { target: "_blank", rel: "noopener noreferrer" }
+                    : { download: true })}
                   className="rounded-md bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground hover:opacity-90"
                 >
-                  Download
+                  {row.format === "pdf" ? "Open" : "Download"}
                 </a>
               )}
               <button

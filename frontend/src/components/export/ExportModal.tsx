@@ -26,6 +26,12 @@ const SECTION_OPTIONS = [
   { id: "prepare", label: "Prepare" },
 ] as const;
 
+const PODCAST_LENGTHS = [
+  { minutes: 5 as const, label: "5 min", blurb: "Quick summary — main claims and takeaways only" },
+  { minutes: 8 as const, label: "8 min", blurb: "Standard walkthrough — methods, results, and context" },
+  { minutes: 12 as const, label: "12 min", blurb: "Deeper dive — assumptions, figures, and open questions" },
+];
+
 const FORMATS = [
   {
     id: "pdf" as const,
@@ -87,7 +93,6 @@ export function ExportModal({ paperId, open, onClose, hasOpenAiKey = true }: Exp
   const [compact, setCompact] = useState(false);
   const [pptxTheme, setPptxTheme] = useState<"light" | "dark">("light");
   const [dense, setDense] = useState(false);
-  const [voice, setVoice] = useState<"onyx" | "nova" | "alloy">("onyx");
   const [lengthMinutes, setLengthMinutes] = useState<5 | 8 | 12>(8);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState<ModalPhase>("configure");
@@ -168,7 +173,7 @@ export function ExportModal({ paperId, open, onClose, hasOpenAiKey = true }: Exp
       } else if (format === "pptx") {
         options.pptx = { theme: pptxTheme, dense };
       } else {
-        options.podcast = { voice, length_minutes: lengthMinutes };
+        options.podcast = { length_minutes: lengthMinutes };
       }
       const { export_id } = await api.requestExport(paperId, {
         format,
@@ -379,30 +384,23 @@ export function ExportModal({ paperId, open, onClose, hasOpenAiKey = true }: Exp
 
               {format === "podcast" && (
                 <div className="space-y-2 rounded-lg border border-border/40 bg-muted/[0.06] px-3 py-2.5 text-[var(--text-xs)]">
-                  <label className="flex items-center justify-between gap-2">
-                    <span>Voice</span>
-                    <select
-                      value={voice}
-                      onChange={(e) => setVoice(e.target.value as typeof voice)}
-                      className="rounded-md border border-border bg-background px-2 py-1"
-                    >
-                      <option value="onyx">Onyx</option>
-                      <option value="nova">Nova</option>
-                      <option value="alloy">Alloy</option>
-                    </select>
-                  </label>
-                  <label className="flex items-center justify-between gap-2">
-                    <span>Length</span>
+                  <label className="flex flex-col gap-1">
+                    <span className="font-medium text-foreground/90">Length</span>
                     <select
                       value={lengthMinutes}
                       onChange={(e) => setLengthMinutes(Number(e.target.value) as 5 | 8 | 12)}
                       className="rounded-md border border-border bg-background px-2 py-1"
                     >
-                      <option value={5}>5 min</option>
-                      <option value={8}>8 min</option>
-                      <option value={12}>12 min</option>
+                      {PODCAST_LENGTHS.map((opt) => (
+                        <option key={opt.minutes} value={opt.minutes}>
+                          {opt.label} — {opt.blurb}
+                        </option>
+                      ))}
                     </select>
                   </label>
+                  <p className="text-[10px] leading-relaxed text-muted-foreground/80">
+                    Typical server cost: about $0.08–0.20 per episode (script + narration), depending on length and sections included.
+                  </p>
                 </div>
               )}
             </div>
@@ -438,7 +436,7 @@ export function ExportModal({ paperId, open, onClose, hasOpenAiKey = true }: Exp
                   Building your {exportFormatLabel(format).toLowerCase()}…
                 </p>
                 <p className="max-w-xs text-[var(--text-xs)] text-muted-foreground/80">
-                  This usually takes under a minute. You can close this dialog — progress stays visible in the analysis pane.
+                  This usually takes under a minute. You can close this dialog — check Panel options → Recent exports when it finishes.
                 </p>
               </>
             )}
@@ -452,10 +450,12 @@ export function ExportModal({ paperId, open, onClose, hasOpenAiKey = true }: Exp
                 )}
                 <a
                   href={progressRow.download_url}
-                  download
+                  {...(format === "pdf"
+                    ? { target: "_blank", rel: "noopener noreferrer" }
+                    : { download: true })}
                   className="rounded-md bg-primary px-4 py-2 text-[var(--text-sm)] font-medium text-primary-foreground motion-safe:duration-150 hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 >
-                  Download {format.toUpperCase()}
+                  {format === "pdf" ? "Open PDF" : `Download ${format.toUpperCase()}`}
                 </a>
                 {format === "podcast" && (
                   <audio controls src={progressRow.download_url} className="w-full max-w-sm h-8" preload="none" />
