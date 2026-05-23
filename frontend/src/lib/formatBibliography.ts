@@ -59,6 +59,14 @@ function truncateAfterBibliographyBleed(s: string): string {
     }
   }
   /** Table / figure rows glued into bibliography (common in physics PDFs). */
+  const tableHeader = /\bTABLE\s+[IVXLC\d]+[\s.:]/i.exec(s);
+  if (tableHeader && tableHeader.index !== undefined && tableHeader.index > 30) {
+    return s.slice(0, tableHeader.index).trim();
+  }
+  const groundState = /\bGround[\s-]state\b/i.exec(s);
+  if (groundState && groundState.index !== undefined && groundState.index > 40) {
+    return s.slice(0, groundState.index).trim();
+  }
   const tableRow =
     /\s\d{1,3}\.\d{1,2}\s+(?:Excited|Ground|State|Figure|Table)\b/i.exec(s) ||
     /\bRe\s*\([^)]{0,12}\)\s*!?\s*e\s*\(\s*cm/i.exec(s) ||
@@ -220,8 +228,58 @@ export function isGarbledBibliographyLine(raw: string): boolean {
   return false;
 }
 
-const JOURNAL_SPLIT =
-  /,\s*(?:Phys\.|Rev\.|J\.|Nature|Proc\.|Appl\.|Chem\.|Lett\.|Mag\.|Acta|Trans\.|Science|Cell|ISBN|http|doi:|Vol\.|edited by|In:)/i;
+const CITATION_VENUE =
+  /,\s*(?:Phys\.\s*Rev(?:\.\s*(?:Lett|B))?|Rev\.\s*Mod\.\s*Phys\.|J\.\s*Phys\.\s*Chem\.|Chem\.\s*Phys\.\s*Lett\.|J\.\s*Chem\.\s*Phys\.|Appl\.\s*Phys\.|Acta|Trans\.|Mag\.|Nature|Science|Proc\.|Cell|NIST|http|doi:|Vol\.|edited by|In:)/i;
+
+function extractPublicationYear(s: string): string | null {
+  const exactParen = [...s.matchAll(/\((?:19|20)\d{2}\)/g)];
+  if (exactParen.length) {
+    return exactParen[exactParen.length - 1][0].replace(/[()]/g, "");
+  }
+  const innerYear = [...s.matchAll(/\([^)]*(?:19|20)\d{2}[^)]*\)/g)];
+  if (innerYear.length) {
+    const m = innerYear[innerYear.length - 1][0].match(/(?:19|20)\d{2}/);
+    if (m) return m[0];
+  }
+  const bareYears = [...s.matchAll(/\b(?:19|20)\d{2}\b/g)];
+  return bareYears.length ? bareYears[bareYears.length - 1][0] : null;
+}
+
+function extractAuthorLead(s: string): string {
+  const venue = CITATION_VENUE.exec(s);
+  if (venue && venue.index > 0) {
+    return s.slice(0, venue.index).replace(/,\s*$/, "").trim();
+  }
+  const comma = s.indexOf(", ");
+  if (comma > 0 && comma < 120) {
+    return s.slice(0, comma).trim();
+  }
+  return s.split(",")[0]?.trim() || s;
+}
+
+function extractCitationDetail(s: string, authors: string): string {
+  const venue = CITATION_VENUE.exec(s);
+  if (venue && venue.index >= 0) {
+    return s.slice(venue.index).replace(/^,\s*/, "").trim();
+  }
+  if (authors.length < s.length) {
+    return s.slice(authors.length).replace(/^,\s*/, "").trim();
+  }
+  return s;
+}
+
+/** Heuristic: line still looks like a bibliography row after sanitization. */
+export function looksLikeBibliographyLine(raw: string): boolean {
+  const s = sanitizeCitationFullText(raw);
+  if (!s || s.length < 18) return false;
+  if (isGarbledBibliographyLine(s)) return false;
+  return (
+    /\((?:19|20)\d{2}\)/.test(s) ||
+    /\([^)]*(?:19|20)\d{2}[^)]*\)/.test(s) ||
+    /\b(?:19|20)\d{2}\b/.test(s) ||
+    /\b(?:Phys\.|Rev\.|Chem\.|doi:|http|WebBook|Press|Lett\.|Nature|Science|Molecules|Monograph)\b/i.test(s)
+  );
+}
 
 /**
  * Format a bibliography row like the Cited by list:
@@ -237,26 +295,36 @@ export function formatReferenceEntry(work: {
   if (!raw || isGarbledBibliographyLine(raw)) return null;
 
   const s = sanitizeCitationFullText(raw).replace(/^\[\d{1,4}\]\s*/, "").trim();
-  const yearMatch = s.match(/\((19|20)\d{2}\)/);
-  const year = yearMatch ? yearMatch[0].replace(/[()]/g, "") : null;
+  if (!looksLikeBibliographyLine(s)) return null;
 
-  const split = s.split(JOURNAL_SPLIT);
-  const authors = (split[0] || "").trim();
-  let detail =
-    split.length > 1
-      ? s.slice(split[0].length).replace(/^,\s*/, "").trim()
-      : "";
+  const year = extractPublicationYear(s);
+  const authors = extractAuthorLead(s);
+  let detail = extractCitationDetail(s, authors);
+  if (!detail || isGarbledBibliographyLine(detail)) detail = s;
+  if (detail.length > 220) detail = `${detail.slice(0, 219).trim()}…`;
 
-  if (!detail && work.title && !isGarbledBibliographyLine(work.title)) {
-    detail = work.title.trim();
-  }
-  if (!detail) detail = s.slice(authors.length).replace(/^,\s*/, "").trim();
-  if (!detail || isGarbledBibliographyLine(detail)) return null;
+  return `${authors || "Unknown authors"} (${year ?? "n.d."}) — ${detail}`;
+}
 
-  const authorPart = authors.length >= 3 ? authors : s.split(",")[0]?.trim() || authors;
-  if (detail.length > 200) detail = `${detail.slice(0, 199).trim()}…`;
-
-  return `${authorPart || "Unknown authors"} (${year ?? "n.d."}) — ${detail}`;
+/** Display label for a reference row — structured when possible, sanitized fallback otherwise. */
+export function referenceDisplayLabel(work: {
+  citation_display?: string;
+  title?: string;
+}): string | null {
+  return (
+    formatReferenceEntry(work) ??
+    (looksLikeBibliographyLine(
+      (typeof work.citation_display === "string" && work.citation_display) ||
+        work.title ||
+        "",
+    )
+      ? sanitizeCitationForDisplay(
+          (typeof work.citation_display === "string" && work.citation_display) ||
+            work.title ||
+            "",
+        )
+      : null)
+  );
 }
 
 /** Cluster headings from the model should read like prose, not PDF table fragments. */
@@ -296,22 +364,27 @@ export function filterUsablePriorWork<T extends { citation_display?: string; tit
       (typeof w.citation_display === "string" && w.citation_display.trim()) ||
       (w.title || "").trim();
     if (!raw) return false;
-    if (isGarbledBibliographyLine(raw)) return false;
-    return formatReferenceEntry(w) !== null;
+    return looksLikeBibliographyLine(raw);
   });
 }
 
-/** Drop duplicate bibliography rows after garbled filtering. */
-export function dedupePriorWork<T extends { citation_display?: string; title?: string }>(
-  items: T[],
-): T[] {
-  const seen = new Set<string>();
+/** Drop duplicate bibliography rows — prefer first occurrence per bib index. */
+export function dedupePriorWork<
+  T extends { bib_label?: string; ref_id?: string; citation_display?: string; title?: string },
+>(items: T[]): T[] {
+  const seenLabels = new Set<string>();
+  const seenBib = new Set<string>();
   return items.filter((w) => {
-    const label = formatReferenceEntry(w);
+    const bib = String(w.bib_label ?? w.ref_id ?? "").trim();
+    if (bib) {
+      if (seenBib.has(bib)) return false;
+      seenBib.add(bib);
+    }
+    const label = referenceDisplayLabel(w);
     if (!label) return false;
     const key = label.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
+    if (seenLabels.has(key)) return false;
+    seenLabels.add(key);
     return true;
   });
 }

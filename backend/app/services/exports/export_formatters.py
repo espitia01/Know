@@ -215,9 +215,23 @@ def _is_garbled_bibliography_line(raw: str) -> bool:
 
 
 _JOURNAL_SPLIT = re.compile(
-    r",\s*(?:Phys\.|Rev\.|J\.|Nature|Proc\.|Appl\.|Chem\.|Lett\.|Mag\.|Acta|Trans\.|Science|Cell|ISBN|http|doi:|Vol\.|edited by|In:)",
+    r",\s*(?:Phys\.\s*Rev(?:\.\s*(?:Lett|B))?|Rev\.\s*Mod\.\s*Phys\.|J\.\s*Phys\.\s*Chem\.|"
+    r"Chem\.\s*Phys\.\s*Lett\.|J\.\s*Chem\.\s*Phys\.|Appl\.\s*Phys\.|Nature|Science|Proc\.|Cell|NIST|http|doi:|Vol\.|edited by|In:)",
     re.I,
 )
+
+
+def _extract_publication_year(s: str) -> str | None:
+    exact = re.findall(r"\((?:19|20)\d{2}\)", s)
+    if exact:
+        return exact[-1].strip("()")
+    inner = re.findall(r"\([^)]*(?:19|20)\d{2}[^)]*\)", s)
+    if inner:
+        m = re.search(r"(?:19|20)\d{2}", inner[-1])
+        if m:
+            return m.group(0)
+    bare = re.findall(r"\b(?:19|20)\d{2}\b", s)
+    return bare[-1] if bare else None
 
 
 def _format_reference_entry(entry: dict) -> str | None:
@@ -225,21 +239,26 @@ def _format_reference_entry(entry: dict) -> str | None:
     if not raw or _is_garbled_bibliography_line(raw):
         return None
     s = re.sub(r"^\[\d{1,4}\]\s*", "", raw).strip()
-    year_match = re.search(r"\((19|20)\d{2}\)", s)
-    year = year_match.group(0).strip("()") if year_match else None
-    parts = _JOURNAL_SPLIT.split(s, maxsplit=1)
-    authors = (parts[0] or "").strip()
-    detail = s[len(parts[0]) :].lstrip(", ").strip() if len(parts) > 1 else ""
-    if not detail:
-        title = plain_text(entry.get("title"), max_len=4000)
-        if title and not _is_garbled_bibliography_line(title):
-            detail = title
-    if not detail or _is_garbled_bibliography_line(detail):
+    if len(s) < 18:
         return None
-    author_part = authors if len(authors) >= 3 else (authors.split(",")[0] or authors).strip()
-    if len(detail) > 200:
-        detail = detail[:199].rstrip() + "…"
-    return f"{author_part or 'Unknown authors'} ({year or 'n.d.'}) — {detail}"
+    year = _extract_publication_year(s)
+    venue = _JOURNAL_SPLIT.search(s)
+    if venue and venue.start() > 0:
+        authors = s[: venue.start()].rstrip(", ").strip()
+        detail = s[venue.start() :].lstrip(", ").strip()
+    else:
+        comma = s.find(", ")
+        if 0 < comma < 120:
+            authors = s[:comma].strip()
+            detail = s[comma + 2 :].strip()
+        else:
+            authors = s.split(",")[0].strip() if "," in s else s
+            detail = s
+    if not detail or _is_garbled_bibliography_line(detail):
+        detail = s
+    if len(detail) > 220:
+        detail = detail[:219].rstrip() + "…"
+    return f"{authors or 'Unknown authors'} ({year or 'n.d.'}) — {detail}"
 
 
 def _collect_prior_work_entries(content: dict) -> list[dict]:

@@ -437,8 +437,16 @@ def split_bibliography_chunks(bib: str) -> dict[str, str]:
     for i, (start, num) in enumerate(merged):
         end = merged[i + 1][0] if i + 1 < len(merged) else len(bib)
         blob = bib[start:end].strip()
-        if blob:
+        blob = _clean_bib_chunk(blob)
+        if blob and num not in chunks:
             chunks[num] = blob
+
+    if merged and "1" not in chunks:
+        first_pos = merged[0][0]
+        if first_pos > 0:
+            prefix = _clean_bib_chunk(bib[:first_pos].strip())
+            if len(prefix) >= 40 and re.search(r"\(\d{4}\)", prefix):
+                chunks["1"] = prefix
 
     if not chunks and len(bstrip) >= 80:
         parts = re.split(r"(?<=[.\]])\s+(?=[A-Z][a-z]?[.,]\s+[A-Z])", bstrip)
@@ -461,6 +469,20 @@ def split_bibliography_chunks(bib: str) -> dict[str, str]:
 
 
 _JUNK_HTTP = ("github.com", "creativecommons", "linkedin.com")
+
+_BLOB_BLEED = re.compile(
+    r"\b(?:TABLE\s+[IVXLC\d]+[\s.:]|FIGURE\s+\d+[\s.:]|Ground[\s-]state|Excited[\s-]state|Re\s*\(\s*A)",
+    re.I,
+)
+
+
+def _clean_bib_chunk(blob: str) -> str:
+    """Drop table/figure body text glued onto a bibliography line."""
+    text = (blob or "").strip()
+    m = _BLOB_BLEED.search(text)
+    if m and m.start() > 48:
+        return text[: m.start()].strip()
+    return text
 
 
 def _publisher_url_from_blob(blob: str) -> str | None:
@@ -556,6 +578,7 @@ def bibliography_to_prior_work_entries(bib_text: str, *, max_items: int = 120) -
         blob = (chunks.get(key) or "").strip()
         if not blob:
             continue
+        blob = _clean_bib_chunk(blob)
         raw_lines = [ln.strip() for ln in blob.replace("\r\n", "\n").split("\n") if ln.strip()]
         citation_display = "\n".join(raw_lines) if raw_lines else blob
         condensed = " ".join(raw_lines) if raw_lines else " ".join(blob.split())

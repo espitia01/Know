@@ -30,3 +30,25 @@ def test_single_short_reference_unchanged():
     chunks = split_bibliography_chunks(bib)
     assert chunks
     assert max(len(v) for v in chunks.values()) <= 1200
+
+
+def test_infers_leading_unnumbered_first_reference():
+    bib = (
+        "M. Rohlfing and S. G. Louie, Phys. Rev. Lett. 81, 2312 (1998).\n"
+        "[2] M. Rohlfing and S. G. Louie, Phys. Rev. B 62, 4927 (2000).\n"
+        "[3] F. Mauri and R. Car, Phys. Rev. Lett. 75, 3166 (1995)."
+    )
+    chunks = split_bibliography_chunks(bib)
+    assert "1" in chunks
+    assert "2" in chunks
+    assert "TABLE" not in chunks.get("3", "")
+
+
+def test_truncates_table_bleed_on_last_chunk():
+    bib = (
+        "[13] M. I. McCarthy, P. Rosums, J. Chem. Phys. 86, 6693 (1987).\n"
+        "TABLE II. Ground-state and excited-state data for NH3:"
+    )
+    chunks = split_bibliography_chunks(bib)
+    assert "13" in chunks
+    assert "TABLE II" not in chunks["13"]

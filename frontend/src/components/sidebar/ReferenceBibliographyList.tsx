@@ -1,12 +1,12 @@
 "use client";
 
 import type { PriorWork } from "@/lib/api";
-import { formatReferenceEntry } from "@/lib/formatBibliography";
+import { referenceDisplayLabel } from "@/lib/formatBibliography";
 import { priorWorkExternalHref, referenceIndexLabel } from "@/lib/priorWorkLinks";
 
 function ReferenceRow({ work, index }: { work: PriorWork; index: number }) {
   const href = priorWorkExternalHref(work);
-  const label = formatReferenceEntry(work);
+  const label = referenceDisplayLabel(work);
   if (!label) return null;
   const indexLabel = referenceIndexLabel(work, index);
 
