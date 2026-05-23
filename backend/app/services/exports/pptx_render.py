@@ -114,9 +114,10 @@ def _add_bullet_slide(
         for j, b in enumerate(bullets[i : i + chunk]):
             para = btf.paragraphs[0] if j == 0 else btf.add_paragraph()
             para.text = b[:900]
-            para.font.size = Pt(13 if dense else 15)
+            para.font.size = Pt(12 if dense else 14)
             para.font.color.rgb = _rgb(theme, "text")
-            para.space_after = Pt(8)
+            para.space_after = Pt(6)
+            para.line_spacing = 1.15
 
 
 def _add_qa_slide(prs: Presentation, heading: str, pairs: list[tuple[str, str]], theme: dict) -> None:

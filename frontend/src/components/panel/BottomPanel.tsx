@@ -9,11 +9,9 @@ import type { useSelectionThread } from "@/lib/useSelectionThread";
 import { EMPTY_SELECTION_LIST } from "@/lib/store";
 import { FEATURE_TOOLTIPS } from "@/lib/tooltips";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
-import { OverflowMenu } from "@/components/analysis/OverflowMenu";
-import { FAMILY_TO_VAR } from "@/lib/analysisFont";
-import type { AnalysisFontFamily } from "@/lib/store";
-import { cn } from "@/lib/utils";
+import { AnalysisPanelMenu } from "./AnalysisPanelMenu";
 import { SelectionResultPanel } from "./SelectionResultPanel";
+import { FAMILY_TO_VAR } from "@/lib/analysisFont";
 import { PreReadingPanel } from "../sidebar/PreReadingPanel";
 import { RelatedWorkPanel } from "../sidebar/RelatedWorkPanel";
 import { QAPanel } from "../sidebar/QAPanel";
@@ -24,7 +22,6 @@ import { FiguresPanel } from "../sidebar/FiguresPanel";
 import { CrossPaperPanel } from "../sidebar/CrossPaperPanel";
 import { ExportModal } from "../export/ExportModal";
 import { ExportStatusBar } from "../export/ExportStatusBar";
-import { ExportsMenu } from "../export/ExportsMenu";
 import { api } from "@/lib/api";
 
 export type PanelPosition = "right" | "left" | "bottom";
@@ -38,33 +35,12 @@ interface AnalysisPanelProps {
   selectionThread: SelectionThread;
 }
 
-const POSITION_LABEL: Record<PanelPosition, string> = {
-  right: "Right",
-  bottom: "Bottom",
-  left: "Left",
-};
-
 // Tab labels: compact weight + tracking; active state from data-active.
 // `::after` indicator is refined in globals.css under `.analysis-panel-tabs`.
 // `flex-none shrink-0` overrides TabsTrigger’s default `flex-1` so many tabs
 // don’t compress in a narrow right/left column — the row scrolls instead.
 const TAB_STYLE =
   "shrink-0 flex-none h-8 rounded-md px-2.5 text-[var(--text-sm)] tracking-[-0.012em] font-medium text-muted-foreground/85 hover:text-foreground data-active:text-foreground data-active:font-medium";
-
-const positionIcons: Record<PanelPosition, { path: string; next: string }> = {
-  right: {
-    path: "M3 3h18v18H3V3zm12 0v18",
-    next: "Move to bottom",
-  },
-  bottom: {
-    path: "M3 3h18v18H3V3zm0 12h18",
-    next: "Move to left",
-  },
-  left: {
-    path: "M3 3h18v18H3V3zm6 0v18",
-    next: "Move to right",
-  },
-};
 
 export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThread }: AnalysisPanelProps) {
   const {
@@ -167,8 +143,6 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
     });
   }, [effectiveTab]);
 
-  const icon = positionIcons[position] || positionIcons.right;
-
   const handleFollowUp = async (question: string, context: string) => {
     // Pack the prior passage + analysis blob as the "selected text"
     // input — the prompt builder treats it as conversation history.
@@ -252,158 +226,20 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
           </TabsList>
         </div>
 
-        <OverflowMenu
-          ariaLabel="Panel options"
+        <AnalysisPanelMenu
           open={panelMenuOpen}
           onOpenChange={setPanelMenuOpen}
-          buttonProps={{
-            className:
-              "shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground data-[popup-open]:bg-accent/60 motion-safe:duration-150",
-            title: "Panel options — text size, font, pane position",
-            "aria-label": "Panel options",
-          }}
-          triggerInner={
-            <span className="relative inline-flex">
-              <svg
-                className="h-3.5 w-3.5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-              >
-                <line x1="4" x2="4" y1="21" y2="14" />
-                <line x1="4" x2="4" y1="10" y2="3" />
-                <line x1="12" x2="12" y1="21" y2="12" />
-                <line x1="12" x2="12" y1="8" y2="3" />
-                <line x1="20" x2="20" y1="21" y2="16" />
-                <line x1="20" x2="20" y1="12" y2="3" />
-                <line x1="1" x2="7" y1="14" y2="14" />
-                <line x1="9" x2="15" y1="8" y2="8" />
-                <line x1="17" x2="23" y1="16" y2="16" />
-              </svg>
-              {exportUnreadBadge && (
-                <span className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-foreground/50" />
-              )}
-            </span>
-          }
-          className="w-64"
-        >
-          <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">
-            Text size
-          </div>
-          <div className="flex items-center gap-1 px-1 pb-2">
-            <button
-              type="button"
-              onClick={() => bumpAnalysisFontScale(-0.1)}
-              disabled={analysisFontScale <= 0.85 + 1e-6}
-              className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
-              aria-label="Decrease text size"
-            >
-              <span className="text-[var(--text-xs)] font-semibold leading-none">A−</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setAnalysisFontScale(1)}
-              disabled={Math.abs(analysisFontScale - 1) < 1e-6}
-              className="flex-1 h-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none text-[var(--text-xs)] font-medium tabular-nums"
-              aria-label="Reset text size"
-            >
-              {Math.round(analysisFontScale * 100)}%
-            </button>
-            <button
-              type="button"
-              onClick={() => bumpAnalysisFontScale(0.1)}
-              disabled={analysisFontScale >= 1.6 - 1e-6}
-              className="h-7 w-7 inline-flex items-center justify-center rounded-md border border-border hover:bg-accent disabled:opacity-40 disabled:pointer-events-none"
-              aria-label="Increase text size"
-            >
-              <span className="text-[var(--text-xs)] font-semibold leading-none">A+</span>
-            </button>
-          </div>
-          <div className="px-2 pb-2 text-[var(--text-xs)] text-muted-foreground/70 leading-snug">
-            Saved across every paper and reload.
-          </div>
-
-          <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">
-            Font family
-          </div>
-          <div className="grid grid-cols-2 gap-1 px-1 pb-2">
-            {(
-              [
-                { id: "sans", label: "Sans" },
-                { id: "serif", label: "Serif" },
-                { id: "times", label: "Times" },
-                { id: "arial", label: "Arial" },
-                { id: "mono", label: "Mono" },
-              ] as const
-            ).map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => setAnalysisFontFamily(f.id as AnalysisFontFamily)}
-                className={cn(
-                  "h-7 inline-flex items-center justify-center rounded-md border text-[var(--text-xs)] font-medium",
-                  analysisFontFamily === f.id
-                    ? "border-foreground/35 bg-accent/50 text-foreground"
-                    : "border-border bg-transparent text-foreground/80 hover:bg-accent/40",
-                )}
-                style={{ fontFamily: FAMILY_TO_VAR[f.id as AnalysisFontFamily] }}
-                aria-pressed={analysisFontFamily === f.id}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="my-1 mx-1 h-px bg-border/70" />
-
-          <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">
-            Export
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setExportUnreadBadge(false);
-              setPanelMenuOpen(false);
-              setExportModalOpen(true);
-            }}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[var(--text-sm)] hover:bg-accent transition-colors text-left"
-          >
-            Export analysis…
-          </button>
-          <div
-            onClick={() => setExportUnreadBadge(false)}
-            onKeyDown={() => {}}
-            role="presentation"
-          >
-            <ExportsMenu />
-          </div>
-
-          <div className="my-1 mx-1 h-px bg-border/70" />
-
-          <div className="px-2 pt-1 pb-1 text-[var(--text-xs)] font-semibold text-muted-foreground/80">
-            Pane position
-          </div>
-          <button
-            type="button"
-            onClick={onCyclePosition}
-            className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-md text-[var(--text-sm)] hover:bg-accent transition-colors"
-          >
-            <span className="flex items-center gap-2 text-foreground/90">
-              <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d={icon.path} />
-              </svg>
-              {POSITION_LABEL[position]}
-            </span>
-            <span className="text-[var(--text-xs)] text-muted-foreground/80">{icon.next}</span>
-          </button>
-          <div className="px-2 pt-1 text-[var(--text-xs)] text-muted-foreground/70 leading-snug">
-            Saved across every paper and reload.
-          </div>
-        </OverflowMenu>
+          exportUnreadBadge={exportUnreadBadge}
+          onExportBadgeClear={() => setExportUnreadBadge(false)}
+          onExportOpen={() => setExportModalOpen(true)}
+          analysisFontScale={analysisFontScale}
+          bumpAnalysisFontScale={bumpAnalysisFontScale}
+          setAnalysisFontScale={setAnalysisFontScale}
+          analysisFontFamily={analysisFontFamily}
+          setAnalysisFontFamily={setAnalysisFontFamily}
+          position={position}
+          onCyclePosition={onCyclePosition}
+        />
       </div>
 
       <ExportStatusBar paperId={paperId} />

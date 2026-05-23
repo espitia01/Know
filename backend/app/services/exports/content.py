@@ -72,11 +72,19 @@ def gather_export_context(
         pr = cache.get("pre_reading") or {}
         cited = cache.get("cited_by")
         cited_items = cited.get("items") if isinstance(cited, dict) else cited
-        out["related"] = {
+        related_block = {
             "prior_work": pr.get("prior_work") or [],
             "prior_work_topics": pr.get("prior_work_topics") or [],
             "cited_by": cited_items or [],
         }
+        out["related"] = related_block
+        from .export_formatters import related_bibliography
+
+        out["related_formatted"] = [
+            line.split(". ", 1)[1] if ". " in line and line[0].isdigit() else line
+            for line in related_bibliography({"related": related_block})
+            if not line.startswith("Cited by")
+        ]
 
     return out
 

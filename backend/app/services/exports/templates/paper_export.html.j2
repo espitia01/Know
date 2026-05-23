@@ -145,28 +145,15 @@
       {% else %}<p class="placeholder">No cross-paper Q&amp;A yet.</p>{% endif %}
 
     {% elif key == 'related' %}
-      {% set rel = content.related or {} %}
-      {% set pw = rel.prior_work or [] %}
-      {% set topics = rel.prior_work_topics or [] %}
-      {% set cb = rel.cited_by or [] %}
-      {% if pw %}
+      {% set bib = content.related_formatted or [] %}
+      {% set cb = (content.related or {}).cited_by or [] %}
+      {% if bib %}
         <h3>Bibliography</h3>
         <ol class="bib-list">
-        {% for p in pw %}
-          <li>{{ p.citation_display or p.title or '' }}</li>
+        {% for line in bib %}
+          <li>{{ line | markdown }}</li>
         {% endfor %}
         </ol>
-      {% elif topics %}
-        {% for topic in topics %}
-          {% if topic.items %}
-          <h3>{{ topic.theme or 'References' }}</h3>
-          <ol class="bib-list">
-          {% for p in topic.items %}
-            <li>{{ p.citation_display or p.title or '' }}</li>
-          {% endfor %}
-          </ol>
-          {% endif %}
-        {% endfor %}
       {% endif %}
       {% if cb %}
         <h3>Cited by</h3>
@@ -176,7 +163,7 @@
         {% endfor %}
         </ol>
       {% endif %}
-      {% if not pw and not topics and not cb %}<p class="placeholder">No references parsed yet.</p>{% endif %}
+      {% if not bib and not cb %}<p class="placeholder">No references parsed yet.</p>{% endif %}
 
     {% else %}
       <p class="placeholder">No content for this section.</p>

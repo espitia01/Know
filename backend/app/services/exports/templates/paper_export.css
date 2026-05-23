@@ -1,10 +1,10 @@
 @page {
   size: var(--paper-size, Letter);
-  margin: 2.2cm 2cm;
+  margin: 2cm 1.85cm;
   @bottom-center {
     content: counter(page);
-    font-family: var(--body-serif);
-    font-size: 9pt;
+    font-family: var(--body-sans);
+    font-size: 8.5pt;
     color: #666;
   }
 }
@@ -20,45 +20,49 @@
 
 body {
   font-family: var(--body-serif);
-  font-size: 10.5pt;
-  line-height: 1.6;
+  font-size: 10pt;
+  line-height: 1.48;
   color: var(--ink);
 }
 
 h1, h2, h3 {
   font-family: var(--body-sans);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
+}
+
+p {
+  margin: 0 0 0.55em;
 }
 
 .cover {
   page-break-after: always;
-  padding-top: 28%;
+  padding-top: 26%;
 }
 
 .cover-label {
   font-family: var(--body-sans);
-  font-size: 9pt;
-  letter-spacing: 0.12em;
+  font-size: 8.5pt;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--muted);
-  margin-bottom: 1.2em;
+  margin-bottom: 1em;
 }
 
 .cover h1 {
-  font-size: 24pt;
-  line-height: 1.25;
-  margin: 0 0 0.6em;
+  font-size: 22pt;
+  line-height: 1.22;
+  margin: 0 0 0.5em;
 }
 
 .cover .authors {
-  font-size: 12pt;
+  font-size: 11pt;
   color: var(--muted);
-  margin-bottom: 2em;
+  margin-bottom: 1.6em;
 }
 
 .cover .meta {
-  font-size: 10pt;
+  font-size: 9.5pt;
   color: var(--muted);
 }
 
@@ -67,16 +71,16 @@ h1, h2, h3 {
 }
 
 .toc h2 {
-  font-size: 14pt;
-  margin-bottom: 0.8em;
+  font-size: 13pt;
+  margin-bottom: 0.65em;
 }
 
 .toc ol {
-  padding-left: 1.2em;
+  padding-left: 1.1em;
 }
 
 .toc li {
-  margin-bottom: 0.35em;
+  margin-bottom: 0.28em;
 }
 
 .export-section {
@@ -84,22 +88,22 @@ h1, h2, h3 {
 }
 
 .export-section h2 {
-  font-size: 16pt;
+  font-size: 15pt;
   border-bottom: 1px solid var(--rule);
-  padding-bottom: 0.35em;
-  margin: 0 0 1em;
+  padding-bottom: 0.28em;
+  margin: 0 0 0.75em;
 }
 
 .export-section h3 {
-  font-size: 11pt;
-  margin: 1.2em 0 0.45em;
+  font-size: 10pt;
+  margin: 0.9em 0 0.35em;
   color: var(--muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
 }
 
 .block {
-  margin-bottom: 1em;
+  margin-bottom: 0.75em;
 }
 
 .placeholder {
@@ -108,113 +112,132 @@ h1, h2, h3 {
 }
 
 dl {
-  margin: 0 0 1em;
+  margin: 0 0 0.75em;
 }
 
 dt {
   font-weight: 600;
-  margin-top: 0.6em;
+  margin-top: 0.45em;
 }
 
 dd {
-  margin: 0.15em 0 0 0;
+  margin: 0.1em 0 0 0;
   padding-left: 0;
 }
 
 ul, ol {
-  padding-left: 1.3em;
-  margin: 0.4em 0 1em;
+  padding-left: 1.15em;
+  margin: 0.25em 0 0.65em;
 }
 
 li {
-  margin-bottom: 0.35em;
+  margin-bottom: 0.22em;
+}
+
+.bib-list {
+  list-style: decimal;
+  padding-left: 1.4em;
 }
 
 .bib-list li {
-  margin-bottom: 0.55em;
+  margin-bottom: 0.38em;
   text-align: left;
+  line-height: 1.42;
 }
 
 .assumption-list .assumption-type {
   font-family: var(--body-sans);
-  font-size: 8.5pt;
+  font-size: 8pt;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--muted);
-  margin-right: 0.35em;
+  margin-right: 0.3em;
 }
 
 .qa-item {
-  margin-bottom: 1.4em;
-  padding-bottom: 0.8em;
+  margin-bottom: 1em;
+  padding-bottom: 0.55em;
   border-bottom: 1px solid #eee;
 }
 
 .qa-item .question {
   font-weight: 600;
-  margin-bottom: 0.35em;
+  margin-bottom: 0.25em;
 }
 
 .selection-item {
-  margin-bottom: 1.4em;
-  padding: 0.8em 0;
+  margin-bottom: 1em;
+  padding: 0.55em 0;
   border-bottom: 1px solid #eee;
 }
 
 .selection-item .passage {
-  font-size: 10pt;
+  font-size: 9.5pt;
   color: var(--muted);
-  margin-bottom: 0.35em;
+  margin-bottom: 0.25em;
 }
 
 .selection-item .selection-action {
   font-family: var(--body-sans);
-  font-size: 8.5pt;
+  font-size: 8pt;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
-  margin-bottom: 0.45em;
+  margin-bottom: 0.35em;
 }
 
 .figure-block {
-  margin: 1.2em 0 1.6em;
+  margin: 0.9em 0 1.2em;
   page-break-inside: avoid;
 }
 
 .figure-block img {
   display: block;
   max-width: 100%;
-  max-height: 420px;
-  margin: 0 auto 0.5em;
+  max-height: 400px;
+  margin: 0 auto 0.4em;
 }
 
 .figure-block figcaption {
-  font-size: 9.5pt;
+  font-size: 9pt;
   color: var(--muted);
   text-align: center;
 }
 
 .figure-analysis {
-  margin-top: 0.6em;
-  font-size: 10pt;
+  margin-top: 0.45em;
+  font-size: 9.5pt;
 }
 
 .math-display {
   display: block;
   text-align: center;
   overflow-x: auto;
-  margin: 0.8em 0;
+  margin: 0.45em 0;
+  font-size: 10.5pt;
 }
 
 .math-inline {
   display: inline;
   vertical-align: baseline;
+  font-size: 10pt;
+}
+
+body.compact {
+  font-size: 9pt;
+  line-height: 1.38;
 }
 
 .compact h2 {
-  font-size: 14pt;
+  font-size: 13pt;
 }
 
 .compact h3 {
-  font-size: 10pt;
+  font-size: 9.5pt;
+}
+
+.compact .block,
+.compact .qa-item,
+.compact .selection-item {
+  margin-bottom: 0.65em;
 }

@@ -137,7 +137,7 @@ export function OverflowMenu({
             aria-label={ariaLabel}
             style={menuStyle}
             className={cn(
-              "fixed z-[100] w-56 rounded-[var(--radius-lg)] border border-border bg-popover p-2 text-popover-foreground shadow-[var(--shadow-lg)] outline-none",
+              "fixed z-[100] w-56 rounded-[var(--radius-lg)] border border-border/50 bg-popover p-2 text-popover-foreground shadow-[var(--shadow-sm)] outline-none",
               className,
             )}
           >

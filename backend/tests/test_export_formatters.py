@@ -3,6 +3,7 @@
 from app.services.exports.export_formatters import (
     assumptions_bullets,
     prepare_sections,
+    related_bibliography,
     selection_entries,
     summary_sections,
 )
@@ -45,3 +46,20 @@ def test_assumptions_bullets():
     content = {"assumptions": {"assumptions": [{"type": "implicit", "statement": "Data is i.i.d."}]}}
     bullets = assumptions_bullets(content)
     assert bullets and "i.i.d." in bullets[0]
+
+
+def test_related_bibliography_filters_garbled_rows():
+    content = {
+        "related": {
+            "prior_work": [
+                {"citation_display": "1.08 120"},
+                {
+                    "citation_display": "[3] F. Mauri and R. Car, Phys. Rev. Lett. 75, 3166 (1995)."
+                },
+            ]
+        }
+    }
+    lines = related_bibliography(content)
+    assert len(lines) == 1
+    assert "Mauri" in lines[0]
+    assert "1995" in lines[0]

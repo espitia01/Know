@@ -1,91 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type CitedByItem, type PriorWork } from "@/lib/api";
+import { api, type CitedByItem } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { AnalysisSection } from "@/components/analysis/AnalysisSection";
-import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
-import { priorWorkExternalHref, referenceIndexLabel } from "@/lib/priorWorkLinks";
-import {
-  sanitizeCitationFullText,
-  sanitizeRelatedClusterSummaryMarkdown,
-  referenceListItems,
-  isUsableClusterTheme,
-  isGarbledBibliographyLine,
-} from "@/lib/formatBibliography";
+import { dedupePriorWork, referenceListItems } from "@/lib/formatBibliography";
 import { CitationGraph } from "@/components/sidebar/CitationGraph";
+import { ReferenceBibliographyList } from "@/components/sidebar/ReferenceBibliographyList";
 
 interface RelatedWorkPanelProps {
   paperId: string;
 }
 
 const RELATED_TAB_INTRO =
-  "Tap a citation to open its DOI, arXiv, or PubMed link when we have one — otherwise Google Scholar. Numbers match this paper’s bibliography when we can parse them.";
-
-function CitationIndex({ n }: { n: number }) {
-  return (
-    <span
-      className="mt-px shrink-0 w-6 text-right text-[var(--text-xs)] tabular-nums text-muted-foreground/70"
-      aria-hidden
-    >
-      {n}.
-    </span>
-  );
-}
-
-function VerbatimCitationLink({ work }: { work: PriorWork }) {
-  const href = priorWorkExternalHref(work);
-  const raw =
-    (typeof work.citation_display === "string" && work.citation_display.trim()) ||
-    work.title.trim() ||
-    "Reference";
-  const display = sanitizeCitationFullText(raw);
-  if (!display || display.length < 4) return null;
-  const linkCls =
-    "block text-[var(--text-sm)] leading-relaxed text-foreground/90 underline decoration-border underline-offset-[3px] hover:decoration-foreground/60 text-pretty hyphens-auto [overflow-wrap:anywhere]";
-
-  if (href) {
-    return (
-      <a href={href} target="_blank" rel="noopener noreferrer" className={linkCls}>
-        {display}
-      </a>
-    );
-  }
-  return (
-    <span className="block text-[var(--text-sm)] leading-relaxed text-foreground/90 text-pretty hyphens-auto [overflow-wrap:anywhere]">
-      {display}
-    </span>
-  );
-}
-
-function CitationList({
-  items,
-  startIndex = 0,
-}: {
-  items: PriorWork[];
-  startIndex?: number;
-}) {
-  const usable = referenceListItems(items);
-  return (
-    <ol className="mt-3 list-none space-y-2 p-0">
-      {usable.map((p, i) => {
-        const sequential = startIndex + i + 1;
-        const indexLabel = referenceIndexLabel(p, sequential);
-        return (
-          <li key={`${p.bib_label ?? p.ref_id ?? p.title}-${indexLabel}`} className="flex items-start gap-2.5">
-            <CitationIndex n={indexLabel} />
-            <div className="min-w-0 flex-1 pt-px">
-              <VerbatimCitationLink work={p} />
-            </div>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
+  "Bibliography entries match the Cited by format below. Tap a row to open DOI, arXiv, PubMed, or Scholar when available.";
 
 export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
   const preReading = useStore((s) => s.preReadingByPaper[paperId] ?? null);
@@ -144,29 +75,12 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
     }
   };
 
-  const topicalClusters = useMemo(() => {
-    if (!preReading) return null;
-    const pts = preReading.prior_work_topics;
-    const hasItems =
-      Array.isArray(pts) && pts.some((t) => (t.items?.length ?? 0) > 0);
-    return hasItems ? pts!.filter((t) => (t.items?.length ?? 0) > 0) : null;
-  }, [preReading]);
-
-  const clusterGlobalStarts = useMemo(() => {
-    if (!topicalClusters?.length) return [];
-    let acc = 0;
-    return topicalClusters.map((sec) => {
-      const base = acc;
-      acc += sec.items?.length ?? 0;
-      return base;
-    });
-  }, [topicalClusters]);
-
   const priorList = useMemo(
-    () => referenceListItems(preReading?.prior_work ?? []),
+    () => dedupePriorWork(referenceListItems(preReading?.prior_work ?? [])),
     [preReading?.prior_work],
   );
 
+  const topics = useMemo(() => preReading?.prior_work_topics ?? [], [preReading?.prior_work_topics]);
   const rawPriorCount = preReading?.prior_work?.length ?? 0;
 
   if (preReadingLoading) {
@@ -192,8 +106,8 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
           body={
             loadError ||
             (preReading
-              ? "Prepare couldn’t isolate a numbered bibliography in this PDF. Re-run it when references are selectable as text."
-              : "Run Prepare to extract cited works from this paper’s bibliography.")
+              ? "Prepare couldn't isolate a numbered bibliography in this PDF. Re-run it when references are selectable as text."
+              : "Run Prepare to extract cited works from this paper's bibliography.")
           }
           cta={{ label: loadError ? "Retry Prepare" : "Run Prepare", onClick: handleRunPrepare }}
         />
@@ -201,7 +115,7 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
     );
   }
 
-  const graphAvailable = priorList.length > 0 || citedBy.length > 0;
+  const graphAvailable = priorList.length > 0 || citedBy.length > 0 || topics.length > 0;
 
   return (
     <div className="space-y-8 motion-safe:animate-fade-in">
@@ -212,8 +126,13 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
           paperTitle={paperTitle}
           outbound={priorList}
           inbound={citedBy}
+          topics={topics}
         />
       )}
+
+      <AnalysisSection title="References" count={priorList.length}>
+        <ReferenceBibliographyList items={priorList} />
+      </AnalysisSection>
 
       <AnalysisSection title="Cited by" count={citedBy.length}>
         {citedLoading ? (
@@ -223,7 +142,7 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
         ) : citedBy.length === 0 ? (
           <EmptyState title="No known papers cite this one yet." body="" />
         ) : (
-          <ol className="mt-3 list-none space-y-2 p-0">
+          <ol className="mt-3 list-none space-y-2.5 p-0">
             {citedBy.map((item, i) => {
               const authors = (item.authors ?? []).slice(0, 3).join(", ");
               const href =
@@ -231,51 +150,35 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
                 (item.arxiv ? `https://arxiv.org/abs/${item.arxiv}` : "") ||
                 item.url ||
                 (item.s2_id ? `https://www.semanticscholar.org/paper/${item.s2_id}` : "");
-              const label = `${i + 1}. ${authors}${authors ? " " : ""}(${item.year ?? "n.d."}) — ${item.title}`;
+              const label = `${authors}${authors ? " " : ""}(${item.year ?? "n.d."}) — ${item.title}`;
               return (
-                <li key={item.s2_id || item.title} className="text-[var(--text-sm)] leading-relaxed text-foreground/90">
-                  {href ? (
-                    <a href={href} target="_blank" rel="noopener noreferrer" className="underline decoration-border underline-offset-[3px] hover:decoration-foreground/60">
-                      {label}
-                    </a>
-                  ) : (
-                    label
-                  )}
+                <li key={item.s2_id || item.title} className="flex items-start gap-2.5">
+                  <span
+                    className="mt-px shrink-0 w-6 text-right text-[var(--text-xs)] tabular-nums text-muted-foreground/70"
+                    aria-hidden
+                  >
+                    {i + 1}.
+                  </span>
+                  <div className="min-w-0 flex-1 pt-px text-[var(--text-sm)] leading-relaxed text-foreground/90">
+                    {href ? (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline-offset-[3px] hover:underline decoration-border/60"
+                      >
+                        {label}
+                      </a>
+                    ) : (
+                      label
+                    )}
+                  </div>
                 </li>
               );
             })}
           </ol>
         )}
       </AnalysisSection>
-
-      {topicalClusters?.length ? (
-        topicalClusters.map((sec, si) => {
-          const items = referenceListItems(sec.items ?? []);
-          if (!items.length) return null;
-          const theme = (sec.theme ?? "").trim();
-          const summaryRaw = (sec.summary || "").trim();
-          const summary = summaryRaw
-            ? sanitizeRelatedClusterSummaryMarkdown(summaryRaw)
-            : "";
-          const showSummary =
-            summary.length >= 40 && !isGarbledBibliographyLine(summary);
-          const title = isUsableClusterTheme(theme) ? theme : "References";
-          return (
-            <AnalysisSection key={`cluster-${si}`} title={title} count={items.length}>
-              {showSummary ? (
-                <div className="mb-3 rounded-md border border-border/40 bg-muted/[0.06] px-3 py-2 [&_.analysis-content]:text-[var(--text-sm)] [&_.analysis-content]:leading-relaxed">
-                  <StreamingMarkdown>{summary}</StreamingMarkdown>
-                </div>
-              ) : null}
-              <CitationList items={items} startIndex={clusterGlobalStarts[si] ?? 0} />
-            </AnalysisSection>
-          );
-        })
-      ) : (
-        <AnalysisSection title="References" count={priorList.length}>
-          <CitationList items={priorList} />
-        </AnalysisSection>
-      )}
 
       <div>
         <button

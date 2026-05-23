@@ -189,16 +189,11 @@ export function sanitizeCitationFullText(raw: string): string {
   return s;
 }
 
-/** Keep every reference row that has any displayable text. */
+/** Keep bibliography rows that render as real citations. */
 export function referenceListItems<T extends { citation_display?: string; title?: string }>(
   items: T[],
 ): T[] {
-  return items.filter((w) => {
-    const raw =
-      (typeof w.citation_display === "string" && w.citation_display.trim()) ||
-      (w.title || "").trim();
-    return raw.length >= 4;
-  });
+  return filterUsablePriorWork(items);
 }
 
 /** True when a line is table junk, a bare index, or otherwise not a bibliography entry. */
@@ -206,17 +201,62 @@ export function isGarbledBibliographyLine(raw: string): boolean {
   const s = normalizeBibliographyCitationLine(raw);
   if (!s || s.length < 10) return true;
   if (/^[\d.\s()[\]{}]+$/.test(s)) return true;
+  if (/^\d{1,3}(?:\.\d+)?(?:\s+\d{1,3}(?:\.\d+)?)?$/.test(s)) return true;
+  if (/^\d{1,3}\.\d{1,2}\s*$/.test(s)) return true;
+  if (/\bP\s+H\s+Y\s+S\s+I\s+C\s+A\s+L\b/i.test(s)) return true;
   if (/^\d{1,3}\.\d{1,2}\s+[A-Za-z(~]/.test(s) && !/\b(?:doi|arxiv|vol\.|pp\.|press|journal|rev\.|lett\.|phys\.|chem\.)/i.test(s)) {
     return true;
   }
   if (/\bRe\s*\([^)]*\)\s*!?\s*e\s*\(\s*cm/i.test(s)) return true;
   if (/\bTe\s*\([^)]*\)\s*(?:CLDA|eV)\b/i.test(s)) return true;
+  if (/\bCLDA\b/i.test(s) && !/\b(?:Phys\.|Rev\.|J\.)\b/i.test(s)) return true;
+  if (/\bExcited state\b/i.test(s) && !/\(\d{4}\)/.test(s)) return true;
   if (/~A1|!e\s*\(|\uFFFD/.test(s)) return true;
   const digits = (s.match(/\d/g) || []).length;
   if (digits / s.length > 0.38 && s.length < 100) return true;
   const alpha = (s.match(/[a-zA-Z]/g) || []).length;
   if (alpha < 8) return true;
+  if (/^[A-Z](?:\s+[A-Z]){4,}/.test(s.replace(/[^A-Za-z\s]/g, ""))) return true;
   return false;
+}
+
+const JOURNAL_SPLIT =
+  /,\s*(?:Phys\.|Rev\.|J\.|Nature|Proc\.|Appl\.|Chem\.|Lett\.|Mag\.|Acta|Trans\.|Science|Cell|ISBN|http|doi:|Vol\.|edited by|In:)/i;
+
+/**
+ * Format a bibliography row like the Cited by list:
+ * `Authors (year) — journal / title fragment`
+ */
+export function formatReferenceEntry(work: {
+  citation_display?: string;
+  title?: string;
+}): string | null {
+  const raw =
+    (typeof work.citation_display === "string" && work.citation_display.trim()) ||
+    (work.title || "").trim();
+  if (!raw || isGarbledBibliographyLine(raw)) return null;
+
+  const s = sanitizeCitationFullText(raw).replace(/^\[\d{1,4}\]\s*/, "").trim();
+  const yearMatch = s.match(/\((19|20)\d{2}\)/);
+  const year = yearMatch ? yearMatch[0].replace(/[()]/g, "") : null;
+
+  const split = s.split(JOURNAL_SPLIT);
+  const authors = (split[0] || "").trim();
+  let detail =
+    split.length > 1
+      ? s.slice(split[0].length).replace(/^,\s*/, "").trim()
+      : "";
+
+  if (!detail && work.title && !isGarbledBibliographyLine(work.title)) {
+    detail = work.title.trim();
+  }
+  if (!detail) detail = s.slice(authors.length).replace(/^,\s*/, "").trim();
+  if (!detail || isGarbledBibliographyLine(detail)) return null;
+
+  const authorPart = authors.length >= 3 ? authors : s.split(",")[0]?.trim() || authors;
+  if (detail.length > 200) detail = `${detail.slice(0, 199).trim()}…`;
+
+  return `${authorPart || "Unknown authors"} (${year ?? "n.d."}) — ${detail}`;
 }
 
 /** Cluster headings from the model should read like prose, not PDF table fragments. */
@@ -257,6 +297,21 @@ export function filterUsablePriorWork<T extends { citation_display?: string; tit
       (w.title || "").trim();
     if (!raw) return false;
     if (isGarbledBibliographyLine(raw)) return false;
-    return sanitizeCitationForDisplay(raw).length >= 12;
+    return formatReferenceEntry(w) !== null;
+  });
+}
+
+/** Drop duplicate bibliography rows after garbled filtering. */
+export function dedupePriorWork<T extends { citation_display?: string; title?: string }>(
+  items: T[],
+): T[] {
+  const seen = new Set<string>();
+  return items.filter((w) => {
+    const label = formatReferenceEntry(w);
+    if (!label) return false;
+    const key = label.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
 }

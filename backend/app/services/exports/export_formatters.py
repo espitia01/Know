@@ -180,31 +180,95 @@ def notes_bullets(content: dict) -> list[str]:
     ]
 
 
-def related_bibliography(content: dict) -> list[str]:
+def _normalize_bib_line(raw: str) -> str:
+    s = re.sub(r"\s+", " ", (raw or "").strip())
+    return s
+
+
+def _is_garbled_bibliography_line(raw: str) -> bool:
+    s = _normalize_bib_line(raw)
+    if not s or len(s) < 10:
+        return True
+    if re.fullmatch(r"[\d.\s()[\]{}]+", s):
+        return True
+    if re.fullmatch(r"\d{1,3}(?:\.\d+)?(?:\s+\d{1,3}(?:\.\d+)?)?", s):
+        return True
+    if re.fullmatch(r"\d{1,3}\.\d{1,2}\s*", s):
+        return True
+    if re.search(r"\bP\s+H\s+Y\s+S\s+I\s+C\s+A\s+L\b", s, re.I):
+        return True
+    if re.search(r"\bRe\s*\([^)]*\)\s*!?\s*e\s*\(\s*cm", s, re.I):
+        return True
+    if re.search(r"\bTe\s*\([^)]*\)\s*(?:CLDA|eV)\b", s, re.I):
+        return True
+    if re.search(r"\bCLDA\b", s, re.I) and not re.search(r"\b(?:Phys\.|Rev\.|J\.)\b", s, re.I):
+        return True
+    if re.search(r"\bExcited state\b", s, re.I) and not re.search(r"\(\d{4}\)", s):
+        return True
+    digits = len(re.findall(r"\d", s))
+    if digits / max(len(s), 1) > 0.38 and len(s) < 100:
+        return True
+    alpha = len(re.findall(r"[a-zA-Z]", s))
+    if alpha < 8:
+        return True
+    return False
+
+
+_JOURNAL_SPLIT = re.compile(
+    r",\s*(?:Phys\.|Rev\.|J\.|Nature|Proc\.|Appl\.|Chem\.|Lett\.|Mag\.|Acta|Trans\.|Science|Cell|ISBN|http|doi:|Vol\.|edited by|In:)",
+    re.I,
+)
+
+
+def _format_reference_entry(entry: dict) -> str | None:
+    raw = plain_text(entry.get("citation_display") or entry.get("title"), max_len=4000)
+    if not raw or _is_garbled_bibliography_line(raw):
+        return None
+    s = re.sub(r"^\[\d{1,4}\]\s*", "", raw).strip()
+    year_match = re.search(r"\((19|20)\d{2}\)", s)
+    year = year_match.group(0).strip("()") if year_match else None
+    parts = _JOURNAL_SPLIT.split(s, maxsplit=1)
+    authors = (parts[0] or "").strip()
+    detail = s[len(parts[0]) :].lstrip(", ").strip() if len(parts) > 1 else ""
+    if not detail:
+        title = plain_text(entry.get("title"), max_len=4000)
+        if title and not _is_garbled_bibliography_line(title):
+            detail = title
+    if not detail or _is_garbled_bibliography_line(detail):
+        return None
+    author_part = authors if len(authors) >= 3 else (authors.split(",")[0] or authors).strip()
+    if len(detail) > 200:
+        detail = detail[:199].rstrip() + "…"
+    return f"{author_part or 'Unknown authors'} ({year or 'n.d.'}) — {detail}"
+
+
+def _collect_prior_work_entries(content: dict) -> list[dict]:
     rel = content.get("related") or {}
-    lines: list[str] = []
+    entries: list[dict] = []
     pw = rel.get("prior_work") or []
     if isinstance(pw, list):
-        for i, entry in enumerate(pw, 1):
-            if isinstance(entry, dict):
-                cite = plain_text(entry.get("citation_display") or entry.get("title"), max_len=2000)
-                if cite:
-                    lines.append(f"{i}. {cite}")
-            elif plain_text(entry):
-                lines.append(f"{i}. {plain_text(entry, max_len=2000)}")
-    topics = rel.get("prior_work_topics") or []
-    if isinstance(topics, list) and not lines:
-        idx = 1
-        for topic in topics:
-            if not isinstance(topic, dict):
-                continue
-            for entry in topic.get("items") or []:
-                if isinstance(entry, dict):
-                    cite = plain_text(entry.get("citation_display") or entry.get("title"), max_len=2000)
-                    if cite:
-                        lines.append(f"{idx}. {cite}")
-                        idx += 1
-    cited = rel.get("cited_by") or []
+        entries.extend(e for e in pw if isinstance(e, dict))
+    if not entries:
+        for topic in rel.get("prior_work_topics") or []:
+            if isinstance(topic, dict):
+                entries.extend(e for e in (topic.get("items") or []) if isinstance(e, dict))
+    return entries
+
+
+def related_bibliography(content: dict) -> list[str]:
+    lines: list[str] = []
+    seen: set[str] = set()
+    for entry in _collect_prior_work_entries(content):
+        label = _format_reference_entry(entry)
+        if not label:
+            continue
+        key = label.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(f"{len(lines) + 1}. {label}")
+
+    cited = (content.get("related") or {}).get("cited_by") or []
     if isinstance(cited, list):
         for i, c in enumerate(cited, 1):
             if not isinstance(c, dict):
