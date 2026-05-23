@@ -1563,6 +1563,33 @@ function PaperContent() {
     meta?: { highlightColor?: string },
   ) => {
     const capturedRegions = selection?.regions;
+    // For analysis actions (explain / derive), wrap the live selection
+    // in a transient <mark> BEFORE we clear it. This gives the user a
+    // visible "what's being analyzed right now" cue that survives
+    // closing the toolbar — the browser's native ::selection is gone
+    // the instant we removeAllRanges().
+    if (typeof document !== "undefined" && (action === "explain" || action === "derive")) {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+        // First clear any stale active-analysis marks from a previous
+        // selection so we only ever have one live one.
+        document.querySelectorAll(".reader-active-analysis").forEach((el) => {
+          const parent = el.parentNode;
+          if (!parent) return;
+          while (el.firstChild) parent.insertBefore(el.firstChild, el);
+          parent.removeChild(el);
+        });
+        try {
+          const range = sel.getRangeAt(0);
+          const wrap = document.createElement("mark");
+          wrap.className = "reader-active-analysis";
+          range.surroundContents(wrap);
+        } catch {
+          /* range spans multiple block nodes — skip the wrap, the
+             analysis still runs against the captured text. */
+        }
+      }
+    }
     setSelection(null);
     window.getSelection()?.removeAllRanges();
 

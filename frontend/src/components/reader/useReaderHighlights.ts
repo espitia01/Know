@@ -30,29 +30,57 @@ export function useReaderHighlights(
     const root = containerRef.current;
     if (!root || !textHighlights.length) return;
 
-    for (const h of textHighlights) {
-      const needle = (h.selected_text || "").trim();
-      if (needle.length < 8) continue;
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      let node: Node | null;
-      while ((node = walker.nextNode())) {
-        const text = node.textContent || "";
-        const idx = text.indexOf(needle);
-        if (idx < 0) continue;
-        const range = document.createRange();
-        range.setStart(node, idx);
-        range.setEnd(node, idx + needle.length);
-        const mark = document.createElement("mark");
-        mark.className = "rounded-sm px-0.5";
-        mark.style.backgroundColor = `${h.color}44`;
-        try {
-          range.surroundContents(mark);
-        } catch {
-          /* overlapping ranges — skip */
+    const applyHighlights = () => {
+      // Strip any prior highlight wraps so re-runs don't compound.
+      root
+        .querySelectorAll("mark[data-reader-highlight]")
+        .forEach((mark) => {
+          const parent = mark.parentNode;
+          if (!parent) return;
+          while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+          parent.removeChild(mark);
+        });
+      for (const h of textHighlights) {
+        const needle = (h.selected_text || "").trim();
+        if (needle.length < 8) continue;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let node: Node | null;
+        while ((node = walker.nextNode())) {
+          const text = node.textContent || "";
+          const idx = text.indexOf(needle);
+          if (idx < 0) continue;
+          const range = document.createRange();
+          range.setStart(node, idx);
+          range.setEnd(node, idx + needle.length);
+          const mark = document.createElement("mark");
+          mark.dataset.readerHighlight = "true";
+          mark.className = "rounded-sm px-0.5";
+          mark.style.backgroundColor = `${h.color}44`;
+          try {
+            range.surroundContents(mark);
+          } catch {
+            /* overlapping ranges — skip */
+          }
+          break;
         }
-        break;
       }
-    }
+    };
+
+    // Try immediately, then once again on the next animation frame,
+    // then again after a short delay. Streamdown sometimes mounts its
+    // blocks lazily, so the initial tree walk runs against an
+    // incomplete DOM. (Avoid a MutationObserver — applyHighlights
+    // mutates the DOM, which would trigger an infinite loop.)
+    applyHighlights();
+    const raf =
+      typeof requestAnimationFrame !== "undefined"
+        ? requestAnimationFrame(() => applyHighlights())
+        : 0;
+    const timeoutId = window.setTimeout(applyHighlights, 800);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.clearTimeout(timeoutId);
+    };
   }, [containerRef, textHighlights]);
 
   const dismissBanner = () => {

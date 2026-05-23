@@ -1262,6 +1262,22 @@
   50%      { transform: scale(0.95); opacity: 1; }
 }
 
+/* Transient "this is what's being analyzed" highlight applied when the
+   user clicks Explain/Derive in the reader. Stays visible until the
+   user makes a new selection. Subtle enough not to compete with the
+   prose, but obvious enough to track. */
+.reader-active-analysis {
+  background-color: color-mix(in oklab, var(--foreground) 8%, transparent);
+  border-radius: 3px;
+  box-decoration-break: clone;
+  padding: 0.05em 0.1em;
+  margin: 0 -0.1em;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 12%, transparent);
+}
+.dark .reader-active-analysis {
+  background-color: color-mix(in oklab, var(--foreground) 14%, transparent);
+}
+
 /* ────────────────────────────────────────────────────────────────────────
    Animations — tamer and reduced-motion safe (see @media query above)
    ──────────────────────────────────────────────────────────────────── */
