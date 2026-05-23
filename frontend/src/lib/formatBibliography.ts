@@ -166,6 +166,16 @@ function stripCitationIndexYearBleed(input: string): string {
 }
 
 export function sanitizeCitationForDisplay(raw: string): string {
+  let s = sanitizeCitationFullText(raw);
+  if (s.length > 480) {
+    s = `${s.slice(0, 480).replace(/\s+\S*$/, "")}…`;
+  }
+  s = clipCitationLineLength(s);
+  return s;
+}
+
+/** Full bibliography line for the References pane — no preview truncation. */
+export function sanitizeCitationFullText(raw: string): string {
   let s = normalizeBibliographyCitationLine(raw);
   s = s.replace(MODEL_ANGLE_TAGS, " ");
   s = collapseDuplicateSentenceRuns(s);
@@ -173,15 +183,22 @@ export function sanitizeCitationForDisplay(raw: string): string {
   s = collapseDuplicateSentenceRuns(s);
   s = stripTrailingOrphanIndexTail(s);
   s = stripCitationIndexYearBleed(s);
-  /** Collapsed-line footnote junk: “…2016. 16 [37]” */
   s = s.replace(/\.\s+(?:\d{1,3}\.{0,2}\s+){1,3}(?=\s*\[)/g, ". ");
   s = collapseDuplicateSentenceRuns(s);
   s = s.replace(/\s{2,}/g, " ").trim();
-  if (s.length > 480) {
-    s = `${s.slice(0, 480).replace(/\s+\S*$/, "")}…`;
-  }
-  s = clipCitationLineLength(s);
   return s;
+}
+
+/** Keep every reference row that has any displayable text. */
+export function referenceListItems<T extends { citation_display?: string; title?: string }>(
+  items: T[],
+): T[] {
+  return items.filter((w) => {
+    const raw =
+      (typeof w.citation_display === "string" && w.citation_display.trim()) ||
+      (w.title || "").trim();
+    return raw.length >= 4;
+  });
 }
 
 /** True when a line is table junk, a bare index, or otherwise not a bibliography entry. */

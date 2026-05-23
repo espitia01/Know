@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..db import list_highlights
 from ...models.schemas import ParsedPaper
 
 
@@ -14,11 +13,10 @@ SECTION_LABELS = {
     "assumptions": "Assumptions",
     "qa": "Q&A",
     "notes": "Notes",
-    "highlights": "Highlights",
     "figures": "Figures",
     "selection": "Selection history",
     "cross": "Cross-paper Q&A",
-    "related": "Related work",
+    "related": "References",
 }
 
 
@@ -43,7 +41,11 @@ def gather_export_context(
         out["prepare"] = cache.get("pre_reading") or cache.get("prepare")
 
     if "summary" in sections:
-        out["summary"] = cache.get("summary")
+        out["summary"] = (
+            cache.get("summary")
+            or cache.get("summary_deep")
+            or cache.get("summary_lite")
+        )
 
     if "assumptions" in sections:
         out["assumptions"] = cache.get("assumptions")
@@ -53,9 +55,6 @@ def gather_export_context(
 
     if "notes" in sections:
         out["notes"] = paper.notes or []
-
-    if "highlights" in sections:
-        out["highlights"] = list_highlights(user_id, paper.id)
 
     if "figures" in sections:
         out["figures"] = {
@@ -71,9 +70,12 @@ def gather_export_context(
 
     if "related" in sections:
         pr = cache.get("pre_reading") or {}
+        cited = cache.get("cited_by")
+        cited_items = cited.get("items") if isinstance(cited, dict) else cited
         out["related"] = {
-            "prior_work": pr.get("prior_work") or pr.get("prior_work_topics") or [],
-            "cited_by": cache.get("cited_by") or [],
+            "prior_work": pr.get("prior_work") or [],
+            "prior_work_topics": pr.get("prior_work_topics") or [],
+            "cited_by": cited_items or [],
         }
 
     return out

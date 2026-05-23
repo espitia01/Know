@@ -2,44 +2,78 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{{ paper.title }} — Know Export</title>
+  <title>{{ paper.title }} — Analysis Export</title>
   <style>{% include 'paper_export.css' %}</style>
 </head>
 <body class="{{ 'compact' if compact else '' }}">
   <section class="cover">
+    <p class="cover-label">Analysis export</p>
     <h1>{{ paper.title }}</h1>
-    <p class="authors">{{ paper.authors | join(", ") }}</p>
-    <p class="meta">Exported from Know · {{ export_date }}</p>
+    {% if paper.authors %}<p class="authors">{{ paper.authors | join(", ") }}</p>{% endif %}
+    <p class="meta">{{ export_date }}</p>
   </section>
 
   {% if sections | length > 1 %}
   <section class="toc">
     <h2>Contents</h2>
-    <ul>
+    <ol>
       {% for key in sections %}
       <li>{{ section_labels.get(key, key) }}</li>
       {% endfor %}
-    </ul>
+    </ol>
   </section>
   {% endif %}
 
   {% for key in sections %}
-  <section data-key="{{ key }}">
+  <section class="export-section" data-key="{{ key }}">
     <h2>{{ section_labels.get(key, key) }}</h2>
+
     {% if key == 'summary' %}
       {% set s = content.summary %}
       {% if s %}
-        {% if s.overview %}<div class="block">{{ s.overview | markdown }}</div>{% endif %}
-        {% if s.tl_dr %}<p><strong>TL;DR:</strong> {{ s.tl_dr | markdown }}</p>{% endif %}
+        {% if s.overview %}<div class="block"><h3>Overview</h3>{{ s.overview | markdown }}</div>{% endif %}
+        {% if s.motivation %}<div class="block"><h3>Motivation</h3>{{ s.motivation | markdown }}</div>{% endif %}
         {% if s.key_contributions %}
-        <h3>Key contributions</h3><ul>{% for c in s.key_contributions %}<li>{{ c | markdown }}</li>{% endfor %}</ul>
+        <h3>Key contributions</h3>
+        <ul>{% for c in s.key_contributions %}<li>{{ c | markdown }}</li>{% endfor %}</ul>
         {% endif %}
-        {% if s.methodology %}<h3>Methodology</h3><div>{{ s.methodology | markdown }}</div>{% endif %}
-        {% if s.main_results %}<h3>Results</h3><div>{{ s.main_results | markdown }}</div>{% endif %}
-        {% if s.discussion %}<h3>Discussion</h3><div>{{ s.discussion | markdown }}</div>{% endif %}
-        {% if s.limitations %}<h3>Limitations</h3><ul>{% for l in s.limitations %}<li>{{ l | markdown }}</li>{% endfor %}</ul>{% endif %}
-        {% if s.future_work %}<h3>Future work</h3><div>{{ s.future_work | markdown }}</div>{% endif %}
-      {% else %}<p class="placeholder">No summary yet.</p>{% endif %}
+        {% if s.methodology %}<div class="block"><h3>Methodology</h3>{{ s.methodology | markdown }}</div>{% endif %}
+        {% if s.main_results %}<div class="block"><h3>Results</h3>{{ s.main_results | markdown }}</div>{% endif %}
+        {% if s.discussion %}<div class="block"><h3>Discussion</h3>{{ s.discussion | markdown }}</div>{% endif %}
+        {% if s.limitations %}
+        <h3>Limitations</h3>
+        <ul>{% for l in s.limitations %}<li>{{ l | markdown }}</li>{% endfor %}</ul>
+        {% endif %}
+        {% if s.future_work %}<div class="block"><h3>Future work</h3>{{ s.future_work | markdown }}</div>{% endif %}
+      {% else %}<p class="placeholder">No summary generated yet.</p>{% endif %}
+
+    {% elif key == 'prepare' %}
+      {% set pr = content.prepare %}
+      {% if pr %}
+        {% if pr.definitions %}
+        <h3>Definitions</h3>
+        <dl>{% for d in pr.definitions %}<dt>{{ d.term }}</dt><dd>{{ d.definition | markdown }}</dd>{% endfor %}</dl>
+        {% endif %}
+        {% if pr.concepts %}
+        <h3>Concepts</h3>
+        <dl>{% for c in pr.concepts %}<dt>{{ c.name or c.term }}</dt><dd>{{ (c.description or c.explanation or '') | markdown }}</dd>{% endfor %}</dl>
+        {% endif %}
+        {% if pr.research_questions %}
+        <h3>Research questions</h3>
+        <ul>{% for rq in pr.research_questions %}<li>{{ (rq.question if rq is mapping else rq) | markdown }}</li>{% endfor %}</ul>
+        {% endif %}
+      {% else %}<p class="placeholder">No prepare analysis yet.</p>{% endif %}
+
+    {% elif key == 'assumptions' %}
+      {% set a = content.assumptions %}
+      {% set items = a.assumptions if a is mapping and a.assumptions else [] %}
+      {% if items %}
+        <ul class="assumption-list">
+        {% for item in items %}
+          <li><span class="assumption-type">{{ item.type }}</span> {{ item.statement | markdown }}</li>
+        {% endfor %}
+        </ul>
+      {% else %}<p class="placeholder">No assumptions extracted yet.</p>{% endif %}
 
     {% elif key == 'qa' %}
       {% set sessions = content.qa or [] %}
@@ -47,8 +81,8 @@
         {% for session in sessions %}
           {% for item in session.get('items', session.get('questions', [])) %}
           <div class="qa-item">
-            <p class="question">Q: {{ item.question | markdown }}</p>
-            <p>A: {{ (item.answer or '') | markdown }}</p>
+            <p class="question">{{ item.question | markdown }}</p>
+            <div class="answer">{{ (item.answer or '') | markdown }}</div>
           </div>
           {% endfor %}
         {% endfor %}
@@ -57,73 +91,92 @@
     {% elif key == 'notes' %}
       {% set notes = content.notes or [] %}
       {% if notes %}
-        <ul>{% for n in notes %}<li>{{ (n.text or n.content or '') | markdown }}</li>{% endfor %}</ul>
-      {% else %}<p class="placeholder">No notes yet.</p>{% endif %}
-
-    {% elif key == 'highlights' %}
-      {% set hl = content.highlights or [] %}
-      {% if hl %}
-        <ul>{% for h in hl %}<li><strong>{{ h.color }}</strong>: {{ h.selected_text }}{% if h.note %} — {{ h.note }}{% endif %}</li>{% endfor %}</ul>
-      {% else %}<p class="placeholder">No highlights yet.</p>{% endif %}
+        <ul class="notes-list">{% for n in notes %}<li>{{ (n.text or n.content or '') | markdown }}</li>{% endfor %}</ul>
+      {% else %}<p class="placeholder">No notes saved yet.</p>{% endif %}
 
     {% elif key == 'selection' %}
       {% set sel = content.selection or [] %}
       {% if sel %}
         {% for item in sel %}
-        <div class="qa-item">
-          <p><em>{{ item.get('selected_text', item.get('selection', '')) }}</em></p>
-          <div>{{ (item.get('body') or item.get('result') or item.get('explanation') or '') | markdown }}</div>
+        <div class="selection-item">
+          <p class="passage"><em>{{ item.get('selected_text', item.get('selection', '')) }}</em></p>
+          <p class="selection-action">{{ item.get('action', 'explain') | title }}</p>
+          <div class="selection-body">{{ (item.get('explanation') or item.get('elaboration') or item.get('answer') or item.get('body') or item.get('result') or '') | markdown }}</div>
         </div>
         {% endfor %}
       {% else %}<p class="placeholder">No selection history yet.</p>{% endif %}
 
-    {% elif key == 'assumptions' %}
-      {% set a = content.assumptions %}
-      {% if a and a.assumptions %}
-        <ul>{% for item in a.assumptions %}<li><strong>{{ item.type }}</strong>: {{ item.statement | markdown }}</li>{% endfor %}</ul>
-      {% elif a and a is mapping and a.get('assumptions') %}
-        <ul>{% for item in a.assumptions %}<li><strong>{{ item.type }}</strong>: {{ item.statement | markdown }}</li>{% endfor %}</ul>
-      {% else %}<p class="placeholder">No assumptions yet.</p>{% endif %}
-
     {% elif key == 'figures' %}
       {% set fig = content.figures or {} %}
       {% set metas = fig.meta or [] %}
-      {% if metas and include_figures %}
+      {% set analyses = fig.analyses or [] %}
+      {% if metas %}
         {% for f in metas %}
-        <figure>
-          {% if f.local_path %}<img src="file://{{ f.local_path }}" alt="{{ f.caption }}">{% endif %}
+        <figure class="figure-block">
+          {% if include_figures and f.local_path %}<img src="file://{{ f.local_path }}" alt="{{ f.caption }}">{% endif %}
           <figcaption>{{ f.caption }}</figcaption>
+          {% for a in analyses %}
+            {% if a.figure_id == f.id %}
+          <div class="figure-analysis">{{ (a.description or a.answer or '') | markdown }}</div>
+            {% endif %}
+          {% endfor %}
         </figure>
         {% endfor %}
-      {% elif metas and not include_figures %}
-        <p class="placeholder">Figures omitted (toggle off).</p>
       {% else %}<p class="placeholder">No figures yet.</p>{% endif %}
-
-    {% elif key == 'prepare' %}
-      {% set pr = content.prepare %}
-      {% if pr %}
-        {% if pr.definitions %}<h3>Definitions</h3><ul>{% for d in pr.definitions %}<li><strong>{{ d.term }}</strong>: {{ d.definition | markdown }}</li>{% endfor %}</ul>{% endif %}
-        {% if pr.concepts %}<h3>Concepts</h3><ul>{% for c in pr.concepts %}<li><strong>{{ c.name }}</strong>: {{ c.description | markdown }}</li>{% endfor %}</ul>{% endif %}
-      {% else %}<p class="placeholder">No prepare analysis yet.</p>{% endif %}
 
     {% elif key == 'cross' %}
       {% set cross = content.cross or [] %}
       {% if cross %}
-        {% for item in cross %}
-        <div class="qa-item">
-          <p class="question">Q: {{ item.question | markdown }}</p>
-          <p>A: {{ (item.answer or '') | markdown }}</p>
-        </div>
+        {% for block in cross %}
+          {% if block.get('items') %}
+            {% for item in block.get('items') %}
+            <div class="qa-item">
+              <p class="question">{{ item.question | markdown }}</p>
+              <div class="answer">{{ (item.answer or '') | markdown }}</div>
+            </div>
+            {% endfor %}
+          {% else %}
+          <div class="qa-item">
+            <p class="question">{{ block.question | markdown }}</p>
+            <div class="answer">{{ (block.answer or '') | markdown }}</div>
+          </div>
+          {% endif %}
         {% endfor %}
       {% else %}<p class="placeholder">No cross-paper Q&amp;A yet.</p>{% endif %}
 
     {% elif key == 'related' %}
       {% set rel = content.related or {} %}
       {% set pw = rel.prior_work or [] %}
+      {% set topics = rel.prior_work_topics or [] %}
       {% set cb = rel.cited_by or [] %}
-      {% if pw %}<h3>Prior work</h3><ul>{% for p in pw %}<li>{{ p.title or p.get('citation_display', '') }} — {{ p.relevance or '' }}</li>{% endfor %}</ul>{% endif %}
-      {% if cb %}<h3>Cited by</h3><ul>{% for c in cb %}<li>{{ c.title }} ({{ c.year or '' }})</li>{% endfor %}</ul>{% endif %}
-      {% if not pw and not cb %}<p class="placeholder">No related work yet.</p>{% endif %}
+      {% if pw %}
+        <h3>Bibliography</h3>
+        <ol class="bib-list">
+        {% for p in pw %}
+          <li>{{ p.citation_display or p.title or '' }}</li>
+        {% endfor %}
+        </ol>
+      {% elif topics %}
+        {% for topic in topics %}
+          {% if topic.items %}
+          <h3>{{ topic.theme or 'References' }}</h3>
+          <ol class="bib-list">
+          {% for p in topic.items %}
+            <li>{{ p.citation_display or p.title or '' }}</li>
+          {% endfor %}
+          </ol>
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+      {% if cb %}
+        <h3>Cited by</h3>
+        <ol class="bib-list">
+        {% for c in cb %}
+          <li>{{ (c.authors or [])[:3] | join(', ') }} ({{ c.year or 'n.d.' }}) — {{ c.title }}</li>
+        {% endfor %}
+        </ol>
+      {% endif %}
+      {% if not pw and not topics and not cb %}<p class="placeholder">No references parsed yet.</p>{% endif %}
 
     {% else %}
       <p class="placeholder">No content for this section.</p>

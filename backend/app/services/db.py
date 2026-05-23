@@ -1118,7 +1118,7 @@ def match_paper_chunks(
 # ----------------------------------------------------------------
 
 ALLOWED_EXPORT_SECTIONS = frozenset({
-    "prepare", "summary", "assumptions", "qa", "notes", "highlights",
+    "prepare", "summary", "assumptions", "qa", "notes",
     "figures", "selection", "cross", "related",
 })
 

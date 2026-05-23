@@ -1,7 +1,6 @@
 import type {
   Assumption,
   CrossPaperQA,
-  Highlight,
   Note,
   ParsedPaper,
   PaperSummary,
@@ -9,13 +8,11 @@ import type {
   QAItem,
   SelectionAnalysisResult,
 } from "@/lib/api";
-import { persistedHighlightCount } from "@/lib/highlightUtils";
 
 export type ExportSectionId =
   | "summary"
   | "qa"
   | "notes"
-  | "highlights"
   | "selection"
   | "assumptions"
   | "figures"
@@ -55,7 +52,12 @@ function hasRelatedContent(
   const prior = pr?.prior_work?.length ?? 0;
   const topics = pr?.prior_work_topics?.length ?? 0;
   const raw = cache as Record<string, unknown> | undefined;
-  const citedBy = Array.isArray(raw?.cited_by) ? raw!.cited_by!.length : 0;
+  const citedRaw = raw?.cited_by;
+  const citedBy = Array.isArray(citedRaw)
+    ? citedRaw.length
+    : Array.isArray((citedRaw as { items?: unknown[] } | undefined)?.items)
+      ? (citedRaw as { items: unknown[] }).items.length
+      : 0;
   return prior > 0 || topics > 0 || citedBy > 0;
 }
 
@@ -65,7 +67,6 @@ type AvailabilitySnap = {
   preReadingByPaper: Record<string, PreReadingAnalysis | null>;
   assumptionsByPaper: Record<string, Assumption[]>;
   notesByPaper: Record<string, Note[]>;
-  highlightsByPaper: Record<string, Highlight[]>;
   selectionHistoryByPaper: Record<string, SelectionAnalysisResult[]>;
   qaResultsByPaper: Record<string, QAItem[]>;
   crossPaperResults: CrossPaperQA[];
@@ -100,8 +101,6 @@ export function getExportSectionAvailability(
   const notesLive = snap.notesByPaper[paperId]?.length ?? 0;
   const notesCached = paper?.notes?.length ?? 0;
 
-  const highlights = persistedHighlightCount(snap.highlightsByPaper[paperId]);
-
   const selectionLive = snap.selectionHistoryByPaper[paperId]?.length ?? 0;
   const selectionCached = Array.isArray(cache?.selections) ? cache!.selections!.length : 0;
 
@@ -119,7 +118,6 @@ export function getExportSectionAvailability(
     summary: hasSummaryContent(summary),
     qa: qaLive + qaCached > 0,
     notes: notesLive + notesCached > 0,
-    highlights: highlights > 0,
     selection: selectionLive + selectionCached > 0,
     assumptions: assumptionsLive + assumptionsCached > 0,
     figures: figureMeta + figureAnalyses > 0,

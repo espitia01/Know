@@ -30,3 +30,28 @@ def test_render_pptx_slide_count():
     assert prs.slides[0].shapes[0].text_frame.text.startswith("Deck Title")
     assert filename.endswith(".pptx")
     assert "presentationml" in ctype
+
+
+def test_render_pptx_prepare_and_assumptions():
+    paper = ParsedPaper(
+        id="p2",
+        title="Methods Paper",
+        authors=["Alice"],
+        cached_analysis={
+            "pre_reading": {
+                "definitions": [{"term": "Loss", "definition": "Objective minimized during training."}],
+            },
+            "assumptions": {
+                "assumptions": [{"type": "explicit", "statement": "Labels are noise-free."}],
+            },
+        },
+    )
+    export_row = {
+        "user_id": "u1",
+        "sections": ["prepare", "assumptions"],
+        "options": {"pptx": {"theme": "light", "dense": False}},
+    }
+    cache = gather_export_context(paper, "u1", export_row["sections"])
+    data, _, _ = render_pptx(export_row, paper, cache)
+    prs = Presentation(io.BytesIO(data))
+    assert len(prs.slides) >= 4

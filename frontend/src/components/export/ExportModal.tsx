@@ -18,12 +18,11 @@ const SECTION_OPTIONS = [
   { id: "summary", label: "Summary" },
   { id: "qa", label: "Q&A" },
   { id: "notes", label: "Notes" },
-  { id: "highlights", label: "Highlights" },
   { id: "selection", label: "Selections" },
   { id: "assumptions", label: "Assumptions" },
   { id: "figures", label: "Figures" },
   { id: "cross", label: "Cross-paper Q&A" },
-  { id: "related", label: "Related work" },
+  { id: "related", label: "References" },
   { id: "prepare", label: "Prepare" },
 ] as const;
 

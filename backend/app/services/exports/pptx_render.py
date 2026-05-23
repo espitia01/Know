@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-import re
 from datetime import datetime, timezone
 
 from pptx import Presentation
@@ -13,83 +12,163 @@ from pptx.util import Inches, Pt
 from ...models.schemas import ParsedPaper
 from ..pdf_parser import resolve_figure_path
 from .content import SECTION_LABELS, gather_export_context, slugify_title
-from .math_render import _INLINE_RE, _DISPLAY_RE, render_math_png_bytes
+from .export_formatters import (
+    assumptions_bullets,
+    cross_qa_entries,
+    notes_bullets,
+    prepare_sections,
+    qa_entries,
+    related_bibliography,
+    selection_entries,
+    summary_sections,
+)
 
 _THEMES = {
-    "light": {"bg": (255, 255, 255), "text": (17, 17, 17), "accent": (60, 60, 60)},
-    "dark": {"bg": (24, 24, 27), "text": (250, 250, 250), "accent": (180, 180, 180)},
+    "light": {"bg": (255, 255, 255), "text": (24, 24, 27), "muted": (82, 82, 91), "rule": (228, 228, 231)},
+    "dark": {"bg": (24, 24, 27), "text": (250, 250, 250), "muted": (161, 161, 170), "rule": (63, 63, 70)},
 }
 
 
-def _set_slide_bg(slide, rgb: tuple[int, int, int]) -> None:
+def _rgb(theme: dict, key: str):
     from pptx.dml.color import RGBColor
 
+    return RGBColor(*theme[key])
+
+
+def _set_slide_bg(slide, theme: dict) -> None:
     fill = slide.background.fill
     fill.solid()
-    fill.fore_color.rgb = RGBColor(*rgb)
+    fill.fore_color.rgb = _rgb(theme, "bg")
+
+
+def _blank_slide(prs: Presentation, theme: dict):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _set_slide_bg(slide, theme)
+    return slide
 
 
 def _add_title_slide(prs: Presentation, paper: ParsedPaper, theme: dict) -> None:
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    _set_slide_bg(slide, theme["bg"])
-    box = slide.shapes.add_textbox(Inches(0.8), Inches(2.2), Inches(11.5), Inches(2))
+    slide = _blank_slide(prs, theme)
+    box = slide.shapes.add_textbox(Inches(0.9), Inches(2.0), Inches(11.5), Inches(3.2))
     tf = box.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
     p.text = paper.title or "Untitled"
-    p.font.size = Pt(32)
+    p.font.size = Pt(30)
     p.font.bold = True
-    p.alignment = PP_ALIGN.CENTER
-    from pptx.dml.color import RGBColor
-
-    p.font.color.rgb = RGBColor(*theme["text"])
-    sub = tf.add_paragraph()
-    sub.text = ", ".join(paper.authors or [])
-    sub.font.size = Pt(16)
-    sub.font.color.rgb = RGBColor(*theme["accent"])
-    sub.alignment = PP_ALIGN.CENTER
+    p.font.color.rgb = _rgb(theme, "text")
+    p.alignment = PP_ALIGN.LEFT
+    if paper.authors:
+        sub = tf.add_paragraph()
+        sub.text = ", ".join(paper.authors)
+        sub.font.size = Pt(14)
+        sub.font.color.rgb = _rgb(theme, "muted")
     foot = tf.add_paragraph()
-    foot.text = f"Exported from Know — {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+    foot.text = f"Analysis export · {datetime.now(timezone.utc).strftime('%B %d, %Y')}"
     foot.font.size = Pt(11)
-    foot.font.color.rgb = RGBColor(*theme["accent"])
-    foot.alignment = PP_ALIGN.CENTER
+    foot.font.color.rgb = _rgb(theme, "muted")
+    foot.space_before = Pt(18)
+
+
+def _add_section_title_slide(prs: Presentation, title: str, theme: dict) -> None:
+    slide = _blank_slide(prs, theme)
+    box = slide.shapes.add_textbox(Inches(0.9), Inches(2.8), Inches(11.5), Inches(1.2))
+    tf = box.text_frame
+    p = tf.paragraphs[0]
+    p.text = title
+    p.font.size = Pt(28)
+    p.font.bold = True
+    p.font.color.rgb = _rgb(theme, "text")
 
 
 def _add_bullet_slide(
     prs: Presentation,
-    title: str,
+    heading: str,
     bullets: list[str],
     theme: dict,
     *,
     dense: bool = False,
+    subtitle: str | None = None,
 ) -> None:
     if not bullets:
         return
-    chunk = 8 if dense else 5
+    chunk = 7 if dense else 5
     for i in range(0, len(bullets), chunk):
-        slide = prs.slides.add_slide(prs.slide_layouts[6])
-        _set_slide_bg(slide, theme["bg"])
-        tb = slide.shapes.add_textbox(Inches(0.6), Inches(0.5), Inches(12), Inches(0.8))
-        tb.text_frame.text = title if i == 0 else f"{title} (cont.)"
-        tb.text_frame.paragraphs[0].font.size = Pt(24)
-        from pptx.dml.color import RGBColor
-
-        tb.text_frame.paragraphs[0].font.color.rgb = RGBColor(*theme["text"])
-        body = slide.shapes.add_textbox(Inches(0.8), Inches(1.4), Inches(11.5), Inches(5.5))
-        tf = body.text_frame
+        slide = _blank_slide(prs, theme)
+        tb = slide.shapes.add_textbox(Inches(0.75), Inches(0.55), Inches(12), Inches(0.9))
+        tf = tb.text_frame
         tf.word_wrap = True
+        p = tf.paragraphs[0]
+        p.text = heading if i == 0 else f"{heading} (continued)"
+        p.font.size = Pt(22)
+        p.font.bold = True
+        p.font.color.rgb = _rgb(theme, "text")
+        if subtitle and i == 0:
+            sp = tf.add_paragraph()
+            sp.text = subtitle
+            sp.font.size = Pt(12)
+            sp.font.color.rgb = _rgb(theme, "muted")
+        body = slide.shapes.add_textbox(Inches(0.9), Inches(1.55), Inches(11.8), Inches(5.4))
+        btf = body.text_frame
+        btf.word_wrap = True
         for j, b in enumerate(bullets[i : i + chunk]):
-            para = tf.paragraphs[0] if j == 0 else tf.add_paragraph()
-            para.text = b[:500]
-            para.font.size = Pt(14 if dense else 16)
-            para.font.color.rgb = RGBColor(*theme["text"])
-            para.level = 0
+            para = btf.paragraphs[0] if j == 0 else btf.add_paragraph()
+            para.text = b[:900]
+            para.font.size = Pt(13 if dense else 15)
+            para.font.color.rgb = _rgb(theme, "text")
+            para.space_after = Pt(8)
 
 
-def _plain_text(s: str) -> str:
-    s = _DISPLAY_RE.sub(lambda m: m.group(1), s or "")
-    s = _INLINE_RE.sub(lambda m: m.group(1), s or "")
-    return re.sub(r"\s+", " ", s).strip()
+def _add_qa_slide(prs: Presentation, heading: str, pairs: list[tuple[str, str]], theme: dict) -> None:
+    for q, a in pairs[:24]:
+        slide = _blank_slide(prs, theme)
+        box = slide.shapes.add_textbox(Inches(0.75), Inches(0.55), Inches(12), Inches(6.2))
+        tf = box.text_frame
+        tf.word_wrap = True
+        hp = tf.paragraphs[0]
+        hp.text = heading
+        hp.font.size = Pt(14)
+        hp.font.bold = True
+        hp.font.color.rgb = _rgb(theme, "muted")
+        qp = tf.add_paragraph()
+        qp.text = q[:500]
+        qp.font.size = Pt(18)
+        qp.font.bold = True
+        qp.font.color.rgb = _rgb(theme, "text")
+        qp.space_before = Pt(10)
+        ap = tf.add_paragraph()
+        ap.text = a[:1200] if a else "—"
+        ap.font.size = Pt(14)
+        ap.font.color.rgb = _rgb(theme, "text")
+        ap.space_before = Pt(12)
+
+
+def _add_selection_slide(
+    prs: Presentation,
+    heading: str,
+    rows: list[tuple[str, str, str]],
+    theme: dict,
+) -> None:
+    for action, sel, body in rows[:20]:
+        slide = _blank_slide(prs, theme)
+        box = slide.shapes.add_textbox(Inches(0.75), Inches(0.55), Inches(12), Inches(6.2))
+        tf = box.text_frame
+        tf.word_wrap = True
+        hp = tf.paragraphs[0]
+        hp.text = f"{heading} · {action.title()}"
+        hp.font.size = Pt(13)
+        hp.font.color.rgb = _rgb(theme, "muted")
+        qp = tf.add_paragraph()
+        qp.text = f"“{sel[:420]}”" if sel else "Selected passage"
+        qp.font.size = Pt(15)
+        qp.font.italic = True
+        qp.font.color.rgb = _rgb(theme, "text")
+        qp.space_before = Pt(8)
+        bp = tf.add_paragraph()
+        bp.text = body[:1400] if body else "—"
+        bp.font.size = Pt(14)
+        bp.font.color.rgb = _rgb(theme, "text")
+        bp.space_before = Pt(14)
 
 
 def render_pptx(export_row: dict, paper: ParsedPaper, cache: dict) -> tuple[bytes, str, str]:
@@ -109,71 +188,89 @@ def render_pptx(export_row: dict, paper: ParsedPaper, cache: dict) -> tuple[byte
 
     for key in sections:
         label = SECTION_LABELS.get(key, key)
+        _add_section_title_slide(prs, label, theme)
+
         if key == "summary":
-            s = content.get("summary") or {}
-            bullets = []
-            if s.get("overview"):
-                bullets.append(_plain_text(s["overview"]))
-            if s.get("tl_dr"):
-                bullets.append(f"TL;DR: {_plain_text(s['tl_dr'])}")
-            for c in s.get("key_contributions") or []:
-                bullets.append(_plain_text(c))
-            _add_bullet_slide(prs, label, bullets, theme, dense=dense)
-            for sub, stitle in [
-                ("methodology", "Methodology"),
-                ("main_results", "Results"),
-                ("discussion", "Discussion"),
-            ]:
-                if s.get(sub):
-                    _add_bullet_slide(prs, stitle, [_plain_text(s[sub])], theme, dense=dense)
+            blocks = summary_sections(content)
+            if not blocks:
+                _add_bullet_slide(prs, label, ["No summary generated yet."], theme, dense=dense)
+            for sub, bullets in blocks:
+                _add_bullet_slide(prs, sub, bullets, theme, dense=dense)
+
+        elif key == "prepare":
+            blocks = prepare_sections(content)
+            if not blocks:
+                _add_bullet_slide(prs, label, ["No prepare analysis yet."], theme, dense=dense)
+            for sub, bullets in blocks:
+                _add_bullet_slide(prs, sub, bullets, theme, dense=dense)
+
+        elif key == "assumptions":
+            bullets = assumptions_bullets(content)
+            _add_bullet_slide(
+                prs, label, bullets or ["No assumptions extracted yet."], theme, dense=dense
+            )
 
         elif key == "qa":
-            items = []
-            for session in content.get("qa") or []:
-                for item in session.get("items") or session.get("questions") or []:
-                    items.append(
-                        f"Q: {_plain_text(item.get('question', ''))}\nA: {_plain_text(item.get('answer', ''))}"
-                    )
-            if items:
-                _add_bullet_slide(prs, label, items, theme, dense=dense)
+            pairs = qa_entries(content)
+            if pairs:
+                _add_qa_slide(prs, label, pairs, theme)
             else:
                 _add_bullet_slide(prs, label, ["No Q&A yet."], theme, dense=dense)
 
-        elif key in ("notes", "highlights", "selection", "cross"):
-            entries = []
-            if key == "notes":
-                for n in content.get("notes") or []:
-                    entries.append(_plain_text(n.get("text") or n.get("content") or ""))
-            elif key == "highlights":
-                for h in content.get("highlights") or []:
-                    entries.append(f"{h.get('color', '')}: {h.get('selected_text', '')}")
-            elif key == "selection":
-                for item in content.get("selection") or []:
-                    entries.append(_plain_text(item.get("body") or item.get("result") or ""))
+        elif key == "cross":
+            pairs = cross_qa_entries(content)
+            if pairs:
+                _add_qa_slide(prs, label, pairs, theme)
             else:
-                for item in content.get("cross") or []:
-                    entries.append(f"Q: {_plain_text(item.get('question', ''))}")
+                _add_bullet_slide(prs, label, ["No cross-paper Q&A yet."], theme, dense=dense)
+
+        elif key == "notes":
+            bullets = notes_bullets(content)
             _add_bullet_slide(
-                prs, label, entries or [f"No {label.lower()} yet."], theme, dense=dense
+                prs, label, bullets or ["No notes saved yet."], theme, dense=dense
+            )
+
+        elif key == "selection":
+            rows = selection_entries(content)
+            if rows:
+                _add_selection_slide(prs, label, rows, theme)
+            else:
+                _add_bullet_slide(prs, label, ["No selection history yet."], theme, dense=dense)
+
+        elif key == "related":
+            bib = related_bibliography(content)
+            _add_bullet_slide(
+                prs, label, bib or ["No references parsed yet."], theme, dense=True
             )
 
         elif key == "figures":
-            metas = (content.get("figures") or {}).get("meta") or paper.figures or []
-            for f in metas:
-                fid = f.get("id") if isinstance(f, dict) else getattr(f, "id", None)
-                slide = prs.slides.add_slide(prs.slide_layouts[6])
-                _set_slide_bg(slide, theme["bg"])
-                path = resolve_figure_path(paper.id, fid, export_row["user_id"]) if fid else None
-                if path and path.exists():
-                    slide.shapes.add_picture(str(path), Inches(0.5), Inches(1), height=Inches(5))
-                cap = f.get("caption") if isinstance(f, dict) else getattr(f, "caption", "")
-                box = slide.shapes.add_textbox(Inches(6.5), Inches(1), Inches(6), Inches(5))
-                box.text_frame.text = cap or "Figure"
-            if not metas:
-                _add_bullet_slide(prs, label, ["No figures yet."], theme, dense=dense)
+            from .export_formatters import figure_slides
 
-        else:
-            _add_bullet_slide(prs, label, [f"See {label} in Know."], theme, dense=dense)
+            fig_rows = figure_slides(content, paper)
+            if not fig_rows:
+                _add_bullet_slide(prs, label, ["No figures yet."], theme, dense=dense)
+            user_id = export_row["user_id"]
+            for cap, analysis, fid in fig_rows:
+                slide = _blank_slide(prs, theme)
+                path = resolve_figure_path(paper.id, fid, user_id) if fid else None
+                if path and path.exists():
+                    slide.shapes.add_picture(str(path), Inches(0.6), Inches(0.8), height=Inches(4.8))
+                    box = slide.shapes.add_textbox(Inches(6.4), Inches(0.8), Inches(6.2), Inches(5.8))
+                else:
+                    box = slide.shapes.add_textbox(Inches(0.75), Inches(0.8), Inches(11.8), Inches(5.8))
+                tf = box.text_frame
+                tf.word_wrap = True
+                p = tf.paragraphs[0]
+                p.text = cap
+                p.font.size = Pt(16)
+                p.font.bold = True
+                p.font.color.rgb = _rgb(theme, "text")
+                if analysis:
+                    ap = tf.add_paragraph()
+                    ap.text = analysis
+                    ap.font.size = Pt(13)
+                    ap.font.color.rgb = _rgb(theme, "text")
+                    ap.space_before = Pt(10)
 
     buf = io.BytesIO()
     prs.save(buf)

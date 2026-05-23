@@ -10,9 +10,9 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
 import { priorWorkExternalHref, referenceIndexLabel } from "@/lib/priorWorkLinks";
 import {
-  sanitizeCitationForDisplay,
+  sanitizeCitationFullText,
   sanitizeRelatedClusterSummaryMarkdown,
-  filterUsablePriorWork,
+  referenceListItems,
   isUsableClusterTheme,
   isGarbledBibliographyLine,
 } from "@/lib/formatBibliography";
@@ -42,9 +42,8 @@ function VerbatimCitationLink({ work }: { work: PriorWork }) {
     (typeof work.citation_display === "string" && work.citation_display.trim()) ||
     work.title.trim() ||
     "Reference";
-  if (isGarbledBibliographyLine(raw)) return null;
-  const display = sanitizeCitationForDisplay(raw);
-  if (!display || display.length < 12) return null;
+  const display = sanitizeCitationFullText(raw);
+  if (!display || display.length < 4) return null;
   const linkCls =
     "block text-[var(--text-sm)] leading-relaxed text-foreground/90 underline decoration-border underline-offset-[3px] hover:decoration-foreground/60 text-pretty hyphens-auto [overflow-wrap:anywhere]";
 
@@ -69,7 +68,7 @@ function CitationList({
   items: PriorWork[];
   startIndex?: number;
 }) {
-  const usable = filterUsablePriorWork(items);
+  const usable = referenceListItems(items);
   return (
     <ol className="mt-3 list-none space-y-2 p-0">
       {usable.map((p, i) => {
@@ -164,9 +163,11 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
   }, [topicalClusters]);
 
   const priorList = useMemo(
-    () => filterUsablePriorWork(preReading?.prior_work ?? []),
+    () => referenceListItems(preReading?.prior_work ?? []),
     [preReading?.prior_work],
   );
+
+  const rawPriorCount = preReading?.prior_work?.length ?? 0;
 
   if (preReadingLoading) {
     return (
@@ -182,7 +183,7 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
     );
   }
 
-  if (!preReading || priorList.length === 0) {
+  if (!preReading || rawPriorCount === 0) {
     return (
       <div className="space-y-4 motion-safe:animate-fade-in">
         <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground">{RELATED_TAB_INTRO}</p>
@@ -249,7 +250,7 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
 
       {topicalClusters?.length ? (
         topicalClusters.map((sec, si) => {
-          const items = filterUsablePriorWork(sec.items ?? []);
+          const items = referenceListItems(sec.items ?? []);
           if (!items.length) return null;
           const theme = (sec.theme ?? "").trim();
           const summaryRaw = (sec.summary || "").trim();

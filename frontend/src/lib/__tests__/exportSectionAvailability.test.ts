@@ -8,7 +8,6 @@ describe("getExportSectionAvailability", () => {
     preReadingByPaper: {},
     assumptionsByPaper: {},
     notesByPaper: {},
-    highlightsByPaper: {},
     selectionHistoryByPaper: {},
     qaResultsByPaper: {},
     crossPaperResults: [],
@@ -32,44 +31,6 @@ describe("getExportSectionAvailability", () => {
     };
     const avail = getExportSectionAvailability(paperId, snap as never);
     expect(avail.assumptions).toBe(true);
-  });
-
-  it("ignores transient passage-flash highlights", () => {
-    const paperId = "p1";
-    const snap = {
-      ...emptySnap,
-      highlightsByPaper: {
-        [paperId]: [
-          {
-            id: "passage-flash-123",
-            paper_id: paperId,
-            selected_text: "flash",
-            color: "blue" as const,
-          },
-        ],
-      },
-    };
-    const avail = getExportSectionAvailability(paperId, snap as never);
-    expect(avail.highlights).toBe(false);
-  });
-
-  it("counts persisted highlights", () => {
-    const paperId = "p1";
-    const snap = {
-      ...emptySnap,
-      highlightsByPaper: {
-        [paperId]: [
-          {
-            id: "hl-1",
-            paper_id: paperId,
-            selected_text: "saved",
-            color: "yellow" as const,
-          },
-        ],
-      },
-    };
-    const avail = getExportSectionAvailability(paperId, snap as never);
-    expect(avail.highlights).toBe(true);
   });
 
   it("counts Q&A items not empty session shells", () => {

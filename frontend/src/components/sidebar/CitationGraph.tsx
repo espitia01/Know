@@ -6,8 +6,6 @@ import type { CitedByItem, PriorWork } from "@/lib/api";
 import { extractCitationShortLabel } from "@/lib/formatBibliography";
 import { priorWorkExternalHref, referenceIndexLabel } from "@/lib/priorWorkLinks";
 
-const PREVIEW = 5;
-
 interface CitationEntry {
   id: string;
   label: string;
@@ -105,9 +103,6 @@ function ColumnPreview({
   entries: CitationEntry[];
   emptyHint: string;
 }) {
-  const preview = entries.slice(0, PREVIEW);
-  const rest = entries.length - preview.length;
-
   return (
     <div className="min-w-0 flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-2">
@@ -118,16 +113,13 @@ function ColumnPreview({
           {count}
         </span>
       </div>
-      {preview.length === 0 ? (
+      {entries.length === 0 ? (
         <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground/75">{emptyHint}</p>
       ) : (
-        <div className="space-y-1.5">
-          {preview.map((e) => (
+        <div className="max-h-52 space-y-1.5 overflow-y-auto overscroll-y-contain pr-1 [scrollbar-gutter:stable]">
+          {entries.map((e) => (
             <CitationChip key={e.id} entry={e} />
           ))}
-          {rest > 0 && (
-            <p className="text-[10px] text-muted-foreground/70">+ {rest} more below</p>
-          )}
         </div>
       )}
     </div>
@@ -235,7 +227,7 @@ export function CitationGraph({ paperTitle, outbound, inbound }: CitationGraphPr
               Citation map
             </h3>
             <p className="mt-1 text-[var(--text-xs)] leading-relaxed text-muted-foreground/85">
-              What this paper cites and what cites it — scroll the lists below for full entries.
+              What this paper cites and what cites it. Scroll each column for the full list.
             </p>
           </div>
           {canExpand && (
