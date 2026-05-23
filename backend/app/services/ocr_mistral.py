@@ -51,10 +51,21 @@ def _decode_image_bytes(raw: str) -> bytes:
 
 
 def _rewrite_image_refs(markdown: str, mapping: dict[str, str]) -> str:
+    """Map Mistral image ids (e.g. img-0.jpeg) to stable per-paper paths."""
+    if not mapping:
+        return markdown
     out = markdown
-    for old_id, new_id in mapping.items():
-        out = out.replace(f"]({old_id})", f"]({new_id})")
+    # Longest ids first — avoids partial matches (img-1 vs img-10).
+    for old_id, new_id in sorted(mapping.items(), key=lambda kv: len(kv[0]), reverse=True):
         out = out.replace(f"](./{old_id})", f"]({new_id})")
+        out = out.replace(f"]({old_id})", f"]({new_id})")
+        # Mistral sometimes emits a bare filename before the caption, not a markdown link.
+        out = re.sub(
+            rf"^{re.escape(old_id)}\s*\n",
+            f"![figure]({new_id})\n",
+            out,
+            flags=re.MULTILINE,
+        )
     return out
 
 
@@ -110,8 +121,8 @@ async def run_mistral_ocr(
             json={
                 "model": MISTRAL_OCR_MODEL,
                 "document": {
-                    "type": "document_base64",
-                    "document_base64": encoded,
+                    "type": "document_url",
+                    "document_url": f"data:application/pdf;base64,{encoded}",
                 },
                 "include_image_base64": True,
                 "image_limit": 200,
@@ -120,12 +131,25 @@ async def run_mistral_ocr(
         )
 
     if resp.status_code != 200:
-        raise RuntimeError(f"mistral_ocr_failed:{resp.status_code}")
+        detail = (resp.text or "")[:500]
+        raise RuntimeError(f"mistral_ocr_failed:{resp.status_code}:{detail}")
 
     data = resp.json()
-    pages = data.get("pages") or []
-    if not isinstance(pages, list):
-        raise RuntimeError("mistral_ocr_invalid_response")
+    pages_raw = data.get("pages") or []
+    if not isinstance(pages_raw, list) or not pages_raw:
+        raise RuntimeError("mistral_ocr_empty_response")
+
+    pages = sorted(
+        (p for p in pages_raw if isinstance(p, dict)),
+        key=lambda p: int(p.get("index", 0)),
+    )
+    if len(pages_raw) > MAX_OCR_PAGES:
+        logger.warning(
+            "Mistral OCR returned %s pages; truncating to %s for %s",
+            len(pages_raw),
+            MAX_OCR_PAGES,
+            paper_id,
+        )
 
     page_limit = min(len(pages), MAX_OCR_PAGES)
     page_markdown: list[str] = []
@@ -170,6 +194,9 @@ async def run_mistral_ocr(
     _persist_ocr_images(paper_id, user_id, pending_images)
 
     joined = "\n\n---\n\n".join(page_markdown)
+    if not joined.strip():
+        raise RuntimeError("mistral_ocr_empty_markdown")
+
     model = str(data.get("model") or MISTRAL_OCR_MODEL)
     return OcrResult(
         markdown=joined,

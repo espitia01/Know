@@ -191,7 +191,12 @@ def save_paper_meta(paper_dict: dict, user_id: str) -> None:
     }
     try:
         client.table("papers").upsert(row, on_conflict="id").execute()
-    except Exception:
+    except Exception as first_exc:
+        logger.warning(
+            "save_paper_meta OCR upsert failed for %s (migration 020 applied?): %s",
+            paper_dict.get("id"),
+            first_exc,
+        )
         for key in ("raw_text", "markdown", "page_markdown", "ocr_images", "ocr_status", "ocr_model"):
             row.pop(key, None)
         try:

@@ -618,6 +618,28 @@ function PaperContent() {
     useShallow((s) => s.papersById[activePaperId] ?? s.paper),
   );
   const useMarkdownReader = activePaperMeta?.ocr_status === "ready";
+  const ocrKickoffRef = useRef<string | null>(null);
+
+  // Retry OCR for uploads that failed or predated Mistral (pending/failed).
+  useEffect(() => {
+    const status = activePaperMeta?.ocr_status;
+    if (!activePaperId || status === "ready" || status === "unsupported") return;
+    if (ocrKickoffRef.current === activePaperId) return;
+    ocrKickoffRef.current = activePaperId;
+
+    void api
+      .runPaperOcr(activePaperId)
+      .then(async (res) => {
+        if (res.ocr_status !== "ready") return;
+        const refreshed = await api.getPaper(activePaperId);
+        const merged = mergeCachedAnalysis(refreshed, useStore.getState().papersById[activePaperId]);
+        cachePaper(merged);
+        if (useStore.getState().paper?.id === activePaperId) {
+          setPaper(merged);
+        }
+      })
+      .catch(() => undefined);
+  }, [activePaperId, activePaperMeta?.ocr_status, cachePaper, setPaper]);
   // Stage 2 migration: streaming + history + abort all flow through the
   // `useSelectionThread` hook below. The bare AbortController + SSE
   // parsing block this used to need is gone; the hook owns it.
