@@ -55,9 +55,8 @@ export function MarkdownReader({
   onTextSelected,
   onSelectionClear,
 }: MarkdownReaderProps) {
-  const markdownByPaper = useStore((s) => s.markdownByPaper);
+  const entry = useStore((s) => s.markdownByPaper[paperId]);
   const setPaperMarkdown = useStore((s) => s.setPaperMarkdown);
-  const entry = markdownByPaper[paperId];
   const containerRef = useRef<HTMLDivElement>(null);
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(!entry);

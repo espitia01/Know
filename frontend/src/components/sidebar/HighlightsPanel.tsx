@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { api, type Highlight } from "@/lib/api";
-import { useStore, EMPTY_HIGHLIGHTS_LIST } from "@/lib/store";
+import { useStore, EMPTY_HIGHLIGHTS_LIST, EMPTY_PDF_REGIONS_LIST } from "@/lib/store";
 import { isPersistedHighlight } from "@/lib/highlightUtils";
 import { formatHighlightDisplay } from "@/lib/highlightDisplay";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -89,7 +89,9 @@ function HighlightCard({
 
 export function HighlightsPanel({ paperId }: HighlightsPanelProps) {
   const highlights = useStore((s) => s.highlightsByPaper[paperId] ?? EMPTY_HIGHLIGHTS_LIST);
-  const regionHighlights = useStore((s) => s.pdfRegionHighlightsByPaper[paperId] ?? []);
+  const regionHighlights = useStore(
+    (s) => s.pdfRegionHighlightsByPaper[paperId] ?? EMPTY_PDF_REGIONS_LIST,
+  );
   const visibleHighlights = highlights.filter(isPersistedHighlight);
   const removeHighlightForPaper = useStore((s) => s.removeHighlightForPaper);
   const addHighlightForPaper = useStore((s) => s.addHighlightForPaper);

@@ -8,6 +8,7 @@ import {
   figurePreviewUrl,
   ocrFiguresPending,
 } from "@/lib/ocrFigures";
+import { useShallow } from "zustand/react/shallow";
 import { useStore } from "@/lib/store";
 // Stage 3: figure analysis streams from the migrated AI SDK route and
 // renders via Streamdown.
@@ -218,9 +219,15 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   const paperMatches = paper?.id === paperId;
   const effectivePaper = paperMatches ? paper : cachedForPanel;
   const ocrStatus = effectivePaper?.ocr_status;
+  const ocrImagesSig = useMemo(() => {
+    if (effectivePaper?.id !== paperId || effectivePaper.ocr_status !== "ready") return "";
+    const images = effectivePaper.ocr_images;
+    if (!images?.length) return "0";
+    return images.map((img) => img.id).join("\x1f");
+  }, [paperId, effectivePaper?.id, effectivePaper?.ocr_status, effectivePaper?.ocr_images]);
   const figures = useMemo(
     () => analysisFiguresFromPaper(effectivePaper),
-    [effectivePaper],
+    [effectivePaper, ocrImagesSig],
   );
   const paperReady = Boolean(effectivePaper?.id);
   const ocrPending = ocrFiguresPending(effectivePaper);
@@ -276,7 +283,25 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   useEffect(() => {
     if (!paperId || effectivePaper?.id !== paperId) return;
     const list = effectivePaper.cached_analysis?.figure_analyses;
-    setConversations(chatsFromFigureAnalyses(list));
+    const next = chatsFromFigureAnalyses(list);
+    setConversations((prev) => {
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      if (
+        prevKeys.length === nextKeys.length &&
+        prevKeys.every((k) => {
+          const a = prev[k];
+          const b = next[k];
+          return (
+            a?.length === b?.length &&
+            a.every((msg, i) => msg.role === b[i]?.role && msg.text === b[i]?.text)
+          );
+        })
+      ) {
+        return prev;
+      }
+      return next;
+    });
   }, [paperId, effectivePaper?.id, figureAnalysesSig]); // eslint-disable-line react-hooks/exhaustive-deps -- synced via compact figureAnalysesSig
 
   // Abort any in-flight figure stream when the panel unmounts so we don't

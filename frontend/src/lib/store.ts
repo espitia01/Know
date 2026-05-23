@@ -63,6 +63,9 @@ export type PdfRegionHighlight = {
   highlightId?: string;
 };
 
+/** Stable empty array for pdf-region highlight selectors (see EMPTY_HIGHLIGHTS_LIST). */
+export const EMPTY_PDF_REGIONS_LIST: PdfRegionHighlight[] = [];
+
 interface UiPrefs {
   panelPos: ReaderPanelPosition;
   panelSizeSide: number;

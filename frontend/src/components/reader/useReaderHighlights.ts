@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type RefObject } from "react";
-import { useStore } from "@/lib/store";
+import { useStore, EMPTY_HIGHLIGHTS_LIST } from "@/lib/store";
 
 const BANNER_KEY = "know:pdf-region-highlight-banner";
 
@@ -16,7 +16,9 @@ export function useReaderHighlights(
   const regionCount = useStore(
     (s) => (s.pdfRegionHighlightsByPaper[paperId] ?? []).length,
   );
-  const textHighlights = useStore((s) => s.highlightsByPaper[paperId] ?? []);
+  const textHighlights = useStore(
+    (s) => s.highlightsByPaper[paperId] ?? EMPTY_HIGHLIGHTS_LIST,
+  );
   const [bannerDismissed, setBannerDismissed] = useState(true);
 
   useEffect(() => {
