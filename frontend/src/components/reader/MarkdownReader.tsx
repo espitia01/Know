@@ -30,13 +30,14 @@ function readerUrlTransform(url: string): string | null {
   return null;
 }
 
-/** Wrap figure caption paragraphs for journal-style styling. */
-function wrapFigureCaptions(markdown: string): string {
-  return markdown.replace(
-    /^(Fig\.?\s+\d+[.:][^\n]*|Figure\s+\d+[.:][^\n]*)/gim,
-    (line) => `<figcaption class="reader-figure-caption">${line}</figcaption>`,
-  );
-}
+/**
+ * Figure captions used to be wrapped in raw `<figcaption>` HTML inside
+ * the markdown, but that meant remark-math skipped them (HTML blocks
+ * aren't processed for `$...$` math). We now leave them as regular
+ * markdown paragraphs and tag them with a class via DOM post-process
+ * (see `tagFigureCaptions` below) so KaTeX has already converted the
+ * math by the time we restyle.
+ */
 
 /**
  * Collapse the noisy author byline Mistral OCR emits when a paper's
@@ -132,24 +133,28 @@ function collapseAuthorByline(markdown: string): string {
  * When the compositor produced fig-N.png composites for this paper,
  * drop the lingering panel-level `p\d+-img-\d+\.png` refs from the
  * markdown — they're already represented by the composite and showing
- * both gives the random-looking "extra figure" placeholders the user
- * sees between captions and prose.
+ * both gives the random-looking "extra figure A/B/C" placeholders that
+ * appear between captions and prose for multi-panel figures.
+ *
+ * We drop the entire line whenever it contains a panel ref, including
+ * cases where the ref is followed by a label like
+ * `![figure](p0-img-0.png) A`.
  */
 function dropPanelRefsWhenCompositesExist(markdown: string): string {
   const hasComposite = /(?:^|[^A-Za-z0-9])fig-\d+\.png/.test(markdown);
   if (!hasComposite) return markdown;
-  // Remove the whole markdown image line (and any adjacent blank line)
-  // when the src is a bare panel id.
-  return markdown
-    .split("\n")
-    .filter((line) => {
-      const t = line.trim();
-      // Match `![alt](p0-img-0.png)` or bare `p0-img-0.png` lines.
-      if (/^!\[[^\]]*\]\(p\d+-img-\d+\.png\)\s*$/.test(t)) return false;
-      if (/^p\d+-img-\d+\.png\s*$/.test(t)) return false;
-      return true;
-    })
-    .join("\n");
+  const panelRe = /(?:^|[^A-Za-z0-9])p\d+-img-\d+\.png/;
+  const out: string[] = [];
+  for (const line of markdown.split("\n")) {
+    if (panelRe.test(line)) {
+      // Drop the entire line. Also drop a trailing blank in `out`
+      // so we don't accumulate empty paragraphs between drops.
+      if (out.length > 0 && !out[out.length - 1].trim()) out.pop();
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
 }
 
 /**
@@ -448,6 +453,9 @@ export function MarkdownReader({
   const [error, setError] = useState("");
 
   const { showBanner, dismissBanner } = useReaderHighlights(paperId, containerRef);
+  const activeSelection = useStore(
+    (s) => s.selectionResultByPaper[paperId] ?? null,
+  );
 
   const readerStyle = useMemo(
     () =>
@@ -503,7 +511,6 @@ export function MarkdownReader({
         joined = collapseAuthorByline(joined);
         joined = wrapBylineParagraph(joined);
         joined = dropPanelRefsWhenCompositesExist(joined);
-        joined = wrapFigureCaptions(joined);
         joined = collapseFragmentedMathParagraphs(joined);
         joined = rewriteOcrImageReferences(joined, paperId, trial);
 
@@ -539,6 +546,86 @@ export function MarkdownReader({
     const hasMath = selectionHasMath(text, range);
     onTextSelected?.(text, rect, { hasMath });
   }, [onTextSelected]);
+
+  // Post-render DOM pass: tag figure caption paragraphs and re-apply
+  // the active-analysis highlight from the selection store. This runs
+  // every time `body` or `activeSelection` changes — including on a
+  // fresh page load, which is how the Explain/Derive highlight
+  // survives a refresh or back-navigation.
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root || !body) return;
+
+    const apply = () => {
+      // 1. Tag figure caption paragraphs. Math inside has already been
+      //    converted to KaTeX nodes by Streamdown, so adding a class
+      //    after the fact won't disturb the rendered equations.
+      root.querySelectorAll<HTMLParagraphElement>("p").forEach((p) => {
+        if (p.classList.contains("reader-figure-caption")) return;
+        const text = (p.textContent || "").trim();
+        if (/^(Fig\.?|Figure)\s+\d+[.:]/i.test(text)) {
+          p.classList.add("reader-figure-caption");
+        }
+      });
+
+      // 2. Active analysis highlight — wrap the current selection's
+      //    text in a colored <mark>, dropping any stale wrap first.
+      const action = activeSelection?.action;
+      const needle = (activeSelection?.selected_text || "").trim();
+      const wantWrap =
+        (action === "explain" || action === "derive") && needle.length >= 8;
+
+      // If a wrap with the right action + matching content is already
+      // present, leave it alone (avoids flicker during streams).
+      const existing = root.querySelector<HTMLElement>(".reader-active-analysis");
+      const existingMatches =
+        existing &&
+        wantWrap &&
+        existing.classList.contains(`reader-active-analysis--${action}`) &&
+        (existing.textContent || "").includes(needle.slice(0, 32));
+      if (existingMatches) return;
+
+      // Clear stale wraps before applying a new one.
+      root.querySelectorAll(".reader-active-analysis").forEach((el) => {
+        const parent = el.parentNode;
+        if (!parent) return;
+        while (el.firstChild) parent.insertBefore(el.firstChild, el);
+        parent.removeChild(el);
+      });
+
+      if (!wantWrap) return;
+
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        const text = node.textContent || "";
+        const idx = text.indexOf(needle);
+        if (idx < 0) continue;
+        try {
+          const range = document.createRange();
+          range.setStart(node, idx);
+          range.setEnd(node, idx + needle.length);
+          const mark = document.createElement("mark");
+          mark.className = `reader-active-analysis reader-active-analysis--${action}`;
+          range.surroundContents(mark);
+        } catch {
+          /* range spans multiple nodes — skip */
+        }
+        break;
+      }
+    };
+
+    apply();
+    const raf =
+      typeof requestAnimationFrame !== "undefined"
+        ? requestAnimationFrame(apply)
+        : 0;
+    const t = window.setTimeout(apply, 800);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.clearTimeout(t);
+    };
+  }, [body, activeSelection]);
 
   useEffect(() => {
     const root = containerRef.current;
