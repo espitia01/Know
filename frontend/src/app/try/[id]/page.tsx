@@ -41,6 +41,18 @@ const PdfViewer = dynamic(
   },
 );
 
+const MarkdownReader = dynamic(
+  () => import("@/components/reader/MarkdownReader").then((m) => m.MarkdownReader),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full items-center justify-center text-[var(--text-sm)] text-muted-foreground">
+        Preparing readable view…
+      </div>
+    ),
+  },
+);
+
 /**
  * Local alias kept named `Md` so the existing JSX in this trial page
  * (`<Md>{...}</Md>`) didn't have to be churned during the migration.
@@ -174,6 +186,7 @@ export default function TrialPaperView() {
   idRef.current = id;
 
   const [title, setTitle] = useState("");
+  const [ocrStatus, setOcrStatus] = useState("");
   const [trialMeta, setTrialMeta] = useState({ used: 0, limit: 2 });
 
   const [activeTab, setActiveTab] = useState("summary");
@@ -205,6 +218,7 @@ export default function TrialPaperView() {
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data?.title) setTitle(data.title);
+        if (data?.ocr_status) setOcrStatus(data.ocr_status);
         if (data && typeof data.trial_selections_used === "number") {
           setTrialMeta({
             used: data.trial_selections_used,
@@ -444,16 +458,35 @@ export default function TrialPaperView() {
         >
           Sign up
         </Link>
+        {ocrStatus === "ready" && (
+          <a
+            href={`${API_BASE}/api/trial/paper/${id}/pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hidden sm:inline text-[11px] font-medium text-muted-foreground hover:text-foreground"
+          >
+            View original PDF
+          </a>
+        )}
       </header>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-muted/30">
-          <PdfViewer
-            url={`${API_BASE}/api/trial/paper/${id}/pdf`}
-            paperId={id}
-            onTextSelected={handleTextSelected}
-            onSelectionClear={handleSelectionClear}
-          />
+          {ocrStatus === "ready" ? (
+            <MarkdownReader
+              paperId={id}
+              trial
+              onTextSelected={handleTextSelected}
+              onSelectionClear={handleSelectionClear}
+            />
+          ) : (
+            <PdfViewer
+              url={`${API_BASE}/api/trial/paper/${id}/pdf`}
+              paperId={id}
+              onTextSelected={handleTextSelected}
+              onSelectionClear={handleSelectionClear}
+            />
+          )}
           {selection && (
             <SelectionToolbar
               text={selection.text}

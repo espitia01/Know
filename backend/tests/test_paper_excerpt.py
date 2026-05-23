@@ -3,6 +3,21 @@
 from app.services.paper_excerpt import build_prepare_excerpt
 
 
+def test_excerpt_works_with_markdown_headings():
+    raw = (
+        "## Introduction\n\n"
+        "Intro paragraph one.\n\n"
+        "## Methods\n"
+        + ("method detail " * 400)
+        + "\n\n"
+        "## Conclusion\n"
+        "We conclude here.\n"
+    )
+    excerpt = build_prepare_excerpt(raw, max_chars=5000)
+    assert "Introduction" in excerpt or "intro" in excerpt.lower()
+    assert "conclude" in excerpt.lower() or "Conclusion" in excerpt
+
+
 def test_excerpt_includes_named_sections():
     raw = (
         "Title line\n\n"

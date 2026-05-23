@@ -73,6 +73,19 @@ const PdfViewer = dynamic(
   }
 );
 
+const MarkdownReader = dynamic(
+  () => import("@/components/reader/MarkdownReader").then((m) => m.MarkdownReader),
+  {
+    ssr: false,
+    loading: () => (
+      <PaperLoadingScreen
+        title="Loading reader"
+        subtitle="Preparing readable view…"
+      />
+    ),
+  }
+);
+
 const MIN_SIDE = 280;
 const MAX_SIDE = 700;
 const MIN_BOTTOM = 180;
@@ -601,6 +614,10 @@ function PaperContent() {
   const [error, setError] = useState("");
 
   const [activePaperId, setActivePaperId] = useState(paperId);
+  const activePaperMeta = useStore(
+    useShallow((s) => s.papersById[activePaperId] ?? s.paper),
+  );
+  const useMarkdownReader = activePaperMeta?.ocr_status === "ready";
   // Stage 2 migration: streaming + history + abort all flow through the
   // `useSelectionThread` hook below. The bare AbortController + SSE
   // parsing block this used to need is gone; the hook owns it.
@@ -1742,13 +1759,21 @@ function PaperContent() {
 
   const pdfInner = (
     <>
-      <PdfViewer
-        url={api.getPdfUrl(activePaperId)}
-        paperId={activePaperId}
-        onTextSelected={handleTextSelected}
-        onSelectionClear={handleSelectionClear}
-        reserveToolbarRightForOverlay={headerHidden && !focusMode}
-      />
+      {useMarkdownReader ? (
+        <MarkdownReader
+          paperId={activePaperId}
+          onTextSelected={handleTextSelected}
+          onSelectionClear={handleSelectionClear}
+        />
+      ) : (
+        <PdfViewer
+          url={api.getPdfUrl(activePaperId)}
+          paperId={activePaperId}
+          onTextSelected={handleTextSelected}
+          onSelectionClear={handleSelectionClear}
+          reserveToolbarRightForOverlay={headerHidden && !focusMode}
+        />
+      )}
       {selection && (
         <SelectionToolbar
           text={selection.text}
@@ -2049,6 +2074,16 @@ function PaperContent() {
         >
           {panelVisible ? "Hide Analysis" : "Show Analysis"}
         </button>
+
+        {useMarkdownReader && (
+          <button
+            type="button"
+            onClick={() => window.open(api.getPdfUrl(activePaperId), "_blank", "noopener,noreferrer")}
+            className="hidden sm:inline text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors shrink-0"
+          >
+            View original PDF
+          </button>
+        )}
 
         {/* Focus mode: drop all chrome and request browser fullscreen.
             Escape exits. */}

@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 
 from .config import settings
 from .auth import require_auth
@@ -407,8 +407,9 @@ def _check_trial_rate(request: Request):
 async def trial_upload(request: Request):
     _check_trial_rate(request)
 
-    from .services.pdf_parser import extract_pdf, save_paper
+    from .services.pdf_parser import extract_pdf, save_paper, paper_prompt_text
     from .services.llm import extract_metadata
+    from .api.papers import _ocr_upload_fields
     import uuid
 
     content_type = request.headers.get("content-type", "")
@@ -449,6 +450,15 @@ async def trial_upload(request: Request):
         title = filename.replace(".pdf", "")
         authors = []
 
+    ocr_fields = await _ocr_upload_fields(content, paper_id, None)
+    if ocr_fields["markdown"]:
+        try:
+            meta = await extract_metadata(ocr_fields["markdown"][:4000])
+            title = meta.get("title", title)
+            authors = meta.get("authors", authors)
+        except Exception:
+            pass
+
     from .models.schemas import ParsedPaper
     paper = ParsedPaper(
         id=paper_id,
@@ -461,6 +471,7 @@ async def trial_upload(request: Request):
         tags=["trial"],
         notes=[],
         cached_analysis={},
+        **ocr_fields,
     )
     save_paper(paper)
     return {"id": paper.id, "title": paper.title, "authors": paper.authors, "figures": [f.model_dump() for f in paper.figures]}
@@ -470,7 +481,7 @@ async def trial_upload(request: Request):
 async def trial_summary(request: Request, body: dict):
     _check_trial_rate(request)
 
-    from .services.pdf_parser import get_paper, save_paper
+    from .services.pdf_parser import get_paper, save_paper, paper_prompt_text
     from .services.llm import summarize_paper
 
     paper_id = body.get("paper_id", "")
@@ -487,7 +498,7 @@ async def trial_summary(request: Request, body: dict):
         return paper.cached_analysis["summary"]
 
     try:
-        result = await summarize_paper(paper.raw_text, model_override="claude-haiku-4-5")
+        result = await summarize_paper(paper_prompt_text(paper), model_override="claude-haiku-4-5")
         paper.cached_analysis["summary"] = result
         save_paper(paper)
         return result
@@ -504,7 +515,7 @@ async def trial_get_paper(paper_id: str, request: Request):
     if not paper_id.startswith("trial_"):
         raise HTTPException(status_code=400, detail="Trial access only for trial papers")
 
-    from .services.pdf_parser import get_paper
+    from .services.pdf_parser import get_paper, paper_prompt_text
     paper = get_paper(paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
@@ -513,9 +524,52 @@ async def trial_get_paper(paper_id: str, request: Request):
         "id": paper.id,
         "title": paper.title,
         "authors": paper.authors,
+        "ocr_status": paper.ocr_status,
+        "markdown_length": len(paper.markdown or ""),
         "trial_selections_used": used,
         "trial_selections_limit": TRIAL_SELECTION_CAP,
     }
+
+
+@app.get("/api/trial/paper/{paper_id}/markdown")
+async def trial_get_paper_markdown(paper_id: str, request: Request):
+    _check_trial_rate(request)
+    from .api.papers import _validate_id
+    _validate_id(paper_id, "paper_id")
+    if not paper_id.startswith("trial_"):
+        raise HTTPException(status_code=400, detail="Trial access only for trial papers")
+
+    from .services.pdf_parser import get_paper
+    paper = get_paper(paper_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return {
+        "markdown": paper.markdown,
+        "page_markdown": paper.page_markdown,
+        "images": [i.model_dump() for i in paper.ocr_images],
+        "ocr_status": paper.ocr_status,
+    }
+
+
+@app.get("/api/trial/paper/{paper_id}/ocr-image/{image_id}")
+async def trial_get_ocr_image(paper_id: str, image_id: str, request: Request):
+    _check_trial_rate(request)
+    from .api.papers import _validate_id
+    from .services.ocr_mistral import validate_ocr_image_id
+    from .services.pdf_parser import load_ocr_image_bytes
+
+    _validate_id(paper_id, "paper_id")
+    if not paper_id.startswith("trial_"):
+        raise HTTPException(status_code=400, detail="Trial access only for trial papers")
+    try:
+        validate_ocr_image_id(image_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid image id")
+
+    img_bytes = load_ocr_image_bytes(paper_id, image_id, None)
+    if not img_bytes:
+        raise HTTPException(status_code=404, detail="OCR image not found")
+    return Response(content=img_bytes, media_type="image/png")
 
 
 @app.get("/api/trial/paper/{paper_id}/pdf")
@@ -540,7 +594,7 @@ async def trial_selection_stream(request: Request, body: dict):
     import asyncio
 
     from .api.papers import _validate_id
-    from .services.pdf_parser import get_paper, mutate_local_paper, append_capped
+    from .services.pdf_parser import get_paper, mutate_local_paper, append_capped, paper_prompt_text
     from .services.llm import (
         AnthropicProvider,
         get_fast_provider,
@@ -582,7 +636,7 @@ async def trial_selection_stream(request: Request, body: dict):
     if not isinstance(provider, AnthropicProvider):
         raise HTTPException(status_code=503, detail="Streaming is unavailable")
 
-    system, user_text = _get_selection_prompt(paper.raw_text, selected_text, action)
+    system, user_text = _get_selection_prompt(paper_prompt_text(paper), selected_text, action)
 
     async def event_stream():
         full_text = ""

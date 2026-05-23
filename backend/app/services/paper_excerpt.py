@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 _HEADING_RE = re.compile(
-    r"^\s*(?:\d+(?:\.\d+)*\s+)?"
+    r"^\s*(?:#+\s*)?(?:\d+(?:\.\d+)*\s+)?"
     r"(abstract|introduction|background|related work|method[s]?|approach|model|"
     r"theor(?:y|etical)|experiment[s]?|result[s]?|evaluation|discussion|"
     r"conclusion[s]?|future work|limitations)\b",

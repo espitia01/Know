@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Depends
 
 from ..models.schemas import SearchResponse, SearchResult
-from ..services.pdf_parser import get_paper
+from ..services.pdf_parser import get_paper, paper_prompt_text
 from ..auth import require_auth
 from .papers import _validate_id, _verify_paper_owner
 
@@ -38,7 +38,7 @@ async def search_paper(
     query_lower = q.lower()
     results: list[SearchResult] = []
 
-    content = paper.raw_text or ""
+    content = paper_prompt_text(paper)
     content_lower = content.lower()
     start_idx = 0
     while True:

@@ -13,6 +13,7 @@ import type {
   SelectionAnalysisResult,
   PaperSummary,
   CrossPaperQA,
+  PaperMarkdownResponse,
 } from "./api";
 import { selectionKey as selectionResultKey } from "./selectionActions";
 import { MAX_SESSION_PAPERS } from "./workspaceFeatureFlags";
@@ -94,6 +95,9 @@ interface AppStore {
   updateCachedAnalysis: (paperId: string, partial: Record<string, unknown>) => void;
   forgetCachedPaper: (paperId: string) => void;
   getCachedPaper: (id: string) => ParsedPaper | undefined;
+
+  markdownByPaper: Record<string, PaperMarkdownResponse>;
+  setPaperMarkdown: (paperId: string, payload: PaperMarkdownResponse) => void;
 
   uiPrefs: UiPrefs;
   setPanelPosition: (pos: ReaderPanelPosition) => void;
@@ -375,6 +379,12 @@ export const useStore = create<AppStore>()(
           return { papersById: rest };
         }),
       getCachedPaper: (id) => get().papersById[id],
+
+      markdownByPaper: {},
+      setPaperMarkdown: (paperId, payload) =>
+        set((s) => ({
+          markdownByPaper: { ...s.markdownByPaper, [paperId]: payload },
+        })),
 
       uiPrefs: {
         panelPos: "right",

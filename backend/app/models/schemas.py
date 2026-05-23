@@ -10,6 +10,13 @@ class FigureInfo(BaseModel):
     page: int = 0
 
 
+class OcrImage(BaseModel):
+    id: str
+    page: int
+    bbox: list[float] | None = None
+    caption: str = ""
+
+
 class Reference(BaseModel):
     id: str
     text: str
@@ -20,6 +27,11 @@ class ParsedPaper(BaseModel):
     title: str
     authors: list[str] = []
     raw_text: str = ""
+    markdown: str = ""
+    page_markdown: list[str] = []
+    ocr_images: list[OcrImage] = []
+    ocr_status: str = "pending"
+    ocr_model: str = ""
     figures: list[FigureInfo] = []
     has_si: bool = False
     folder: str = ""
@@ -167,6 +179,7 @@ class SettingsUpdate(BaseModel):
 class SettingsResponse(BaseModel):
     has_anthropic_key: bool
     has_openai_key: bool = False
+    has_mistral_key: bool = False
     analysis_model: str
     fast_model: str
     background_preset: str | None = None

@@ -19,11 +19,14 @@ from ..services.pdf_parser import (
     get_figure_path,
     get_paper,
     list_papers,
+    load_ocr_image_bytes,
     MAX_FIGURES_PER_PAPER,
     mutate_paper,
+    paper_prompt_text,
     save_paper,
     _forget_paper_lock,
 )
+from ..services.ocr_mistral import MistralOcrUnavailable, run_mistral_ocr, validate_ocr_image_id
 from ..services.llm import extract_metadata, polish_note_from_selection, _sanitize_user_text
 from ..services import storage as cloud_storage
 from ..auth import require_auth
@@ -58,11 +61,69 @@ def _mirror_upload_to_storage(user_id: str, paper_id: str, content: bytes) -> No
                         fig_file.read_bytes(),
                         "image/png",
                     )
+        ocr_dir = settings.papers_dir / paper_id / "ocr"
+        if ocr_dir.exists():
+            for img_file in ocr_dir.iterdir():
+                if img_file.suffix == ".png":
+                    cloud_storage.upload_file(
+                        user_id,
+                        f"{paper_id}/ocr/{img_file.name}",
+                        img_file.read_bytes(),
+                        "image/png",
+                    )
     except Exception:
         # Per F-UPLOAD-LAG: storage mirroring must never turn a successful
         # local parse/save into a failed upload response.
         import logging
         logging.getLogger(__name__).exception("Storage mirror failed for paper %s", paper_id)
+
+
+async def _ocr_upload_fields(
+    content: bytes,
+    paper_id: str,
+    user_id: str | None,
+) -> dict:
+    """Run Mistral OCR and return ParsedPaper OCR field values."""
+    import asyncio
+
+    if not (settings.mistral_api_key or "").strip():
+        return {
+            "markdown": "",
+            "page_markdown": [],
+            "ocr_images": [],
+            "ocr_status": "unsupported",
+            "ocr_model": "",
+        }
+
+    try:
+        ocr = await asyncio.wait_for(
+            run_mistral_ocr(content, paper_id, user_id),
+            timeout=180,
+        )
+        return {
+            "markdown": ocr.markdown,
+            "page_markdown": ocr.page_markdown,
+            "ocr_images": ocr.images,
+            "ocr_status": "ready",
+            "ocr_model": ocr.model,
+        }
+    except MistralOcrUnavailable:
+        return {
+            "markdown": "",
+            "page_markdown": [],
+            "ocr_images": [],
+            "ocr_status": "unsupported",
+            "ocr_model": "",
+        }
+    except Exception as exc:
+        logger.warning("Mistral OCR failed for %s: %s", paper_id, exc)
+        return {
+            "markdown": "",
+            "page_markdown": [],
+            "ocr_images": [],
+            "ocr_status": "failed",
+            "ocr_model": "",
+        }
 
 
 def _validate_id(value: str, name: str = "ID") -> str:
@@ -140,12 +201,23 @@ async def upload_paper(
         try:
             # Per F-UPLOAD-LAG: metadata is nice-to-have for display, but a
             # slow upstream model should not keep the reader closed.
+            text_for_meta = raw.raw_text
             meta = await asyncio.wait_for(
-                extract_metadata(raw.raw_text, user_id=user_id),
+                extract_metadata(text_for_meta, user_id=user_id),
                 timeout=15,
             )
         except Exception:
             meta = {"title": "", "authors": []}
+
+        ocr_fields = await _ocr_upload_fields(content, paper_id, user_id)
+        if ocr_fields["markdown"]:
+            try:
+                meta = await asyncio.wait_for(
+                    extract_metadata(ocr_fields["markdown"][:4000], user_id=user_id),
+                    timeout=15,
+                )
+            except Exception:
+                pass
 
         paper = ParsedPaper(
             id=paper_id,
@@ -153,6 +225,7 @@ async def upload_paper(
             authors=meta.get("authors", []),
             raw_text=raw.raw_text,
             figures=raw.figures,
+            **ocr_fields,
         )
 
         save_paper(paper, user_id=user_id)
@@ -184,7 +257,7 @@ async def get_papers(user_id: str = Depends(require_auth)):
     "/{paper_id}",
     response_model=ParsedPaper,
     # Per audit §6.1: raw_text is large and only used server-side for prompts.
-    response_model_exclude={"raw_text"},
+    response_model_exclude={"raw_text", "markdown", "page_markdown"},
 )
 async def get_paper_by_id(paper_id: str, user_id: str = Depends(require_auth)):
     _validate_id(paper_id, "paper_id")
@@ -218,6 +291,81 @@ async def get_paper_pdf(paper_id: str, user_id: str = Depends(require_auth)):
                         headers={"Content-Disposition": f"inline; filename={paper_id}.pdf"})
 
     raise HTTPException(status_code=404, detail="PDF not found")
+
+
+@router.get("/{paper_id}/markdown")
+async def get_paper_markdown(paper_id: str, user_id: str = Depends(require_auth)):
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    paper = get_paper(paper_id, user_id=user_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return {
+        "markdown": paper.markdown,
+        "page_markdown": paper.page_markdown,
+        "images": [i.model_dump() for i in paper.ocr_images],
+        "ocr_status": paper.ocr_status,
+    }
+
+
+@router.get("/{paper_id}/ocr-image/{image_id}")
+async def get_paper_ocr_image(
+    paper_id: str,
+    image_id: str,
+    user_id: str = Depends(require_auth),
+):
+    _validate_id(paper_id, "paper_id")
+    try:
+        validate_ocr_image_id(image_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid image id")
+    _verify_paper_owner(paper_id, user_id)
+
+    signed = cloud_storage.create_signed_url(user_id, f"{paper_id}/ocr/{image_id}", 600)
+    if signed:
+        return RedirectResponse(signed, status_code=302)
+
+    img_bytes = load_ocr_image_bytes(paper_id, image_id, user_id)
+    if img_bytes:
+        return Response(content=img_bytes, media_type="image/png")
+
+    raise HTTPException(status_code=404, detail="OCR image not found")
+
+
+@router.post("/{paper_id}/ocr/run")
+async def run_paper_ocr(paper_id: str, user_id: str = Depends(require_auth)):
+    """Lazy OCR for legacy papers or retries after failure."""
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    paper = get_paper(paper_id, user_id=user_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    if paper.ocr_status == "ready" and paper.markdown.strip():
+        return {"ocr_status": "ready", "markdown_length": len(paper.markdown)}
+
+    pdf_path = settings.papers_dir / f"{paper_id}.pdf"
+    content = pdf_path.read_bytes() if pdf_path.exists() else cloud_storage.download_file(user_id, f"{paper_id}.pdf")
+    if not content:
+        raise HTTPException(status_code=404, detail="PDF not found")
+
+    ocr_fields = await _ocr_upload_fields(content, paper_id, user_id)
+
+    def _apply(p: ParsedPaper) -> None:
+        p.markdown = ocr_fields["markdown"]
+        p.page_markdown = ocr_fields["page_markdown"]
+        p.ocr_images = ocr_fields["ocr_images"]
+        p.ocr_status = ocr_fields["ocr_status"]
+        p.ocr_model = ocr_fields["ocr_model"]
+
+    try:
+        mutate_paper(paper_id, user_id, _apply)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Paper not found") from None
+
+    return {
+        "ocr_status": ocr_fields["ocr_status"],
+        "markdown_length": len(ocr_fields["markdown"]),
+    }
 
 
 @router.get("/{paper_id}/figures/{fig_id}")
@@ -419,7 +567,7 @@ async def add_note(paper_id: str, body: dict, user_id: str = Depends(require_aut
         )
         try:
             note_text = await polish_note_from_selection(
-                paper.raw_text or "", trimmed, user_id=user_id
+                paper_prompt_text(paper), trimmed, user_id=user_id
             )
             if not note_text.strip():
                 raise ValueError("empty polish result")

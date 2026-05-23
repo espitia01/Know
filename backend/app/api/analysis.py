@@ -63,6 +63,7 @@ from ..services.pdf_parser import (
     get_figure_path,
     load_figure_png_bytes,
     mutate_paper,
+    paper_prompt_text,
 )
 from ..services.citation_resolve import (
     bibliography_to_prior_work_entries,
@@ -112,8 +113,8 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
     )
     analysis_payload = None
     try:
-        result = await analyze_paper(paper.raw_text, user_id=user_id)
-        raw_txt = paper.raw_text or ""
+        result = await analyze_paper(paper_prompt_text(paper), user_id=user_id)
+        raw_txt = paper_prompt_text(paper) or ""
         bib_blob = extract_references_section(raw_txt, max_chars=26000)
         bib_rows = bibliography_to_prior_work_entries(bib_blob)
         # Some PDFs place references only in the last pages; extracting from the tail
@@ -211,7 +212,7 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
         count=get_usage_multiplier(user_id),
     )
     try:
-        result = await analyze_selection(paper.raw_text, selected_text, action, user_id=user_id)
+        result = await analyze_selection(paper_prompt_text(paper), selected_text, action, user_id=user_id)
         if question:
             # Per audit §11.3: keep selected_text identical to what the
             # server analyzed, and persist the user's short follow-up prompt
@@ -317,7 +318,7 @@ async def explain(paper_id: str, req: ExplainRequest, user_id: str = Depends(req
         count=get_usage_multiplier(user_id),
     )
     try:
-        result = await explain_term(paper.raw_text, req.term, req.context, user_id=user_id)
+        result = await explain_term(paper_prompt_text(paper), req.term, req.context, user_id=user_id)
         resp = ExplainResponse(
             term=result.get("term", req.term),
             explanation=result.get("explanation", "Could not generate explanation."),
@@ -353,7 +354,7 @@ async def skipped_steps(paper_id: str, body: dict, user_id: str = Depends(requir
         count=get_usage_multiplier(user_id),
     )
     try:
-        result = await find_skipped_steps(paper.raw_text, section_content, user_id=user_id)
+        result = await find_skipped_steps(paper_prompt_text(paper), section_content, user_id=user_id)
         def _apply(p):
             append_capped(p.cached_analysis, "skipped_steps", result)
         mutate_paper(paper_id, user_id, _apply)
@@ -385,7 +386,7 @@ async def assumptions(paper_id: str, user_id: str = Depends(require_auth)):
     )
     assumptions_payload = None
     try:
-        result = await extract_assumptions(paper.raw_text, user_id=user_id)
+        result = await extract_assumptions(paper_prompt_text(paper), user_id=user_id)
         # If the LLM output was malformed and we fell through to the
         # safe-parse fallback (`{}`), do NOT cache an empty assumptions
         # list. Caching it creates the "disappearing assumptions" bug:
@@ -463,7 +464,7 @@ async def derivation_exercise(paper_id: str, body: dict, user_id: str = Depends(
         count=get_usage_multiplier(user_id),
     )
     try:
-        result = await generate_derivation_exercise(paper.raw_text, section_content, user_id=user_id)
+        result = await generate_derivation_exercise(paper_prompt_text(paper), section_content, user_id=user_id)
         exercise = DerivationExercise(
             title=result.get("title", "Derivation Exercise"),
             original_section=result.get("original_section", section_content[:50]),
@@ -520,7 +521,7 @@ async def qa_suggest(paper_id: str, body: dict, user_id: str = Depends(require_a
     try:
         from ..services.llm import suggest_questions
         questions = await suggest_questions(
-            paper.raw_text,
+            paper_prompt_text(paper),
             already_seen=exclude,
             user_id=user_id,
         )
@@ -560,7 +561,7 @@ async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)
     )
     try:
         result = await answer_questions(
-            paper.raw_text, req.questions, user_id=user_id, paper_id=paper_id,
+            paper_prompt_text(paper), req.questions, user_id=user_id, paper_id=paper_id,
         )
         if isinstance(result, dict) and "items" in result:
             resp = QAResponse(**result)
@@ -601,7 +602,7 @@ async def summary(paper_id: str, user_id: str = Depends(require_auth)):
     )
     summary_payload = None
     try:
-        result = await summarize_paper(paper.raw_text, user_id=user_id)
+        result = await summarize_paper(paper_prompt_text(paper), user_id=user_id)
         if not result or not result.get("overview"):
             release_usage(token)
             raise HTTPException(status_code=502, detail="Summary generation returned empty results. Please retry.")
@@ -672,7 +673,7 @@ async def figure_qa(paper_id: str, body: dict, user_id: str = Depends(require_au
     )
     try:
         result = await analyze_figure(
-            paper.raw_text, image_b64, question, user_id=user_id, paper_id=paper_id,
+            paper_prompt_text(paper), image_b64, question, user_id=user_id, paper_id=paper_id,
         )
         result["figure_id"] = fig_id
         result["question"] = question
@@ -834,7 +835,7 @@ async def get_cited_by(paper_id: str, user_id: str = Depends(require_auth)):
         doi = (cached_meta.get("doi") or "").strip()
         arxiv = (cached_meta.get("arxiv") or "").strip()
     if not doi and not arxiv:
-        head = (paper.raw_text or "")[:800]
+        head = (paper_prompt_text(paper) or "")[:800]
         doi = _doi_norm(head) or ""
         arxiv = _arxiv_from_blob(head) or ""
     s2_id = await resolve_paper_s2_id(paper.title or "", doi or None, arxiv or None)

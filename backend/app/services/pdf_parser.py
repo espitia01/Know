@@ -14,7 +14,7 @@ from pathlib import Path
 import fitz  # pymupdf
 
 from ..config import settings
-from ..models.schemas import FigureInfo, ParsedPaper
+from ..models.schemas import FigureInfo, OcrImage, ParsedPaper
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,32 @@ def invalidate_paper_cache(paper_id: str, user_id: str | None = None) -> None:
 class RawExtraction:
     raw_text: str
     figures: list[FigureInfo] = field(default_factory=list)
+
+
+def paper_prompt_text(paper: ParsedPaper) -> str:
+    """Text LLM providers should see — Markdown when OCR succeeded."""
+    from .paper_text import paper_prompt_text as _ppt
+
+    return _ppt(paper)
+
+
+def _ocr_fields_from_row(row: dict) -> dict:
+    images_raw = row.get("ocr_images") or []
+    images: list[OcrImage] = []
+    if isinstance(images_raw, list):
+        for item in images_raw:
+            if isinstance(item, dict):
+                images.append(OcrImage(**item))
+    page_md = row.get("page_markdown") or []
+    if not isinstance(page_md, list):
+        page_md = []
+    return {
+        "markdown": row.get("markdown") or "",
+        "page_markdown": [str(x) for x in page_md],
+        "ocr_images": images,
+        "ocr_status": row.get("ocr_status") or "pending",
+        "ocr_model": row.get("ocr_model") or "",
+    }
 
 
 _FIG_CAPTION_RE = re.compile(
@@ -732,6 +758,14 @@ def _load_paper_locked(paper_id: str, user_id: str | None) -> ParsedPaper | None
                     FigureInfo(**f) for f in (row.get("figures") or []) if isinstance(f, dict)
                 ]
                 changed = True
+            if row and not paper.markdown and row.get("markdown"):
+                ocr = _ocr_fields_from_row(row)
+                paper.markdown = ocr["markdown"]
+                paper.page_markdown = ocr["page_markdown"]
+                paper.ocr_images = ocr["ocr_images"]
+                paper.ocr_status = ocr["ocr_status"]
+                paper.ocr_model = ocr["ocr_model"]
+                changed = True
             if changed:
                 meta_path.write_text(paper.model_dump_json(indent=2))
         return paper
@@ -741,11 +775,17 @@ def _load_paper_locked(paper_id: str, user_id: str | None) -> ParsedPaper | None
         row = get_paper_meta(paper_id, user_id)
         if row:
             figures_raw = row.get("figures") or []
+            ocr = _ocr_fields_from_row(row)
             paper = ParsedPaper(
                 id=row["id"],
                 title=row.get("title", ""),
                 authors=row.get("authors", []),
                 raw_text=row.get("raw_text", ""),
+                markdown=ocr["markdown"],
+                page_markdown=ocr["page_markdown"],
+                ocr_images=ocr["ocr_images"],
+                ocr_status=ocr["ocr_status"],
+                ocr_model=ocr["ocr_model"],
                 # Per F-FIGURES: rebuild figure metadata from Supabase when
                 # the ephemeral Railway paper.json file is missing.
                 figures=[FigureInfo(**f) for f in figures_raw if isinstance(f, dict)],
@@ -782,6 +822,42 @@ def get_paper(paper_id: str, user_id: str | None = None) -> ParsedPaper | None:
                 _paper_cache.popitem(last=False)
         return paper.model_copy(deep=True)
     return None
+
+
+def get_ocr_image_path(paper_id: str, image_id: str) -> Path | None:
+    """Filesystem path for a Mistral OCR extracted image."""
+    img_path = settings.papers_dir / paper_id / "ocr" / image_id
+    if img_path.exists():
+        return img_path
+    return None
+
+
+def load_ocr_image_bytes(paper_id: str, image_id: str, user_id: str | None) -> bytes | None:
+    """Load OCR image bytes from disk or Supabase Storage."""
+    local = get_ocr_image_path(paper_id, image_id)
+    if local:
+        try:
+            return local.read_bytes()
+        except OSError:
+            logger.warning("Failed to read local OCR image %s/%s", paper_id, image_id, exc_info=True)
+
+    if not user_id:
+        return None
+
+    from . import storage as cloud_storage
+
+    data = cloud_storage.download_file(user_id, f"{paper_id}/ocr/{image_id}")
+    if not data:
+        return None
+
+    cache_dir = settings.papers_dir / paper_id / "ocr"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cached = cache_dir / image_id
+    try:
+        cached.write_bytes(data)
+    except OSError:
+        logger.warning("Failed to cache OCR image %s/%s", paper_id, image_id, exc_info=True)
+    return data
 
 
 def get_figure_path(paper_id: str, fig_id: str) -> Path | None:

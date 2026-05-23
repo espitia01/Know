@@ -1468,7 +1468,9 @@ async def generate_podcast_script(
 
     provider = get_provider(user_id)
     target_words = target_minutes * 150
-    paper_text = build_prepare_excerpt(paper.raw_text or "", max_chars=6000)
+    from .pdf_parser import paper_prompt_text
+
+    paper_text = build_prepare_excerpt(paper_prompt_text(paper), max_chars=6000)
 
     section_blocks = []
     content = cache or {}

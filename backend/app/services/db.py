@@ -162,6 +162,14 @@ def save_paper_meta(paper_dict: dict, user_id: str) -> None:
     if not client:
         return
 
+    ocr_images_raw = paper_dict.get("ocr_images") or []
+    ocr_images: list[dict] = []
+    for item in ocr_images_raw:
+        if hasattr(item, "model_dump"):
+            ocr_images.append(item.model_dump())
+        elif isinstance(item, dict):
+            ocr_images.append(item)
+
     row = {
         "id": paper_dict["id"],
         "user_id": user_id,
@@ -175,11 +183,17 @@ def save_paper_meta(paper_dict: dict, user_id: str) -> None:
         "figures": paper_dict.get("figures", []),
         "cached_analysis": paper_dict.get("cached_analysis", {}),
         "raw_text": paper_dict.get("raw_text", ""),
+        "markdown": paper_dict.get("markdown", ""),
+        "page_markdown": paper_dict.get("page_markdown", []),
+        "ocr_images": ocr_images,
+        "ocr_status": paper_dict.get("ocr_status", "pending"),
+        "ocr_model": paper_dict.get("ocr_model", ""),
     }
     try:
         client.table("papers").upsert(row, on_conflict="id").execute()
     except Exception:
-        row.pop("raw_text", None)
+        for key in ("raw_text", "markdown", "page_markdown", "ocr_images", "ocr_status", "ocr_model"):
+            row.pop(key, None)
         try:
             client.table("papers").upsert(row, on_conflict="id").execute()
         except Exception as e:

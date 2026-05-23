@@ -98,7 +98,7 @@ function SettingsContent() {
   const [showUpgradeConfirm, setShowUpgradeConfirm] = useState(false);
   const [scheduledUpgradeAt, setScheduledUpgradeAt] = useState<number | null>(null);
   const [showScheduledModal, setShowScheduledModal] = useState(false);
-  const [usage, setUsage] = useState<{
+  const [hasMistralKey, setHasMistralKey] = useState<boolean | null>(null);
     tier: string;
     papers_used: number;
     papers_limit: number;
@@ -118,6 +118,10 @@ function SettingsContent() {
   // in-session left the Opus radio hidden until the user manually
   // refreshed the page, because `showModels` was already true and React
   // never re-ran this effect.
+  useEffect(() => {
+    api.getSettings().then((s) => setHasMistralKey(Boolean(s.has_mistral_key))).catch(() => setHasMistralKey(false));
+  }, []);
+
   useEffect(() => {
     if (!showModels) return;
     api.getSettings().then((s) => {
@@ -372,6 +376,23 @@ function SettingsContent() {
               )}
             </div>
           </div>
+        </div>
+
+        <div className="glass rounded-2xl p-6 space-y-3">
+          <p className="text-[14px] font-semibold text-foreground">Paper OCR</p>
+          <p className="text-[12px] leading-relaxed text-muted-foreground">
+            Know runs uploaded PDFs through Mistral OCR to produce a clean readable view and to feed the same Markdown to analysis models.
+          </p>
+          <p className="text-[11px] font-medium text-muted-foreground/90">
+            Status:{" "}
+            <span className="text-foreground/80">
+              {hasMistralKey === null
+                ? "Checking…"
+                : hasMistralKey
+                  ? "configured on server"
+                  : "not configured — uploads fall back to legacy PDF view"}
+            </span>
+          </p>
         </div>
 
         {/* Usage */}

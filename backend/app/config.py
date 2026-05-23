@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-3-small"
     openai_api_key: str = ""
 
+    # Mistral OCR — canonical paper markdown at upload time
+    mistral_api_key: str = ""
+
     model_config = {"env_prefix": "KNOW_", "env_file": ".env", "extra": "ignore"}
 
 

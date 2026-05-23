@@ -97,12 +97,12 @@ async def internal_paper_text(paper_id: str, user_id: str):
     if not get_paper_meta(paper_id, user_id=user_id):
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    from ..services.pdf_parser import get_paper
+    from ..services.pdf_parser import get_paper, paper_prompt_text
     paper = get_paper(paper_id, user_id=user_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    raw_text = paper.raw_text or ""
+    raw_text = paper_prompt_text(paper)
     if len(raw_text) > 200_000:
         raw_text = raw_text[:200_000]
 

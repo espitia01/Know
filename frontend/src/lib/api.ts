@@ -57,6 +57,8 @@ export function getAuthHeadersSync(): Record<string, string> {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+export { API_BASE };
+
 async function authHeaders(): Promise<Record<string, string>> {
   if (_getToken) {
     const token = await refreshToken();
@@ -241,6 +243,8 @@ export interface ParsedPaper {
   title: string;
   authors: string[];
   raw_text: string;
+  ocr_status?: string;
+  ocr_model?: string;
   figures: FigureInfo[];
   has_si: boolean;
   folder: string;
@@ -263,6 +267,13 @@ export interface ParsedPaper {
     skipped_steps?: Record<string, unknown>[];
     assumptions_cooldown_until?: number;
   };
+}
+
+export interface PaperMarkdownResponse {
+  markdown: string;
+  page_markdown: string[];
+  images: Array<{ id: string; page: number; bbox?: number[] | null; caption?: string }>;
+  ocr_status: string;
 }
 
 export interface PaperListEntry {
@@ -384,6 +395,7 @@ export interface SelectionAnalysisResult {
 export interface SettingsResponse {
   has_anthropic_key: boolean;
   has_openai_key?: boolean;
+  has_mistral_key?: boolean;
   analysis_model: string;
   fast_model: string;
   background_preset?: string | null;
@@ -528,6 +540,25 @@ export const api = {
   listPapers: () => getRequest<PaperListEntry[]>("/api/papers/"),
 
   getPaper: (id: string) => getRequest<ParsedPaper>(`/api/papers/${id}`),
+
+  getPaperMarkdown: (id: string) =>
+    getRequest<PaperMarkdownResponse>(`/api/papers/${id}/markdown`),
+
+  runPaperOcr: (id: string) =>
+    request<{ ocr_status: string; markdown_length: number }>(`/api/papers/${id}/ocr/run`, {
+      method: "POST",
+    }),
+
+  getOcrImageUrl: (paperId: string, imageId: string, trial = false) =>
+    trial
+      ? `${API_BASE}/api/trial/paper/${paperId}/ocr-image/${imageId}`
+      : `${API_BASE}/api/papers/${paperId}/ocr-image/${imageId}`,
+
+  getTrialPaperMarkdown: (id: string) =>
+    fetch(`${API_BASE}/api/trial/paper/${id}/markdown`).then(async (res) => {
+      if (!res.ok) throw new Error("Failed to load markdown");
+      return res.json() as Promise<PaperMarkdownResponse>;
+    }),
 
   getPdfUrl: (id: string) => `${API_BASE}/api/papers/${id}/pdf`,
 
