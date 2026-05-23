@@ -27,6 +27,14 @@ export default clerkMiddleware(async (auth, req) => {
 
 export const config = {
   matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    // Dynamic API routes can legitimately end in `.png` (OCR image proxy,
+    // figure proxy, etc.). They MUST go through clerkMiddleware so the
+    // session is initialized before requireUser() runs in the route
+    // handler — otherwise auth() reads no session and returns 401.
+    "/api/(.*)",
+    // Page routes: skip static assets by extension. Keep `.png` etc. in
+    // the negative list so `<img src="/favicon.png">` and friends don't
+    // pay middleware overhead.
+    "/((?!api/|_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
   ],
 };
