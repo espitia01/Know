@@ -99,6 +99,7 @@ function SettingsContent() {
   const [scheduledUpgradeAt, setScheduledUpgradeAt] = useState<number | null>(null);
   const [showScheduledModal, setShowScheduledModal] = useState(false);
   const [hasMistralKey, setHasMistralKey] = useState<boolean | null>(null);
+  const [usage, setUsage] = useState<{
     tier: string;
     papers_used: number;
     papers_limit: number;
