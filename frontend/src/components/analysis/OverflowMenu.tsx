@@ -137,6 +137,10 @@ export function OverflowMenu({
             aria-label={ariaLabel}
             style={menuStyle}
             className={cn(
+              // `w-56` is the historic default for compact menus
+              // (font, position). Wider menus override this by passing
+              // their own `w-…` via `className`; `cn` (tailwind-merge)
+              // dedupes width utilities so the caller wins.
               "fixed z-[100] w-56 rounded-[var(--radius-lg)] border border-border/50 bg-popover p-2 text-popover-foreground shadow-[var(--shadow-sm)] outline-none",
               className,
             )}

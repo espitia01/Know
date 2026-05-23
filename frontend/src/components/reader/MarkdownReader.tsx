@@ -30,6 +30,12 @@ function readerUrlTransform(url: string): string | null {
   if (url.startsWith("/") || url.startsWith("#")) return url;
   if (url.startsWith("https://") || url.startsWith("http://")) return url;
   if (url.startsWith("mailto:")) return url;
+  // Bare OCR image ids (e.g. `p0-img-0.png`, `fig-1.png`) are NOT
+  // safe URLs but our custom <img> component below knows how to fetch
+  // them through the authenticated proxy. We pass them through here
+  // unchanged; if we returned null, Streamdown would strip the src
+  // before the custom component ever ran.
+  if (OCR_IMAGE_RE.test(url)) return url;
   return null;
 }
 
@@ -224,33 +230,74 @@ function collapseFragmentedMathParagraphs(markdown: string): string {
 
 /**
  * Drop Mistral OCR's ASCII-fallback duplication. Mistral often emits
- * each glyph of a math token as its own line BEFORE the full text run,
- * yielding patterns like:
+ * each glyph of a math token as its own paragraph (separated by blank
+ * lines) BEFORE the full text run or display math block — producing
+ * vertical stacks like:
  *
- *     within the first-principles
- *     G
- *     W
- *     GW-Bethe-Salpeter-equation
+ *     ν
+ *     c
+ *     (
+ *     r̂
+ *     ...
+ *     $$\nu_c(\hat r, \hat r') = 1/|\hat r - \hat r'|.$$
  *
- * If we see a run of ≥2 short alphanumeric-only lines that concatenate
- * to a prefix of the next non-empty line, the short lines are OCR
- * fallback and should be dropped.
+ * These stacks are almost never legitimate prose: real paragraphs are
+ * never 1-3 characters tall for 3+ rows in a row. We collapse any run
+ * of ≥3 short lines (≤4 chars each, allowing blank separators) into
+ * nothing if the following content is math or a continuation; otherwise
+ * we keep the cluster.
  */
 function stripOcrAsciiFallback(markdown: string): string {
   const lines = markdown.split("\n");
   const out: string[] = [];
   let i = 0;
-  const isShortGlyph = (s: string) =>
-    /^[A-Za-z0-9\\\$_^{}+\-=]{1,4}$/.test(s.replace(/\$/g, ""));
+  const isShortGlyph = (s: string) => {
+    const t = s.trim();
+    if (!t || t.length > 4) return false;
+    // Don't kill list-marker lines or markdown chrome.
+    if (/^[#>|`]/.test(t)) return false;
+    if (/^\d+\.$/.test(t)) return false;
+    return /^[\p{L}\p{N}\p{M}\p{P}\p{S}^_=+\-*/|\\$ˆ`'"′″]+$/u.test(t);
+  };
+
+  const dropClusterAndJoin = (postJ: number) => {
+    // Eat trailing blanks from out (the paragraph break BEFORE the
+    // cluster) and the blank lines AFTER the cluster too — this
+    // fuses the surrounding paragraphs into one continuous paragraph
+    // instead of leaving them as two separated by an empty gap.
+    while (out.length > 0 && !out[out.length - 1].trim()) out.pop();
+    let k = postJ;
+    while (k < lines.length && !lines[k].trim()) k += 1;
+    return k;
+  };
+
   while (i < lines.length) {
     const cluster: number[] = [];
     let j = i;
-    while (j < lines.length && lines[j].trim() && isShortGlyph(lines[j].trim())) {
+    while (j < lines.length) {
+      if (!lines[j].trim()) {
+        if (cluster.length === 0) break;
+        // Lookahead: is the next non-blank line still a short glyph?
+        let k = j + 1;
+        while (k < lines.length && !lines[k].trim()) k += 1;
+        if (k < lines.length && isShortGlyph(lines[k])) {
+          j = k;
+          continue;
+        }
+        break;
+      }
+      if (!isShortGlyph(lines[j])) break;
       cluster.push(j);
       j += 1;
     }
-    if (cluster.length >= 2) {
-      // Look ahead for the first non-empty follow-up line (skip blanks).
+    if (cluster.length >= 3) {
+      // Run of ≥3 short lines = OCR fallback. Drop unconditionally.
+      i = dropClusterAndJoin(j);
+      continue;
+    }
+    if (cluster.length === 2) {
+      // Two-line case: only drop when followed by a longer run that
+      // begins with the concatenated letters of the cluster.
       let k = j;
       while (k < lines.length && !lines[k].trim()) k += 1;
       const followUp = k < lines.length ? lines[k].trim() : "";
@@ -259,12 +306,8 @@ function stripOcrAsciiFallback(markdown: string): string {
         .join("");
       const concatLetters = concat.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
       const followLetters = followUp.slice(0, 16).replace(/[^A-Za-z0-9]/g, "").toLowerCase();
-      if (
-        concatLetters.length >= 2 &&
-        followLetters.startsWith(concatLetters)
-      ) {
-        // Drop the fallback cluster, keep the follow-up.
-        i = j;
+      if (concatLetters.length >= 2 && followLetters.startsWith(concatLetters)) {
+        i = dropClusterAndJoin(j);
         continue;
       }
     }
@@ -272,6 +315,35 @@ function stripOcrAsciiFallback(markdown: string): string {
     i += 1;
   }
   return out.join("\n");
+}
+
+/**
+ * Strip the per-page running footer Mistral pastes between pages:
+ *
+ *     076401-1 0031-9007/03/90(7)/076401(4)$20.00 © 2003 The American Physical Society 076401-1
+ *
+ * Detect lines that match the journal-style "<id> ... © <year> <publisher> <id>" shape, or
+ * standalone page-id pairs like "076401-1 076401-1". These never carry
+ * useful content for the reader.
+ */
+function stripPageNumberFooters(markdown: string): string {
+  return markdown
+    .split("\n")
+    .filter((line) => {
+      const t = line.trim();
+      if (!t) return true;
+      // "076401-1 076401-1" or similar duplicated page id pairs.
+      if (/^[\d\-]{3,}\s+[\d\-]{3,}$/.test(t) && /\d-\d/.test(t)) return false;
+      // Full journal copyright lines.
+      if (
+        /^\S+\s+\d{4}[\-/]\d{4}\/\d.*©\s+\d{4}.*Physical Society/i.test(t) ||
+        /©\s*\d{4}.+Physical Society/i.test(t)
+      ) {
+        return false;
+      }
+      return true;
+    })
+    .join("\n");
 }
 
 /**
@@ -446,6 +518,10 @@ export function MarkdownReader({
         // breaks were a PDF artifact, not a structural one — sections
         // flow across them.
         let joined = cleanedPages.join("\n\n");
+        joined = stripPageNumberFooters(joined);
+        // Run dedup TWICE: the second pass catches stacks revealed
+        // once the first pass removes adjacent display-math blocks.
+        joined = stripOcrAsciiFallback(joined);
         joined = stripOcrAsciiFallback(joined);
         joined = collapseAuthorByline(joined);
         joined = wrapBylineParagraph(joined);

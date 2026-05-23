@@ -55,8 +55,9 @@ export function ReaderFontMenu() {
     <OverflowMenu
       ariaLabel="Reader appearance"
       align="end"
+      className="w-[19rem] p-3"
       triggerInner={
-        <span className="text-[11px] font-semibold tracking-tight text-muted-foreground/90">
+        <span className="text-[11.5px] font-semibold tracking-tight text-muted-foreground/90">
           Aa
         </span>
       }
@@ -65,7 +66,7 @@ export function ReaderFontMenu() {
           "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-border/40 bg-muted/[0.08] text-foreground/90 hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
       }}
     >
-      <div className="min-w-[14rem] space-y-3 p-2">
+      <div className="space-y-3.5">
         <div>
           <MenuLabel>Size</MenuLabel>
           <div className="flex items-center gap-1">
@@ -93,14 +94,16 @@ export function ReaderFontMenu() {
 
         <div>
           <MenuLabel>Width</MenuLabel>
-          <div className="grid grid-cols-3 gap-1">
+          <div className="grid grid-cols-3 gap-1.5">
             {WIDTHS.map((w) => (
               <button
                 key={w.id}
                 type="button"
                 onClick={() => setReaderLayoutWidth(w.id)}
-                className={`rounded-md border border-border/45 px-2 py-1 text-[10px] hover:bg-accent/40 ${
-                  readerLayoutWidth === w.id ? "border-foreground/40 bg-accent/30 font-medium" : ""
+                className={`rounded-md border border-border/45 px-2 py-1.5 text-[11px] font-medium leading-none hover:bg-accent/40 motion-safe:transition-colors motion-safe:duration-150 ${
+                  readerLayoutWidth === w.id
+                    ? "border-foreground/45 bg-accent/35 text-foreground"
+                    : "text-muted-foreground/90"
                 }`}
                 aria-pressed={readerLayoutWidth === w.id}
               >
