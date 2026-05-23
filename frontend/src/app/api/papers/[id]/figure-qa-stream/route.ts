@@ -36,7 +36,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const ID_RE = /^[a-zA-Z0-9_-]+$/;
+const PAPER_ID_RE = /^[a-zA-Z0-9_-]+$/;
+const OCR_FIGURE_ID_RE = /^p\d+-img-\d+\.png$/;
+
+function isValidFigureId(id: string): boolean {
+  return PAPER_ID_RE.test(id) || OCR_FIGURE_ID_RE.test(id);
+}
 
 function jsonError(
   status: number,
@@ -52,7 +57,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id: paperId } = await params;
-  if (!paperId || !ID_RE.test(paperId)) {
+  if (!paperId || !PAPER_ID_RE.test(paperId)) {
     return jsonError(400, "bad_paper_id", "Invalid paper id");
   }
 
@@ -71,7 +76,7 @@ export async function POST(
     return jsonError(400, "bad_body", "Body must be valid JSON");
   }
   const figureId = typeof body.figure_id === "string" ? body.figure_id : "";
-  if (!ID_RE.test(figureId)) {
+  if (!isValidFigureId(figureId)) {
     return jsonError(400, "bad_figure_id", "Invalid figure id");
   }
   const question = typeof body.question === "string" ? body.question.slice(0, 2000) : "";

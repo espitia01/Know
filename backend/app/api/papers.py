@@ -135,6 +135,15 @@ def _validate_id(value: str, name: str = "ID") -> str:
     return value
 
 
+def _validate_figure_id(value: str) -> str:
+    """Accept legacy figure ids or Mistral OCR image ids (p0-img-0.png)."""
+    from ..services.ocr_mistral import is_ocr_image_id
+
+    if is_ocr_image_id(value):
+        return value
+    return _validate_id(value, "fig_id")
+
+
 def _verify_paper_owner(paper_id: str, user_id: str) -> None:
     """Check that the paper belongs to the requesting user via Supabase."""
     from ..services.db import get_db, get_paper_meta
@@ -335,7 +344,11 @@ async def get_paper_ocr_image(
 
 
 @router.post("/{paper_id}/ocr/run")
-async def run_paper_ocr(paper_id: str, user_id: str = Depends(require_auth)):
+async def run_paper_ocr(
+    paper_id: str,
+    background_tasks: BackgroundTasks,
+    user_id: str = Depends(require_auth),
+):
     """Lazy OCR for legacy papers or retries after failure."""
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
@@ -358,11 +371,18 @@ async def run_paper_ocr(paper_id: str, user_id: str = Depends(require_auth)):
         p.ocr_images = ocr_fields["ocr_images"]
         p.ocr_status = ocr_fields["ocr_status"]
         p.ocr_model = ocr_fields["ocr_model"]
+        if ocr_fields["ocr_status"] == "ready" and ocr_fields["markdown"]:
+            from ..services.analysis_source import clear_text_derived_analysis
+
+            clear_text_derived_analysis(p)
 
     try:
         mutate_paper(paper_id, user_id, _apply)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Paper not found") from None
+
+    if ocr_fields["ocr_status"] == "ready" and ocr_fields["markdown"]:
+        background_tasks.add_task(_embed_paper_background, user_id, paper_id)
 
     return {
         "ocr_status": ocr_fields["ocr_status"],
@@ -774,11 +794,13 @@ async def _embed_paper_background(user_id: str, paper_id: str) -> None:
     try:
         from ..services.retrieval import embed_paper
         from ..services.embeddings import EmbeddingProviderError
+        from ..services.analysis_source import text_for_analysis
 
         paper = get_paper(paper_id, user_id=user_id)
-        if not paper or not (paper.raw_text or "").strip():
+        text = text_for_analysis(paper) if paper else ""
+        if not text.strip():
             return
-        await embed_paper(paper_id, user_id, paper.raw_text)
+        await embed_paper(paper_id, user_id, text)
     except EmbeddingProviderError:
         logger.info("Skipping embed for %s — provider not configured", paper_id)
     except Exception:

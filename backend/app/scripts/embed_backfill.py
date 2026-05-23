@@ -16,10 +16,12 @@ async def _embed_one(paper_id: str, user_id: str) -> int:
     from app.services.retrieval import embed_paper
     from app.services.embeddings import EmbeddingProviderError
 
+    from app.services.analysis_source import text_for_analysis
+
     paper = get_paper(paper_id, user_id=user_id)
-    if not paper or not (paper.raw_text or "").strip():
+    if not paper or not text_for_analysis(paper).strip():
         return 0
-    return await embed_paper(paper_id, user_id, paper.raw_text)
+    return await embed_paper(paper_id, user_id, text_for_analysis(paper))
 
 
 async def main() -> None:

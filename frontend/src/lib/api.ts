@@ -225,6 +225,13 @@ export interface FigureInfo {
   page: number;
 }
 
+export interface OcrImage {
+  id: string;
+  page: number;
+  bbox?: number[] | null;
+  caption?: string;
+}
+
 export interface Note {
   id: string;
   text: string;
@@ -245,6 +252,7 @@ export interface ParsedPaper {
   raw_text: string;
   ocr_status?: string;
   ocr_model?: string;
+  ocr_images?: OcrImage[];
   figures: FigureInfo[];
   has_si: boolean;
   folder: string;

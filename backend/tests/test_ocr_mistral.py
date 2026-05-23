@@ -22,6 +22,13 @@ def test_rewrite_image_refs():
     assert "p0-img-1.png" in out
 
 
+def test_infer_image_caption():
+    from app.services.ocr_mistral import _infer_image_caption
+
+    md = "![figure](p0-img-0.png)\nFigure 2: Accuracy vs. epoch."
+    assert _infer_image_caption(md, "p0-img-0.png") == "Figure 2: Accuracy vs. epoch."
+
+
 def test_rewrite_image_refs_bare_filename():
     md = "img-0.jpeg\nFigure 1: Scatter plot."
     out = _rewrite_image_refs(md, {"img-0.jpeg": "p0-img-0.png"})

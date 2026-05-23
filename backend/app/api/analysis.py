@@ -85,7 +85,7 @@ from ..gating import (
     resolve_fast_model,
     get_usage_multiplier,
 )
-from ..api.papers import _validate_id, _verify_paper_owner
+from ..api.papers import _validate_id, _validate_figure_id, _verify_paper_owner
 
 router = APIRouter(prefix="/api/papers", tags=["analysis"])
 logger = logging.getLogger(__name__)
@@ -657,9 +657,19 @@ async def figure_qa(paper_id: str, body: dict, user_id: str = Depends(require_au
 
     if not fig_id:
         raise HTTPException(status_code=400, detail="No figure_id provided")
-    _validate_id(fig_id, "fig_id")
+    _validate_figure_id(fig_id)
 
-    fig_bytes = load_figure_png_bytes(paper_id, fig_id, user_id)
+    from ..services.pdf_parser import load_figure_png_bytes, load_ocr_image_bytes
+    from ..services.ocr_mistral import validate_ocr_image_id
+
+    fig_bytes = None
+    try:
+        validate_ocr_image_id(fig_id)
+        fig_bytes = load_ocr_image_bytes(paper_id, fig_id, user_id)
+    except ValueError:
+        pass
+    if not fig_bytes:
+        fig_bytes = load_figure_png_bytes(paper_id, fig_id, user_id)
     if not fig_bytes:
         raise HTTPException(status_code=404, detail="Figure not found")
 
@@ -740,7 +750,7 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
         _verify_paper_owner(pid, user_id)
         p = get_paper(pid, user_id=user_id)
         if p:
-            paper_texts.append((p.title, p.raw_text))
+            paper_texts.append((p.title, paper_prompt_text(p)))
 
     if not paper_texts:
         raise HTTPException(status_code=404, detail="No valid papers found")

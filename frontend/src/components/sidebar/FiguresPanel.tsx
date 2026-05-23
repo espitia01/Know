@@ -3,7 +3,11 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { parsePartialJson } from "ai";
 import { api, type FigureInfo, type FigureAnalysis, type ParsedPaper } from "@/lib/api";
-import { captureScreenTabToPng, readClipboardImageBlob } from "@/lib/pdfSelectionCapture";
+import {
+  analysisFiguresFromPaper,
+  figurePreviewUrl,
+  ocrFiguresPending,
+} from "@/lib/ocrFigures";
 import { useStore } from "@/lib/store";
 // Stage 3: figure analysis streams from the migrated AI SDK route and
 // renders via Streamdown.
@@ -213,8 +217,17 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   );
   const paperMatches = paper?.id === paperId;
   const effectivePaper = paperMatches ? paper : cachedForPanel;
-  const figures = effectivePaper?.figures ?? [];
-  const paperReady = Array.isArray(effectivePaper?.figures);
+  const ocrStatus = effectivePaper?.ocr_status;
+  const figures = useMemo(
+    () => analysisFiguresFromPaper(effectivePaper),
+    [effectivePaper],
+  );
+  const paperReady = Boolean(effectivePaper?.id);
+  const ocrPending = ocrFiguresPending(effectivePaper);
+  const figureSrc = useCallback(
+    (figId: string) => figurePreviewUrl(paperId, figId, ocrStatus),
+    [paperId, ocrStatus],
+  );
   const [selected, setSelected] = useState<FigureInfo | null>(null);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
@@ -236,18 +249,10 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const prevPaperIdRef = useRef(paperId);
   const abortRef = useRef<AbortController | null>(null);
-  const [clipSaving, setClipSaving] = useState(false);
-  const [clipError, setClipError] = useState<string | null>(null);
-
-  const marqueeMode = useStore((s) => s.marqueeMode);
-  const setMarqueeMode = useStore((s) => s.setMarqueeMode);
-  const pendingFigureBlob = useStore((s) => s.pendingFigureBlob);
-  const setPendingFigureBlob = useStore((s) => s.setPendingFigureBlob);
-  const pendingFigureCaption = useStore((s) => s.pendingFigureCaption);
-  const setPendingFigureCaption = useStore((s) => s.setPendingFigureCaption);
+  const [ocrError, setOcrError] = useState<string | null>(null);
 
   useEffect(() => {
-    setClipError(null);
+    setOcrError(null);
   }, [paperId]);
 
   useEffect(() => {
@@ -284,38 +289,29 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [conversations, selected, loading]);
 
-  const handleReextract = useCallback(async () => {
-    // Capture the paper snapshot for *this* paperId at call time. We
-    // pull from the in-memory cache rather than the global `paper`
-    // slice so the re-extract works even if the user has already
-    // switched to a different paper before this callback runs.
-    const snapshot = useStore.getState().papersById[paperId] ?? paper;
-    if (!snapshot) return;
+  const handleRerunOcr = useCallback(async () => {
+    setOcrError(null);
     setFigureReextractInFlight(paperId, true);
     try {
-      const result = await api.reextractFigures(paperId);
-      const next = { ...snapshot, figures: result.figures };
-      // Always refresh the cache — the user returning to this paper
-      // must see the freshly-extracted figures, whether or not they
-      // were watching when the request resolved.
-      cachePaper(next);
-      // Only mutate the global `paper` when this paper is still the
-      // active one; otherwise we'd overwrite the paper the user is
-      // currently reading with a different paper's data. This is the
-      // "figures extraction stopped" bug reported after a mid-job
-      // paper switch — the job wasn't stopping, it was quietly
-      // clobbering the in-view paper on completion.
+      const res = await api.runPaperOcr(paperId);
+      if (res.ocr_status !== "ready") {
+        setOcrError("OCR did not complete. Check that Mistral OCR is configured on the server.");
+        return;
+      }
+      const refreshed = await api.getPaper(paperId);
+      cachePaper(refreshed);
       if (useStore.getState().paper?.id === paperId) {
-        setPaper(next);
+        setPaper(refreshed);
       }
       setSelected(null);
-      setConversations(chatsFromFigureAnalyses(next.cached_analysis?.figure_analyses));
+      setConversations(chatsFromFigureAnalyses(refreshed.cached_analysis?.figure_analyses));
     } catch (e) {
-      console.error("Re-extraction failed:", e);
+      console.error("OCR rerun failed:", e);
+      setOcrError(e instanceof Error ? e.message : "OCR failed");
     } finally {
       setFigureReextractInFlight(paperId, false);
     }
-  }, [paperId, paper, setPaper, cachePaper, setFigureReextractInFlight]);
+  }, [paperId, setPaper, cachePaper, setFigureReextractInFlight]);
 
   const handleAnalyze = useCallback(
     async (fig: FigureInfo, q: string = "", model?: string) => {
@@ -492,64 +488,6 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     [paperId, fastModel, figureModelOverride]
   );
 
-  const ingestFigureBlob = useCallback(
-    async (blob: Blob | null, cancelHint: string) => {
-      setClipError(null);
-      if (!blob) {
-        setClipError(cancelHint);
-        return;
-      }
-      try {
-        setClipSaving(true);
-        const { figure: uploaded, figures: uploadedFigures } = await api.uploadFigureFromSelection(paperId, blob);
-        const caption = useStore.getState().pendingFigureCaption;
-        const figure = caption ? { ...uploaded, caption } : uploaded;
-        const figures = uploadedFigures.map((f) => (f.id === figure.id ? figure : f));
-        if (caption) useStore.getState().setPendingFigureCaption(null);
-        const snap =
-          useStore.getState().papersById[paperId] ??
-          (useStore.getState().paper?.id === paperId ? useStore.getState().paper : null);
-        if (!snap || snap.id !== paperId) {
-          setClipError("Could not sync paper cache. Reload the library and try again.");
-          return;
-        }
-        const next = { ...snap, figures };
-        cachePaper(next);
-        if (useStore.getState().paper?.id === paperId) {
-          setPaper(next);
-        }
-        setSelected(figure);
-        void handleAnalyze(figure, "");
-      } catch (e) {
-        setClipError(e instanceof Error ? e.message : "Could not save figure image.");
-      } finally {
-        setClipSaving(false);
-      }
-    },
-    [paperId, cachePaper, setPaper, handleAnalyze],
-  );
-
-  useEffect(() => {
-    if (!pendingFigureBlob) return;
-    const blob = pendingFigureBlob;
-    setPendingFigureBlob(null);
-    void ingestFigureBlob(blob, "Region capture failed.");
-  }, [pendingFigureBlob, setPendingFigureBlob, ingestFigureBlob, pendingFigureCaption, setPendingFigureCaption]);
-
-  const handleScreenCapture = useCallback(async () => {
-    await ingestFigureBlob(
-      await captureScreenTabToPng(),
-      "Screen capture was cancelled or not supported. Allow sharing when the browser asks, then try again.",
-    );
-  }, [ingestFigureBlob]);
-
-  const handlePasteFromClipboard = useCallback(async () => {
-    await ingestFigureBlob(
-      await readClipboardImageBlob(),
-      "No image on the clipboard. Take a system screenshot (e.g. ⌘⇧4 on Mac, Win+Shift+S on Windows), copy the image, then tap Paste again.",
-    );
-  }, [ingestFigureBlob]);
-
   const handleAsk = useCallback(() => {
     if (!selected || !question.trim()) return;
     const model = figureModelOverride ?? fastModel;
@@ -572,67 +510,49 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     );
   }
 
-  if (figures.length === 0) {
+  if (ocrPending || reextracting) {
     return (
-      <div className="mx-auto flex max-w-lg flex-col gap-6 rounded-2xl border border-border/45 bg-gradient-to-b from-card/35 to-card/[0.08] px-6 py-9 text-center shadow-[var(--shadow-sm)] backdrop-blur-[2px] motion-safe:animate-fade-in dark:from-card/20 dark:to-transparent">
+      <div className="flex min-h-[30vh] flex-col items-center justify-center gap-3 py-10">
+        <div className="w-full max-w-xs">
+          <AnalysisProgress kind="search" />
+        </div>
+        <p className="text-[var(--text-sm)] text-muted-foreground/80">
+          {reextracting ? "Running Mistral OCR…" : "Preparing figures from OCR…"}
+        </p>
+      </div>
+    );
+  }
+
+  if (figures.length === 0) {
+    const unsupported = ocrStatus === "unsupported";
+    const failed = ocrStatus === "failed";
+    return (
+      <div className="mx-auto flex max-w-lg flex-col gap-5 rounded-2xl border border-border/45 bg-gradient-to-b from-card/35 to-card/[0.08] px-6 py-9 text-center shadow-[var(--shadow-sm)] backdrop-blur-[2px] motion-safe:animate-fade-in dark:from-card/20 dark:to-transparent">
         <div className="space-y-2.5">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-border/40 bg-background/50 text-muted-foreground/60 shadow-inner">
-            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.25}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-            </svg>
-          </div>
-          <p className="text-[var(--text-md)] font-semibold tracking-tight text-foreground/95">No figures detected</p>
+          <p className="text-[var(--text-md)] font-semibold tracking-tight text-foreground/95">
+            {unsupported ? "OCR unavailable" : failed ? "OCR failed" : "No figures in OCR output"}
+          </p>
           <p className="mx-auto max-w-sm text-[var(--text-xs)] leading-snug text-muted-foreground/88">
-            Nothing was extracted from the PDF. Capture a region, paste an image, or re-run extraction.
+            {unsupported
+              ? "This deployment does not have Mistral OCR configured. Figures and analysis use OCR markdown when available."
+              : failed
+                ? "Mistral OCR did not complete for this paper. Retry after checking the API key on the server."
+                : "Mistral OCR finished but did not extract any figure images from this PDF."}
           </p>
         </div>
-        <div className="flex flex-col gap-2">
+        {!unsupported && (
           <button
             type="button"
-            onClick={handleScreenCapture}
-            disabled={clipSaving || reextracting}
-            className="btn-primary-glass inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[var(--text-sm)] font-semibold text-background shadow-md transition-[opacity,transform] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={handleRerunOcr}
+            disabled={reextracting}
+            className="btn-primary-glass inline-flex min-h-10 items-center justify-center rounded-xl px-4 py-2 text-[var(--text-sm)] font-semibold text-background disabled:opacity-40"
           >
-            <svg className="h-4 w-4 shrink-0 opacity-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
-            </svg>
-            {clipSaving ? "Saving…" : "Capture screen or window…"}
+            {reextracting ? "Running OCR…" : "Re-run Mistral OCR"}
           </button>
-          <button
-            type="button"
-            title="Draw a rectangle on the PDF to capture a region"
-            onClick={() => setMarqueeMode(true)}
-            disabled={marqueeMode || clipSaving || reextracting}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border/65 bg-background/70 px-4 py-2.5 text-[var(--text-sm)] font-medium text-foreground/90 backdrop-blur-sm transition-colors hover:border-border-strong hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <svg className="h-4 w-4 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5M20.25 16.5V18A2.25 2.25 0 0 1 18 20.25h-1.5M3.75 16.5V18A2.25 2.25 0 0 0 6 20.25h1.5" />
-            </svg>
-            {marqueeMode ? "Drawing…" : "Select region"}
-          </button>
-          <button
-            type="button"
-            onClick={handlePasteFromClipboard}
-            disabled={clipSaving || reextracting}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border/65 bg-background/70 px-4 py-2.5 text-[var(--text-sm)] font-medium text-foreground/90 backdrop-blur-sm transition-colors hover:border-border-strong hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <svg className="h-4 w-4 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.65}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.398.084.612v9.75c0 .414-.336.75-.75.75H4.5a.75.75 0 0 1-.75-.75v-9.75c0-.214.03-.418.084-.612m7.336 0c.653.734 1.693 1.164 2.744 1.323.31.067.627.097.956.097h3.073a2.25 2.25 0 0 0 2.227-1.932m-11.964-11.962L4.744 15.058A75.846 75.846 0 0 1 12 21.75a75.837 75.837 0 0 1-7.893-11.962Z" />
-            </svg>
-            Paste from clipboard
-          </button>
-        </div>
-        <button
-          type="button"
-          onClick={handleReextract}
-          disabled={reextracting || clipSaving}
-          className="text-[var(--text-xs)] font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline disabled:opacity-40"
-        >
-          {reextracting ? "Re-extracting from PDF…" : "Re-run PDF figure extraction"}
-        </button>
-        {clipError && (
+        )}
+        {ocrError && (
           <p className="text-left text-[var(--text-xs)] text-destructive/90" role="alert">
-            {clipError}
+            {ocrError}
           </p>
         )}
       </div>
@@ -646,7 +566,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
       <div className="flex flex-col h-full">
         {lightboxFig && (
           <Lightbox
-            src={api.getFigureUrl(paperId, lightboxFig.id)}
+            src={figureSrc(lightboxFig.id)}
             alt={lightboxFig.caption || lightboxFig.id}
             onClose={() => setLightboxFig(null)}
           />
@@ -675,7 +595,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
             aria-label="Expand figure"
           >
             <AuthImage
-              src={api.getFigureUrl(paperId, selected.id)}
+              src={figureSrc(selected.id)}
               alt={selected.caption || selected.id}
               className="w-full object-contain max-h-[250px]"
             />
@@ -815,63 +735,21 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-border/50 bg-muted/25 px-3.5 py-3 shadow-[var(--shadow-xs)] backdrop-blur-[2px] dark:bg-muted/15">
-        <p className="text-[11px] font-medium text-foreground/90 tracking-tight">Add or capture</p>
-        <p className="mt-1 text-[10px] leading-snug text-muted-foreground/90">
-          Marquee on the PDF, browser capture, paste an image, or re-run extraction.
-        </p>
-        <div className="mt-3 flex flex-wrap gap-1.5 rounded-[10px] border border-border/40 bg-background/35 p-1 dark:bg-background/25">
-          <button
-            type="button"
-            title="Opens your browser's screen / window picker"
-            onClick={handleScreenCapture}
-            disabled={clipSaving || reextracting || loading}
-            className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-md border border-border/55 bg-background/80 px-2.5 py-1.5 text-[11px] font-semibold text-foreground/92 shadow-sm shadow-black/[0.02] transition-colors hover:border-border-strong hover:bg-accent/35 disabled:opacity-40 dark:shadow-black/20"
-          >
-            <svg className="h-3.5 w-3.5 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.233-2.33 3 3 0 0 1 3.758 3.848A3.752 3.752 0 0 1 18 19.5H6.75Z" />
-            </svg>
-            {clipSaving ? "…" : "Capture"}
-          </button>
-          <button
-            type="button"
-            title="Draw a rectangle on the PDF to capture a region"
-            onClick={() => setMarqueeMode(true)}
-            disabled={marqueeMode || clipSaving || reextracting || loading}
-            className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-md border border-border/55 bg-background/80 px-2.5 py-1.5 text-[11px] font-semibold text-foreground/92 shadow-sm shadow-black/[0.02] transition-colors hover:border-border-strong hover:bg-accent/35 disabled:opacity-40 dark:shadow-black/20"
-          >
-            <svg className="h-3.5 w-3.5 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3.75H6A2.25 2.25 0 0 0 3.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0 1 20.25 6v1.5M20.25 16.5V18A2.25 2.25 0 0 1 18 20.25h-1.5M3.75 16.5V18A2.25 2.25 0 0 0 6 20.25h1.5" />
-            </svg>
-            {marqueeMode ? "Drawing…" : "Select region"}
-          </button>
-          <button
-            type="button"
-            title="Clipboard image after system screenshot"
-            onClick={handlePasteFromClipboard}
-            disabled={clipSaving || reextracting || loading}
-            className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-md border border-border/55 bg-background/80 px-2.5 py-1.5 text-[11px] font-semibold text-foreground/92 shadow-sm shadow-black/[0.02] transition-colors hover:border-border-strong hover:bg-accent/35 disabled:opacity-40 dark:shadow-black/20"
-          >
-            <svg className="h-3.5 w-3.5 shrink-0 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.65}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.398.084.612v9.75c0 .414-.336.75-.75.75H4.5a.75.75 0 0 1-.75-.75v-9.75c0-.214.03-.418.084-.612m7.336 0c.653.734 1.693 1.164 2.744 1.323.31.067.627.097.956.097h3.073a2.25 2.25 0 0 0 2.227-1.932m-11.964-11.962L4.744 15.058A75.846 75.846 0 0 1 12 21.75a75.837 75.837 0 0 1-7.893-11.962Z" />
-            </svg>
-            Paste
-          </button>
-          <button
-            type="button"
-            title="Try built-in detection again after changing the PDF"
-            onClick={handleReextract}
-            disabled={reextracting || clipSaving || loading}
-            className="inline-flex min-h-8 items-center rounded-md px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground/95 transition-colors hover:bg-accent/45 hover:text-foreground disabled:opacity-40"
-          >
-            {reextracting ? "…" : "Re-extract PDF"}
-          </button>
-        </div>
+      <div className="flex items-center justify-between gap-2 rounded-xl border border-border/50 bg-muted/25 px-3.5 py-2.5 text-[11px] text-muted-foreground">
+        <span>{figures.length} figure{figures.length === 1 ? "" : "s"} from Mistral OCR</span>
+        <button
+          type="button"
+          onClick={handleRerunOcr}
+          disabled={reextracting || loading}
+          className="font-medium text-foreground/90 underline-offset-2 hover:underline disabled:opacity-40"
+        >
+          {reextracting ? "Running OCR…" : "Re-run OCR"}
+        </button>
       </div>
 
-      {clipError && (
+      {ocrError && (
         <p className="text-[var(--text-xs)] text-destructive/90" role="alert">
-          {clipError}
+          {ocrError}
         </p>
       )}
 
@@ -889,7 +767,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
             >
               <div className="relative aspect-[4/3] overflow-hidden bg-muted/25">
                 <AuthImage
-                  src={api.getFigureUrl(paperId, fig.id)}
+                  src={figureSrc(fig.id)}
                   alt={fig.caption || fig.id}
                   className="h-full w-full object-cover"
                 />

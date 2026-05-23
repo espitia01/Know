@@ -50,6 +50,20 @@ def _decode_image_bytes(raw: str) -> bytes:
         raise RuntimeError("invalid_image_base64") from exc
 
 
+def _infer_image_caption(page_md: str, image_id: str) -> str:
+    """Pull 'Figure N: …' caption lines that follow an OCR image reference."""
+    lines = page_md.splitlines()
+    for i, line in enumerate(lines):
+        if image_id not in line:
+            continue
+        for j in range(i + 1, min(i + 4, len(lines))):
+            candidate = lines[j].strip()
+            if re.match(r"^(Figure|Fig\.?)\s", candidate, re.IGNORECASE):
+                return candidate[:500]
+        break
+    return ""
+
+
 def _rewrite_image_refs(markdown: str, mapping: dict[str, str]) -> str:
     """Map Mistral image ids (e.g. img-0.jpeg) to stable per-paper paths."""
     if not mapping:
@@ -189,7 +203,13 @@ async def run_mistral_ocr(
 
                 manifest.append(OcrImage(id=new_id, page=page_index, bbox=bbox))
 
-        page_markdown.append(_rewrite_image_refs(md, id_map))
+        rewritten = _rewrite_image_refs(md, id_map)
+        page_markdown.append(rewritten)
+        for entry in manifest:
+            if entry.page == page_index and not entry.caption:
+                cap = _infer_image_caption(rewritten, entry.id)
+                if cap:
+                    entry.caption = cap
 
     _persist_ocr_images(paper_id, user_id, pending_images)
 
@@ -210,3 +230,7 @@ def validate_ocr_image_id(image_id: str) -> str:
     if not _OCR_IMAGE_ID_RE.match(image_id or ""):
         raise ValueError("invalid image_id")
     return image_id
+
+
+def is_ocr_image_id(image_id: str) -> bool:
+    return bool(_OCR_IMAGE_ID_RE.match(image_id or ""))

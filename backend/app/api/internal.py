@@ -52,6 +52,14 @@ def _validate_id(value: str, name: str = "id") -> str:
     return value
 
 
+def _validate_figure_id(value: str) -> str:
+    from ..services.ocr_mistral import is_ocr_image_id
+
+    if is_ocr_image_id(value):
+        return value
+    return _validate_id(value, "figure_id")
+
+
 def require_internal_bearer(authorization: str = Header(default="")) -> None:
     """Reject anything that isn't ``Authorization: Bearer <KNOW_INTERNAL_BACKEND_TOKEN>``.
 
@@ -242,7 +250,7 @@ async def internal_figure_png(paper_id: str, figure_id: str, user_id: str):
     deploy dependency we don't need yet.
     """
     _validate_id(paper_id, "paper_id")
-    _validate_id(figure_id, "figure_id")
+    _validate_figure_id(figure_id)
     if not user_id:
         raise HTTPException(status_code=400, detail="Missing user_id")
 
@@ -250,8 +258,17 @@ async def internal_figure_png(paper_id: str, figure_id: str, user_id: str):
     if not get_paper_meta(paper_id, user_id=user_id):
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    from ..services.pdf_parser import get_figure_path
+    from ..services.pdf_parser import get_figure_path, load_ocr_image_bytes
+    from ..services.ocr_mistral import validate_ocr_image_id
     from ..services import storage as cloud_storage
+
+    try:
+        validate_ocr_image_id(figure_id)
+        ocr_bytes = load_ocr_image_bytes(paper_id, figure_id, user_id)
+        if ocr_bytes:
+            return Response(content=ocr_bytes, media_type="image/png")
+    except ValueError:
+        pass
 
     fig_path = get_figure_path(paper_id, figure_id)
     if fig_path:
@@ -381,13 +398,14 @@ async def internal_embed_paper(paper_id: str, body: dict = Body(...)):
     from ..services.pdf_parser import get_paper
     from ..services.retrieval import embed_paper
     from ..services.embeddings import EmbeddingProviderError
+    from ..services.analysis_source import text_for_analysis
 
     paper = get_paper(paper_id, user_id=user_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
     try:
-        n = await embed_paper(paper_id, user_id, paper.raw_text or "")
+        n = await embed_paper(paper_id, user_id, text_for_analysis(paper))
     except EmbeddingProviderError as exc:
         raise HTTPException(status_code=503, detail={"code": exc.code, "message": exc.message})
     except Exception:
