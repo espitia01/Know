@@ -286,6 +286,8 @@ interface AppStore {
   setExportUnreadBadge: (v: boolean) => void;
   exportToast: string | null;
   setExportToast: (msg: string | null) => void;
+  dismissedExportStatusIds: string[];
+  dismissExportStatus: (exportId: string) => void;
 }
 
 export const useStore = create<AppStore>()(
@@ -966,6 +968,13 @@ export const useStore = create<AppStore>()(
       setExportUnreadBadge: (v) => set({ exportUnreadBadge: v }),
       exportToast: null,
       setExportToast: (msg) => set({ exportToast: msg }),
+      dismissedExportStatusIds: [],
+      dismissExportStatus: (exportId) =>
+        set((s) => ({
+          dismissedExportStatusIds: s.dismissedExportStatusIds.includes(exportId)
+            ? s.dismissedExportStatusIds
+            : [...s.dismissedExportStatusIds, exportId],
+        })),
     }),
     {
       name: "know-paper-store",

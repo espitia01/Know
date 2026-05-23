@@ -23,6 +23,7 @@ import { SummaryPanel } from "../sidebar/SummaryPanel";
 import { FiguresPanel } from "../sidebar/FiguresPanel";
 import { CrossPaperPanel } from "../sidebar/CrossPaperPanel";
 import { ExportModal } from "../export/ExportModal";
+import { ExportStatusBar } from "../export/ExportStatusBar";
 import { ExportsMenu } from "../export/ExportsMenu";
 import { api } from "@/lib/api";
 
@@ -404,6 +405,8 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
           </div>
         </OverflowMenu>
       </div>
+
+      <ExportStatusBar paperId={paperId} />
 
       <div className="analysis-scroll-fade min-h-0 flex-1 overflow-y-auto overscroll-y-contain [scrollbar-gutter:stable]">
         <div

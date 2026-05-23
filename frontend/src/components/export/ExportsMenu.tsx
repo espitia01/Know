@@ -4,11 +4,13 @@ import { useCallback, useEffect, useMemo } from "react";
 import { api, type ExportRow } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
+import { ExportFormatIcon, exportFormatLabel } from "./ExportFormatIcon";
 
-const FORMAT_LABEL: Record<ExportRow["format"], string> = {
-  pdf: "PDF",
-  pptx: "PPTX",
-  podcast: "Podcast",
+const STATUS_LABEL: Record<ExportRow["status"], string> = {
+  pending: "Queued",
+  running: "Processing",
+  completed: "Ready",
+  failed: "Failed",
 };
 
 function isActive(row: ExportRow) {
@@ -71,7 +73,7 @@ export function ExportsMenu() {
   if (!sorted.length) {
     return (
       <p className="px-2 py-2 text-[var(--text-xs)] text-muted-foreground/70">
-        No exports yet.
+        No exports yet — use Export analysis above.
       </p>
     );
   }
@@ -84,18 +86,30 @@ export function ExportsMenu() {
       {sorted.slice(0, 20).map((row) => (
         <div
           key={row.id}
-          className="flex flex-col gap-1 rounded-md px-2 py-1.5 hover:bg-accent/40 text-[var(--text-xs)]"
+          className="flex flex-col gap-1.5 rounded-md px-2 py-1.5 hover:bg-accent/40 text-[var(--text-xs)]"
         >
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-medium truncate">
-              {FORMAT_LABEL[row.format]} · {row.status}
-            </span>
+          <div className="flex items-center gap-2">
+            <ExportFormatIcon format={row.format} size="sm" />
+            <div className="min-w-0 flex-1">
+              <span className="block font-medium truncate text-foreground/90">
+                {exportFormatLabel(row.format)}
+              </span>
+              <span
+                className={cn(
+                  "text-[10px]",
+                  row.status === "failed" ? "text-destructive/80" : "text-muted-foreground/75",
+                )}
+              >
+                {STATUS_LABEL[row.status]}
+                {isActive(row) ? "…" : ""}
+              </span>
+            </div>
             <div className="flex items-center gap-1 shrink-0">
               {row.status === "completed" && row.download_url && (
                 <a
                   href={row.download_url}
                   download
-                  className="rounded border border-border px-1.5 py-0.5 hover:bg-accent/60"
+                  className="rounded-md bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground hover:opacity-90"
                 >
                   Download
                 </a>
@@ -111,19 +125,16 @@ export function ExportsMenu() {
             </div>
           </div>
           {row.status === "failed" && row.error_message && (
-            <span className="text-destructive/80 truncate">{row.error_message}</span>
+            <span className="text-destructive/80 truncate pl-9">{row.error_message}</span>
           )}
           {row.format === "podcast" && row.status === "completed" && row.download_url && (
-            <audio controls src={row.download_url} className="w-full h-7" preload="none" />
+            <audio controls src={row.download_url} className="w-full h-7 pl-9" preload="none" />
           )}
           {row.byte_size != null && row.status === "completed" && (
-            <span className="text-muted-foreground/70 tabular-nums">
+            <span className="text-muted-foreground/70 tabular-nums pl-9">
               {(row.byte_size / 1024).toFixed(0)} KB
               {row.duration_s != null ? ` · ${Math.round(row.duration_s / 60)} min` : ""}
             </span>
-          )}
-          {isActive(row) && (
-            <span className={cn("text-muted-foreground/70")}>Processing…</span>
           )}
         </div>
       ))}

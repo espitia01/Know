@@ -104,8 +104,6 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
   const [citedBy, setCitedBy] = useState<CitedByItem[]>([]);
   const [citedLoading, setCitedLoading] = useState(false);
   const [citedError, setCitedError] = useState<string | null>(null);
-  const relatedView = useStore((s) => s.uiPrefs.relatedView ?? "graph");
-  const setRelatedView = useStore((s) => s.setRelatedView);
   const paperTitle = useStore((s) => s.paper?.id === paperId ? (s.paper?.title ?? "") : "");
 
   useEffect(() => {
@@ -206,28 +204,9 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
 
   return (
     <div className="space-y-8 motion-safe:animate-fade-in">
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground">{RELATED_TAB_INTRO}</p>
-        {graphAvailable && (
-          <div className="flex shrink-0 gap-1 rounded-md border border-border/40 bg-muted/[0.08] p-0.5 text-[10px] font-medium">
-            {(["graph", "list"] as const).map((id) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setRelatedView(id)}
-                aria-pressed={relatedView === id}
-                className={`rounded-sm px-2 py-0.5 capitalize transition-colors motion-safe:duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
-                  relatedView === id ? "bg-card/30 text-foreground" : "text-muted-foreground/85 hover:text-foreground"
-                }`}
-              >
-                {id}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground">{RELATED_TAB_INTRO}</p>
 
-      {graphAvailable && relatedView === "graph" && (
+      {graphAvailable && (
         <CitationGraph
           paperTitle={paperTitle}
           outbound={priorList}
