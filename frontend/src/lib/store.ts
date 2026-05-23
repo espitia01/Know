@@ -49,6 +49,8 @@ type ReaderPanelPosition = "right" | "left" | "bottom";
 
 export type AnalysisFontFamily = "sans" | "serif" | "mono" | "times" | "arial";
 export type ReaderFontFamily = "serif" | "sans" | "mono";
+export type ReaderLayoutWidth = "compact" | "standard" | "wide";
+export type ReaderLayoutStyle = "journal" | "modern" | "plain";
 
 export type PdfRegionHighlight = {
   id: string;
@@ -77,6 +79,8 @@ interface UiPrefs {
   relatedView?: "graph" | "list";
   readerFontScale: number;
   readerFontFamily: ReaderFontFamily;
+  readerLayoutWidth: ReaderLayoutWidth;
+  readerLayoutStyle: ReaderLayoutStyle;
 }
 
 interface AppStore {
@@ -115,6 +119,8 @@ interface AppStore {
   clearPaperUiPrefs: (paperId: string) => void;
   setReaderFontScale: (v: number) => void;
   setReaderFontFamily: (v: ReaderFontFamily) => void;
+  setReaderLayoutWidth: (v: ReaderLayoutWidth) => void;
+  setReaderLayoutStyle: (v: ReaderLayoutStyle) => void;
 
   // Per-paper flag for "figure re-extraction in progress". Lives in
   // the global store (not FiguresPanel local state) so switching
@@ -404,6 +410,8 @@ export const useStore = create<AppStore>()(
         relatedView: "graph",
         readerFontScale: 1,
         readerFontFamily: "serif",
+        readerLayoutWidth: "standard",
+        readerLayoutStyle: "journal",
       },
       setPanelPosition: (pos) =>
         set((s) => ({ uiPrefs: { ...s.uiPrefs, panelPos: pos } })),
@@ -460,6 +468,10 @@ export const useStore = create<AppStore>()(
         })),
       setReaderFontFamily: (v) =>
         set((s) => ({ uiPrefs: { ...s.uiPrefs, readerFontFamily: v } })),
+      setReaderLayoutWidth: (v) =>
+        set((s) => ({ uiPrefs: { ...s.uiPrefs, readerLayoutWidth: v } })),
+      setReaderLayoutStyle: (v) =>
+        set((s) => ({ uiPrefs: { ...s.uiPrefs, readerLayoutStyle: v } })),
 
       figureReextractInFlight: {},
       setFigureReextractInFlight: (paperId, running) =>
@@ -1075,6 +1087,8 @@ export const useStore = create<AppStore>()(
         if (ui) {
           if (ui.readerFontScale == null) ui.readerFontScale = 1;
           if (!ui.readerFontFamily) ui.readerFontFamily = "serif";
+          if (!ui.readerLayoutWidth) ui.readerLayoutWidth = "standard";
+          if (!ui.readerLayoutStyle) ui.readerLayoutStyle = "journal";
         }
         const byPaper = p.state?.pdfRegionHighlightsByPaper;
         if (byPaper) {

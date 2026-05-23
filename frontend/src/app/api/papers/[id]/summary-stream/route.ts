@@ -142,7 +142,7 @@ export async function POST(
       schema: zodSchema(PaperSummaryDeepSchema),
       schemaName: "PaperSummaryDeep",
       schemaDescription:
-        "Detailed body of a paper summary (methodology, results, discussion, limitations, future work, figures). The overview/tl_dr/key contributions were produced by the lite phase and must not be repeated.",
+        "Comprehensive structured summary of an academic paper, including overview, key contributions, methodology, results, discussion, limitations, future work, key equations (with per-variable glossary), and key figures/tables.",
       system,
       messages: cachedUserMessages(paperContextText, taskText),
       providerOptions: ANTHROPIC_CACHE_EPHEMERAL,

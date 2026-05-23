@@ -83,13 +83,30 @@ export type SelectionResult = z.infer<typeof SelectionResultSchema>;
  * shallow merge so a single `PaperSummary` consumer keeps rendering.
  */
 
+const KeyEquationTerm = z.object({
+  symbol: z
+    .string()
+    .describe("The variable or symbol from the equation, wrapped in $...$ (e.g. \"$\\\\alpha$\" or \"$F_x$\")."),
+  meaning: z
+    .string()
+    .describe("Plain-English description of what this symbol denotes, including units when relevant."),
+});
+
 const KeyEquation = z.object({
   equation: z
     .string()
     .describe(
       "Display-math LaTeX for one of the paper's most important equations. MUST be wrapped in $$...$$ delimiters. Example: \"$$E = mc^2$$\". Never emit bare LaTeX commands.",
     ),
-  meaning: z.string().describe("Markdown one-paragraph explanation."),
+  meaning: z
+    .string()
+    .describe("Markdown one-paragraph explanation of what this equation says and why it matters in the paper."),
+  terms: z
+    .array(KeyEquationTerm)
+    .optional()
+    .describe(
+      "Per-variable glossary: every distinct symbol appearing in the equation, with its meaning. Include constants like $\\\\epsilon_0$ as well as variables. Aim for completeness."
+    ),
 });
 
 const KeyFigure = z.object({
@@ -121,6 +138,14 @@ export type PaperSummaryLite = z.infer<typeof PaperSummaryLiteSchema>;
 export const PaperSummaryDeepSchema = z.object({
   model: z.string().optional(),
   created_at: z.number().optional(),
+  overview: z.string().describe("3–5 sentence high-level overview of what the paper does and why it matters."),
+  tl_dr: z
+    .string()
+    .optional()
+    .describe("One-sentence takeaway with the single most important result. Math-aware ($...$ allowed)."),
+  key_contributions: z
+    .array(z.string())
+    .describe("1–2 sentence bullets, 3–5 items, ordered by importance."),
   motivation: z.string().describe("3–5 sentences on why this work was done and what gap it fills."),
   methodology: z
     .string()
@@ -133,6 +158,7 @@ export const PaperSummaryDeepSchema = z.object({
     .describe("1–2 paragraph markdown — what the results mean, how they compare to prior work."),
   limitations: z.array(z.string()).optional(),
   future_work: z.string().optional().describe("2–3 sentences on follow-up research this enables."),
+  key_equations: z.array(KeyEquation).optional().describe("Up to 4 of the paper's most important equations, each with a per-variable glossary."),
   key_figures_and_tables: z.array(KeyFigure).optional(),
 });
 

@@ -7,7 +7,9 @@ import { code } from "@streamdown/code";
 import { api, getAuthHeadersSync } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { READER_FAMILY_TO_VAR } from "@/lib/readerFont";
+import { selectionHasMath } from "@/lib/selectionMath";
 import { cn } from "@/lib/utils";
+import { OwlSpinner } from "@/components/ui/OwlSpinner";
 import { useReaderHighlights } from "./useReaderHighlights";
 import { ReaderFontMenu } from "./ReaderFontMenu";
 
@@ -17,12 +19,130 @@ const STREAMDOWN_PLUGINS = { math, code };
 const OCR_IMAGE_RE = /(?:p\d+-img-\d+|fig-\d+)\.png/g;
 const ocrBlobCache = new Map<string, string>();
 
+/**
+ * Streamdown's default URL transform blocks `blob:` and `data:` URLs in
+ * images, which kills our OCR figure hydration. Allow same-origin URLs,
+ * blob:/data: (from the hydration cache), plus standard HTTPS sources.
+ */
+function readerUrlTransform(url: string): string | null {
+  if (!url) return null;
+  if (url.startsWith("blob:") || url.startsWith("data:")) return url;
+  if (url.startsWith("/") || url.startsWith("#")) return url;
+  if (url.startsWith("https://") || url.startsWith("http://")) return url;
+  if (url.startsWith("mailto:")) return url;
+  return null;
+}
+
 /** Wrap figure caption paragraphs for journal-style styling. */
 function wrapFigureCaptions(markdown: string): string {
   return markdown.replace(
     /^(Fig\.?\s+\d+[.:][^\n]*|Figure\s+\d+[.:][^\n]*)/gim,
     (line) => `<figcaption class="reader-figure-caption">${line}</figcaption>`,
   );
+}
+
+/**
+ * Collapse the noisy author byline Mistral OCR emits when a paper's
+ * affiliation numerals are typeset as stacked superscripts (Sci. Adv.
+ * cover pages are the worst offenders). The pattern looks like:
+ *
+ *     Author Name
+ *     1
+ *     ,
+ *     2
+ *     1,2
+ *     , Next Author
+ *     3
+ *     3
+ *
+ * which is what shows up as the visually duplicated "1 , 2 1,2" runs.
+ * We treat any sequence of digit/punctuation-only lines that appear
+ * immediately after a name as the affiliation marker and collapse it
+ * into a single superscript-style fragment.
+ */
+function collapseAuthorByline(markdown: string): string {
+  const lines = markdown.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  // Only operate on the first ~12 non-blank lines after a title — past
+  // that we're definitely in the abstract / body.
+  let bylineBudget = 12;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (bylineBudget <= 0) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    if (!line.trim()) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    // Heading or section break — stop munging.
+    if (/^#|^\s*Abstract\b|^\s*ABSTRACT\b|^\s*INTRODUCTION\b/.test(line)) {
+      bylineBudget = 0;
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    // Gather any following digit/punctuation-only lines as one cluster.
+    const cluster: string[] = [];
+    let j = i + 1;
+    const isMarkerLine = (s: string) => /^[\s\d,;*†‡§¶∗]+$/.test(s) && /\d/.test(s);
+    while (j < lines.length && lines[j].trim() && isMarkerLine(lines[j])) {
+      cluster.push(lines[j].trim());
+      j += 1;
+    }
+    if (cluster.length >= 2) {
+      // Dedupe identical markers ("1\n,\n2\n1,2" → "1,2").
+      const compact = cluster.join(",").replace(/[^\d,]/g, "").split(",").filter(Boolean);
+      const unique = Array.from(new Set(compact));
+      const marker = unique.join(",");
+      out.push(`${line}<sup>${marker}</sup>`);
+      i = j;
+      bylineBudget -= 1;
+      continue;
+    }
+    out.push(line);
+    i += 1;
+    bylineBudget -= 1;
+  }
+  return out.join("\n");
+}
+
+/**
+ * Wrap the paragraph immediately after the first H1 (typically the
+ * author byline) in a `.reader-byline` class so the byline gets its
+ * own muted styling and doesn't compete with the body.
+ */
+function wrapBylineParagraph(markdown: string): string {
+  const lines = markdown.split("\n");
+  const titleIdx = lines.findIndex((l) => /^#\s+\S/.test(l));
+  if (titleIdx < 0) return markdown;
+  // Skip blank lines after the title.
+  let bylineStart = titleIdx + 1;
+  while (bylineStart < lines.length && !lines[bylineStart].trim()) bylineStart += 1;
+  if (bylineStart >= lines.length) return markdown;
+  // Byline runs until the next blank line OR the next heading.
+  let bylineEnd = bylineStart;
+  while (
+    bylineEnd < lines.length &&
+    lines[bylineEnd].trim() &&
+    !/^#/.test(lines[bylineEnd])
+  ) {
+    bylineEnd += 1;
+  }
+  if (bylineEnd === bylineStart) return markdown;
+  const bylineText = lines.slice(bylineStart, bylineEnd).join(" ");
+  // Heuristic: byline lines usually contain commas, asterisks, or `^{` markers.
+  if (!/[,*†‡§¶∗^]/.test(bylineText)) return markdown;
+  const wrapped = [
+    ...lines.slice(0, bylineStart),
+    `<p class="reader-byline">${bylineText}</p>`,
+    ...lines.slice(bylineEnd),
+  ];
+  return wrapped.join("\n");
 }
 
 async function hydrateMarkdownImages(
@@ -55,7 +175,7 @@ async function hydrateMarkdownImages(
 export interface MarkdownReaderProps {
   paperId: string;
   trial?: boolean;
-  onTextSelected?: (text: string, rect: DOMRect) => void;
+  onTextSelected?: (text: string, rect: DOMRect, meta?: { hasMath?: boolean }) => void;
   onSelectionClear?: () => void;
 }
 
@@ -69,6 +189,8 @@ export function MarkdownReader({
   const setPaperMarkdown = useStore((s) => s.setPaperMarkdown);
   const readerFontScale = useStore((s) => s.uiPrefs.readerFontScale);
   const readerFontFamily = useStore((s) => s.uiPrefs.readerFontFamily);
+  const readerLayoutWidth = useStore((s) => s.uiPrefs.readerLayoutWidth);
+  const readerLayoutStyle = useStore((s) => s.uiPrefs.readerLayoutStyle);
   const containerRef = useRef<HTMLDivElement>(null);
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(!entry);
@@ -115,9 +237,15 @@ export function MarkdownReader({
             : [];
 
         const hydrated = await Promise.all(
-          rawPages.map(async (page) => {
-            const withCaptions = wrapFigureCaptions(page);
-            return hydrateMarkdownImages(withCaptions, paperId, trial);
+          rawPages.map(async (page, idx) => {
+            let prepared = page;
+            // Byline cleanup only runs on the first page — the cover.
+            if (idx === 0) {
+              prepared = collapseAuthorByline(prepared);
+              prepared = wrapBylineParagraph(prepared);
+            }
+            prepared = wrapFigureCaptions(prepared);
+            return hydrateMarkdownImages(prepared, paperId, trial);
           }),
         );
 
@@ -150,7 +278,8 @@ export function MarkdownReader({
     if (text.length < 2) return;
     const rects = range.getClientRects();
     const rect = rects.length > 0 ? rects[rects.length - 1] : range.getBoundingClientRect();
-    onTextSelected?.(text, rect);
+    const hasMath = selectionHasMath(text, range);
+    onTextSelected?.(text, rect, { hasMath });
   }, [onTextSelected]);
 
   useEffect(() => {
@@ -213,16 +342,36 @@ export function MarkdownReader({
 
   const rendered = useMemo(() => {
     if (!pages.length) return null;
+    const READER_ALLOWED_TAGS: Record<string, string[]> = {
+      figcaption: ["class"],
+      sup: [],
+      sub: [],
+      p: ["class"],
+    };
     if (pages.length === 1) {
       return (
-        <Streamdown plugins={STREAMDOWN_PLUGINS} mode="static" controls={false} parseIncompleteMarkdown={false}>
+        <Streamdown
+          plugins={STREAMDOWN_PLUGINS}
+          mode="static"
+          controls={false}
+          parseIncompleteMarkdown={false}
+          urlTransform={readerUrlTransform}
+          allowedTags={READER_ALLOWED_TAGS}
+        >
           {pages[0]}
         </Streamdown>
       );
     }
     return pages.map((body, i) => (
       <section key={i + 1} data-page={i + 1} className="scroll-mt-6">
-        <Streamdown plugins={STREAMDOWN_PLUGINS} mode="static" controls={false} parseIncompleteMarkdown={false}>
+        <Streamdown
+          plugins={STREAMDOWN_PLUGINS}
+          mode="static"
+          controls={false}
+          parseIncompleteMarkdown={false}
+          urlTransform={readerUrlTransform}
+          allowedTags={READER_ALLOWED_TAGS}
+        >
           {body}
         </Streamdown>
       </section>
@@ -231,8 +380,11 @@ export function MarkdownReader({
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-[var(--text-sm)] text-muted-foreground">
-        Preparing readable view…
+      <div className="flex h-full flex-col items-center justify-center gap-4 text-[var(--text-sm)] text-muted-foreground">
+        <div className="text-foreground/80">
+          <OwlSpinner size={48} label="Preparing readable view" />
+        </div>
+        <p>Preparing readable view…</p>
       </div>
     );
   }
@@ -273,9 +425,13 @@ export function MarkdownReader({
           "[scrollbar-gutter:stable]",
         )}
       >
-        <article className="reader-article mx-auto max-w-[68ch] px-6 py-8 md:px-14">
-          {rendered}
-        </article>
+        <div
+          className="reader-shell mx-auto w-full max-w-[min(86ch,100%)] px-5 py-8 md:px-10"
+          data-layout={readerLayoutWidth}
+          data-style={readerLayoutStyle}
+        >
+          <article className="reader-article mx-auto">{rendered}</article>
+        </div>
       </div>
     </div>
   );

@@ -10,6 +10,7 @@ import { snapshotDomRect } from "@/lib/domRect";
 import { capturePdfViewportUnionToBlob } from "@/lib/pdfSelectionCapture";
 import { captureTextSelectionRegions, pageRangeForSelectionRect } from "@/lib/pdfHighlightRegions";
 import { useReadingState } from "@/hooks/useReadingState";
+import { hasMathInText } from "@/lib/selectionMath";
 
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -91,7 +92,10 @@ interface PdfViewerProps {
   onTextSelected?: (
     text: string,
     rect: DOMRect,
-    capture?: { regions: Array<Omit<PdfRegionHighlight, "id" | "color" | "highlightId">> },
+    capture?: {
+      regions?: Array<Omit<PdfRegionHighlight, "id" | "color" | "highlightId">>;
+      hasMath?: boolean;
+    },
   ) => void;
   onSelectionClear?: () => void;
   /** When true, leave room on the right of the mini toolbar — e.g. floating
@@ -1738,7 +1742,9 @@ export function PdfViewer({
 
     const finishCapture = () => {
       const regions = captureTextSelectionRegions(container, captureOpts);
-      onTextSelected?.(text, rect, regions.length > 0 ? { regions } : undefined);
+      const hasMath = hasMathInText(text);
+      const meta = regions.length > 0 || hasMath ? { regions: regions.length > 0 ? regions : undefined, hasMath } : undefined;
+      onTextSelected?.(text, rect, meta);
     };
 
     if (container && numPages > 0 && stride > PAGE_GAP) {

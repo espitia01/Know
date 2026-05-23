@@ -562,7 +562,7 @@ export const api = {
   getOcrImageUrl: (paperId: string, imageId: string, trial = false) =>
     trial
       ? `${API_BASE}/api/trial/paper/${paperId}/ocr-image/${imageId}`
-      : `${API_BASE}/api/papers/${paperId}/ocr-image/${imageId}`,
+      : `/api/papers/${paperId}/ocr-image/${imageId}`,
 
   getTrialPaperMarkdown: (id: string) =>
     fetch(`${API_BASE}/api/trial/paper/${id}/markdown`).then(async (res) => {

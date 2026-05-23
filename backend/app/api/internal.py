@@ -123,6 +123,30 @@ async def internal_paper_text(paper_id: str, user_id: str):
     }
 
 
+@router.get("/paper/{paper_id}/ocr-image/{image_id}", dependencies=[Depends(require_internal_bearer)])
+async def internal_paper_ocr_image(paper_id: str, image_id: str, user_id: str):
+    """Stream an OCR-extracted image (composite or per-panel) for a paper."""
+    _validate_id(paper_id, "paper_id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Missing user_id")
+
+    from ..services.db import get_paper_meta
+    from ..services.ocr_mistral import validate_ocr_image_id
+    from ..services.pdf_parser import load_ocr_image_bytes
+
+    if not get_paper_meta(paper_id, user_id=user_id):
+        raise HTTPException(status_code=404, detail="Paper not found")
+    try:
+        validate_ocr_image_id(image_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    img_bytes = load_ocr_image_bytes(paper_id, image_id, user_id)
+    if not img_bytes:
+        raise HTTPException(status_code=404, detail="OCR image not found")
+    return Response(content=img_bytes, media_type="image/png")
+
+
 @router.get("/paper/{paper_id}/pdf", dependencies=[Depends(require_internal_bearer)])
 async def internal_paper_pdf(paper_id: str, user_id: str):
     """Stream the original PDF for a paper (Next.js proxy uses this)."""

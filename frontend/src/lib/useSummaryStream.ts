@@ -1,23 +1,16 @@
 "use client";
 
 /**
- * Two-phase Summary orchestrator (PROMPT_7 Track D).
+ * Single-phase summary orchestrator.
  *
- * Phase 1 — **lite**: `useObject` against `/api/papers/[id]/summary-lite-stream`.
- * Returns overview + tl_dr + key contributions + a few equations in ~10 s on
- * Haiku. Persists to `cached_analysis.summary_lite` server-side.
- *
- * Phase 2 — **deep**: `useObject` against `/api/papers/[id]/summary-stream`.
- * Returns methodology / results / discussion / limitations / future work /
- * figures in 60–90 s on Sonnet. Persists to `cached_analysis.summary_deep`.
- *
- * Both phases write into `summaryByPaper[paperId]` as a shallow merge so the
- * panel renders a single coalesced `PaperSummary`. The deep phase auto-kicks
- * once the lite phase has an overview AND the user is on the same paper.
- *
- * Per-paper writes mean a stale stream from paper A cannot splatter into
- * paper B's panel after the user switches tabs — late writes simply update
- * A's slot which B's panel doesn't read.
+ * The earlier two-phase pipeline (haiku fast preview → sonnet deep
+ * dive) caused the model badge to flicker mid-render and confused
+ * users who expected their Settings `analysis_model` to be the one
+ * doing the work. We now do exactly one stream call, scoped to the
+ * user's analysis model, against `/api/papers/[id]/summary-stream`
+ * (schema `PaperSummaryDeepSchema`, which now contains every field
+ * the panel renders). Persistence still lives under
+ * `cached_analysis.summary_deep` so legacy reads keep working.
  */
 
 import { useCallback, useEffect, useRef } from "react";
@@ -25,10 +18,8 @@ import { experimental_useObject as useObject } from "@ai-sdk/react";
 import { api } from "@/lib/api";
 import {
   PaperSummaryDeepSchema,
-  PaperSummaryLiteSchema,
   type PaperSummary,
   type PaperSummaryDeep,
-  type PaperSummaryLite,
 } from "@/lib/server/schemas";
 import { useStore } from "@/lib/store";
 import { useUserSettings } from "@/lib/UserSettingsContext";
@@ -41,9 +32,7 @@ import {
   clearProgressStart,
 } from "@/lib/analysisState";
 
-/** Stream stall before Python batch fallback (Vercel often cuts ~60s). */
-const LITE_FALLBACK_MS = 30_000;
-const DEEP_FALLBACK_MS = 90_000;
+const FALLBACK_MS = 90_000;
 
 function describeError(error: unknown): string {
   if (!error) return "Summary generation failed. Try again.";
@@ -61,7 +50,7 @@ function hasOverview(value: Partial<PaperSummary> | null | undefined): boolean {
   return typeof value?.overview === "string" && value.overview.trim().length > 0;
 }
 
-function hasDeepBody(value: Partial<PaperSummary> | null | undefined): boolean {
+function hasBody(value: Partial<PaperSummary> | null | undefined): boolean {
   return (
     typeof value?.methodology === "string" && value.methodology.trim().length > 0
   );
@@ -75,57 +64,26 @@ function mergeSummary(
 }
 
 export function useSummaryStream(paperId: string) {
-  const { analysisModel, fastModel } = useUserSettings();
+  const { analysisModel } = useUserSettings();
 
-  // Per-paper writers (Track A): writes target `paperId`'s slot, not
-  // whichever paper is currently active. A slow deep stream finishing
-  // after the user switched away still lands in the right paper.
   const setSummaryForPaper = useStore((s) => s.setSummaryForPaper);
   const setSummaryError = useStore((s) => s.setSummaryError);
   const setSummaryLoadingForPaper = useStore((s) => s.setSummaryLoadingForPaper);
   const updateCachedAnalysis = useStore((s) => s.updateCachedAnalysis);
 
-  const liteFallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const deepFallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const liteFallbackStarted = useRef(false);
-  const deepFallbackStarted = useRef(false);
-  const liteStartedFor = useRef<string | null>(null);
-  const deepStartedFor = useRef<string | null>(null);
-  const litePartialRef = useRef<Partial<PaperSummaryLite> | undefined>(undefined);
-  const deepPartialRef = useRef<Partial<PaperSummaryDeep> | undefined>(undefined);
-  const liteModelRef = useRef<string | undefined>(undefined);
-  const deepModelRef = useRef<string | undefined>(undefined);
+  const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fallbackStarted = useRef(false);
+  const startedFor = useRef<string | null>(null);
+  const partialRef = useRef<Partial<PaperSummaryDeep> | undefined>(undefined);
+  const modelRef = useRef<string | undefined>(undefined);
 
-  const clearLiteTimer = useCallback(() => {
-    if (liteFallbackTimer.current != null) {
-      clearTimeout(liteFallbackTimer.current);
-      liteFallbackTimer.current = null;
-    }
-  }, []);
-  const clearDeepTimer = useCallback(() => {
-    if (deepFallbackTimer.current != null) {
-      clearTimeout(deepFallbackTimer.current);
-      deepFallbackTimer.current = null;
+  const clearFallbackTimer = useCallback(() => {
+    if (fallbackTimer.current != null) {
+      clearTimeout(fallbackTimer.current);
+      fallbackTimer.current = null;
     }
   }, []);
 
-  const finishLoadingFlag = useCallback(
-    (pid: string) => {
-      // Loading flips off when *either* phase is fully done. We keep
-      // it on while the deep is still streaming so the panel can show
-      // the "Loading the deep dive…" inline pulse.
-      const stillLite = liteStartedFor.current === pid;
-      const stillDeep = deepStartedFor.current === pid;
-      if (!stillLite && !stillDeep) {
-        setSummaryLoadingForPaper(pid, false);
-      }
-    },
-    [setSummaryLoadingForPaper],
-  );
-
-  /** Merge a partial into the per-paper summary slot. Late writes from
-   *  a stale stream are not gated by `paper?.id === pid` — they land in
-   *  their own paper's slot, which is the right place. */
   const mergeIntoPaperSlot = useCallback(
     (pid: string, patch: Partial<PaperSummary>) => {
       const prev = useStore.getState().summaryByPaper[pid] ?? null;
@@ -138,43 +96,30 @@ export function useSummaryStream(paperId: string) {
     [setSummaryForPaper],
   );
 
-  const finishLite = useCallback(
-    (pid: string, summary: PaperSummaryLite) => {
-      setSummaryError(pid, null);
+  const finishSummary = useCallback(
+    (pid: string, summary: PaperSummaryDeep) => {
       const withMeta: PaperSummary = {
         ...summary,
-        model: summary.model ?? liteModelRef.current,
+        model: summary.model ?? modelRef.current,
         created_at: summary.created_at ?? Date.now(),
       };
       mergeIntoPaperSlot(pid, withMeta);
-      updateCachedAnalysis(pid, { summary_lite: withMeta });
+      const merged = useStore.getState().summaryByPaper[pid] ?? withMeta;
+      updateCachedAnalysis(pid, {
+        summary_deep: withMeta,
+        summary: merged,
+      });
+      setSummaryError(pid, null);
+      autoAnalyzedPapers.add(`${pid}:summary`);
     },
     [mergeIntoPaperSlot, setSummaryError, updateCachedAnalysis],
   );
 
-  const finishDeep = useCallback(
-    (pid: string, summary: PaperSummaryDeep) => {
-      const withMeta: PaperSummary = {
-        ...summary,
-        model: summary.model ?? deepModelRef.current,
-      };
-      mergeIntoPaperSlot(pid, withMeta);
-      const merged = useStore.getState().summaryByPaper[pid];
-      // Persist the merged blob to `cached_analysis.summary` so old
-      // readers (single-slot) still get a usable payload.
-      updateCachedAnalysis(pid, {
-        summary_deep: withMeta,
-        summary: merged ?? withMeta,
-      });
-    },
-    [mergeIntoPaperSlot, updateCachedAnalysis],
-  );
-
   const runBatchFallback = useCallback(
     async (pid: string) => {
-      if (deepFallbackStarted.current) return;
-      deepFallbackStarted.current = true;
-      clearDeepTimer();
+      if (fallbackStarted.current) return;
+      fallbackStarted.current = true;
+      clearFallbackTimer();
       setSummaryLoadingForPaper(pid, true);
       try {
         const summary = await api.getSummary(pid);
@@ -189,17 +134,15 @@ export function useSummaryStream(paperId: string) {
       } catch (e) {
         setSummaryError(pid, describeError(e));
       } finally {
-        deepStartedFor.current = null;
-        liteStartedFor.current = null;
+        startedFor.current = null;
         markRequestEnd(pid, "summary");
         clearProgressStart(pid, "summary");
         activeSummaryStreamStoppers.delete(pid);
-        finishLoadingFlag(pid);
+        setSummaryLoadingForPaper(pid, false);
       }
     },
     [
-      clearDeepTimer,
-      finishLoadingFlag,
+      clearFallbackTimer,
       mergeIntoPaperSlot,
       setSummaryError,
       setSummaryLoadingForPaper,
@@ -207,209 +150,109 @@ export function useSummaryStream(paperId: string) {
     ],
   );
 
-  // ---- Lite phase ---------------------------------------------------
-  const liteObj = useObject({
-    id: `${paperId}-lite`,
-    api: `/api/papers/${paperId}/summary-lite-stream`,
-    schema: PaperSummaryLiteSchema,
-    credentials: "include",
-    onError: (error) => {
-      clearLiteTimer();
-      const pid = liteStartedFor.current;
-      liteStartedFor.current = null;
-      if (!pid) return;
-      setSummaryError(pid, describeError(error));
-      // Lite died — go straight to the batch fallback (which produces
-      // a full summary including the deep fields).
-      void runBatchFallback(pid);
-    },
-    onFinish: ({ object, error }) => {
-      clearLiteTimer();
-      const pid = liteStartedFor.current;
-      liteStartedFor.current = null;
-      if (!pid) return;
-      const candidate = (object ?? litePartialRef.current) as
-        | Partial<PaperSummaryLite>
-        | undefined;
-      if (hasOverview(candidate)) {
-        finishLite(pid, candidate as PaperSummaryLite);
-        finishLoadingFlag(pid);
-        // Auto-kick deep once lite lands.
-        startDeep(pid);
-        return;
-      }
-      if (error) setSummaryError(pid, describeError(error));
-      void runBatchFallback(pid);
-    },
-  });
-
-  litePartialRef.current = liteObj.object as Partial<PaperSummaryLite> | undefined;
-  const lastLiteMergeKey = useRef("");
-
-  useEffect(() => {
-    const pid = liteStartedFor.current;
-    if (!pid) return;
-    const partial = liteObj.object as Partial<PaperSummaryLite> | undefined;
-    // Terminal empty stream — onFinish may not run; release the ref so we
-    // don't keep re-running this effect on every `object` reference churn.
-    if (!liteObj.isLoading && !partial) {
-      liteStartedFor.current = null;
-      return;
-    }
-    if (!partial || !(partial.overview || partial.tl_dr || partial.key_contributions?.length)) {
-      if (!liteObj.isLoading) liteStartedFor.current = null;
-      return;
-    }
-    const mergeKey = JSON.stringify(partial);
-    if (mergeKey === lastLiteMergeKey.current) return;
-    lastLiteMergeKey.current = mergeKey;
-    mergeIntoPaperSlot(pid, {
-      ...partial,
-      model: liteModelRef.current,
-    });
-  }, [liteObj.object, liteObj.isLoading, mergeIntoPaperSlot]);
-
-  // ---- Deep phase ---------------------------------------------------
-  const deepObj = useObject({
-    id: `${paperId}-deep`,
+  const obj = useObject({
+    id: `${paperId}-summary`,
     api: `/api/papers/${paperId}/summary-stream`,
     schema: PaperSummaryDeepSchema,
     credentials: "include",
     onError: (error) => {
-      clearDeepTimer();
-      const pid = deepStartedFor.current;
-      deepStartedFor.current = null;
+      clearFallbackTimer();
+      const pid = startedFor.current;
+      startedFor.current = null;
       if (!pid) return;
       setSummaryError(pid, describeError(error));
-      finishLoadingFlag(pid);
+      setSummaryLoadingForPaper(pid, false);
     },
     onFinish: ({ object, error }) => {
-      clearDeepTimer();
-      const pid = deepStartedFor.current;
-      deepStartedFor.current = null;
+      clearFallbackTimer();
+      const pid = startedFor.current;
+      startedFor.current = null;
       if (!pid) return;
-      const candidate = (object ?? deepPartialRef.current) as
+      const candidate = (object ?? partialRef.current) as
         | Partial<PaperSummaryDeep>
         | undefined;
-      if (hasDeepBody(candidate)) {
-        finishDeep(pid, candidate as PaperSummaryDeep);
+      if (hasBody(candidate)) {
+        finishSummary(pid, candidate as PaperSummaryDeep);
         markRequestEnd(pid, "summary");
         clearProgressStart(pid, "summary");
         activeSummaryStreamStoppers.delete(pid);
-        autoAnalyzedPapers.add(`${pid}:summary`);
-        finishLoadingFlag(pid);
+        setSummaryLoadingForPaper(pid, false);
         return;
       }
       if (error) setSummaryError(pid, describeError(error));
-      finishLoadingFlag(pid);
+      // Stream finished without methodology — fall back to the
+      // batch endpoint so the user gets *something*.
+      void runBatchFallback(pid);
     },
   });
 
-  deepPartialRef.current = deepObj.object as Partial<PaperSummaryDeep> | undefined;
-  const lastDeepMergeKey = useRef("");
+  partialRef.current = obj.object as Partial<PaperSummaryDeep> | undefined;
+  const lastMergeKey = useRef("");
 
   useEffect(() => {
-    const pid = deepStartedFor.current;
+    const pid = startedFor.current;
     if (!pid) return;
-    const partial = deepObj.object as Partial<PaperSummaryDeep> | undefined;
-    if (!deepObj.isLoading && !partial) {
-      deepStartedFor.current = null;
+    const partial = obj.object as Partial<PaperSummaryDeep> | undefined;
+    if (!obj.isLoading && !partial) {
+      startedFor.current = null;
       return;
     }
-    if (!partial || !(partial.methodology || partial.main_results || partial.discussion)) {
-      if (!deepObj.isLoading) deepStartedFor.current = null;
+    const hasAny =
+      !!partial &&
+      (partial.overview ||
+        partial.tl_dr ||
+        (partial.key_contributions && partial.key_contributions.length) ||
+        partial.motivation ||
+        partial.methodology ||
+        partial.main_results ||
+        partial.discussion);
+    if (!hasAny) {
+      if (!obj.isLoading) startedFor.current = null;
       return;
     }
     const mergeKey = JSON.stringify(partial);
-    if (mergeKey === lastDeepMergeKey.current) return;
-    lastDeepMergeKey.current = mergeKey;
-    mergeIntoPaperSlot(pid, {
-      ...partial,
-      model: deepModelRef.current,
-    });
-  }, [deepObj.object, deepObj.isLoading, mergeIntoPaperSlot]);
-
-  // ---- Public starters ---------------------------------------------
-  const startDeep = useCallback(
-    (pid: string) => {
-      if (deepObj.isLoading) return;
-      deepFallbackStarted.current = false;
-      deepStartedFor.current = pid;
-      deepModelRef.current = analysisModel;
-      lastDeepMergeKey.current = "";
-      setSummaryLoadingForPaper(pid, true);
-      clearDeepTimer();
-      deepFallbackTimer.current = setTimeout(() => {
-        if (!deepObj.isLoading) return;
-        if (hasDeepBody(deepPartialRef.current)) return;
-        deepObj.stop();
-        void runBatchFallback(pid);
-      }, DEEP_FALLBACK_MS);
-      deepObj.submit({});
-    },
-    [analysisModel, clearDeepTimer, deepObj, runBatchFallback, setSummaryLoadingForPaper],
-  );
+    if (mergeKey === lastMergeKey.current) return;
+    lastMergeKey.current = mergeKey;
+    mergeIntoPaperSlot(pid, { ...partial, model: modelRef.current } as Partial<PaperSummary>);
+  }, [obj.object, obj.isLoading, mergeIntoPaperSlot]);
 
   const start = useCallback(() => {
-    if (liteObj.isLoading || deepObj.isLoading) return;
+    if (obj.isLoading) return;
     const pid = paperId;
 
-    // If lite is already cached server-side it gets hydrated by the
-    // page's `cachedAnalysis` path; the caller still routes through
-    // start() to ensure the deep phase runs on demand. Skip the lite
-    // stream when we already have an overview in the per-paper slot.
     const existing = useStore.getState().summaryByPaper[pid] ?? null;
-    if (hasOverview(existing) && !hasDeepBody(existing)) {
-      // Lite already done, deep missing — skip lite, jump to deep.
-      markRequestStart(pid, "summary");
-      activeSummaryStreamStoppers.set(pid, () => {
-        clearDeepTimer();
-        deepObj.stop();
-      });
-      setSummaryError(pid, null);
-      clearProgressStart(pid, "summary");
-      startDeep(pid);
-      return;
-    }
-    if (hasOverview(existing) && hasDeepBody(existing)) {
-      // Nothing to do — both phases already on disk and merged.
+    if (hasOverview(existing) && hasBody(existing)) {
       return;
     }
 
-    liteFallbackStarted.current = false;
-    liteStartedFor.current = pid;
-    liteModelRef.current = fastModel;
-    lastLiteMergeKey.current = "";
-    lastDeepMergeKey.current = "";
+    fallbackStarted.current = false;
+    startedFor.current = pid;
+    modelRef.current = analysisModel;
+    lastMergeKey.current = "";
     markRequestStart(pid, "summary");
     activeSummaryStreamStoppers.set(pid, () => {
-      clearLiteTimer();
-      clearDeepTimer();
-      liteObj.stop();
-      deepObj.stop();
+      clearFallbackTimer();
+      obj.stop();
     });
     setSummaryError(pid, null);
     setSummaryLoadingForPaper(pid, true);
     clearProgressStart(pid, "summary");
-    clearLiteTimer();
-    liteFallbackTimer.current = setTimeout(() => {
-      if (!liteObj.isLoading) return;
-      if (hasOverview(litePartialRef.current as Partial<PaperSummary>)) return;
-      liteObj.stop();
+    clearFallbackTimer();
+    fallbackTimer.current = setTimeout(() => {
+      if (!obj.isLoading) return;
+      if (hasBody(partialRef.current as Partial<PaperSummary>)) return;
+      obj.stop();
       void runBatchFallback(pid);
-    }, LITE_FALLBACK_MS);
-    liteObj.submit({});
+    }, FALLBACK_MS);
+    obj.submit({});
   }, [
     paperId,
-    fastModel,
-    liteObj,
-    deepObj,
-    clearLiteTimer,
-    clearDeepTimer,
+    analysisModel,
+    obj,
+    clearFallbackTimer,
     runBatchFallback,
     setSummaryError,
     setSummaryLoadingForPaper,
-    startDeep,
   ]);
 
   useEffect(() => {
@@ -420,24 +263,21 @@ export function useSummaryStream(paperId: string) {
   }, [paperId, start]);
 
   const stop = useCallback(() => {
-    clearLiteTimer();
-    clearDeepTimer();
-    liteObj.stop();
-    deepObj.stop();
-    const pid = liteStartedFor.current || deepStartedFor.current || paperId;
-    liteStartedFor.current = null;
-    deepStartedFor.current = null;
+    clearFallbackTimer();
+    obj.stop();
+    const pid = startedFor.current || paperId;
+    startedFor.current = null;
     markRequestEnd(pid, "summary");
     clearProgressStart(pid, "summary");
     activeSummaryStreamStoppers.delete(pid);
-    finishLoadingFlag(pid);
-  }, [paperId, liteObj, deepObj, clearLiteTimer, clearDeepTimer, finishLoadingFlag]);
+    setSummaryLoadingForPaper(pid, false);
+  }, [paperId, obj, clearFallbackTimer, setSummaryLoadingForPaper]);
 
   return {
     start,
     stop,
-    isLoading: liteObj.isLoading || deepObj.isLoading,
-    error: liteObj.error || deepObj.error,
+    isLoading: obj.isLoading,
+    error: obj.error,
   };
 }
 

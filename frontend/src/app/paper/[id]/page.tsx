@@ -617,6 +617,11 @@ function PaperContent() {
   const activePaperMeta = useStore(
     useShallow((s) => s.papersById[activePaperId] ?? s.paper),
   );
+  const setStoreActivePaperId = useStore((s) => s.setActivePaperId);
+  useEffect(() => {
+    setStoreActivePaperId(activePaperId);
+    return () => setStoreActivePaperId(null);
+  }, [activePaperId, setStoreActivePaperId]);
   const useMarkdownReader = activePaperMeta?.ocr_status === "ready";
   const ocrKickoffRef = useRef<string | null>(null);
 
@@ -709,6 +714,7 @@ function PaperContent() {
       wPct: number;
       hPct: number;
     }>;
+    hasMath?: boolean;
   } | null>(null);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [allFolders, setAllFolders] = useState<string[]>([]);
@@ -1538,9 +1544,12 @@ function PaperContent() {
   const handleTextSelected = useCallback((
     text: string,
     rect: DOMRect,
-    capture?: { regions: Array<{ pageNum: number; xPct: number; yPct: number; wPct: number; hPct: number }> },
+    capture?: {
+      regions?: Array<{ pageNum: number; xPct: number; yPct: number; wPct: number; hPct: number }>;
+      hasMath?: boolean;
+    },
   ) => {
-    setSelection({ text, rect, regions: capture?.regions });
+    setSelection({ text, rect, regions: capture?.regions, hasMath: capture?.hasMath });
   }, []);
 
   const handleSelectionClear = useCallback(() => {
@@ -1561,8 +1570,6 @@ function PaperContent() {
     // a slow "Derive" on paper A could repaint the analysis pane for
     // paper B once the user switches.
     const startedFor = activePaperId;
-    const stillOnStartedPaper = () =>
-      useStore.getState().activePaperId === startedFor;
 
     if (action === "highlight") {
       if (!startedFor) return;
@@ -1630,14 +1637,12 @@ function PaperContent() {
     }
 
     // Streaming actions — explain / derive — go through the migrated
-    // Next.js + AI SDK route. The hook owns the AbortController, the
-    // partial→final state writes, history upsert, error formatting,
-    // and the usage refresh. We only need to point the panel at the
-    // Selection tab and kick off the stream.
+    // Next.js + AI SDK route. `selectionThread` is constructed with
+    // `activePaperId`, so its writes are already paper-scoped; no
+    // extra guard required.
+    if (!startedFor) return;
     setPanelVisible(true);
     setActiveTab("selection");
-
-    if (!stillOnStartedPaper()) return;
 
     selectionThread.start({
       action: action as "explain" | "derive",
@@ -1800,6 +1805,7 @@ function PaperContent() {
         <SelectionToolbar
           text={selection.text}
           rect={selection.rect}
+          hasMath={selection.hasMath ?? false}
           onAction={handleSelectionAction}
           onDismiss={handleSelectionClear}
         />

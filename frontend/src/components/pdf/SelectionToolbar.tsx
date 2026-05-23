@@ -19,6 +19,8 @@ interface SelectionToolbarProps {
   onDismiss: () => void;
   /** Demo / quota: when `used &gt;= limit`, actions are disabled. */
   selectionQuota?: { used: number; limit: number };
+  /** When false, the `Derive` action is hidden (selection has no math). */
+  hasMath?: boolean;
 }
 
 function ExplainIcon() {
@@ -77,7 +79,7 @@ const actions: {
 const TOOLBAR_FALLBACK_W = 260;
 const TOOLBAR_FALLBACK_H = 44;
 
-export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuota }: SelectionToolbarProps) {
+export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuota, hasMath = true }: SelectionToolbarProps) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   /** Avoid a one-frame `(0,0)` flash once portaled — seed from viewport + selection geometry. */
   const [pos, setPos] = useState<{ top: number; left: number }>(() => {
@@ -118,7 +120,8 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
 
   const visibleActions = actions.filter((a) => {
     if (a.id === "note") return canAccess(tier, "notes");
-    if (a.id === "explain" || a.id === "derive") return canAccess(tier, "selection");
+    if (a.id === "derive") return canAccess(tier, "selection") && hasMath;
+    if (a.id === "explain") return canAccess(tier, "selection");
     return true;
   });
 

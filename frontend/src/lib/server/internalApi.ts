@@ -117,22 +117,20 @@ export async function fetchUserModelPrefs(
   return call<UserModelPrefs>(`/api/internal/user/${userId}/models`, { method: "GET" }, signal);
 }
 
-/** Stream the original PDF bytes for a paper (owner-checked on Python side). */
-export async function fetchPaperPdfStream(
-  paperId: string,
-  userId: string,
+async function streamFromInternal(
+  pathWithQuery: string,
+  accept: string,
   signal?: AbortSignal,
 ): Promise<Response> {
   assertConfigured();
-  const qs = new URLSearchParams({ user_id: userId }).toString();
-  const url = `${BASE}/api/internal/paper/${paperId}/pdf?${qs}`;
+  const url = `${BASE}${pathWithQuery}`;
   let res: Response;
   try {
     res = await fetch(url, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${TOKEN}`,
-        Accept: "application/pdf",
+        Accept: accept,
       },
       signal,
       cache: "no-store",
@@ -155,9 +153,34 @@ export async function fetchPaperPdfStream(
         /* ignore */
       }
     }
-    throw new InternalApiError(res.status, `PDF fetch ${res.status}`, "pdf_fetch_failed", detail);
+    throw new InternalApiError(res.status, `Stream ${res.status}`, "stream_fetch_failed", detail);
   }
   return res;
+}
+
+/** Stream the original PDF bytes for a paper (owner-checked on Python side). */
+export async function fetchPaperPdfStream(
+  paperId: string,
+  userId: string,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const qs = new URLSearchParams({ user_id: userId }).toString();
+  return streamFromInternal(`/api/internal/paper/${paperId}/pdf?${qs}`, "application/pdf", signal);
+}
+
+/** Stream a single OCR image (panel crop or composite figure). */
+export async function fetchOcrImageStream(
+  paperId: string,
+  imageId: string,
+  userId: string,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const qs = new URLSearchParams({ user_id: userId }).toString();
+  return streamFromInternal(
+    `/api/internal/paper/${paperId}/ocr-image/${imageId}?${qs}`,
+    "image/png",
+    signal,
+  );
 }
 
 /** Tier allow-list for per-request model overrides on stream routes. */

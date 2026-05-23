@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { AnalysisSection } from "@/components/analysis/AnalysisSection";
@@ -251,18 +251,42 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.key_equations && s.key_equations.length > 0 && (
         <AnalysisSection title="Key equations" count={s.key_equations.length}>
-          <div className="overflow-hidden rounded-lg border border-border/50 bg-card/35 dark:bg-card/22">
+          <div className="space-y-3">
             {s.key_equations.map((eq, i) => {
               if (!eq) return null;
+              const terms = (eq as { terms?: { symbol?: string; meaning?: string }[] }).terms;
               return (
                 <div
                   key={i}
-                  className="border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40"
+                  className="overflow-hidden rounded-lg border border-border/50 bg-card/35 dark:bg-card/22"
                 >
-                  <StreamingMarkdown>{ensureDisplayMath(eq.equation)}</StreamingMarkdown>
-                  <div className="mt-1.5 text-[var(--text-sm)] text-muted-foreground">
-                    <StreamingMarkdown>{eq.meaning ?? ""}</StreamingMarkdown>
+                  <div className="border-b border-border/50 px-4 py-3">
+                    <StreamingMarkdown>{ensureDisplayMath(eq.equation)}</StreamingMarkdown>
                   </div>
+                  {eq.meaning && (
+                    <div className="px-4 py-3 text-[var(--text-sm)] leading-relaxed text-muted-foreground">
+                      <StreamingMarkdown>{eq.meaning}</StreamingMarkdown>
+                    </div>
+                  )}
+                  {terms && terms.length > 0 && (
+                    <div className="border-t border-border/45 bg-muted/[0.06] px-4 py-3">
+                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">
+                        Where
+                      </p>
+                      <dl className="grid grid-cols-[minmax(2.5rem,auto)_1fr] gap-x-3 gap-y-1.5 text-[var(--text-sm)] leading-snug">
+                        {terms.map((t, k) => (
+                          <Fragment key={k}>
+                            <dt className="text-foreground">
+                              <StreamingMarkdown>{t.symbol ?? ""}</StreamingMarkdown>
+                            </dt>
+                            <dd className="text-muted-foreground">
+                              <StreamingMarkdown>{t.meaning ?? ""}</StreamingMarkdown>
+                            </dd>
+                          </Fragment>
+                        ))}
+                      </dl>
+                    </div>
+                  )}
                 </div>
               );
             })}
