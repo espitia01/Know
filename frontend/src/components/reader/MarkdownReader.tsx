@@ -61,9 +61,15 @@ function collapseAuthorByline(markdown: string): string {
   const lines = markdown.split("\n");
   const out: string[] = [];
   let i = 0;
-  // Only operate on the first ~12 non-blank lines after a title — past
-  // that we're definitely in the abstract / body.
-  let bylineBudget = 12;
+  // Only operate on the first ~24 non-blank lines after a title — past
+  // that we're definitely in the abstract / body. Bumped from 12 to
+  // accommodate Sci. Adv.–style pages with long author lists.
+  let bylineBudget = 24;
+  // A "marker" is any short line that's purely digits/punctuation
+  // (commas, asterisks, daggers, ∗, etc.). Mistral emits affiliation
+  // tags as separate paragraphs: "1\n,\n2\n1,2" — each piece a marker.
+  const isMarkerLine = (s: string) =>
+    /^[\s\d,.;:*†‡§¶∗∥]+$/.test(s) && s.length <= 8;
   while (i < lines.length) {
     const line = lines[i];
     if (bylineBudget <= 0) {
@@ -83,15 +89,29 @@ function collapseAuthorByline(markdown: string): string {
       i += 1;
       continue;
     }
-    // Gather any following digit/punctuation-only lines as one cluster.
+    // Gather any following marker-only lines as a cluster, allowing
+    // blank-line separators inside the cluster.
     const cluster: string[] = [];
     let j = i + 1;
-    const isMarkerLine = (s: string) => /^[\s\d,;*†‡§¶∗]+$/.test(s) && /\d/.test(s);
-    while (j < lines.length && lines[j].trim() && isMarkerLine(lines[j])) {
+    while (j < lines.length) {
+      if (!lines[j].trim()) {
+        // Lookahead: is the next non-blank line still a marker?
+        let k = j + 1;
+        while (k < lines.length && !lines[k].trim()) k += 1;
+        if (k < lines.length && isMarkerLine(lines[k].trim())) {
+          j = k;
+          continue;
+        }
+        break;
+      }
+      if (!isMarkerLine(lines[j].trim())) break;
       cluster.push(lines[j].trim());
       j += 1;
     }
-    if (cluster.length >= 2) {
+    // Cluster must contain at least one digit somewhere to be
+    // considered an affiliation marker (not just stray punctuation).
+    const hasDigit = cluster.some((c) => /\d/.test(c));
+    if (cluster.length >= 2 && hasDigit) {
       // Dedupe identical markers ("1\n,\n2\n1,2" → "1,2").
       const compact = cluster.join(",").replace(/[^\d,]/g, "").split(",").filter(Boolean);
       const unique = Array.from(new Set(compact));
@@ -106,6 +126,30 @@ function collapseAuthorByline(markdown: string): string {
     bylineBudget -= 1;
   }
   return out.join("\n");
+}
+
+/**
+ * When the compositor produced fig-N.png composites for this paper,
+ * drop the lingering panel-level `p\d+-img-\d+\.png` refs from the
+ * markdown — they're already represented by the composite and showing
+ * both gives the random-looking "extra figure" placeholders the user
+ * sees between captions and prose.
+ */
+function dropPanelRefsWhenCompositesExist(markdown: string): string {
+  const hasComposite = /(?:^|[^A-Za-z0-9])fig-\d+\.png/.test(markdown);
+  if (!hasComposite) return markdown;
+  // Remove the whole markdown image line (and any adjacent blank line)
+  // when the src is a bare panel id.
+  return markdown
+    .split("\n")
+    .filter((line) => {
+      const t = line.trim();
+      // Match `![alt](p0-img-0.png)` or bare `p0-img-0.png` lines.
+      if (/^!\[[^\]]*\]\(p\d+-img-\d+\.png\)\s*$/.test(t)) return false;
+      if (/^p\d+-img-\d+\.png\s*$/.test(t)) return false;
+      return true;
+    })
+    .join("\n");
 }
 
 /**
@@ -458,6 +502,7 @@ export function MarkdownReader({
         joined = stripOcrAsciiFallback(joined);
         joined = collapseAuthorByline(joined);
         joined = wrapBylineParagraph(joined);
+        joined = dropPanelRefsWhenCompositesExist(joined);
         joined = wrapFigureCaptions(joined);
         joined = collapseFragmentedMathParagraphs(joined);
         joined = rewriteOcrImageReferences(joined, paperId, trial);

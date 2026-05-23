@@ -1582,7 +1582,7 @@ function PaperContent() {
         try {
           const range = sel.getRangeAt(0);
           const wrap = document.createElement("mark");
-          wrap.className = "reader-active-analysis";
+          wrap.className = `reader-active-analysis reader-active-analysis--${action}`;
           range.surroundContents(wrap);
         } catch {
           /* range spans multiple block nodes — skip the wrap, the
