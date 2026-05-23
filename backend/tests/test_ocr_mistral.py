@@ -11,8 +11,12 @@ import pytest
 from app.services.ocr_mistral import (
     MistralOcrUnavailable,
     _rewrite_image_refs,
+    group_panels_into_figures,
+    render_composite_from_pdf,
+    FigureGroup,
     run_mistral_ocr,
 )
+from app.models.schemas import OcrImage
 
 
 def test_rewrite_image_refs():
@@ -98,3 +102,49 @@ def test_run_mistral_ocr_missing_key():
                 await run_mistral_ocr(b"%PDF", "p1", None)
 
     asyncio.run(_run())
+
+
+def test_group_panels_into_figures_groups_by_caption():
+    md = (
+        "![figure](p0-img-0.png)\n"
+        "![figure](p0-img-1.png)\n"
+        "Fig. 1. Composite panels A–D.\n"
+        "\n"
+        "Body text."
+    )
+    panels = {
+        "p0-img-0.png": OcrImage(id="p0-img-0.png", page=0, bbox=[10, 20, 100, 120]),
+        "p0-img-1.png": OcrImage(id="p0-img-1.png", page=0, bbox=[110, 20, 200, 120]),
+    }
+    counter = [1]
+    out, groups = group_panels_into_figures(0, md, panels, counter)
+    assert len(groups) == 1
+    assert groups[0].figure_id == "fig-1.png"
+    assert groups[0].panel_image_ids == ["p0-img-0.png", "p0-img-1.png"]
+    assert groups[0].caption.startswith("Fig. 1.")
+    assert "fig-1.png" in out
+    assert "p0-img-0.png" not in out
+
+
+def test_group_panels_into_figures_handles_orphan_panels():
+    md = "![figure](p1-img-0.png)\n\nNo caption here."
+    panels = {
+        "p1-img-0.png": OcrImage(id="p1-img-0.png", page=1, bbox=[0, 0, 50, 50]),
+    }
+    counter = [1]
+    out, groups = group_panels_into_figures(1, md, panels, counter)
+    assert len(groups) == 1
+    assert groups[0].caption == ""
+    assert "fig-1.png" in out
+
+
+def test_composite_render_falls_back_when_pdf_missing():
+    group = FigureGroup(
+        figure_id="fig-1.png",
+        page=0,
+        caption="Fig. 1.",
+        panel_image_ids=["p0-img-0.png"],
+        bbox=(0, 0, 100, 100),
+        dpi=200,
+    )
+    assert render_composite_from_pdf(b"not-a-pdf", group) is None

@@ -48,6 +48,7 @@ function selectionRowsEqual(
 type ReaderPanelPosition = "right" | "left" | "bottom";
 
 export type AnalysisFontFamily = "sans" | "serif" | "mono" | "times" | "arial";
+export type ReaderFontFamily = "serif" | "sans" | "mono";
 
 export type PdfRegionHighlight = {
   id: string;
@@ -74,6 +75,8 @@ interface UiPrefs {
   scrollByPaper: Record<string, number>;
   qaDraftByPaper: Record<string, string>;
   relatedView?: "graph" | "list";
+  readerFontScale: number;
+  readerFontFamily: ReaderFontFamily;
 }
 
 interface AppStore {
@@ -110,6 +113,8 @@ interface AppStore {
   setPdfScroll: (paperId: string, ratio: number) => void;
   setQADraft: (paperId: string, draft: string) => void;
   clearPaperUiPrefs: (paperId: string) => void;
+  setReaderFontScale: (v: number) => void;
+  setReaderFontFamily: (v: ReaderFontFamily) => void;
 
   // Per-paper flag for "figure re-extraction in progress". Lives in
   // the global store (not FiguresPanel local state) so switching
@@ -397,6 +402,8 @@ export const useStore = create<AppStore>()(
         scrollByPaper: {},
         qaDraftByPaper: {},
         relatedView: "graph",
+        readerFontScale: 1,
+        readerFontFamily: "serif",
       },
       setPanelPosition: (pos) =>
         set((s) => ({ uiPrefs: { ...s.uiPrefs, panelPos: pos } })),
@@ -444,6 +451,15 @@ export const useStore = create<AppStore>()(
           delete qaDraftByPaper[paperId];
           return { uiPrefs: { ...s.uiPrefs, scrollByPaper, qaDraftByPaper } };
         }),
+      setReaderFontScale: (v) =>
+        set((s) => ({
+          uiPrefs: {
+            ...s.uiPrefs,
+            readerFontScale: Math.max(0.85, Math.min(1.5, v)),
+          },
+        })),
+      setReaderFontFamily: (v) =>
+        set((s) => ({ uiPrefs: { ...s.uiPrefs, readerFontFamily: v } })),
 
       figureReextractInFlight: {},
       setFigureReextractInFlight: (paperId, running) =>
@@ -1050,8 +1066,16 @@ export const useStore = create<AppStore>()(
       }),
       migrate: (persisted) => {
         const p = persisted as {
-          state?: { pdfRegionHighlightsByPaper?: Record<string, Array<Record<string, unknown>>> };
+          state?: {
+            pdfRegionHighlightsByPaper?: Record<string, Array<Record<string, unknown>>>;
+            uiPrefs?: Partial<UiPrefs>;
+          };
         };
+        const ui = p.state?.uiPrefs;
+        if (ui) {
+          if (ui.readerFontScale == null) ui.readerFontScale = 1;
+          if (!ui.readerFontFamily) ui.readerFontFamily = "serif";
+        }
         const byPaper = p.state?.pdfRegionHighlightsByPaper;
         if (byPaper) {
           for (const pid of Object.keys(byPaper)) {

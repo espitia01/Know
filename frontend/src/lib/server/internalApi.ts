@@ -117,6 +117,49 @@ export async function fetchUserModelPrefs(
   return call<UserModelPrefs>(`/api/internal/user/${userId}/models`, { method: "GET" }, signal);
 }
 
+/** Stream the original PDF bytes for a paper (owner-checked on Python side). */
+export async function fetchPaperPdfStream(
+  paperId: string,
+  userId: string,
+  signal?: AbortSignal,
+): Promise<Response> {
+  assertConfigured();
+  const qs = new URLSearchParams({ user_id: userId }).toString();
+  const url = `${BASE}/api/internal/paper/${paperId}/pdf?${qs}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        Accept: "application/pdf",
+      },
+      signal,
+      cache: "no-store",
+    });
+  } catch (e) {
+    throw new InternalApiError(
+      503,
+      `Internal backend unreachable: ${e instanceof Error ? e.message : "unknown"}`,
+      "internal_unreachable",
+    );
+  }
+  if (!res.ok) {
+    let detail: unknown;
+    try {
+      detail = await res.json();
+    } catch {
+      try {
+        detail = await res.text();
+      } catch {
+        /* ignore */
+      }
+    }
+    throw new InternalApiError(res.status, `PDF fetch ${res.status}`, "pdf_fetch_failed", detail);
+  }
+  return res;
+}
+
 /** Tier allow-list for per-request model overrides on stream routes. */
 export async function fetchAllowedModels(
   userId: string,

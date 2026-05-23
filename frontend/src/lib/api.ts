@@ -230,6 +230,8 @@ export interface OcrImage {
   page: number;
   bbox?: number[] | null;
   caption?: string;
+  kind?: "figure" | "panel";
+  panel_ids?: string[] | null;
 }
 
 export interface Note {
@@ -568,7 +570,7 @@ export const api = {
       return res.json() as Promise<PaperMarkdownResponse>;
     }),
 
-  getPdfUrl: (id: string) => `${API_BASE}/api/papers/${id}/pdf`,
+  getPdfUrl: (id: string) => `/api/papers/${id}/pdf`,
 
   deletePaper: (id: string) =>
     request<{ status: string }>(`/api/papers/${id}`, { method: "DELETE" }),

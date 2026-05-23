@@ -1,19 +1,29 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback, type CSSProperties } from "react";
 import { Streamdown } from "streamdown";
 import { createMathPlugin } from "@streamdown/math";
 import { code } from "@streamdown/code";
 import { api, getAuthHeadersSync } from "@/lib/api";
 import { useStore } from "@/lib/store";
+import { READER_FAMILY_TO_VAR } from "@/lib/readerFont";
 import { cn } from "@/lib/utils";
 import { useReaderHighlights } from "./useReaderHighlights";
+import { ReaderFontMenu } from "./ReaderFontMenu";
 
 const math = createMathPlugin({ singleDollarTextMath: true });
 const STREAMDOWN_PLUGINS = { math, code };
 
-const OCR_IMAGE_RE = /p\d+-img-\d+\.png/g;
+const OCR_IMAGE_RE = /(?:p\d+-img-\d+|fig-\d+)\.png/g;
 const ocrBlobCache = new Map<string, string>();
+
+/** Wrap figure caption paragraphs for journal-style styling. */
+function wrapFigureCaptions(markdown: string): string {
+  return markdown.replace(
+    /^(Fig\.?\s+\d+[.:][^\n]*|Figure\s+\d+[.:][^\n]*)/gim,
+    (line) => `<figcaption class="reader-figure-caption">${line}</figcaption>`,
+  );
+}
 
 async function hydrateMarkdownImages(
   markdown: string,
@@ -57,6 +67,8 @@ export function MarkdownReader({
 }: MarkdownReaderProps) {
   const entry = useStore((s) => s.markdownByPaper[paperId]);
   const setPaperMarkdown = useStore((s) => s.setPaperMarkdown);
+  const readerFontScale = useStore((s) => s.uiPrefs.readerFontScale);
+  const readerFontFamily = useStore((s) => s.uiPrefs.readerFontFamily);
   const containerRef = useRef<HTMLDivElement>(null);
   const [pages, setPages] = useState<string[]>([]);
   const [loading, setLoading] = useState(!entry);
@@ -64,6 +76,15 @@ export function MarkdownReader({
   const [currentPage, setCurrentPage] = useState(1);
 
   const { showBanner, dismissBanner } = useReaderHighlights(paperId, containerRef);
+
+  const readerStyle = useMemo(
+    () =>
+      ({
+        "--reader-font-scale": readerFontScale,
+        "--reader-font-family": READER_FAMILY_TO_VAR[readerFontFamily],
+      }) as CSSProperties,
+    [readerFontScale, readerFontFamily],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +115,10 @@ export function MarkdownReader({
             : [];
 
         const hydrated = await Promise.all(
-          rawPages.map((page) => hydrateMarkdownImages(page, paperId, trial)),
+          rawPages.map(async (page) => {
+            const withCaptions = wrapFigureCaptions(page);
+            return hydrateMarkdownImages(withCaptions, paperId, trial);
+          }),
         );
 
         if (!cancelled) {
@@ -115,33 +139,53 @@ export function MarkdownReader({
     };
   }, [paperId, trial, entry, setPaperMarkdown]);
 
+  const commitSelection = useCallback(() => {
+    const root = containerRef.current;
+    if (!root) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    if (!root.contains(range.commonAncestorContainer)) return;
+    const text = sel.toString().trim();
+    if (text.length < 2) return;
+    const rects = range.getClientRects();
+    const rect = rects.length > 0 ? rects[rects.length - 1] : range.getBoundingClientRect();
+    onTextSelected?.(text, rect);
+  }, [onTextSelected]);
+
   useEffect(() => {
     const root = containerRef.current;
     if (!root) return;
 
-    const onSelectionChange = () => {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || !sel.rangeCount) {
-        onSelectionClear?.();
-        return;
+    const onPointerUp = (e: Event) => {
+      if (e.target instanceof Node && root.contains(e.target)) {
+        requestAnimationFrame(() => commitSelection());
       }
-      const range = sel.getRangeAt(0);
-      if (!root.contains(range.commonAncestorContainer)) {
-        onSelectionClear?.();
-        return;
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift" || e.key.startsWith("Arrow") || e.key === "a" && (e.metaKey || e.ctrlKey)) {
+        requestAnimationFrame(() => commitSelection());
       }
-      const text = sel.toString().trim();
-      if (text.length < 2) {
+      if (e.key === "Escape") onSelectionClear?.();
+    };
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.target instanceof Node && root.contains(e.target)) {
         onSelectionClear?.();
-        return;
       }
-      const rect = range.getBoundingClientRect();
-      onTextSelected?.(text, rect);
     };
 
-    document.addEventListener("selectionchange", onSelectionChange);
-    return () => document.removeEventListener("selectionchange", onSelectionChange);
-  }, [onTextSelected, onSelectionClear]);
+    root.addEventListener("mouseup", onPointerUp);
+    root.addEventListener("touchend", onPointerUp);
+    root.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keyup", onKeyUp);
+
+    return () => {
+      root.removeEventListener("mouseup", onPointerUp);
+      root.removeEventListener("touchend", onPointerUp);
+      root.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keyup", onKeyUp);
+    };
+  }, [commitSelection, onSelectionClear, pages.length]);
 
   useEffect(() => {
     const root = containerRef.current;
@@ -202,9 +246,9 @@ export function MarkdownReader({
   }
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col" style={readerStyle}>
       {showBanner && (
-        <div className="border-b border-border/40 bg-muted/[0.08] px-4 py-2 text-[var(--text-xs)] text-muted-foreground">
+        <div className="reader-chrome border-b border-border/40 bg-muted/[0.08] px-4 py-2 text-[var(--text-xs)] text-muted-foreground">
           Highlights saved with PDF coordinates appear in the original PDF view. Text highlights are shown here when
           we can match the passage.
           <button type="button" onClick={dismissBanner} className="ml-2 underline hover:text-foreground">
@@ -212,11 +256,16 @@ export function MarkdownReader({
           </button>
         </div>
       )}
-      {pages.length > 1 && (
-        <div className="sticky top-0 z-10 border-b border-border/40 bg-background/90 px-4 py-2 text-[var(--text-xs)] tabular-nums text-muted-foreground backdrop-blur-sm">
-          Page {currentPage} of {pages.length}
-        </div>
-      )}
+      <div className="reader-chrome sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border/40 bg-muted/[0.08] px-4 py-2 backdrop-blur-sm">
+        {pages.length > 1 ? (
+          <span className="text-[var(--text-xs)] tabular-nums text-muted-foreground">
+            Page {currentPage} of {pages.length}
+          </span>
+        ) : (
+          <span className="text-[var(--text-xs)] text-muted-foreground/70">Readable view</span>
+        )}
+        <ReaderFontMenu />
+      </div>
       <div
         ref={containerRef}
         className={cn(
@@ -224,7 +273,7 @@ export function MarkdownReader({
           "[scrollbar-gutter:stable]",
         )}
       >
-        <article className="prose prose-neutral dark:prose-invert mx-auto max-w-3xl px-6 py-8 font-display analysis-content">
+        <article className="reader-article mx-auto max-w-[68ch] px-6 py-8 md:px-14">
           {rendered}
         </article>
       </div>

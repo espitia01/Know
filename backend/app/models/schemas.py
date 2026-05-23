@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -15,6 +17,8 @@ class OcrImage(BaseModel):
     page: int
     bbox: list[float] | None = None
     caption: str = ""
+    kind: Literal["figure", "panel"] = "panel"
+    panel_ids: list[str] | None = None
 
 
 class Reference(BaseModel):

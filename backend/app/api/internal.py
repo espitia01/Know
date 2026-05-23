@@ -123,6 +123,41 @@ async def internal_paper_text(paper_id: str, user_id: str):
     }
 
 
+@router.get("/paper/{paper_id}/pdf", dependencies=[Depends(require_internal_bearer)])
+async def internal_paper_pdf(paper_id: str, user_id: str):
+    """Stream the original PDF for a paper (Next.js proxy uses this)."""
+    _validate_id(paper_id, "paper_id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Missing user_id")
+
+    from ..services.db import get_paper_meta
+    from ..services import storage as cloud_storage
+    from ..config import settings
+
+    if not get_paper_meta(paper_id, user_id=user_id):
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    pdf_path = settings.papers_dir / f"{paper_id}.pdf"
+    if pdf_path.exists():
+        return FileResponse(
+            str(pdf_path),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{paper_id}.pdf"'},
+        )
+
+    pdf_bytes = cloud_storage.download_file(user_id, f"{paper_id}.pdf")
+    if pdf_bytes:
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.write_bytes(pdf_bytes)
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'inline; filename="{paper_id}.pdf"'},
+        )
+
+    raise HTTPException(status_code=404, detail="PDF not found")
+
+
 # ----------------------------------------------------------------
 # User model preferences (Settings → analysis / fast model)
 # ----------------------------------------------------------------

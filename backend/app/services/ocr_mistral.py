@@ -7,6 +7,7 @@ import binascii
 import logging
 import re
 from dataclasses import dataclass, field
+from typing import Literal
 
 import httpx
 
@@ -18,11 +19,30 @@ logger = logging.getLogger(__name__)
 MISTRAL_OCR_URL = "https://api.mistral.ai/v1/ocr"
 MISTRAL_OCR_MODEL = "mistral-ocr-latest"
 MAX_OCR_PAGES = 500
-_OCR_IMAGE_ID_RE = re.compile(r"^p\d+-img-\d+\.png$")
+_OCR_PANEL_ID_RE = re.compile(r"^p\d+-img-\d+\.png$")
+_OCR_COMPOSITE_ID_RE = re.compile(r"^fig-\d+\.png$")
+_PANEL_IMG_MD_RE = re.compile(r"!\[[^\]]*\]\((p\d+-img-\d+\.png)\)")
+_BARE_PANEL_RE = re.compile(r"^(p\d+-img-\d+\.png)\s*$")
+_CAPTION_START_RE = re.compile(r"^(Fig\.?\s+\d+\.|Figure\s+\d+\.)", re.IGNORECASE)
+_FIG_CAP_MD_RE = re.compile(
+    r"^(Fig\.?\s+\d+[.:][^\n]*|Figure\s+\d+[.:][^\n]*)",
+    re.IGNORECASE | re.MULTILINE,
+)
+_COMPOSITE_BBOX_PAD_PX = 12
 
 
 class MistralOcrUnavailable(Exception):
     """Raised when the Mistral API key is not configured."""
+
+
+@dataclass
+class FigureGroup:
+    figure_id: str
+    page: int
+    caption: str
+    panel_image_ids: list[str]
+    bbox: tuple[float, float, float, float] | None
+    dpi: int = 200
 
 
 @dataclass
@@ -81,6 +101,253 @@ def _rewrite_image_refs(markdown: str, mapping: dict[str, str]) -> str:
             flags=re.MULTILINE,
         )
     return out
+
+
+def _union_panel_bbox(
+    panel_ids: list[str],
+    panels_by_id: dict[str, OcrImage],
+    pad: float = _COMPOSITE_BBOX_PAD_PX,
+) -> tuple[float, float, float, float] | None:
+    xs0: list[float] = []
+    ys0: list[float] = []
+    xs1: list[float] = []
+    ys1: list[float] = []
+    for pid in panel_ids:
+        entry = panels_by_id.get(pid)
+        if not entry or not entry.bbox or len(entry.bbox) != 4:
+            continue
+        x0, y0, x1, y1 = entry.bbox
+        xs0.append(float(x0))
+        ys0.append(float(y0))
+        xs1.append(float(x1))
+        ys1.append(float(y1))
+    if not xs0:
+        return None
+    return (
+        max(0.0, min(xs0) - pad),
+        max(0.0, min(ys0) - pad),
+        max(xs1) + pad,
+        max(ys1) + pad,
+    )
+
+
+def group_panels_into_figures(
+    page_index: int,
+    page_markdown: str,
+    panels_by_id: dict[str, OcrImage],
+    figure_counter: list[int],
+    dpi: int = 200,
+) -> tuple[str, list[FigureGroup]]:
+    """Cluster consecutive panel image refs before a Fig. N caption into one figure group."""
+    lines = page_markdown.splitlines()
+    out_lines: list[str] = []
+    pending_panel_ids: list[str] = []
+    groups: list[FigureGroup] = []
+    i = 0
+
+    def flush_orphan_panels() -> None:
+        nonlocal pending_panel_ids
+        if not pending_panel_ids:
+            return
+        fig_num = figure_counter[0]
+        figure_counter[0] += 1
+        figure_id = f"fig-{fig_num}.png"
+        groups.append(
+            FigureGroup(
+                figure_id=figure_id,
+                page=page_index,
+                caption="",
+                panel_image_ids=list(pending_panel_ids),
+                bbox=_union_panel_bbox(pending_panel_ids, panels_by_id),
+                dpi=dpi,
+            ),
+        )
+        out_lines.append(f"![figure]({figure_id})")
+        pending_panel_ids = []
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        panel_from_md = _PANEL_IMG_MD_RE.fullmatch(stripped)
+        bare_panel = _BARE_PANEL_RE.match(stripped)
+        if panel_from_md:
+            pending_panel_ids.append(panel_from_md.group(1))
+            i += 1
+            continue
+        if bare_panel:
+            pending_panel_ids.append(bare_panel.group(1))
+            i += 1
+            continue
+
+        if _CAPTION_START_RE.match(stripped) and pending_panel_ids:
+            fig_num = figure_counter[0]
+            figure_counter[0] += 1
+            figure_id = f"fig-{fig_num}.png"
+            caption = stripped
+            groups.append(
+                FigureGroup(
+                    figure_id=figure_id,
+                    page=page_index,
+                    caption=caption,
+                    panel_image_ids=list(pending_panel_ids),
+                    bbox=_union_panel_bbox(pending_panel_ids, panels_by_id),
+                    dpi=dpi,
+                ),
+            )
+            out_lines.append(f"![figure]({figure_id})")
+            out_lines.append(line)
+            pending_panel_ids = []
+            i += 1
+            continue
+
+        if pending_panel_ids and stripped and not _PANEL_IMG_MD_RE.search(line):
+            flush_orphan_panels()
+
+        out_lines.append(line)
+        i += 1
+
+    if pending_panel_ids:
+        flush_orphan_panels()
+
+    return "\n".join(out_lines), groups
+
+
+def render_composite_from_pdf(
+    pdf_bytes: bytes,
+    fig: FigureGroup,
+) -> bytes | None:
+    """Clip the source PDF to the union bbox of OCR panels."""
+    if not fig.bbox:
+        return None
+    try:
+        import fitz  # PyMuPDF
+
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if fig.page < 0 or fig.page >= len(doc):
+            doc.close()
+            return None
+        page = doc[fig.page]
+        x0, y0, x1, y1 = fig.bbox
+        scale = 72.0 / max(fig.dpi, 1)
+        rect = fitz.Rect(x0 * scale, y0 * scale, x1 * scale, y1 * scale)
+        pix = page.get_pixmap(clip=rect, dpi=200)
+        data = pix.tobytes("png")
+        doc.close()
+        return data
+    except Exception:
+        logger.warning(
+            "Composite figure render failed for %s page %s",
+            fig.figure_id,
+            fig.page,
+            exc_info=True,
+        )
+        return None
+
+
+def apply_composite_figures(
+    pdf_bytes: bytes,
+    paper_id: str,
+    user_id: str | None,
+    page_markdown: list[str],
+    manifest: list[OcrImage],
+    page_meta: list[tuple[int, int]],
+) -> tuple[list[str], list[OcrImage]]:
+    """Group OCR panel crops into composite figures rendered from the source PDF."""
+    panels_by_id = {img.id: img for img in manifest}
+    for img in manifest:
+        if not img.kind:
+            img.kind = "panel"
+
+    figure_counter = [1]
+    new_pages: list[str] = []
+    composite_manifest: list[OcrImage] = []
+    pending_composites: list[tuple[str, bytes]] = []
+
+    for idx, md in enumerate(page_markdown):
+        page_index, dpi = page_meta[idx] if idx < len(page_meta) else (idx, 200)
+        rewritten, groups = group_panels_into_figures(
+            page_index,
+            md,
+            panels_by_id,
+            figure_counter,
+            dpi=dpi,
+        )
+
+        page_composites: list[OcrImage] = []
+        page_pending: list[tuple[str, bytes]] = []
+        all_rendered = bool(groups)
+
+        for group in groups:
+            png = render_composite_from_pdf(pdf_bytes, group)
+            if not png:
+                all_rendered = False
+                continue
+            page_pending.append((group.figure_id, png))
+            page_composites.append(
+                OcrImage(
+                    id=group.figure_id,
+                    page=group.page,
+                    bbox=list(group.bbox) if group.bbox else None,
+                    caption=group.caption,
+                    kind="figure",
+                    panel_ids=list(group.panel_image_ids),
+                ),
+            )
+
+        if groups and all_rendered:
+            new_pages.append(rewritten)
+            composite_manifest.extend(page_composites)
+            pending_composites.extend(page_pending)
+        else:
+            new_pages.append(md)
+
+    if pending_composites:
+        _persist_ocr_images(paper_id, user_id, pending_composites)
+
+    if composite_manifest:
+        return new_pages, composite_manifest + [img for img in manifest if img.kind == "panel"]
+
+    return page_markdown, manifest
+
+
+def recomposite_figures_for_paper(
+    pdf_bytes: bytes,
+    paper_id: str,
+    user_id: str | None,
+    page_markdown: list[str],
+    manifest: list[OcrImage],
+) -> tuple[list[str], list[OcrImage]]:
+    """Re-run compositing from cached markdown (no Mistral API call)."""
+    page_meta: list[tuple[int, int]] = []
+    for i, md in enumerate(page_markdown):
+        match = re.search(r"p(\d+)-img", md)
+        page_index = int(match.group(1)) if match else i
+        page_meta.append((page_index, 200))
+
+    panel_manifest = [
+        OcrImage(
+            id=img.id,
+            page=img.page,
+            bbox=img.bbox,
+            caption=img.caption or "",
+            kind="panel",
+            panel_ids=img.panel_ids,
+        )
+        for img in manifest
+        if _OCR_PANEL_ID_RE.match(img.id)
+    ]
+    if not panel_manifest:
+        return page_markdown, manifest
+
+    return apply_composite_figures(
+        pdf_bytes,
+        paper_id,
+        user_id,
+        page_markdown,
+        panel_manifest,
+        page_meta,
+    )
 
 
 def _persist_ocr_images(
@@ -167,6 +434,7 @@ async def run_mistral_ocr(
 
     page_limit = min(len(pages), MAX_OCR_PAGES)
     page_markdown: list[str] = []
+    page_meta: list[tuple[int, int]] = []
     manifest: list[OcrImage] = []
     pending_images: list[tuple[str, bytes]] = []
 
@@ -174,6 +442,9 @@ async def run_mistral_ocr(
         if not isinstance(page, dict):
             continue
         page_index = int(page.get("index", len(page_markdown)))
+        dims = page.get("dimensions") if isinstance(page.get("dimensions"), dict) else {}
+        dpi = int(dims.get("dpi") or 200) if dims else 200
+        page_meta.append((page_index, dpi))
         md = str(page.get("markdown") or "")
         images = page.get("images") or []
         id_map: dict[str, str] = {}
@@ -201,7 +472,9 @@ async def run_mistral_ocr(
                 if isinstance(raw_b64, str) and raw_b64.strip():
                     pending_images.append((new_id, _decode_image_bytes(raw_b64)))
 
-                manifest.append(OcrImage(id=new_id, page=page_index, bbox=bbox))
+                manifest.append(
+                    OcrImage(id=new_id, page=page_index, bbox=bbox, kind="panel"),
+                )
 
         rewritten = _rewrite_image_refs(md, id_map)
         page_markdown.append(rewritten)
@@ -212,6 +485,15 @@ async def run_mistral_ocr(
                     entry.caption = cap
 
     _persist_ocr_images(paper_id, user_id, pending_images)
+
+    page_markdown, manifest = apply_composite_figures(
+        pdf_bytes,
+        paper_id,
+        user_id,
+        page_markdown,
+        manifest,
+        page_meta,
+    )
 
     joined = "\n\n---\n\n".join(page_markdown)
     if not joined.strip():
@@ -227,10 +509,10 @@ async def run_mistral_ocr(
 
 
 def validate_ocr_image_id(image_id: str) -> str:
-    if not _OCR_IMAGE_ID_RE.match(image_id or ""):
-        raise ValueError("invalid image_id")
-    return image_id
+    if _OCR_PANEL_ID_RE.match(image_id or "") or _OCR_COMPOSITE_ID_RE.match(image_id or ""):
+        return image_id
+    raise ValueError("invalid image_id")
 
 
 def is_ocr_image_id(image_id: str) -> bool:
-    return bool(_OCR_IMAGE_ID_RE.match(image_id or ""))
+    return bool(_OCR_PANEL_ID_RE.match(image_id or "") or _OCR_COMPOSITE_ID_RE.match(image_id or ""))

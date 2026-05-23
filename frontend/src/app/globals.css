@@ -924,6 +924,139 @@
 }
 
 /* ────────────────────────────────────────────────────────────────────────
+   Mistral OCR reader (journal-style markdown)
+   ──────────────────────────────────────────────────────────────────── */
+.reader-article {
+  font-family: var(
+    --reader-font-family,
+    'Charter',
+    'Iowan Old Style',
+    'Source Serif Pro',
+    Georgia,
+    serif
+  );
+  font-size: calc(16px * var(--reader-font-scale, 1));
+  line-height: 1.75;
+  color: var(--foreground);
+}
+
+.reader-article h1 {
+  font-size: calc(28px * var(--reader-font-scale, 1));
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  margin: 0 0 0.75em;
+}
+
+.reader-article h2 {
+  font-size: calc(13px * var(--reader-font-scale, 1));
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1.35;
+  margin: 1.5em 0 0.65em;
+  padding-bottom: 0.45em;
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+}
+
+.reader-article h3 {
+  font-size: calc(16px * var(--reader-font-scale, 1));
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 1.25em 0 0.5em;
+}
+
+.reader-article p {
+  margin: 0 0 1em;
+}
+
+.reader-article p:last-child {
+  margin-bottom: 0;
+}
+
+.reader-article .reader-figure-caption,
+.reader-article figcaption.reader-figure-caption {
+  font-size: calc(12.5px * var(--reader-font-scale, 1));
+  font-style: italic;
+  color: color-mix(in oklab, var(--muted-foreground) 88%, transparent);
+  line-height: 1.45;
+  margin: 0.35em 0 1.1em;
+}
+
+.reader-article img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 1em auto;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+}
+
+.reader-article ol {
+  padding-left: 2em;
+  margin: 0 0 1em;
+}
+
+.reader-article ol li {
+  text-indent: -2em;
+  padding-left: 2em;
+  margin-bottom: 0.45em;
+}
+
+.reader-article ul {
+  padding-left: 1.35em;
+  margin: 0 0 1em;
+}
+
+.reader-article ul li {
+  margin-bottom: 0.35em;
+}
+
+.reader-article .katex {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: hidden;
+  vertical-align: baseline;
+}
+
+.reader-article .katex-display {
+  margin: 0.85em auto;
+  padding: 0.25rem 0;
+  overflow-x: auto;
+  max-width: 100%;
+  text-align: center;
+  display: block;
+}
+
+.reader-article .katex-display > .katex {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.reader-article blockquote {
+  margin: 1em 0;
+  padding-left: 1em;
+  border-left: 2px solid color-mix(in oklab, var(--border) 60%, transparent);
+  color: color-mix(in oklab, var(--muted-foreground) 90%, transparent);
+}
+
+.reader-article hr {
+  border: none;
+  border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+  margin: 1.5em 0;
+}
+
+@media print {
+  .reader-article {
+    max-width: none;
+    padding: 0;
+  }
+  .reader-chrome {
+    display: none !important;
+  }
+}
+
+/* ────────────────────────────────────────────────────────────────────────
    Animations — tamer and reduced-motion safe (see @media query above)
    ──────────────────────────────────────────────────────────────────── */
 @keyframes fade-in {

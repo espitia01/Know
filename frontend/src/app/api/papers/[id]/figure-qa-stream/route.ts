@@ -37,7 +37,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const PAPER_ID_RE = /^[a-zA-Z0-9_-]+$/;
-const OCR_FIGURE_ID_RE = /^p\d+-img-\d+\.png$/;
+const OCR_FIGURE_ID_RE = /^p\d+-img-\d+\.png$|^fig-\d+\.png$/;
 
 function isValidFigureId(id: string): boolean {
   return PAPER_ID_RE.test(id) || OCR_FIGURE_ID_RE.test(id);
