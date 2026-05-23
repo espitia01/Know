@@ -145,6 +145,83 @@ function wrapBylineParagraph(markdown: string): string {
   return wrapped.join("\n");
 }
 
+/**
+ * Detect and strip the repeating page headers/footers that journals
+ * insert on every page (e.g. "VOLUME 90 NUMBER 7 PHYSICAL REVIEW
+ * LETTERS"). Any short line that appears in ≥2 pages near the top or
+ * bottom is treated as chrome.
+ */
+function stripRunningHeadersFooters(pages: string[]): string[] {
+  if (pages.length < 2) return pages;
+  const SAMPLE = 4; // first/last N non-blank lines per page
+  const counts = new Map<string, number>();
+  const sample: string[][] = pages.map((p) => {
+    const lines = p.split("\n");
+    const nonBlank = lines.filter((l) => l.trim());
+    const head = nonBlank.slice(0, SAMPLE);
+    const tail = nonBlank.slice(-SAMPLE);
+    return [...new Set([...head, ...tail])];
+  });
+  for (const set of sample) {
+    for (const line of set) {
+      // Only consider short lines (<= 140 chars) that aren't headings or images.
+      const t = line.trim();
+      if (!t || t.length > 140) continue;
+      if (t.startsWith("#") || t.startsWith("!") || t.startsWith("|")) continue;
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+  }
+  const threshold = Math.max(2, Math.ceil(pages.length * 0.5));
+  const drop = new Set(
+    [...counts.entries()]
+      .filter(([, n]) => n >= threshold)
+      .map(([k]) => k),
+  );
+  if (drop.size === 0) return pages;
+  return pages.map((p) =>
+    p
+      .split("\n")
+      .filter((l) => !drop.has(l.trim()))
+      .join("\n"),
+  );
+}
+
+/**
+ * Merge consecutive short paragraphs whose content is a single
+ * `$x$` inline math (1-3 chars) — these are OCR-fallback artifacts
+ * where stacked superscripts or column breaks fragment a single
+ * token across multiple lines.
+ */
+function collapseFragmentedMathParagraphs(markdown: string): string {
+  const lines = markdown.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (!/^\$[^$]{1,3}\$$/.test(line.trim())) {
+      out.push(line);
+      i += 1;
+      continue;
+    }
+    const collected: string[] = [line.trim()];
+    let j = i + 1;
+    while (
+      j < lines.length &&
+      (lines[j].trim() === "" || /^\$[^$]{1,3}\$$/.test(lines[j].trim()))
+    ) {
+      if (lines[j].trim()) collected.push(lines[j].trim());
+      j += 1;
+    }
+    if (collected.length > 1) {
+      out.push(collected.join(" "));
+    } else {
+      out.push(line);
+    }
+    i = j;
+  }
+  return out.join("\n");
+}
+
 async function hydrateMarkdownImages(
   markdown: string,
   paperId: string,
@@ -192,10 +269,9 @@ export function MarkdownReader({
   const readerLayoutWidth = useStore((s) => s.uiPrefs.readerLayoutWidth);
   const readerLayoutStyle = useStore((s) => s.uiPrefs.readerLayoutStyle);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [pages, setPages] = useState<string[]>([]);
+  const [body, setBody] = useState<string>("");
   const [loading, setLoading] = useState(!entry);
   const [error, setError] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
 
   const { showBanner, dismissBanner } = useReaderHighlights(paperId, containerRef);
 
@@ -236,21 +312,23 @@ export function MarkdownReader({
             ? [payload.markdown]
             : [];
 
-        const hydrated = await Promise.all(
-          rawPages.map(async (page, idx) => {
-            let prepared = page;
-            // Byline cleanup only runs on the first page — the cover.
-            if (idx === 0) {
-              prepared = collapseAuthorByline(prepared);
-              prepared = wrapBylineParagraph(prepared);
-            }
-            prepared = wrapFigureCaptions(prepared);
-            return hydrateMarkdownImages(prepared, paperId, trial);
-          }),
-        );
+        // Strip running headers/footers that appear on ≥2 pages so the
+        // body reads like a single document instead of a stack of
+        // identical journal mastheads.
+        const cleanedPages = stripRunningHeadersFooters(rawPages);
+
+        // Join all pages into one continuous document. The visual page
+        // breaks were a PDF artifact, not a structural one — sections
+        // flow across them.
+        let joined = cleanedPages.join("\n\n");
+        joined = collapseAuthorByline(joined);
+        joined = wrapBylineParagraph(joined);
+        joined = wrapFigureCaptions(joined);
+        joined = collapseFragmentedMathParagraphs(joined);
+        joined = await hydrateMarkdownImages(joined, paperId, trial);
 
         if (!cancelled) {
-          setPages(hydrated);
+          setBody(joined);
           setLoading(false);
         }
       } catch (e) {
@@ -314,69 +392,29 @@ export function MarkdownReader({
       root.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("keyup", onKeyUp);
     };
-  }, [commitSelection, onSelectionClear, pages.length]);
-
-  useEffect(() => {
-    const root = containerRef.current;
-    if (!root || pages.length < 2) return;
-
-    const sections = root.querySelectorAll<HTMLElement>("section[data-page]");
-    if (!sections.length) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        if (visible?.target instanceof HTMLElement) {
-          const page = Number(visible.target.dataset.page);
-          if (page > 0) setCurrentPage(page);
-        }
-      },
-      { root, threshold: [0.2, 0.5, 0.8] },
-    );
-
-    sections.forEach((s) => observer.observe(s));
-    return () => observer.disconnect();
-  }, [pages]);
+  }, [commitSelection, onSelectionClear, body]);
 
   const rendered = useMemo(() => {
-    if (!pages.length) return null;
+    if (!body) return null;
     const READER_ALLOWED_TAGS: Record<string, string[]> = {
       figcaption: ["class"],
       sup: [],
       sub: [],
       p: ["class"],
     };
-    if (pages.length === 1) {
-      return (
-        <Streamdown
-          plugins={STREAMDOWN_PLUGINS}
-          mode="static"
-          controls={false}
-          parseIncompleteMarkdown={false}
-          urlTransform={readerUrlTransform}
-          allowedTags={READER_ALLOWED_TAGS}
-        >
-          {pages[0]}
-        </Streamdown>
-      );
-    }
-    return pages.map((body, i) => (
-      <section key={i + 1} data-page={i + 1} className="scroll-mt-6">
-        <Streamdown
-          plugins={STREAMDOWN_PLUGINS}
-          mode="static"
-          controls={false}
-          parseIncompleteMarkdown={false}
-          urlTransform={readerUrlTransform}
-          allowedTags={READER_ALLOWED_TAGS}
-        >
-          {body}
-        </Streamdown>
-      </section>
-    ));
-  }, [pages]);
+    return (
+      <Streamdown
+        plugins={STREAMDOWN_PLUGINS}
+        mode="static"
+        controls={false}
+        parseIncompleteMarkdown={false}
+        urlTransform={readerUrlTransform}
+        allowedTags={READER_ALLOWED_TAGS}
+      >
+        {body}
+      </Streamdown>
+    );
+  }, [body]);
 
   if (loading) {
     return (
@@ -389,7 +427,7 @@ export function MarkdownReader({
     );
   }
 
-  if (error || !pages.length) {
+  if (error || !body) {
     return (
       <div className="flex h-full items-center justify-center px-6 text-center text-[var(--text-sm)] text-muted-foreground">
         {error || "No readable content yet."}
@@ -408,14 +446,7 @@ export function MarkdownReader({
           </button>
         </div>
       )}
-      <div className="reader-chrome sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border/40 bg-muted/[0.08] px-4 py-2 backdrop-blur-sm">
-        {pages.length > 1 ? (
-          <span className="text-[var(--text-xs)] tabular-nums text-muted-foreground">
-            Page {currentPage} of {pages.length}
-          </span>
-        ) : (
-          <span className="text-[var(--text-xs)] text-muted-foreground/70">Readable view</span>
-        )}
+      <div className="reader-chrome sticky top-0 z-10 flex items-center justify-end gap-2 border-b border-border/35 bg-background/85 px-4 py-1.5 backdrop-blur-md">
         <ReaderFontMenu />
       </div>
       <div

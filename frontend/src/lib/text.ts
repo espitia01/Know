@@ -50,12 +50,46 @@ function truncateWithMathAwareness(first: string, maxLen: number): string {
   return (lastSpace > 60 ? cut.slice(0, lastSpace) : cut).trim();
 }
 
+/**
+ * Mask out `$...$` / `$$...$$` spans with placeholder characters so the
+ * sentence-detection regex doesn't trip on periods inside math (e.g.
+ * `$0.5\,\mathrm{eV}$`). The mask preserves indices so we can re-extract
+ * the original text by offset.
+ */
+function maskMathSpans(s: string): string {
+  let out = "";
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === "$") {
+      const display = s[i + 1] === "$";
+      const open = display ? 2 : 1;
+      const close = display ? "$$" : "$";
+      const end = s.indexOf(close, i + open);
+      if (end < 0) {
+        // Unclosed math span — bail and keep the rest as-is.
+        out += s.slice(i);
+        break;
+      }
+      const span = s.slice(i, end + close.length);
+      out += span.replace(/[.?!]/g, "·");
+      i = end + close.length;
+      continue;
+    }
+    out += s[i];
+    i += 1;
+  }
+  return out;
+}
+
 /** First-sentence takeaway extractor. Sentence-aware, no mid-word cuts; math-safe. */
 export function firstSentence(input: string | null | undefined, maxLen = 240): string {
   const s = (input ?? "").trim();
   if (!s) return "";
-  const m = s.match(/[^.?!]+[.?!](?=\s+[A-Z(]|\s*$)/);
-  const first = (m ? m[0] : s).trim();
+  const masked = maskMathSpans(s);
+  const m = masked.match(/[^.?!]+[.?!](?=\s+[A-Z(]|\s*$)/);
+  // Use the matched length on the masked string to slice the original.
+  const sliceLen = m ? m[0].length : s.length;
+  const first = s.slice(0, sliceLen).trim();
   if (first.length <= maxLen) return first;
   return truncateWithMathAwareness(first, maxLen);
 }

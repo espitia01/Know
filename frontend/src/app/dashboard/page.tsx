@@ -18,6 +18,7 @@ import { GoogleDriveButton } from "@/components/upload/GoogleDriveButton";
 import { isGoogleDriveConfigured } from "@/lib/googleDrive";
 import { DISCORD_URL } from "@/lib/constants";
 import { PaperLoadingScreen } from "@/components/paper/PaperLoadingScreen";
+import { UploadToast } from "@/components/ui/UploadToast";
 import { markPaperFetched } from "@/lib/papersFreshness";
 import {
   KNOW_RECENT_PAPERS_CHANGED,
@@ -139,15 +140,24 @@ function DashboardContent() {
     async (file: File) => {
       setError("");
       setLoading(true);
+      const uploadId =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const { startUpload, finishUpload } = useStore.getState();
+      startUpload(uploadId, file.name);
       try {
         const paper = await api.uploadPaper(file);
         cachePaper(paper);
         addSessionPaper({ id: paper.id, title: paper.title });
         setPaper(paper);
         markPaperFetched(paper.id);
+        finishUpload(uploadId, true, paper.id);
         router.push(`/paper/${paper.id}`);
       } catch (e: unknown) {
-        setError(e instanceof Error ? e.message : "Upload failed");
+        const msg = e instanceof Error ? e.message : "Upload failed";
+        setError(msg);
+        finishUpload(uploadId, false, undefined, msg);
         setLoading(false);
       }
     },
@@ -276,6 +286,7 @@ function DashboardContent() {
 
   return (
     <main className="flex-1 flex flex-col items-center px-6 pt-[10vh] pb-12 bg-mesh min-h-screen text-foreground">
+      <UploadToast />
       <div className="absolute top-5 right-5 flex items-center gap-2">
         {tierUser?.tier === "free" && (
           <Link

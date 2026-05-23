@@ -17,15 +17,15 @@ export function PaperLoadingScreen({
   return (
     <div className="flex h-screen flex-1 items-center justify-center bg-background text-foreground">
       <div className="mx-auto w-full max-w-sm px-6 text-center motion-safe:animate-fade-in">
-        <div className="mx-auto mb-6 text-foreground/80">
-          <OwlSpinner size={56} label={title} />
+        <div className="mx-auto mb-5 text-foreground/70">
+          <OwlSpinner size={28} label={title} />
         </div>
-        <p className="font-display text-[15px] font-semibold tracking-[-0.02em] text-foreground">
+        <p className="font-display text-[14.5px] font-medium tracking-[-0.01em] text-foreground">
           {title}
         </p>
-        <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{subtitle}</p>
+        <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground/85">{subtitle}</p>
         {detail ? (
-          <p className="mt-1 text-[12px] text-muted-foreground/75">{detail}</p>
+          <p className="mt-1 text-[11.5px] text-muted-foreground/70">{detail}</p>
         ) : null}
       </div>
     </div>

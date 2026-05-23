@@ -52,6 +52,17 @@ export type ReaderFontFamily = "serif" | "sans" | "mono";
 export type ReaderLayoutWidth = "compact" | "standard" | "wide";
 export type ReaderLayoutStyle = "journal" | "modern" | "plain";
 
+export type UploadStatus = "uploading" | "succeeded" | "failed";
+export type UploadEntry = {
+  id: string;
+  filename: string;
+  status: UploadStatus;
+  startedAt: number;
+  finishedAt?: number;
+  paperId?: string;
+  error?: string;
+};
+
 export type PdfRegionHighlight = {
   id: string;
   pageNum: number;
@@ -160,6 +171,17 @@ interface AppStore {
 
   marqueeMode: boolean;
   setMarqueeMode: (v: boolean) => void;
+
+  /**
+   * In-flight or recently-finished paper uploads. Used by the global
+   * upload toast so the user keeps seeing progress even after the
+   * upload popover closes.
+   */
+  uploads: UploadEntry[];
+  startUpload: (id: string, filename: string) => void;
+  finishUpload: (id: string, ok: boolean, paperId?: string, error?: string) => void;
+  dismissUpload: (id: string) => void;
+  clearFinishedUploads: () => void;
 
   /** Per-paper: pdf.js text layer empty on first pages (scanned PDF). Not persisted. */
   pdfTextLayerEmptyByPaper: Record<string, boolean>;
@@ -594,6 +616,35 @@ export const useStore = create<AppStore>()(
 
       marqueeMode: false,
       setMarqueeMode: (v) => set({ marqueeMode: v }),
+
+      uploads: [],
+      startUpload: (id, filename) =>
+        set((s) => ({
+          uploads: [
+            ...s.uploads.filter((u) => u.id !== id),
+            { id, filename, status: "uploading", startedAt: Date.now() },
+          ],
+        })),
+      finishUpload: (id, ok, paperId, error) =>
+        set((s) => ({
+          uploads: s.uploads.map((u) =>
+            u.id === id
+              ? {
+                  ...u,
+                  status: ok ? "succeeded" : "failed",
+                  finishedAt: Date.now(),
+                  paperId,
+                  error,
+                }
+              : u,
+          ),
+        })),
+      dismissUpload: (id) =>
+        set((s) => ({ uploads: s.uploads.filter((u) => u.id !== id) })),
+      clearFinishedUploads: () =>
+        set((s) => ({
+          uploads: s.uploads.filter((u) => u.status === "uploading"),
+        })),
 
       pdfTextLayerEmptyByPaper: {},
       setPdfTextLayerEmpty: (paperId, empty) =>

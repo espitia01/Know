@@ -19,6 +19,7 @@ import { BibtexModal } from "@/components/BibtexModal";
 import { CitationScopeModal } from "@/components/CitationScopeModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { KeyboardShortcuts } from "@/components/KeyboardShortcuts";
+import { UploadToast } from "@/components/ui/UploadToast";
 import { ComingSoonNavControl } from "@/components/reader/ComingSoonNavControl";
 import {
   WORKSPACE_FEATURES_COMING_SOON_TOOLTIP,
@@ -338,18 +339,17 @@ function AddPaperPopover({
     // reading while the rest finish in the background.
     let firstHandled = false;
     let firstError: string | null = null;
-    const { cachePaper, addSessionPaper } = useStore.getState();
+    const { cachePaper, addSessionPaper, startUpload, finishUpload } = useStore.getState();
 
     const tasks = files.map(async (file) => {
+      const uploadId =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `upload-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      startUpload(uploadId, file.name);
       try {
         const paper = await api.uploadPaper(file);
-        // Always register with the global store so the tab appears
-        // in the session bar regardless of which one finishes first
-        // and even if this component has already unmounted.
         cachePaper(paper);
-        // Track C2: pre-seed the freshness marker so the reader page
-        // doesn't waste a network round-trip refetching what the
-        // upload just returned.
         markPaperFetched(paper.id);
         const added = addSessionPaper({ id: paper.id, title: paper.title });
         if (!added && !firstError) {
@@ -359,10 +359,11 @@ function AddPaperPopover({
           firstHandled = true;
           onAdd(paper.id, paper.title);
         }
+        finishUpload(uploadId, true, paper.id);
       } catch (e) {
-        if (!firstError) {
-          firstError = e instanceof Error ? e.message : "Upload failed.";
-        }
+        const msg = e instanceof Error ? e.message : "Upload failed.";
+        if (!firstError) firstError = msg;
+        finishUpload(uploadId, false, undefined, msg);
       } finally {
         setUploadProgress((p) => ({ done: p.done + 1, total: p.total }));
       }
@@ -1821,6 +1822,7 @@ function PaperContent() {
   return (
     <>
     <KeyboardShortcuts />
+    <UploadToast />
     <div className="flex flex-col h-screen overflow-hidden">
       {/* Header — hidden in focus mode or when the user explicitly
           collapses the top bar. Keeping the element mounted would still

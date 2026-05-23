@@ -1,63 +1,47 @@
 "use client";
 
-import Image from "next/image";
-
 interface OwlSpinnerProps {
   size?: number;
   label?: string;
 }
 
 /**
- * Owl-themed loading spinner: the logo softly pulses inside a thin
- * orbiting progress ring. Used wherever a paper- or analysis-scoped
- * operation is in flight.
+ * Minimal modern spinner — a thin gradient arc that rotates over a faint
+ * track. No logo, no chrome. Sized via the `size` prop; color follows
+ * `currentColor` so callers control the tone with text-* utilities.
  */
-export function OwlSpinner({ size = 56, label }: OwlSpinnerProps) {
-  const ring = size + 16;
+export function OwlSpinner({ size = 32, label }: OwlSpinnerProps) {
+  const stroke = Math.max(2, Math.round(size * 0.08));
   return (
     <div
       role="status"
       aria-label={label || "Loading"}
       className="relative inline-flex items-center justify-center"
-      style={{ width: ring, height: ring }}
+      style={{ width: size, height: size }}
     >
       <svg
-        className="absolute inset-0 motion-safe:animate-[owl-ring_2.4s_linear_infinite]"
-        viewBox={`0 0 ${ring} ${ring}`}
+        className="motion-safe:animate-[owl-ring_1s_linear_infinite]"
+        viewBox="0 0 32 32"
+        width={size}
+        height={size}
         fill="none"
         aria-hidden
       >
         <circle
-          cx={ring / 2}
-          cy={ring / 2}
-          r={ring / 2 - 2}
+          cx="16"
+          cy="16"
+          r="13"
           stroke="currentColor"
           strokeOpacity="0.12"
-          strokeWidth="2"
+          strokeWidth={stroke}
         />
-        <circle
-          cx={ring / 2}
-          cy={ring / 2}
-          r={ring / 2 - 2}
+        <path
+          d="M16 3 a13 13 0 0 1 11.26 6.5"
           stroke="currentColor"
-          strokeWidth="2"
+          strokeWidth={stroke}
           strokeLinecap="round"
-          strokeDasharray={`${(ring - 4) * 0.3} ${(ring - 4) * 0.7}`}
         />
       </svg>
-      <div
-        className="relative flex items-center justify-center rounded-2xl border border-border/45 bg-card/35 shadow-[var(--shadow-xs)] motion-safe:animate-[owl-pulse_2s_ease-in-out_infinite] dark:bg-card/22"
-        style={{ width: size, height: size }}
-      >
-        <Image
-          src="/logo.png"
-          alt=""
-          width={Math.round(size * 0.62)}
-          height={Math.round(size * 0.62)}
-          className="rounded-md opacity-90"
-          aria-hidden
-        />
-      </div>
       {label && <span className="sr-only">{label}</span>}
     </div>
   );

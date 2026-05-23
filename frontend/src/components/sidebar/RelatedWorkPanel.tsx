@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type CitedByItem } from "@/lib/api";
+import { useMemo, useRef, useState } from "react";
+import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { AnalysisSection } from "@/components/analysis/AnalysisSection";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
@@ -15,7 +15,7 @@ interface RelatedWorkPanelProps {
 }
 
 const RELATED_TAB_INTRO =
-  "Bibliography entries match the Cited by format below. Tap a row to open DOI, arXiv, PubMed, or Scholar when available.";
+  "Bibliography entries parsed from the paper. Tap a row to open DOI, arXiv, PubMed, or Scholar when available.";
 
 export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
   const preReading = useStore((s) => s.preReadingByPaper[paperId] ?? null);
@@ -30,26 +30,6 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
   const currentPaperRef = useRef(paperId);
   currentPaperRef.current = paperId;
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [citedBy, setCitedBy] = useState<CitedByItem[]>([]);
-  const [citedLoading, setCitedLoading] = useState(false);
-  const [citedError, setCitedError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setCitedLoading(true);
-    setCitedError(null);
-    void api.getCitedBy(paperId).then((res) => {
-      if (cancelled) return;
-      setCitedBy(res.items ?? []);
-      if (res.error === "s2_not_found") setCitedError("not_found");
-      setCitedLoading(false);
-    }).catch(() => {
-      if (cancelled) return;
-      setCitedError("fetch_failed");
-      setCitedLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [paperId]);
 
   const handleRunPrepare = async () => {
     const targetId = paperId;
@@ -138,52 +118,6 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
           <p className="mb-2 text-[var(--text-xs)] text-muted-foreground/80">{filteredNote}</p>
         ) : null}
         <ReferenceBibliographyList items={priorList} />
-      </AnalysisSection>
-
-      <AnalysisSection title="Cited by" count={citedBy.length}>
-        {citedLoading ? (
-          <p className="text-[var(--text-sm)] text-muted-foreground">Loading citing papers…</p>
-        ) : citedError === "not_found" ? (
-          <EmptyState title="Couldn't find this paper on Semantic Scholar." body="" />
-        ) : citedBy.length === 0 ? (
-          <EmptyState title="No known papers cite this one yet." body="" />
-        ) : (
-          <ol className="mt-3 list-none space-y-2.5 p-0">
-            {citedBy.map((item, i) => {
-              const authors = (item.authors ?? []).slice(0, 3).join(", ");
-              const href =
-                (item.doi ? `https://doi.org/${item.doi}` : "") ||
-                (item.arxiv ? `https://arxiv.org/abs/${item.arxiv}` : "") ||
-                item.url ||
-                (item.s2_id ? `https://www.semanticscholar.org/paper/${item.s2_id}` : "");
-              const label = `${authors}${authors ? " " : ""}(${item.year ?? "n.d."}) — ${item.title}`;
-              return (
-                <li key={item.s2_id || item.title} className="flex items-start gap-2.5">
-                  <span
-                    className="mt-px shrink-0 w-6 text-right text-[var(--text-xs)] tabular-nums text-muted-foreground/70"
-                    aria-hidden
-                  >
-                    {i + 1}.
-                  </span>
-                  <div className="min-w-0 flex-1 pt-px text-[var(--text-sm)] leading-relaxed text-foreground/90">
-                    {href ? (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="underline-offset-[3px] hover:underline decoration-border/60"
-                      >
-                        {label}
-                      </a>
-                    ) : (
-                      label
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-        )}
       </AnalysisSection>
 
       <div>

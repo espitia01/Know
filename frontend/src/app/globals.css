@@ -966,15 +966,26 @@
 }
 
 .reader-article h2 {
-  font-size: clamp(11px, calc(0.72rem + 0.05cqw), 13px);
-  font-weight: 600;
-  letter-spacing: 0.12em;
+  font-size: clamp(11.5px, calc(0.74rem + 0.04cqw), 13px);
+  font-weight: 700;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  line-height: 1.35;
-  margin: 1.8em 0 0.7em;
-  padding-bottom: 0.5em;
-  border-bottom: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
-  color: color-mix(in oklab, var(--foreground) 92%, transparent);
+  line-height: 1.4;
+  margin: 2.25em 0 0.85em;
+  padding-bottom: 0.55em;
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+  color: color-mix(in oklab, var(--foreground) 88%, transparent);
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+}
+
+.reader-article h2::before {
+  content: "";
+  width: 4px;
+  height: 0.85em;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--foreground) 35%, transparent);
 }
 
 .reader-article h3 {
@@ -1041,10 +1052,18 @@
   display: block;
   max-width: 100%;
   height: auto;
-  margin: 1.5em auto 0.65em;
-  border-radius: var(--radius-md);
-  border: 1px solid color-mix(in oklab, var(--border) 50%, transparent);
+  margin: 1.75em auto 0.7em;
+  border-radius: var(--radius-lg);
+  border: 1px solid color-mix(in oklab, var(--border) 45%, transparent);
   background: var(--background);
+  box-shadow: 0 1px 3px color-mix(in oklab, var(--foreground) 6%, transparent);
+}
+
+/* Soft hover lift for figures to suggest interactivity (clickable
+   lightbox is on the analysis-pane Figures tab; here we just give it
+   a subtle modern affordance). */
+.reader-article img:hover {
+  box-shadow: 0 4px 14px color-mix(in oklab, var(--foreground) 10%, transparent);
 }
 
 .reader-article ol {
@@ -1159,10 +1178,18 @@
   border-bottom: none;
   padding-bottom: 0;
   margin-top: 1.6em;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.reader-shell[data-style="modern"] .reader-article h2::before {
+  display: none;
 }
 .reader-shell[data-style="plain"] .reader-article h2 {
   border-bottom: none;
   padding-bottom: 0;
+}
+.reader-shell[data-style="plain"] .reader-article h2::before {
+  display: none;
 }
 
 @container reader (max-width: 520px) {
