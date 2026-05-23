@@ -1140,18 +1140,28 @@
   border-bottom-width: 2px;
 }
 
-/* ---- Layout widths ---- */
+/* ---- Layout widths ----
+   The outer .reader-shell already fills the analysis pane; max-width on
+   the article controls the actual measure. We pair each width with a
+   matching vertical rhythm so going Wide actually feels wider, not just
+   "same paragraphs, less margin". */
 .reader-shell[data-layout="compact"] .reader-article {
-  max-width: 56ch;
+  max-width: 52ch;
+  line-height: 1.78;
 }
 .reader-shell[data-layout="standard"] .reader-article {
   max-width: 68ch;
+  line-height: 1.7;
 }
 .reader-shell[data-layout="wide"] .reader-article {
-  max-width: 86ch;
+  max-width: 92ch;
+  line-height: 1.62;
+  letter-spacing: -0.003em;
 }
 
-/* ---- Layout styles ---- */
+/* ---- Layout styles ----
+   Style controls family, heading treatment, and chrome density. Each
+   variant looks distinct at-a-glance so the picker is meaningful. */
 .reader-shell[data-style="journal"] .reader-article {
   font-family: var(
     --reader-font-family,
@@ -1161,6 +1171,12 @@
     Georgia,
     serif
   );
+  --reader-section-bar: 1;
+}
+
+.reader-shell[data-style="modern"] {
+  /* Higher contrast headings + sans body + numbered-section feel. */
+  --reader-section-bar: 0;
 }
 .reader-shell[data-style="modern"] .reader-article {
   font-family: var(
@@ -1169,27 +1185,53 @@
     system-ui,
     sans-serif
   );
-  line-height: 1.65;
+  line-height: 1.7;
+  font-feature-settings: "ss01" on, "ss02" on;
+}
+.reader-shell[data-style="modern"] .reader-article h1 {
+  font-weight: 700;
 }
 .reader-shell[data-style="modern"] .reader-article h2 {
   text-transform: none;
   letter-spacing: -0.005em;
-  font-size: clamp(15px, calc(1rem + 0.1cqw), 18px);
+  font-size: clamp(16px, calc(1.05rem + 0.1cqw), 19px);
   border-bottom: none;
   padding-bottom: 0;
-  margin-top: 1.6em;
-  font-weight: 600;
+  margin-top: 1.85em;
+  font-weight: 700;
   color: var(--foreground);
 }
 .reader-shell[data-style="modern"] .reader-article h2::before {
   display: none;
 }
+.reader-shell[data-style="modern"] .reader-article p {
+  margin-bottom: 1.05em;
+}
+
+.reader-shell[data-style="plain"] {
+  --reader-section-bar: 0;
+}
 .reader-shell[data-style="plain"] .reader-article h2 {
   border-bottom: none;
   padding-bottom: 0;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  color: color-mix(in oklab, var(--muted-foreground) 92%, transparent);
 }
 .reader-shell[data-style="plain"] .reader-article h2::before {
   display: none;
+}
+.reader-shell[data-style="plain"] .reader-article {
+  background: transparent;
+}
+.reader-shell[data-style="plain"] .reader-article img {
+  border: none;
+  box-shadow: none;
+}
+
+/* Section bar respects style preference. */
+.reader-article h2::before {
+  opacity: var(--reader-section-bar, 1);
 }
 
 @container reader (max-width: 520px) {

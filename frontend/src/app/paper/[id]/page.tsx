@@ -2109,9 +2109,16 @@ function PaperContent() {
           <button
             type="button"
             onClick={() => window.open(api.getPdfUrl(activePaperId), "_blank", "noopener,noreferrer")}
-            className="hidden sm:inline text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            title="Open the original PDF in a new tab"
+            className="hidden sm:inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/55 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/85 shadow-[var(--shadow-xs)] backdrop-blur-sm transition-[color,background-color,border-color] hover:border-border hover:bg-accent/35 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
-            View original PDF
+            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6M9 16h6M9 8h6M5 6.75A1.75 1.75 0 016.75 5h7.5L19 9.75v7.5A1.75 1.75 0 0117.25 19H6.75A1.75 1.75 0 015 17.25V6.75z" />
+            </svg>
+            <span>Original PDF</span>
+            <svg className="h-3 w-3 text-muted-foreground/70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H18m0 0v4.5M18 6l-7 7M19.5 13.5V18a1.5 1.5 0 01-1.5 1.5H6A1.5 1.5 0 014.5 18V6A1.5 1.5 0 016 4.5h4.5" />
+            </svg>
           </button>
         )}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback, type CSSProperties, type ImgHTMLAttributes } from "react";
 import { Streamdown } from "streamdown";
 import { createMathPlugin } from "@streamdown/math";
 import { code } from "@streamdown/code";
@@ -16,7 +16,7 @@ import { ReaderFontMenu } from "./ReaderFontMenu";
 const math = createMathPlugin({ singleDollarTextMath: true });
 const STREAMDOWN_PLUGINS = { math, code };
 
-const OCR_IMAGE_RE = /(?:p\d+-img-\d+|fig-\d+)\.png/g;
+const OCR_IMAGE_RE = /^(?:p\d+-img-\d+|fig-\d+)\.png$/;
 const ocrBlobCache = new Map<string, string>();
 
 /**
@@ -222,31 +222,156 @@ function collapseFragmentedMathParagraphs(markdown: string): string {
   return out.join("\n");
 }
 
-async function hydrateMarkdownImages(
-  markdown: string,
-  paperId: string,
-  trial: boolean,
-): Promise<string> {
-  const ids = [...new Set(markdown.match(OCR_IMAGE_RE) ?? [])];
-  if (!ids.length) return markdown;
-
-  const headers = trial ? undefined : getAuthHeadersSync();
-  let out = markdown;
-  await Promise.all(
-    ids.map(async (id) => {
-      const cacheKey = `${paperId}:${id}`;
-      let blobUrl = ocrBlobCache.get(cacheKey);
-      if (!blobUrl) {
-        const res = await fetch(api.getOcrImageUrl(paperId, id, trial), { headers });
-        if (!res.ok) return;
-        const blob = await res.blob();
-        blobUrl = URL.createObjectURL(blob);
-        ocrBlobCache.set(cacheKey, blobUrl);
+/**
+ * Drop Mistral OCR's ASCII-fallback duplication. Mistral often emits
+ * each glyph of a math token as its own line BEFORE the full text run,
+ * yielding patterns like:
+ *
+ *     within the first-principles
+ *     G
+ *     W
+ *     GW-Bethe-Salpeter-equation
+ *
+ * If we see a run of ≥2 short alphanumeric-only lines that concatenate
+ * to a prefix of the next non-empty line, the short lines are OCR
+ * fallback and should be dropped.
+ */
+function stripOcrAsciiFallback(markdown: string): string {
+  const lines = markdown.split("\n");
+  const out: string[] = [];
+  let i = 0;
+  const isShortGlyph = (s: string) =>
+    /^[A-Za-z0-9\\\$_^{}+\-=]{1,4}$/.test(s.replace(/\$/g, ""));
+  while (i < lines.length) {
+    const cluster: number[] = [];
+    let j = i;
+    while (j < lines.length && lines[j].trim() && isShortGlyph(lines[j].trim())) {
+      cluster.push(j);
+      j += 1;
+    }
+    if (cluster.length >= 2) {
+      // Look ahead for the first non-empty follow-up line (skip blanks).
+      let k = j;
+      while (k < lines.length && !lines[k].trim()) k += 1;
+      const followUp = k < lines.length ? lines[k].trim() : "";
+      const concat = cluster
+        .map((idx) => lines[idx].trim().replace(/\$/g, ""))
+        .join("");
+      const concatLetters = concat.replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+      const followLetters = followUp.slice(0, 16).replace(/[^A-Za-z0-9]/g, "").toLowerCase();
+      if (
+        concatLetters.length >= 2 &&
+        followLetters.startsWith(concatLetters)
+      ) {
+        // Drop the fallback cluster, keep the follow-up.
+        i = j;
+        continue;
       }
-      out = out.replaceAll(id, blobUrl);
-    }),
+    }
+    out.push(lines[i]);
+    i += 1;
+  }
+  return out.join("\n");
+}
+
+/**
+ * Authenticated `<img>` for the reader. Streamdown's default img sets
+ * src directly which means same-origin Clerk cookies are sent (good)
+ * but cross-origin OCR images / API errors would silently fall back to
+ * the broken-alt-text browser placeholder. Fetching through an effect
+ * lets us pass bearer headers AND render a useful loading state.
+ */
+function ReaderImage({
+  src,
+  alt,
+  paperId,
+  trial,
+}: ImgHTMLAttributes<HTMLImageElement> & { paperId: string; trial: boolean }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const srcString = typeof src === "string" ? src : "";
+
+  const fetchUrl = useMemo(() => {
+    if (!srcString) return null;
+    if (
+      srcString.startsWith("blob:") ||
+      srcString.startsWith("data:") ||
+      srcString.startsWith("http")
+    ) {
+      return srcString;
+    }
+    // OCR image id like `p0-img-0.png` or `fig-1.png` — route via the
+    // authenticated same-origin proxy.
+    if (OCR_IMAGE_RE.test(srcString)) {
+      return api.getOcrImageUrl(paperId, srcString, trial);
+    }
+    return srcString;
+  }, [srcString, paperId, trial]);
+
+  useEffect(() => {
+    if (!fetchUrl) return;
+    if (fetchUrl.startsWith("blob:") || fetchUrl.startsWith("data:")) {
+      setBlobUrl(fetchUrl);
+      return;
+    }
+    const cacheKey = `${paperId}:${fetchUrl}`;
+    const cached = ocrBlobCache.get(cacheKey);
+    if (cached) {
+      setBlobUrl(cached);
+      return;
+    }
+    let cancelled = false;
+    const headers = trial ? undefined : getAuthHeadersSync();
+    fetch(fetchUrl, { headers, cache: "force-cache" })
+      .then(async (res) => {
+        if (cancelled) return;
+        if (!res.ok) {
+          setFailed(true);
+          return;
+        }
+        const blob = await res.blob();
+        if (cancelled) return;
+        const url = URL.createObjectURL(blob);
+        ocrBlobCache.set(cacheKey, url);
+        setBlobUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchUrl, paperId, trial]);
+
+  if (failed) {
+    return (
+      <span
+        role="img"
+        aria-label={alt || "Figure unavailable"}
+        className="my-4 flex h-40 w-full items-center justify-center rounded-lg border border-dashed border-border/60 bg-muted/[0.10] text-[12px] text-muted-foreground"
+      >
+        Figure unavailable
+      </span>
+    );
+  }
+  if (!blobUrl) {
+    return (
+      <span
+        aria-hidden
+        className="my-4 flex h-40 w-full items-center justify-center rounded-lg border border-border/40 bg-muted/[0.08]"
+      >
+        <OwlSpinner size={24} />
+      </span>
+    );
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return (
+    <img
+      src={blobUrl}
+      alt={alt || ""}
+      className="block max-w-full rounded-lg border border-border/45 bg-background shadow-[0_1px_3px_rgba(0,0,0,0.06)]"
+    />
   );
-  return out;
 }
 
 export interface MarkdownReaderProps {
@@ -321,11 +446,11 @@ export function MarkdownReader({
         // breaks were a PDF artifact, not a structural one — sections
         // flow across them.
         let joined = cleanedPages.join("\n\n");
+        joined = stripOcrAsciiFallback(joined);
         joined = collapseAuthorByline(joined);
         joined = wrapBylineParagraph(joined);
         joined = wrapFigureCaptions(joined);
         joined = collapseFragmentedMathParagraphs(joined);
-        joined = await hydrateMarkdownImages(joined, paperId, trial);
 
         if (!cancelled) {
           setBody(joined);
@@ -402,6 +527,11 @@ export function MarkdownReader({
       sub: [],
       p: ["class"],
     };
+    const READER_COMPONENTS = {
+      img: (props: ImgHTMLAttributes<HTMLImageElement>) => (
+        <ReaderImage {...props} paperId={paperId} trial={trial} />
+      ),
+    } as Parameters<typeof Streamdown>[0]["components"];
     return (
       <Streamdown
         plugins={STREAMDOWN_PLUGINS}
@@ -410,11 +540,12 @@ export function MarkdownReader({
         parseIncompleteMarkdown={false}
         urlTransform={readerUrlTransform}
         allowedTags={READER_ALLOWED_TAGS}
+        components={READER_COMPONENTS}
       >
         {body}
       </Streamdown>
     );
-  }, [body]);
+  }, [body, paperId, trial]);
 
   if (loading) {
     return (
@@ -457,7 +588,7 @@ export function MarkdownReader({
         )}
       >
         <div
-          className="reader-shell mx-auto w-full max-w-[min(86ch,100%)] px-5 py-8 md:px-10"
+          className="reader-shell w-full px-5 py-8 md:px-10"
           data-layout={readerLayoutWidth}
           data-style={readerLayoutStyle}
         >
