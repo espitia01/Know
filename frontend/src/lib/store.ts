@@ -120,6 +120,9 @@ interface AppStore {
    */
   addSessionPaper: (p: { id: string; title: string }) => boolean;
   removeSessionPaper: (id: string) => void;
+  /** Clear multi-paper session state only — keeps paper cache and analysis slices. */
+  clearWorkspaceSession: () => void;
+  /** Full in-memory reset (sign-out). Wipes caches and persisted reader state. */
   clearSession: () => void;
   // Rename a paper in every in-memory representation at once: the
   // active `paper`, the per-id cache, and the session tab bar. The
@@ -481,6 +484,12 @@ export const useStore = create<AppStore>()(
             sessionPapers: nextSessionPapers,
             paper: nextPaper,
           };
+        }),
+      clearWorkspaceSession: () =>
+        set({
+          sessionPapers: [],
+          crossPaperResults: [],
+          activePaperId: null,
         }),
       clearSession: () => {
         set({

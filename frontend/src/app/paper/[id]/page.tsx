@@ -55,6 +55,7 @@ import { isPreReadingPopulated } from "@/lib/preReading";
 import { cn } from "@/lib/utils";
 import { GoogleDriveButton } from "@/components/upload/GoogleDriveButton";
 import { isGoogleDriveConfigured } from "@/lib/googleDrive";
+import { PaperLoadingScreen } from "@/components/paper/PaperLoadingScreen";
 import { isPaperFresh, markPaperFetched } from "@/lib/papersFreshness";
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
@@ -64,13 +65,10 @@ const PdfViewer = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-background">
-        <div
-          className="h-5 w-5 rounded-full border-2 border-border border-t-foreground motion-safe:animate-spin"
-          aria-hidden
-        />
-        <p className="text-[var(--text-sm)] text-muted-foreground">Loading PDF…</p>
-      </div>
+      <PaperLoadingScreen
+        title="Loading PDF"
+        subtitle="Rendering pages…"
+      />
     ),
   }
 );
@@ -581,14 +579,14 @@ function PaperContent() {
     })),
   );
   const {
-    sessionPapers, addSessionPaper, removeSessionPaper, clearSession, updatePaperTitle,
+    sessionPapers, addSessionPaper, removeSessionPaper, clearWorkspaceSession, updatePaperTitle,
     crossPaperResults, addCrossPaperResults, clearCrossPaperResults,
   } = useStore(
     useShallow((s) => ({
       sessionPapers: s.sessionPapers,
       addSessionPaper: s.addSessionPaper,
       removeSessionPaper: s.removeSessionPaper,
-      clearSession: s.clearSession,
+      clearWorkspaceSession: s.clearWorkspaceSession,
       updatePaperTitle: s.updatePaperTitle,
       crossPaperResults: s.crossPaperResults,
       addCrossPaperResults: s.addCrossPaperResults,
@@ -821,6 +819,8 @@ function PaperContent() {
   }, [focusMode, headerHidden, setFocusMode, setHeaderHidden, showAddPaper, showFolderPicker, showWorkspaceMenu]);
 
   useEffect(() => {
+    if (!activePaperId) return;
+
     let stale = false;
     setError("");
 
@@ -1306,7 +1306,7 @@ function PaperContent() {
       missingCount: number,
     ) => {
       applyWorkspaceSession(papers, ws.cross_paper_results, {
-        clearSession,
+        clearWorkspaceSession,
         clearCrossPaperResults,
         addCrossPaperResults,
         addSessionPaper,
@@ -1326,7 +1326,7 @@ function PaperContent() {
       setWorkspaceTruncation(null);
     },
     [
-      clearSession,
+      clearWorkspaceSession,
       clearCrossPaperResults,
       addCrossPaperResults,
       addSessionPaper,
@@ -1659,12 +1659,11 @@ function PaperContent() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center h-screen bg-background text-foreground">
-        <div className="text-center space-y-3 animate-fade-in">
-          <div className="w-6 h-6 border-2 border-border border-t-foreground rounded-full animate-spin mx-auto" />
-          <p className="text-[14px] text-muted-foreground">Loading paper…</p>
-        </div>
-      </div>
+      <PaperLoadingScreen
+        title="Opening paper"
+        subtitle="Loading PDF and saved analysis…"
+        detail={paper?.title ? paper.title.slice(0, 72) : undefined}
+      />
     );
   }
 
@@ -1777,7 +1776,7 @@ function PaperContent() {
       {!chromeHidden && (
       <header className="relative z-30 flex h-12 shrink-0 items-center gap-2.5 border-b border-border/70 px-4 shadow-sm glass-nav">
         <button
-          onClick={() => { clearSession(); router.push("/dashboard"); }}
+          onClick={() => router.push("/dashboard")}
           className="text-muted-foreground/80 hover:text-foreground transition-colors shrink-0 ring-focus rounded-md p-1 -ml-1"
           aria-label="Back to dashboard"
           title="Back to dashboard"

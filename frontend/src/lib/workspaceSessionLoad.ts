@@ -63,7 +63,7 @@ export function getRememberedWorkspacePapers(
 }
 
 export type SessionLoadActions = {
-  clearSession: () => void;
+  clearWorkspaceSession: () => void;
   clearCrossPaperResults: () => void;
   addCrossPaperResults: (items: CrossPaperQA[]) => void;
   addSessionPaper: (p: { id: string; title: string }) => boolean;
@@ -75,7 +75,7 @@ export function applyWorkspaceSession(
   crossPaperResults: CrossPaperQA[] | undefined,
   actions: SessionLoadActions,
 ): void {
-  actions.clearSession();
+  actions.clearWorkspaceSession();
   actions.clearCrossPaperResults();
   if (crossPaperResults && crossPaperResults.length > 0) {
     actions.addCrossPaperResults(crossPaperResults);

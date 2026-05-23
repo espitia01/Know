@@ -8,7 +8,6 @@ import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { clearProgressStart, markRequestStart, markRequestEnd } from "@/lib/analysisState";
 import { dedupePriorWork, referenceListItems } from "@/lib/formatBibliography";
-import { CitationGraph } from "@/components/sidebar/CitationGraph";
 import { ReferenceBibliographyList } from "@/components/sidebar/ReferenceBibliographyList";
 
 interface RelatedWorkPanelProps {
@@ -34,7 +33,6 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
   const [citedBy, setCitedBy] = useState<CitedByItem[]>([]);
   const [citedLoading, setCitedLoading] = useState(false);
   const [citedError, setCitedError] = useState<string | null>(null);
-  const paperTitle = useStore((s) => s.paper?.id === paperId ? (s.paper?.title ?? "") : "");
 
   useEffect(() => {
     let cancelled = false;
@@ -80,8 +78,11 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
     [preReading?.prior_work],
   );
 
-  const topics = useMemo(() => preReading?.prior_work_topics ?? [], [preReading?.prior_work_topics]);
   const rawPriorCount = preReading?.prior_work?.length ?? 0;
+  const filteredNote =
+    rawPriorCount > 0 && priorList.length > 0 && priorList.length < rawPriorCount
+      ? `Showing ${priorList.length} clean entries (${rawPriorCount} raw rows parsed from the PDF).`
+      : null;
 
   if (preReadingLoading) {
     return (
@@ -115,22 +116,27 @@ export function RelatedWorkPanel({ paperId }: RelatedWorkPanelProps) {
     );
   }
 
-  const graphAvailable = priorList.length > 0 || citedBy.length > 0 || topics.length > 0;
+  if (priorList.length === 0) {
+    return (
+      <div className="space-y-4 motion-safe:animate-fade-in">
+        <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground">{RELATED_TAB_INTRO}</p>
+        <EmptyState
+          title="References need a refresh"
+          body="Prepare found bibliography rows, but none passed cleanup yet. Re-run Prepare to rebuild the list with the latest parser."
+          cta={{ label: "Re-run Prepare", onClick: handleRunPrepare }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 motion-safe:animate-fade-in">
       <p className="text-[var(--text-xs)] leading-relaxed text-muted-foreground">{RELATED_TAB_INTRO}</p>
 
-      {graphAvailable && (
-        <CitationGraph
-          paperTitle={paperTitle}
-          outbound={priorList}
-          inbound={citedBy}
-          topics={topics}
-        />
-      )}
-
       <AnalysisSection title="References" count={priorList.length}>
+        {filteredNote ? (
+          <p className="mb-2 text-[var(--text-xs)] text-muted-foreground/80">{filteredNote}</p>
+        ) : null}
         <ReferenceBibliographyList items={priorList} />
       </AnalysisSection>
 

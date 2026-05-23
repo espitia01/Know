@@ -17,6 +17,8 @@ import { FullscreenToggle } from "@/components/FullscreenToggle";
 import { GoogleDriveButton } from "@/components/upload/GoogleDriveButton";
 import { isGoogleDriveConfigured } from "@/lib/googleDrive";
 import { DISCORD_URL } from "@/lib/constants";
+import { PaperLoadingScreen } from "@/components/paper/PaperLoadingScreen";
+import { markPaperFetched } from "@/lib/papersFreshness";
 import {
   KNOW_RECENT_PAPERS_CHANGED,
   getRecentPaperOpenOrder,
@@ -73,7 +75,7 @@ export default function DashboardPage() {
 function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { setPaper, loading, setLoading, cachePaper, addSessionPaper } = useStore();
+  const { setPaper, loading, setLoading, cachePaper, addSessionPaper, clearWorkspaceSession } = useStore();
   const { user: tierUser, refresh: refreshTier } = useUserTier();
   const { user: clerkUser } = useUser();
   const [papers, setPapers] = useState<PaperListEntry[]>([]);
@@ -123,6 +125,10 @@ function DashboardContent() {
   }, []);
 
   useEffect(() => {
+    clearWorkspaceSession();
+  }, [clearWorkspaceSession]);
+
+  useEffect(() => {
     if (searchParams.get("upgraded") === "1") {
       refreshTier().then(() => setShowUpgradeModal(true));
       window.history.replaceState({}, "", "/dashboard");
@@ -138,10 +144,10 @@ function DashboardContent() {
         cachePaper(paper);
         addSessionPaper({ id: paper.id, title: paper.title });
         setPaper(paper);
+        markPaperFetched(paper.id);
         router.push(`/paper/${paper.id}`);
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : "Upload failed");
-      } finally {
         setLoading(false);
       }
     },
@@ -177,6 +183,16 @@ function DashboardContent() {
     maxFiles: 1,
     maxSize: MAX_UPLOAD_BYTES,
   });
+
+  if (loading) {
+    return (
+      <PaperLoadingScreen
+        title="Processing paper"
+        subtitle="Extracting text, structure, and equations…"
+        detail="Opening the reader when ready."
+      />
+    );
+  }
 
   if (isMobile) {
     return (

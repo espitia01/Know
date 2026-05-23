@@ -23,6 +23,7 @@ import {
   applyWorkspaceSession,
   type LoadedWorkspacePaper,
 } from "@/lib/workspaceSessionLoad";
+import { isGoogleDriveConfigured } from "@/lib/googleDrive";
 import { forgetPaper } from "@/lib/analysisState";
 
 function FolderIcon({ className = "w-4 h-4", filled = false }: { className?: string; filled?: boolean }) {
@@ -71,7 +72,7 @@ function LibraryContent() {
   const [workspacesLoading, setWorkspacesLoading] = useState(false);
   const [workspacesFetched, setWorkspacesFetched] = useState(false);
   const [deleteWsConfirm, setDeleteWsConfirm] = useState<string | null>(null);
-  const { addSessionPaper, clearSession, addCrossPaperResults, clearCrossPaperResults, forgetCachedPaper, clearPaperUiPrefs } = useStore();
+  const { addSessionPaper, clearWorkspaceSession, addCrossPaperResults, clearCrossPaperResults, forgetCachedPaper, clearPaperUiPrefs } = useStore();
   const [selectedPapers, setSelectedPapers] = useState<Set<string>>(new Set());
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -106,7 +107,7 @@ function LibraryContent() {
   const finalizeWorkspaceOpen = useCallback(
     (papers: { id: string; title: string }[], ws: WorkspaceRecord) => {
       applyWorkspaceSession(papers, ws.cross_paper_results, {
-        clearSession,
+        clearWorkspaceSession,
         clearCrossPaperResults,
         addCrossPaperResults,
         addSessionPaper,
@@ -116,7 +117,7 @@ function LibraryContent() {
         router.push(`/paper/${papers[0].id}`);
       }
     },
-    [clearSession, clearCrossPaperResults, addCrossPaperResults, addSessionPaper, router],
+    [clearWorkspaceSession, clearCrossPaperResults, addCrossPaperResults, addSessionPaper, router],
   );
 
   const handleOpenWorkspace = useCallback(
@@ -399,9 +400,9 @@ function LibraryContent() {
           {papers.length} paper{papers.length !== 1 ? "s" : ""}
         </span>
         <Link
-          href="/settings#integrations"
+          href={isGoogleDriveConfigured() ? "/dashboard" : "/settings#integrations"}
           className="text-[11px] text-muted-foreground hover:text-foreground/90 transition-colors font-medium px-2 py-1 rounded-md hover:bg-accent/60 flex items-center gap-1"
-          title="Google Drive & Workspace import (coming soon)"
+          title={isGoogleDriveConfigured() ? "Import from Google Drive (Dashboard)" : "Google Drive integration settings"}
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15a4.5 4.5 0 004.5 4.5h7.004a4.5 4.5 0 00.522-8.972m-1.522-.53A4.501 4.501 0 0016.5 6.75h-1.132m0 0A4.5 4.5 0 0012 2.25H9.75A4.5 4.5 0 006.35 6.75" />
