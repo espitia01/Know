@@ -12,7 +12,7 @@ import { selectionKey } from "@/lib/selectionActions";
 // Stage 2: streaming for selection moved to Next.js + AI SDK via this hook.
 // The previous SSE consumer (`consumeSelectionSse`) is still used by the
 // trial flow in `try/[id]/page.tsx`, so we don't delete it yet.
-import { captureCurrentTextSelectionRegions } from "@/lib/pdfHighlightRegions";
+import { captureCurrentTextSelectionRegions, rectToRegions } from "@/lib/pdfHighlightRegions";
 import { useSelectionThread } from "@/lib/useSelectionThread";
 import { SelectionToolbar, type SelectionAction } from "@/components/pdf/SelectionToolbar";
 import { AnalysisPanel, type PanelPosition } from "@/components/panel/BottomPanel";
@@ -1565,7 +1565,23 @@ function PaperContent() {
     meta?: { highlightColor?: string },
   ) => {
     const freshRegions = captureCurrentTextSelectionRegions();
-    const capturedRegions = freshRegions.length > 0 ? freshRegions : selection?.regions;
+    let capturedRegions = freshRegions.length > 0 ? freshRegions : selection?.regions;
+    // Last-resort: synthesize regions from the toolbar's anchor rect so
+    // explain/derive/highlight always carry geometry. Equations and PDFs
+    // with broken text layers frequently came back with zero regions and
+    // then never painted any underline at all.
+    if (!capturedRegions?.length && selection?.rect) {
+      const r = selection.rect;
+      const synthesized = rectToRegions({
+        left: r.left,
+        top: r.top,
+        right: r.left + r.width,
+        bottom: r.top + r.height,
+        width: r.width,
+        height: r.height,
+      });
+      if (synthesized.length > 0) capturedRegions = synthesized;
+    }
     // For analysis actions (explain / derive), wrap the live selection
     // in a transient <mark> BEFORE we clear it. This gives the user a
     // visible "what's being analyzed right now" cue that survives

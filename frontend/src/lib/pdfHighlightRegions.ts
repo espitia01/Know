@@ -54,6 +54,44 @@ export function captureCurrentTextSelectionRegions(): CapturedHighlightRegion[] 
   return captureTextSelectionRegions(activeCaptureContext.container, activeCaptureContext.opts);
 }
 
+/**
+ * Last-resort: convert a single viewport rect (e.g. the toolbar's anchor rect)
+ * into pct regions on whichever page intersects it. Used when text-layer
+ * capture comes back empty so explain/derive/highlight always carry geometry.
+ */
+export function rectToRegions(
+  rect: { left: number; top: number; right: number; bottom: number; width: number; height: number },
+): CapturedHighlightRegion[] {
+  if (!activeCaptureContext) return [];
+  const container = activeCaptureContext.container;
+  const pages = container.querySelectorAll<HTMLElement>(
+    ".react-pdf__Page[data-page-number]",
+  );
+  if (pages.length === 0) return [];
+
+  const out: CapturedHighlightRegion[] = [];
+  const synthetic = new DOMRect(rect.left, rect.top, rect.width, rect.height);
+  for (const pageEl of pages) {
+    const pageRect = pageEl.getBoundingClientRect();
+    if (rectIntersectionArea(synthetic, pageRect) <= 0) continue;
+    const frame = getPageHighlightMetrics(pageEl);
+    if (frame.pw <= 0 || frame.ph <= 0) continue;
+    const left = Math.max(rect.left, frame.refRect.left);
+    const top = Math.max(rect.top, frame.refRect.top);
+    const right = Math.min(rect.right, frame.refRect.right);
+    const bottom = Math.min(rect.bottom, frame.refRect.bottom);
+    if (right <= left || bottom <= top) continue;
+    out.push({
+      pageNum: frame.pageNum,
+      xPct: Math.max(0, (left - frame.refRect.left) / frame.pw),
+      yPct: Math.max(0, (top - frame.refRect.top) / frame.ph),
+      wPct: Math.max(0, (right - left) / frame.pw),
+      hPct: Math.max(0, (bottom - top) / frame.ph),
+    });
+  }
+  return out;
+}
+
 function applyHorizontalPadding(rect: RectLike, pad: number): RectLike {
   if (pad <= 0) return rect;
   return {

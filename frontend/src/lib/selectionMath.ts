@@ -8,11 +8,40 @@ const LATEX_HINT_RE = /\$|\\\(|\\\[|\\frac|\\sum|\\int|\\partial|\\nabla|\\alpha
 const MATH_UNICODE_RE = /[∑∫∂∇√≈≤≥≠≡≅∞∝⊕⊗⋅×·αβγδεζηθικλμνξπρστυφχψω∆ΦΨΩ]/;
 const EQUATION_SHAPE_RE = /(?:[A-Za-z_]\s*=\s*[^=]+|\^\s*[\dA-Za-z]|[_^][{(]|\b\d+\s*[+\-*/]\s*[A-Za-z])/;
 
+/**
+ * PDF text extraction routinely renders equations as space-separated alphabet
+ * soup ("K cv;c0v0 Z c1 v21234c0") — none of which trips the regexes above.
+ * Detect that shape so Derive remains available for math the LLM extracted
+ * from the page.
+ */
+function looksLikePdfGarbledMath(text: string): boolean {
+  if (!text) return false;
+  const trimmed = text.trim();
+  if (trimmed.length === 0 || trimmed.length > 400) return false;
+
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0 || tokens.length > 80) return false;
+
+  let wordy = 0;
+  let mathy = 0;
+  for (const tok of tokens) {
+    if (/^[A-Za-z]{3,}$/.test(tok) && /[aeiouAEIOU]/.test(tok)) {
+      wordy += 1;
+    } else if (tok.length <= 2 || /\d/.test(tok) || /[;:^_(){}<>=+\-*/\\|]/.test(tok)) {
+      mathy += 1;
+    }
+  }
+  const counted = wordy + mathy;
+  if (counted === 0) return false;
+  return mathy >= 3 && wordy / counted < 0.4;
+}
+
 export function hasMathInText(text: string): boolean {
   if (!text) return false;
   if (LATEX_HINT_RE.test(text)) return true;
   if (MATH_UNICODE_RE.test(text)) return true;
   if (EQUATION_SHAPE_RE.test(text)) return true;
+  if (looksLikePdfGarbledMath(text)) return true;
   return false;
 }
 

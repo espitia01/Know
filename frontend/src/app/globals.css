@@ -615,7 +615,7 @@
      page wrapper via geometric hit-testing. */
   pointer-events: none;
   --highlight-rgb: var(--pdf-selection);
-  background: rgb(var(--highlight-rgb) / 0.12);
+  background: rgb(var(--highlight-rgb) / 0.22);
   border-radius: var(--know-hl-radius);
   border-bottom: none;
   transition: background-color 150ms ease;
@@ -623,7 +623,7 @@
 
 .know-selection-underline:hover,
 .know-highlight-overlay:hover .know-selection-underline {
-  background: rgb(var(--highlight-rgb) / 0.18);
+  background: rgb(var(--highlight-rgb) / 0.32);
 }
 
 /* Per-action tints. Hand-picked so each passes WCAG-AA contrast on
@@ -643,18 +643,19 @@
 .know-highlight-rect {
   position: absolute;
   pointer-events: none;
-  mix-blend-mode: multiply;
+  /* No mix-blend-mode — multiply against the PDF canvas was hiding rects
+     entirely on many backgrounds. Plain alpha-tinted fills stay visible. */
   border-radius: var(--know-hl-radius);
   border-bottom: none;
 }
-.know-highlight-rect[data-color="yellow"] { background: rgb(254 240 138 / 0.48); }
-.know-highlight-rect[data-color="green"]  { background: rgb(167 243 208 / 0.48); }
-.know-highlight-rect[data-color="blue"]   { background: rgb(186 230 253 / 0.48); }
-.know-highlight-rect[data-color="pink"]   { background: rgb(251 207 232 / 0.48); }
-.dark .know-highlight-rect[data-color="yellow"] { background: rgb(253 224 71 / 0.28); }
-.dark .know-highlight-rect[data-color="green"]  { background: rgb(110 231 183 / 0.28); }
-.dark .know-highlight-rect[data-color="blue"]   { background: rgb(125 211 252 / 0.28); }
-.dark .know-highlight-rect[data-color="pink"]   { background: rgb(244 114 182 / 0.28); }
+.know-highlight-rect[data-color="yellow"] { background: rgb(254 240 138 / 0.55); }
+.know-highlight-rect[data-color="green"]  { background: rgb(167 243 208 / 0.55); }
+.know-highlight-rect[data-color="blue"]   { background: rgb(186 230 253 / 0.55); }
+.know-highlight-rect[data-color="pink"]   { background: rgb(251 207 232 / 0.55); }
+.dark .know-highlight-rect[data-color="yellow"] { background: rgb(253 224 71 / 0.42); }
+.dark .know-highlight-rect[data-color="green"]  { background: rgb(110 231 183 / 0.42); }
+.dark .know-highlight-rect[data-color="blue"]   { background: rgb(125 211 252 / 0.42); }
+.dark .know-highlight-rect[data-color="pink"]   { background: rgb(244 114 182 / 0.42); }
 
 /* Selection toolbar tooltips — anchored below buttons so they don’t cover fresh selections. */
 .know-toolbar-btn { position: relative; }
