@@ -2,17 +2,19 @@
  * Provider brand marks rendered inline so we never depend on a CDN and
  * always tint correctly in dark mode (`currentColor`).
  *
- * The SVG paths below are simplified monochrome approximations of each
- * provider's official mark, suitable for tiny (16–24px) icon usage in
- * the Settings model picker. If you ever want a pixel-perfect replica,
- * pull the original asset from each brand's press kit:
- *   - Anthropic: https://www.anthropic.com/news (press kit on footer)
- *   - OpenAI:    https://openai.com/brand
- *   - Mistral:   https://mistral.ai/news (assets at the bottom of any press page)
+ * Provenance of the SVG paths:
+ *   - Anthropic: `simple-icons` v16+ (CC0). Source slug `anthropic`.
+ *                https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/anthropic.svg
+ *   - Mistral AI: `simple-icons` v16+ (CC0). Source slug `mistralai`.
+ *                https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/mistralai.svg
+ *   - OpenAI:     Wikimedia Commons "OpenAI Logo.svg" (public domain). The
+ *                wordmark canvas (`viewBox="0 0 1180 320"`) ships only the
+ *                six-petal knot path here, cropped to its bounding box.
+ *                https://commons.wikimedia.org/wiki/File:OpenAI_Logo.svg
  *
- * Use `currentColor` for all fills/strokes so the icon inherits the
- * surrounding text color. Pass `tone` only when you want a coloured
- * accent (renders behind the mark as a soft circle).
+ * All three marks use `fill="currentColor"` so the icon inherits the
+ * surrounding text color in both light and dark mode. Pass the optional
+ * `tone` prop only when you want a coloured tinted disc behind the mark.
  */
 
 import type { SVGProps } from "react";
@@ -42,49 +44,23 @@ export function ProviderLogo({
   const bg = TONE_BG[tone];
   // Wrap in a fixed-size span so the optional tinted disc renders at the
   // requested icon size regardless of inner SVG viewBox aspect ratio.
+  // Inner mark is slightly inset (4px) so the disc has visible padding.
+  const innerSize = tone === "none" ? size : Math.max(8, size - 4);
   return (
     <span
       aria-hidden
       className="inline-flex shrink-0 items-center justify-center rounded-md"
-      style={{
-        width: size,
-        height: size,
-        backgroundColor: bg,
-      }}
+      style={{ width: size, height: size, backgroundColor: bg }}
     >
-      {provider === "anthropic" && <AnthropicMark size={size - 4} {...rest} />}
-      {provider === "openai" && <OpenAIMark size={size - 4} {...rest} />}
-      {provider === "mistral" && <MistralMark size={size - 4} {...rest} />}
+      {provider === "anthropic" && <AnthropicMark size={innerSize} {...rest} />}
+      {provider === "openai" && <OpenAIMark size={innerSize} {...rest} />}
+      {provider === "mistral" && <MistralMark size={innerSize} {...rest} />}
     </span>
   );
 }
 
-/**
- * Anthropic — angular A mark. Simplified from the wordmark glyph.
- * Single closed path so it tints cleanly via `currentColor`.
- */
+/** Anthropic — official A mark (simple-icons v16, CC0). */
 function AnthropicMark({ size, ...rest }: { size: number } & SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 92 64"
-      xmlns="http://www.w3.org/2000/svg"
-      fill="currentColor"
-      role="img"
-      aria-label="Anthropic"
-      {...rest}
-    >
-      <path d="M66.5 0h-12.8L70.6 64H92L66.5 0Zm-41 0L0 64h13.7l5.2-13.6h26.7L50.8 64h13.7L39 0H25.5Zm-2.8 38.9 9.1-23.7 9.1 23.7H22.7Z" />
-    </svg>
-  );
-}
-
-/**
- * OpenAI — the official six-petal knot, monochrome.
- * Complex path; kept as a single `<path d="…">` for compactness.
- */
-function OpenAIMark({ size, ...rest }: { size: number } & SVGProps<SVGSVGElement>) {
   return (
     <svg
       width={size}
@@ -93,47 +69,51 @@ function OpenAIMark({ size, ...rest }: { size: number } & SVGProps<SVGSVGElement
       xmlns="http://www.w3.org/2000/svg"
       fill="currentColor"
       role="img"
-      aria-label="OpenAI"
+      aria-label="Anthropic"
       {...rest}
     >
-      <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365 2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5Z" />
+      <path d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z" />
     </svg>
   );
 }
 
 /**
- * Mistral — pixelated chevron/M stack. The official mark is an
- * orange-to-yellow gradient grid; here we render a single-tone
- * five-row staircase that reads as an "M" at small sizes.
+ * OpenAI — official six-petal knot, extracted from the Wikimedia
+ * Commons "OpenAI Logo.svg" wordmark. The path's natural bounding box
+ * is approximately x=24..310, y=0..320 inside the 1180×320 wordmark
+ * canvas; we crop with `viewBox="24 0 286 320"`.
  */
+function OpenAIMark({ size, ...rest }: { size: number } & SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="24 0 286 320"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="currentColor"
+      role="img"
+      aria-label="OpenAI"
+      {...rest}
+    >
+      <path d="M297.06 130.97c7.26-21.79 4.76-45.66-6.85-65.48-17.46-30.4-52.56-46.04-86.84-38.68-15.25-17.18-37.16-26.95-60.13-26.81-35.04-.08-66.13 22.48-76.91 55.82-22.51 4.61-41.94 18.7-53.31 38.67-17.59 30.32-13.58 68.54 9.92 94.54-7.26 21.79-4.76 45.66 6.85 65.48 17.46 30.4 52.56 46.04 86.84 38.68 15.24 17.18 37.16 26.95 60.13 26.8 35.06.09 66.16-22.49 76.94-55.86 22.51-4.61 41.94-18.7 53.31-38.67 17.57-30.32 13.55-68.51-9.94-94.51zm-120.28 168.11c-14.03.02-27.62-4.89-38.39-13.88.49-.26 1.34-.73 1.89-1.07l63.72-36.8c3.26-1.85 5.26-5.32 5.24-9.07v-89.83l26.93 15.55c.29.14.48.42.52.74v74.39c-.04 33.08-26.83 59.9-59.91 59.97zm-128.84-55.03c-7.03-12.14-9.56-26.37-7.15-40.18.47.28 1.3.79 1.89 1.13l63.72 36.8c3.23 1.89 7.23 1.89 10.47 0l77.79-44.92v31.1c.02.32-.13.63-.38.83l-64.41 37.19c-28.69 16.52-65.33 6.7-81.92-21.95zm-16.77-139.09c7-12.16 18.05-21.46 31.21-26.29 0 .55-.03 1.52-.03 2.2v73.61c-.02 3.74 1.98 7.21 5.23 9.06l77.79 44.91-26.93 15.55c-.27.18-.61.21-.91.08l-64.42-37.22c-28.63-16.58-38.45-53.21-21.95-81.89zm221.26 51.49-77.79-44.92 26.93-15.54c.27-.18.61-.21.91-.08l64.42 37.19c28.68 16.57 38.51 53.26 21.94 81.94-7.01 12.14-18.05 21.44-31.2 26.28v-75.81c.03-3.74-1.96-7.2-5.2-9.06zm26.8-40.34c-.47-.29-1.3-.79-1.89-1.13l-63.72-36.8c-3.23-1.89-7.23-1.89-10.47 0l-77.79 44.92v-31.1c-.02-.32.13-.63.38-.83l64.41-37.16c28.69-16.55 65.37-6.7 81.91 22 6.99 12.12 9.52 26.31 7.15 40.1zm-168.51 55.43-26.94-15.55c-.29-.14-.48-.42-.52-.74v-74.39c.02-33.12 26.89-59.96 60.01-59.94 14.01 0 27.57 4.92 38.34 13.88-.49.26-1.33.73-1.89 1.07l-63.72 36.8c-3.26 1.85-5.26 5.31-5.24 9.06l-.04 89.79zm14.63-31.54 34.65-20.01 34.65 20v40.01l-34.65 20-34.65-20z" />
+    </svg>
+  );
+}
+
+/** Mistral AI — official pixel-grid mark (simple-icons v16, CC0). */
 function MistralMark({ size, ...rest }: { size: number } & SVGProps<SVGSVGElement>) {
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 256 256"
+      viewBox="0 0 24 24"
       xmlns="http://www.w3.org/2000/svg"
       fill="currentColor"
       role="img"
       aria-label="Mistral AI"
       {...rest}
     >
-      {/* Row 1 — outer caps */}
-      <rect x="0"   y="0"   width="48" height="48" />
-      <rect x="208" y="0"   width="48" height="48" />
-      {/* Row 2 — wider stretch */}
-      <rect x="0"   y="52"  width="100" height="48" />
-      <rect x="156" y="52"  width="100" height="48" />
-      {/* Row 3 — middle peak */}
-      <rect x="0"   y="104" width="48"  height="48" />
-      <rect x="104" y="104" width="48"  height="48" />
-      <rect x="208" y="104" width="48"  height="48" />
-      {/* Row 4 — straight legs */}
-      <rect x="0"   y="156" width="48"  height="48" />
-      <rect x="208" y="156" width="48"  height="48" />
-      {/* Row 5 — feet */}
-      <rect x="0"   y="208" width="48"  height="48" />
-      <rect x="208" y="208" width="48"  height="48" />
+      <path d="M17.143 3.429v3.428h-3.429v3.429h-3.428V6.857H6.857V3.43H3.43v13.714H0v3.428h10.286v-3.428H6.857v-3.429h3.429v3.429h3.429v-3.429h3.428v3.429h-3.428v3.428H24v-3.428h-3.43V3.429z" />
     </svg>
   );
 }

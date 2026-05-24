@@ -404,7 +404,15 @@ File: `frontend/src/app/settings/page.tsx` (the only settings page; other settin
 
 ### C.1 — Provider logos
 
-**Already shipped.** `frontend/src/components/ProviderLogo.tsx` exists on `main` and exports `ProviderLogo` plus `PROVIDER_LABEL`:
+**Already shipped, with the official brand marks.** `frontend/src/components/ProviderLogo.tsx` exists on `main` and exports `ProviderLogo` plus `PROVIDER_LABEL`. The three SVG paths inside are sourced from:
+
+| Provider | Source | License |
+|---|---|---|
+| Anthropic | `simple-icons` v16+ (slug `anthropic`) | CC0 |
+| Mistral AI | `simple-icons` v16+ (slug `mistralai`) | CC0 |
+| OpenAI | Wikimedia Commons `OpenAI_Logo.svg`, knot path cropped to its bounding box | Public domain |
+
+Use the component as-is:
 
 ```tsx
 import { ProviderLogo, PROVIDER_LABEL, type ProviderName } from "@/components/ProviderLogo";
@@ -414,7 +422,9 @@ import { ProviderLogo, PROVIDER_LABEL, type ProviderName } from "@/components/Pr
 <span>{PROVIDER_LABEL.mistral}</span>     // "Mistral AI"
 ```
 
-Use it as-is. Do not re-implement, do not add wordmarks, do not pull from a CDN. The marks render via `currentColor` so they adopt the surrounding text color in both light and dark mode. The optional `tone` prop ("warm" / "cool" / "neutral" / "none") renders a soft tinted disc behind the mark — use `tone="warm"` for Mistral, `tone="cool"` for Anthropic and OpenAI in the Settings header rows. If the user later wants pixel-perfect replicas of each company's official mark, the component is annotated with the brand-kit URLs and is the single place to swap them in.
+**Do not re-implement, do not add wordmarks, do not pull from a CDN.** All three marks render via `currentColor` so they tint correctly in dark mode. The optional `tone` prop (`"warm" | "cool" | "neutral" | "none"`) renders a soft tinted disc behind the mark — use `tone="warm"` for Mistral and `tone="cool"` for Anthropic and OpenAI in the Settings header rows.
+
+If a brand later refreshes their mark, swap the path in `ProviderLogo.tsx` and update the provenance comment at the top of the file — it's the single source of truth.
 
 ### C.2 — Model descriptions
 
