@@ -1062,9 +1062,17 @@ export function PdfViewer({
       return false;
     };
 
+    // Cap how many entries we re-scan per repaint. The text-layer search
+    // is the slowest path in `drawUnderlinesForPage` — running it across
+    // a long history on every scroll/zoom mutation is what made the page
+    // unresponsive after dozens of selections. 12 newest entries keeps
+    // the recent ones razor-sharp while older entries still paint via
+    // their stored pct regions in the captured-geometry pass below.
+    const TEXT_SEARCH_CAP = 12;
     let fallbackPainted = 0;
-    for (let i = 0; i < fallbackHistory.length && fallbackPainted < 32; i++) {
-      const entry = fallbackHistory[i];
+    const cappedHistory = fallbackHistory.slice(0, TEXT_SEARCH_CAP);
+    for (let i = 0; i < cappedHistory.length && fallbackPainted < 32; i++) {
+      const entry = cappedHistory[i];
       const raw = entry.selected_text?.trim();
       const entryMinLen = hasMathInText(raw ?? "") ? 2 : minTextLen;
       if (!raw || raw.length < entryMinLen) continue;

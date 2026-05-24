@@ -657,7 +657,12 @@ export const api = {
     id: string,
     selectedText: string,
     action: string,
-    extra?: { question?: string; signal?: AbortSignal; imageBase64?: string },
+    extra?: {
+      question?: string;
+      signal?: AbortSignal;
+      imageBase64?: string;
+      regions?: SelectionAnalysisResult["regions"];
+    },
   ) =>
     request<SelectionAnalysisResult>(`/api/papers/${id}/selection`, {
       method: "POST",
@@ -667,6 +672,7 @@ export const api = {
         action,
         question: extra?.question,
         image_base64: extra?.imageBase64,
+        regions: extra?.regions,
       }),
       signal: extra?.signal,
     }),

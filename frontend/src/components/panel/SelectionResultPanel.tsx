@@ -19,6 +19,7 @@ import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
 import { useStore } from "@/lib/store";
 import { ModelOverridePill } from "@/components/analysis/ModelOverridePill";
 import { useUserSettings } from "@/lib/UserSettingsContext";
+import { api } from "@/lib/api";
 
 /**
  * The user's literal `selected_text` is sometimes alphabet-soup glyphs from
@@ -127,11 +128,22 @@ export function SelectionResultPanel({
   paperId,
 }: SelectionResultPanelProps) {
   const openSelectionFromHistory = useStore((s) => s.openSelectionFromHistory);
+  const removeSelectionFromHistoryForPaper = useStore(
+    (s) => s.removeSelectionFromHistoryForPaper,
+  );
   const focusHistoryRoot =
     onFocusHistoryRoot ??
     ((root: SelectionAnalysisResult) => {
       if (paperId) openSelectionFromHistory(paperId, root);
     });
+
+  const handleDeleteHistoryRoot = (root: SelectionAnalysisResult) => {
+    if (!paperId) return;
+    removeSelectionFromHistoryForPaper(paperId, root);
+    void api
+      .deleteSelection(paperId, root.selected_text ?? "", root.action ?? "explain")
+      .catch(() => {});
+  };
 
   if (loading && !result) {
     return (
@@ -237,11 +249,11 @@ export function SelectionResultPanel({
               .map((t) => {
                 const action = normalizeSelectionAction(t.root.action);
                 return (
-                  <div key={t.rootKey}>
+                  <div key={t.rootKey} className="group/row relative flex">
                     <button
                       type="button"
                       onClick={() => focusHistoryRoot(t.root)}
-                      className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors duration-150 hover:bg-accent/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 pr-10 text-left transition-colors duration-150 hover:bg-accent/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                     >
                       <span
                         className="shrink-0 rounded-full border border-border/55 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/85"
@@ -250,15 +262,38 @@ export function SelectionResultPanel({
                         {ACTION_LABELS[action] || action}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-[12px] text-muted-foreground">
-                        {t.root.selected_text.length > 80
-                          ? t.root.selected_text.slice(0, 80) + "…"
-                          : t.root.selected_text}
+                        {looksLikePdfGarbled(t.root.selected_text)
+                          ? "Equation from selected passage"
+                          : t.root.selected_text.length > 80
+                            ? t.root.selected_text.slice(0, 80) + "…"
+                            : t.root.selected_text}
                       </span>
                       {t.followups.length > 0 && (
                         <span className="shrink-0 font-mono text-[10px] font-normal tabular-nums text-muted-foreground/65">
                           +{t.followups.length}
                         </span>
                       )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteHistoryRoot(t.root);
+                      }}
+                      aria-label="Delete this analysis"
+                      title="Delete"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 text-muted-foreground/55 opacity-0 transition-opacity duration-150 hover:bg-destructive/15 hover:text-destructive focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring group-hover/row:opacity-100 group-focus-within/row:opacity-100"
+                    >
+                      <svg
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={1.8}
+                        aria-hidden
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
                     </button>
                   </div>
                 );

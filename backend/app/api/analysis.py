@@ -193,6 +193,28 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
     selected_text = body.get("selected_text", "").strip()[:10000]
     question = (body.get("question") or "").strip()[:2000]
     action = body.get("action", "explain")
+    # PDF page regions are persisted so the highlight underline can be
+    # repainted after a refresh. The frontend computes pct geometry once
+    # at action time; we don't validate the shape beyond capping length.
+    regions_in = body.get("regions")
+    sanitized_regions: list[dict] | None = None
+    if isinstance(regions_in, list) and len(regions_in) <= 32:
+        sanitized_regions = []
+        for r in regions_in:
+            if not isinstance(r, dict):
+                continue
+            try:
+                sanitized_regions.append({
+                    "pageNum": int(r["pageNum"]),
+                    "xPct": float(r["xPct"]),
+                    "yPct": float(r["yPct"]),
+                    "wPct": float(r["wPct"]),
+                    "hPct": float(r["hPct"]),
+                })
+            except (KeyError, TypeError, ValueError):
+                continue
+        if not sanitized_regions:
+            sanitized_regions = None
     # Optional vision payload: a base64-encoded PNG of the rendered selection,
     # captured client-side when the PDF text layer mangles equation glyphs.
     image_b64 = body.get("image_base64")
@@ -239,6 +261,8 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
             # server analyzed, and persist the user's short follow-up prompt
             # separately so hydration does not rewrite threaded entries.
             result["question"] = question
+        if sanitized_regions:
+            result["regions"] = sanitized_regions
         # Per audit §7.1: append this JSONB item atomically in Postgres
         # instead of read-modify-writing the whole paper row.
         if not append_selection_db(paper_id, user_id, result):
