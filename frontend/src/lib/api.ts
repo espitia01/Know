@@ -657,12 +657,17 @@ export const api = {
     id: string,
     selectedText: string,
     action: string,
-    extra?: { question?: string; signal?: AbortSignal },
+    extra?: { question?: string; signal?: AbortSignal; imageBase64?: string },
   ) =>
     request<SelectionAnalysisResult>(`/api/papers/${id}/selection`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ selected_text: selectedText, action, question: extra?.question }),
+      body: JSON.stringify({
+        selected_text: selectedText,
+        action,
+        question: extra?.question,
+        image_base64: extra?.imageBase64,
+      }),
       signal: extra?.signal,
     }),
 

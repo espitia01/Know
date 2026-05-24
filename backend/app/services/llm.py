@@ -643,8 +643,19 @@ async def polish_note_from_selection(
     return cleaned[:10000]
 
 
-async def analyze_selection(paper_text: str, selected_text: str, action: str, user_id: str | None = None) -> dict:
-    """Analyze a user-highlighted selection from the PDF using the fast provider."""
+async def analyze_selection(
+    paper_text: str,
+    selected_text: str,
+    action: str,
+    user_id: str | None = None,
+    image_b64: str | None = None,
+) -> dict:
+    """Analyze a user-highlighted selection from the PDF using the fast provider.
+
+    When ``image_b64`` is provided, the PNG screenshot of the selection is sent
+    to a vision-capable model alongside the (probably garbled) text — used for
+    equation selections where the PDF text layer is unreadable.
+    """
     provider = get_fast_provider(user_id)
     budget = get_budgets("selection", user_id)
     selected_text = _sanitize_user_text(selected_text, max_chars=budget["selection"])
@@ -743,7 +754,28 @@ Return JSON:
         "You are an expert science educator. Analyze academic paper content to help students learn. "
         "Return ONLY valid JSON.\n\n" + LATEX_FORMAT_INSTRUCTIONS
     )
-    raw = await provider.complete(system, prompt, max_tokens=3000)
+
+    if image_b64 and isinstance(provider, AnthropicProvider):
+        # The PDF text layer mangled what's actually on the page — usually
+        # an equation. Send the rendered region to Claude vision so the
+        # model can read the LaTeX off the page directly, then run the
+        # standard explain/derive prompt against that.
+        system_vision = (
+            system
+            + "\n\nIMPORTANT: The image attached is a screenshot of the EXACT selection from "
+            "the PDF. It is the ground-truth content the user selected — "
+            "the text extraction below may be corrupted or empty. ALWAYS prefer the "
+            "image when interpreting equations, symbols, and math. Reconstruct "
+            "the LaTeX from the image, then analyze that equation/passage."
+        )
+        try:
+            resized = _resize_image_b64(image_b64)
+            raw = await provider.complete_with_image(system_vision, prompt, resized, max_tokens=3000)
+        except Exception:
+            logger.exception("Vision selection failed; falling back to text-only")
+            raw = await provider.complete(system, prompt, max_tokens=3000)
+    else:
+        raw = await provider.complete(system, prompt, max_tokens=3000)
     result = _safe_parse_json(raw)
     # Explain and legacy assumptions payloads share one shape.
     if action == "explain" or action == "assumptions":

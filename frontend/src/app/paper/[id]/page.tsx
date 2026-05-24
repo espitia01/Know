@@ -12,7 +12,13 @@ import { selectionKey } from "@/lib/selectionActions";
 // Stage 2: streaming for selection moved to Next.js + AI SDK via this hook.
 // The previous SSE consumer (`consumeSelectionSse`) is still used by the
 // trial flow in `try/[id]/page.tsx`, so we don't delete it yet.
-import { captureCurrentTextSelectionRegions, rectToRegions } from "@/lib/pdfHighlightRegions";
+import {
+  captureCurrentTextSelectionRegions,
+  rectToRegions,
+  getActivePdfContainer,
+} from "@/lib/pdfHighlightRegions";
+import { capturePdfViewportUnionToBlob } from "@/lib/pdfSelectionCapture";
+import { hasMathInText } from "@/lib/selectionMath";
 import { useSelectionThread } from "@/lib/useSelectionThread";
 import { SelectionToolbar, type SelectionAction } from "@/components/pdf/SelectionToolbar";
 import { AnalysisPanel, type PanelPosition } from "@/components/panel/BottomPanel";
@@ -1684,18 +1690,44 @@ function PaperContent() {
       return;
     }
 
-    // Streaming actions — explain / derive — go through the migrated
-    // Next.js + AI SDK route. `selectionThread` is constructed with
-    // `activePaperId`, so its writes are already paper-scoped; no
-    // extra guard required.
+    // Explain / Derive — Python batch endpoint. If the selection text
+    // looks like an equation mangled by PDF extraction, also send a PNG
+    // crop of the selection so the model can read the math off the page
+    // instead of guessing from context.
     if (!startedFor) return;
     setPanelVisible(true);
     setActiveTab("selection");
+
+    let imageBase64: string | undefined;
+    if (hasMathInText(text) && selection?.rect) {
+      try {
+        const container = getActivePdfContainer();
+        if (container) {
+          const r = selection.rect;
+          const union = new DOMRect(r.left, r.top, r.width, r.height);
+          const blob = await capturePdfViewportUnionToBlob(container, union);
+          if (blob) {
+            imageBase64 = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const out = String(reader.result || "");
+                resolve(out);
+              };
+              reader.onerror = () => reject(reader.error);
+              reader.readAsDataURL(blob);
+            });
+          }
+        }
+      } catch (e) {
+        console.error("Vision capture failed:", e);
+      }
+    }
 
     selectionThread.start({
       action: action as "explain" | "derive",
       selectedText: text,
       regions: capturedRegions,
+      imageBase64,
     });
   }, [activePaperId, selection, setPanelVisible, setActiveTab, selectionThread, setSelectionResultForPaper, upsertSelectionInHistoryForPaper]);
 

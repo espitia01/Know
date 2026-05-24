@@ -17,11 +17,13 @@ import { useUserSettings } from "@/lib/UserSettingsContext";
 export type SelectionAction = "explain" | "derive" | "followup";
 
 export type StartArgs = {
-  action: SelectionAction;
+ action: SelectionAction;
   selectedText: string;
   question?: string;
   model?: string;
   regions?: SelectionAnalysisResult["regions"];
+  /** Base64 PNG of the selection — sent to vision when text is garbled math. */
+  imageBase64?: string;
 };
 
 type StartedState = {
@@ -131,7 +133,11 @@ export function useSelectionThread(paperId: string) {
             paperId,
             trimmed,
             args.action,
-            { question: args.question, signal: controller.signal },
+            {
+              question: args.question,
+              signal: controller.signal,
+              imageBase64: args.imageBase64,
+            },
           );
           if (controller.signal.aborted) return;
 

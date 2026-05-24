@@ -54,6 +54,11 @@ export function captureCurrentTextSelectionRegions(): CapturedHighlightRegion[] 
   return captureTextSelectionRegions(activeCaptureContext.container, activeCaptureContext.opts);
 }
 
+/** Container exposed for callers that need to crop a screenshot at action time. */
+export function getActivePdfContainer(): HTMLElement | null {
+  return activeCaptureContext?.container ?? null;
+}
+
 /**
  * Last-resort: convert a single viewport rect (e.g. the toolbar's anchor rect)
  * into pct regions on whichever page intersects it. Used when text-layer

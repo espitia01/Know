@@ -207,15 +207,9 @@ export function SelectionResultPanel({
     <div className="space-y-8">
       {result && activeThread && (
         <>
+          {/* ResultCard owns its own empty/streaming indicator —
+              don't duplicate it at the panel level. */}
           {renderThreadCard(activeThread)}
-          {loading && (
-            <div className="flex flex-col items-center gap-2 py-6">
-              <div className="w-full max-w-[16rem]">
-                <AnalysisProgress kind="selection" />
-              </div>
-              <p className="text-[var(--text-xs)] text-muted-foreground/85">Thinking…</p>
-            </div>
-          )}
           {canAskFollowUp && (
             <div className="border-t border-border/50 pt-4">
               <p className="mb-2 text-[11px] font-medium text-muted-foreground">

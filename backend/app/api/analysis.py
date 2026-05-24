@@ -193,6 +193,21 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
     selected_text = body.get("selected_text", "").strip()[:10000]
     question = (body.get("question") or "").strip()[:2000]
     action = body.get("action", "explain")
+    # Optional vision payload: a base64-encoded PNG of the rendered selection,
+    # captured client-side when the PDF text layer mangles equation glyphs.
+    image_b64 = body.get("image_base64")
+    if isinstance(image_b64, str):
+        image_b64 = image_b64.strip()
+        # Strip a data-URL prefix if the client included one.
+        if image_b64.startswith("data:image"):
+            comma = image_b64.find(",")
+            if comma >= 0:
+                image_b64 = image_b64[comma + 1 :]
+        # Hard cap (~6 MB encoded ≈ 4.5 MB binary) to keep prompts manageable.
+        if len(image_b64) > 6_500_000:
+            image_b64 = None
+    else:
+        image_b64 = None
     # Legacy "question" is folded into Explain; the standalone Ask
     # button was removed (its UX was a near-duplicate of Explain).
     # Anything else unknown also collapses to Explain so old clients
@@ -204,7 +219,7 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
         action = "explain"
     if action not in ("explain", "derive", "followup"):
         action = "explain"
-    if not selected_text:
+    if not selected_text and not image_b64:
         raise HTTPException(status_code=400, detail="No text selected")
 
     token = reserve_usage(
@@ -212,7 +227,13 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
         count=get_usage_multiplier(user_id),
     )
     try:
-        result = await analyze_selection(paper_prompt_text(paper), selected_text, action, user_id=user_id)
+        result = await analyze_selection(
+            paper_prompt_text(paper),
+            selected_text,
+            action,
+            user_id=user_id,
+            image_b64=image_b64,
+        )
         if question:
             # Per audit §11.3: keep selected_text identical to what the
             # server analyzed, and persist the user's short follow-up prompt
