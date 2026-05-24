@@ -56,6 +56,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  try {
   const { id: paperId } = await params;
   if (!paperId || !PAPER_ID_RE.test(paperId)) {
     return jsonError(400, "bad_paper_id", "Invalid paper id");
@@ -84,13 +85,28 @@ export async function POST(
       fetchPaperContext(paperId, user.userId),
       fetchUserPrefs(user.userId),
     ]);
-    paper = { title: ctx.title, raw_text: ctx.raw_text };
+    paper = {
+      title: ctx.title ?? "Untitled paper",
+      // Defensive: an empty raw_text would cause the model to produce a
+      // schema-invalid object and surface as a 500 from `streamObject`.
+      raw_text: ctx.raw_text ?? "",
+    };
+    if (!paper.raw_text.trim()) {
+      return jsonError(
+        409,
+        "paper_text_unavailable",
+        "Paper text is not ready yet. Try again in a few seconds once parsing finishes.",
+      );
+    }
     deepAnalysis = prefs.deep_analysis;
     analysisModel = await resolveStreamModelOverride(
       user.userId,
       body,
       prefs.analysis_model,
     );
+    if (!analysisModel?.trim()) {
+      analysisModel = process.env.MODEL_ANALYSIS || "claude-sonnet-4-6";
+    }
   } catch (e) {
     if (e instanceof InternalApiError) {
       const status = e.status === 404 ? 404 : 502;
@@ -213,12 +229,29 @@ export async function POST(
     return jsonError(502, "provider_error", message);
   }
 
-  return result.toTextStreamResponse({
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-store, no-transform",
-      "X-Accel-Buffering": "no",
-      "X-Know-Model": analysisModel,
-    },
-  });
+  try {
+    return result.toTextStreamResponse({
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store, no-transform",
+        "X-Accel-Buffering": "no",
+        "X-Know-Model": analysisModel,
+      },
+    });
+  } catch (e) {
+    await releaseOnFailure();
+    const message = e instanceof Error ? e.message : "Stream response error";
+    return jsonError(502, "stream_response_error", message);
+  }
+  } catch (e) {
+    console.error(
+      JSON.stringify({
+        tag: "summary-stream.unhandled",
+        error: e instanceof Error ? e.message : String(e),
+        stack: e instanceof Error ? e.stack?.slice(0, 800) : undefined,
+      }),
+    );
+    const message = e instanceof Error ? e.message : "Internal server error";
+    return jsonError(500, "internal_error", message);
+  }
 }
