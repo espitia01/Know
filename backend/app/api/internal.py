@@ -106,7 +106,17 @@ async def internal_paper_text(paper_id: str, user_id: str):
         raise HTTPException(status_code=404, detail="Paper not found")
 
     from ..services.pdf_parser import get_paper, paper_prompt_text
-    paper = get_paper(paper_id, user_id=user_id)
+    try:
+        paper = get_paper(paper_id, user_id=user_id)
+    except Exception as exc:
+        logger.exception("internal_paper_text failed for %s: %s", paper_id, exc)
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "paper_fetch_failed",
+                "message": "Could not load paper context",
+            },
+        ) from exc
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
@@ -254,43 +264,54 @@ async def internal_usage_reserve(body: dict = Body(...)):
     expects — the Next.js side stores it for the duration of the stream
     and posts it back to ``/usage/release`` if the stream fails.
     """
-    user_id = (body.get("user_id") or "").strip()
-    paper_id = (body.get("paper_id") or "").strip()
-    kind = (body.get("kind") or "").strip()
-    model = body.get("model")
-    count = int(body.get("count") or 1)
-    record_daily = bool(body.get("record_daily", True))
-    # Callers can opt out of the deep multiplier when they've already applied
-    # it client-side (e.g. a future batched stream that pre-scales count by
-    # the question count × deep factor). Default is False so today's Next.js
-    # streams keep getting the multiplier applied here.
-    apply_deep_multiplier = bool(body.get("apply_deep_multiplier", True))
+    try:
+        user_id = (body.get("user_id") or "").strip()
+        paper_id = (body.get("paper_id") or "").strip()
+        kind = (body.get("kind") or "").strip()
+        model = body.get("model")
+        try:
+            count = int(body.get("count") or 1)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid count")
+        record_daily = bool(body.get("record_daily", True))
+        apply_deep_multiplier = bool(body.get("apply_deep_multiplier", True))
 
-    if not user_id or not kind:
-        raise HTTPException(status_code=400, detail="Missing user_id or kind")
-    _validate_id(paper_id, "paper_id")
+        if not user_id or not kind:
+            raise HTTPException(status_code=400, detail="Missing user_id or kind")
+        _validate_id(paper_id, "paper_id")
 
-    if paper_id and kind in ("qa", "selection", "summary", "figure"):
-        from ..services.db import get_paper_meta
-        if not get_paper_meta(paper_id, user_id):
-            raise HTTPException(status_code=403, detail="Paper not found or access denied")
+        if paper_id and kind in ("qa", "selection", "summary", "figure"):
+            from ..services.db import get_paper_meta
+            if not get_paper_meta(paper_id, user_id):
+                raise HTTPException(status_code=403, detail="Paper not found or access denied")
 
-    if model:
-        model = enforce_model(user_id, model)
+        if model:
+            model = enforce_model(user_id, model)
 
-    deep_kinds = {"qa", "selection", "summary", "figure"}
-    if apply_deep_multiplier and kind in deep_kinds:
-        count = count * get_usage_multiplier(user_id)
+        deep_kinds = {"qa", "selection", "summary", "figure"}
+        if apply_deep_multiplier and kind in deep_kinds:
+            count = count * get_usage_multiplier(user_id)
 
-    token = reserve_usage(
-        user_id=user_id,
-        paper_id=paper_id,
-        action=kind,
-        model=model,
-        count=count,
-        record_daily=record_daily,
-    )
-    return {"token": token, "model": model}
+        token = reserve_usage(
+            user_id=user_id,
+            paper_id=paper_id,
+            action=kind,
+            model=model,
+            count=count,
+            record_daily=record_daily,
+        )
+        return {"token": token, "model": model}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("internal_usage_reserve failed: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "usage_unavailable",
+                "message": "Usage tracking unavailable — please try again.",
+            },
+        ) from exc
 
 
 @router.post("/usage/release", dependencies=[Depends(require_internal_bearer)])

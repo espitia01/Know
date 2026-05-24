@@ -138,23 +138,33 @@ export type PaperSummaryLite = z.infer<typeof PaperSummaryLiteSchema>;
 export const PaperSummaryDeepSchema = z.object({
   model: z.string().optional(),
   created_at: z.number().optional(),
-  overview: z.string().describe("3–5 sentence high-level overview of what the paper does and why it matters."),
+  overview: z
+    .string()
+    .optional()
+    .describe("3–5 sentence high-level overview of what the paper does and why it matters."),
   tl_dr: z
     .string()
     .optional()
     .describe("One-sentence takeaway with the single most important result. Math-aware ($...$ allowed)."),
   key_contributions: z
     .array(z.string())
+    .optional()
     .describe("1–2 sentence bullets, 3–5 items, ordered by importance."),
-  motivation: z.string().describe("3–5 sentences on why this work was done and what gap it fills."),
+  motivation: z
+    .string()
+    .optional()
+    .describe("3–5 sentences on why this work was done and what gap it fills."),
   methodology: z
     .string()
+    .optional()
     .describe("1–2 paragraph markdown explanation of the methods, models, or theoretical framework."),
   main_results: z
     .string()
+    .optional()
     .describe("1–2 paragraph markdown describing the key findings; quantitative numbers in $...$ delimiters."),
   discussion: z
     .string()
+    .optional()
     .describe("1–2 paragraph markdown — what the results mean, how they compare to prior work."),
   limitations: z.array(z.string()).optional(),
   future_work: z.string().optional().describe("2–3 sentences on follow-up research this enables."),

@@ -38,10 +38,24 @@ function describeError(error: unknown): string {
   if (!error) return "Summary generation failed. Try again.";
   const message = error instanceof Error ? error.message : String(error);
   try {
-    const parsed = JSON.parse(message) as { detail?: { code?: string; message?: string } };
-    if (parsed.detail?.message) return parsed.detail.message;
+    const parsed = JSON.parse(message) as {
+      detail?: { code?: string; message?: string; model?: string };
+    };
+    if (parsed.detail?.message) {
+      const code = parsed.detail.code ? `[${parsed.detail.code}] ` : "";
+      return `${code}${parsed.detail.message}`;
+    }
   } catch {
-    /* not JSON */
+    /* not JSON — fall through */
+  }
+  if (message.includes("paper_text_unavailable")) {
+    return "Paper text is not ready yet. Wait for parsing to finish, then try again.";
+  }
+  if (message.includes("usage_unavailable") || message.includes("usage tracking")) {
+    return "Usage tracking is temporarily unavailable. If this persists, confirm migration 023 is applied on Supabase.";
+  }
+  if (message.includes("provider_error") || message.includes("Provider error")) {
+    return "The analysis model could not run. Check provider keys / AI Gateway configuration, or pick another model in Settings.";
   }
   return message || "Summary generation failed. Try again.";
 }

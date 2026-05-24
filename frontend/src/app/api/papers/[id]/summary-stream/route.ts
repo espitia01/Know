@@ -52,132 +52,228 @@ function jsonError(
   return NextResponse.json({ detail: { code, message, ...extra } }, { status });
 }
 
+function parseInternalDetail(detail: unknown): Record<string, unknown> {
+  if (detail && typeof detail === "object") {
+    const outer = detail as Record<string, unknown>;
+    if (outer.detail && typeof outer.detail === "object") {
+      return outer.detail as Record<string, unknown>;
+    }
+    return outer;
+  }
+  if (typeof detail === "string" && detail.trim()) {
+    return { message: detail };
+  }
+  return {};
+}
+
+function mapInternalStatus(status: number): number {
+  if (status === 404 || status === 409) return status;
+  if (status === 403 || status === 429) return status;
+  if (status >= 500) return 502;
+  if (status >= 400) return status;
+  return 502;
+}
+
+function internalErrorResponse(
+  e: InternalApiError,
+  fallbackCode: string,
+  fallbackMessage: string,
+): Response {
+  const inner = parseInternalDetail(e.detail);
+  const code = (inner.code as string) || fallbackCode;
+  const message = (inner.message as string) || e.message || fallbackMessage;
+  const status = mapInternalStatus(e.status);
+  return jsonError(status, code, message, { ...inner, upstream_status: e.status });
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  try {
-  const { id: paperId } = await params;
-  if (!paperId || !PAPER_ID_RE.test(paperId)) {
-    return jsonError(400, "bad_paper_id", "Invalid paper id");
-  }
-
-  let user: { userId: string; tier: string };
-  try {
-    user = await requireUser();
-  } catch (e) {
-    if (e instanceof AuthError) return jsonError(e.status, e.code, e.message);
-    return jsonError(401, "unauthorized", "Unauthorized");
-  }
-
-  let body: Record<string, unknown> = {};
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    body = {};
-  }
-
-  let paper: { title: string; raw_text: string };
-  let analysisModel: string;
-  let deepAnalysis = false;
-  try {
-    const [ctx, prefs] = await Promise.all([
-      fetchPaperContext(paperId, user.userId),
-      fetchUserPrefs(user.userId),
-    ]);
-    paper = {
-      title: ctx.title ?? "Untitled paper",
-      // Defensive: an empty raw_text would cause the model to produce a
-      // schema-invalid object and surface as a 500 from `streamObject`.
-      raw_text: ctx.raw_text ?? "",
-    };
-    if (!paper.raw_text.trim()) {
-      return jsonError(
-        409,
-        "paper_text_unavailable",
-        "Paper text is not ready yet. Try again in a few seconds once parsing finishes.",
-      );
-    }
-    deepAnalysis = prefs.deep_analysis;
-    analysisModel = await resolveStreamModelOverride(
-      user.userId,
-      body,
-      prefs.analysis_model,
-    );
-    if (!analysisModel?.trim()) {
-      analysisModel = defaultSlugFor("analysis");
-    }
-  } catch (e) {
-    if (e instanceof InternalApiError) {
-      if (e.status === 409) {
-        const inner = (e.detail as { detail?: Record<string, unknown> } | undefined)?.detail
-          ?? (e.detail as Record<string, unknown> | undefined);
-        const code = (inner?.code as string) || "paper_text_unavailable";
-        const message =
-          (inner?.message as string) ||
-          "Paper text is not ready yet. Try again in a few seconds once parsing finishes.";
-        return jsonError(409, code, message);
-      }
-      const status = e.status === 404 ? 404 : 502;
-      const code = e.status === 404 ? "paper_not_found" : "internal_unavailable";
-      return jsonError(status, code, e.message);
-    }
-    return jsonError(502, "paper_fetch_failed", "Could not load paper context");
-  }
-
   let usageToken: UsageToken | null = null;
-  try {
-    const reserve = await reserveUsage({
-      userId: user.userId,
-      paperId,
-      kind: "summary",
-      model: analysisModel,
-    });
-    usageToken = reserve.token;
-  } catch (e) {
-    if (e instanceof InternalApiError) {
-      const detail = e.detail as { detail?: Record<string, unknown> } | undefined;
-      const inner = (detail?.detail ?? {}) as Record<string, unknown>;
-      const code = (inner.code as string) || (e.status === 403 ? "tier_locked" : "rate_limited");
-      const message = (inner.message as string) || e.message;
-      return jsonError(e.status, code, message, { ...inner });
-    }
-    return jsonError(503, "usage_unavailable", "Usage tracking unavailable");
-  }
-
-  const depth = promptDepthForModel(analysisModel);
-  const { system, paperContextText, taskText } = buildSummaryDeepPrompt({
-    paperTitle: paper.title,
-    paperContext: paper.raw_text,
-    depth,
-    deepAnalysis,
-  });
-
+  let analysisModel = defaultSlugFor("analysis");
   let releasedOnError = false;
+
   const releaseOnFailure = async () => {
     if (releasedOnError) return;
     releasedOnError = true;
-    if (usageToken) await releaseUsage(usageToken);
+    try {
+      if (usageToken) await releaseUsage(usageToken);
+    } catch {
+      /* best-effort */
+    }
   };
 
-  let result: ReturnType<typeof streamObject>;
   try {
-    result = streamObject({
-      model: getModelFromSlug(analysisModel),
-      schema: zodSchema(PaperSummaryDeepSchema),
-      schemaName: "PaperSummaryDeep",
-      schemaDescription:
-        "Comprehensive structured summary of an academic paper, including overview, key contributions, methodology, results, discussion, limitations, future work, key equations (with per-variable glossary), and key figures/tables.",
-      system,
-      messages: cachedUserMessages(analysisModel, paperContextText, taskText),
-      ...(providerOptionsForSlug(analysisModel)
-        ? { providerOptions: providerOptionsForSlug(analysisModel) }
-        : {}),
-      temperature: 0.3,
-      maxOutputTokens: maxOutputTokensFor(analysisModel, "analysis"),
-      onFinish: async (event) => {
-        try {
-          if (event.error) {
+    const { id: paperId } = await params;
+    if (!paperId || !PAPER_ID_RE.test(paperId)) {
+      return jsonError(400, "bad_paper_id", "Invalid paper id");
+    }
+
+    let user: { userId: string; tier: string };
+    try {
+      user = await requireUser();
+    } catch (e) {
+      if (e instanceof AuthError) return jsonError(e.status, e.code, e.message);
+      return jsonError(401, "unauthorized", "Unauthorized");
+    }
+
+    let body: Record<string, unknown> = {};
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      body = {};
+    }
+
+    let paper: { title: string; raw_text: string };
+    let deepAnalysis = false;
+    try {
+      const [ctx, prefs] = await Promise.all([
+        fetchPaperContext(paperId, user.userId),
+        fetchUserPrefs(user.userId),
+      ]);
+      paper = {
+        title: ctx.title ?? "Untitled paper",
+        raw_text: ctx.raw_text ?? "",
+      };
+      if (!paper.raw_text.trim()) {
+        return jsonError(
+          409,
+          "paper_text_unavailable",
+          "Paper text is not ready yet. Try again in a few seconds once parsing finishes.",
+        );
+      }
+      deepAnalysis = prefs.deep_analysis;
+      analysisModel = await resolveStreamModelOverride(
+        user.userId,
+        body,
+        prefs.analysis_model,
+      );
+      if (!analysisModel?.trim()) {
+        analysisModel = defaultSlugFor("analysis");
+      }
+    } catch (e) {
+      if (e instanceof InternalApiError) {
+        return internalErrorResponse(
+          e,
+          e.status === 409 ? "paper_text_unavailable" : "internal_unavailable",
+          e.status === 404
+            ? "Paper not found"
+            : "Could not load paper context",
+        );
+      }
+      return jsonError(502, "paper_fetch_failed", "Could not load paper context");
+    }
+
+    try {
+      const reserve = await reserveUsage({
+        userId: user.userId,
+        paperId,
+        kind: "summary",
+        model: analysisModel,
+      });
+      usageToken = reserve.token;
+      if (reserve.model?.trim()) {
+        analysisModel = reserve.model;
+      }
+    } catch (e) {
+      if (e instanceof InternalApiError) {
+        return internalErrorResponse(
+          e,
+          e.status === 403 ? "tier_locked" : "usage_unavailable",
+          "Usage tracking unavailable",
+        );
+      }
+      return jsonError(503, "usage_unavailable", "Usage tracking unavailable");
+    }
+
+    let system: string;
+    let paperContextText: string;
+    let taskText: string;
+    try {
+      const depth = promptDepthForModel(analysisModel);
+      ({ system, paperContextText, taskText } = buildSummaryDeepPrompt({
+        paperTitle: paper.title,
+        paperContext: paper.raw_text,
+        depth,
+        deepAnalysis,
+      }));
+    } catch (e) {
+      await releaseOnFailure();
+      const message = e instanceof Error ? e.message : "Prompt build failed";
+      return jsonError(502, "prompt_build_failed", message, { model: analysisModel });
+    }
+
+    let result: ReturnType<typeof streamObject>;
+    try {
+      result = streamObject({
+        model: getModelFromSlug(analysisModel),
+        schema: zodSchema(PaperSummaryDeepSchema),
+        schemaName: "PaperSummaryDeep",
+        schemaDescription:
+          "Comprehensive structured summary of an academic paper, including overview, key contributions, methodology, results, discussion, limitations, future work, key equations (with per-variable glossary), and key figures/tables.",
+        system,
+        messages: cachedUserMessages(analysisModel, paperContextText, taskText),
+        ...(providerOptionsForSlug(analysisModel)
+          ? { providerOptions: providerOptionsForSlug(analysisModel) }
+          : {}),
+        temperature: 0.3,
+        maxOutputTokens: maxOutputTokensFor(analysisModel, "analysis"),
+        onFinish: async (event) => {
+          try {
+            if (event.error) {
+              console.error(
+                JSON.stringify({
+                  tag: "summary-stream.finish",
+                  paperId,
+                  userId: user.userId,
+                  hasObject: false,
+                  hasError: true,
+                  errorMessage: String(event.error).slice(0, 500),
+                }),
+              );
+              await releaseOnFailure();
+              return;
+            }
+            const raw = event.object as PaperSummaryDeep | undefined;
+            const parsed = PaperSummaryDeepSchema.safeParse(raw);
+            const finalObject = parsed.success ? parsed.data : raw;
+            const methodology =
+              typeof finalObject?.methodology === "string"
+                ? finalObject.methodology.trim()
+                : "";
+            if (!methodology) {
+              await releaseOnFailure();
+              return;
+            }
+            console.log(
+              JSON.stringify({
+                tag: "summary-stream.finish",
+                paperId,
+                userId: user.userId,
+                hasObject: true,
+                hasError: false,
+                usage: event.usage,
+              }),
+            );
+            try {
+              await upsertCachedAnalysis({
+                userId: user.userId,
+                paperId,
+                key: "summary_deep",
+                value: { ...finalObject, model: analysisModel } as PaperSummaryDeep,
+              });
+            } catch (err) {
+              console.error(
+                JSON.stringify({
+                  tag: "summary-stream.persist",
+                  paperId,
+                  userId: user.userId,
+                  error: err instanceof Error ? err.message : String(err),
+                }),
+              );
+            }
+          } catch (err) {
             console.error(
               JSON.stringify({
                 tag: "summary-stream.finish",
@@ -185,116 +281,66 @@ export async function POST(
                 userId: user.userId,
                 hasObject: false,
                 hasError: true,
-                errorMessage: String(event.error).slice(0, 500),
+                errorMessage: err instanceof Error ? err.message : String(err),
               }),
             );
             await releaseOnFailure();
-            return;
           }
-          const raw = event.object as PaperSummaryDeep | undefined;
-          const parsed = PaperSummaryDeepSchema.safeParse(raw);
-          const finalObject = parsed.success ? parsed.data : raw;
-          const methodology =
-            typeof finalObject?.methodology === "string"
-              ? finalObject.methodology.trim()
-              : "";
-          if (!methodology) {
-            await releaseOnFailure();
-            return;
-          }
-          console.log(
-            JSON.stringify({
-              tag: "summary-stream.finish",
-              paperId,
-              userId: user.userId,
-              hasObject: true,
-              hasError: false,
-              usage: event.usage,
-            }),
-          );
+        },
+        onError: async ({ error }) => {
           try {
-            await upsertCachedAnalysis({
-              userId: user.userId,
-              paperId,
-              key: "summary_deep",
-              value: { ...finalObject, model: analysisModel } as PaperSummaryDeep,
-            });
+            console.error(
+              JSON.stringify({
+                tag: "summary-stream.error",
+                paperId,
+                userId: user.userId,
+                error: String(error).slice(0, 800),
+              }),
+            );
+            await releaseOnFailure();
           } catch (err) {
             console.error(
               JSON.stringify({
-                tag: "summary-stream.persist",
+                tag: "summary-stream.error",
                 paperId,
                 userId: user.userId,
                 error: err instanceof Error ? err.message : String(err),
               }),
             );
           }
-        } catch (err) {
-          console.error(
-            JSON.stringify({
-              tag: "summary-stream.finish",
-              paperId,
-              userId: user.userId,
-              hasObject: false,
-              hasError: true,
-              errorMessage: err instanceof Error ? err.message : String(err),
-            }),
-          );
-          await releaseOnFailure();
-        }
-      },
-      onError: async ({ error }) => {
-        try {
-          console.error(
-            JSON.stringify({
-              tag: "summary-stream.error",
-              paperId,
-              userId: user.userId,
-              error: String(error).slice(0, 800),
-            }),
-          );
-          await releaseOnFailure();
-        } catch (err) {
-          console.error(
-            JSON.stringify({
-              tag: "summary-stream.error",
-              paperId,
-              userId: user.userId,
-              error: err instanceof Error ? err.message : String(err),
-            }),
-          );
-        }
-      },
-    });
-  } catch (e) {
-    await releaseOnFailure();
-    const message = e instanceof Error ? e.message : "Provider error";
-    return jsonError(502, "provider_error", message, { model: analysisModel });
-  }
+        },
+      });
+    } catch (e) {
+      await releaseOnFailure();
+      const message = e instanceof Error ? e.message : "Provider error";
+      return jsonError(502, "provider_error", message, { model: analysisModel });
+    }
 
-  try {
-    return result.toTextStreamResponse({
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-store, no-transform",
-        "X-Accel-Buffering": "no",
-        "X-Know-Model": analysisModel,
-      },
-    });
+    try {
+      return result.toTextStreamResponse({
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store, no-transform",
+          "X-Accel-Buffering": "no",
+          "X-Know-Model": analysisModel,
+        },
+      });
+    } catch (e) {
+      await releaseOnFailure();
+      const message = e instanceof Error ? e.message : "Stream response error";
+      return jsonError(502, "stream_response_error", message, { model: analysisModel });
+    }
   } catch (e) {
     await releaseOnFailure();
-    const message = e instanceof Error ? e.message : "Stream response error";
-    return jsonError(502, "stream_response_error", message);
-  }
-  } catch (e) {
     console.error(
       JSON.stringify({
         tag: "summary-stream.unhandled",
         error: e instanceof Error ? e.message : String(e),
         stack: e instanceof Error ? e.stack?.slice(0, 800) : undefined,
+        model: analysisModel,
       }),
     );
     const message = e instanceof Error ? e.message : "Internal server error";
-    return jsonError(500, "internal_error", message);
+    return jsonError(502, "internal_error", message, { model: analysisModel });
   }
 }

@@ -388,12 +388,18 @@ def reserve_usage(
             )
         reserved["paper"] = True
     except HTTPException:
-        if reserved["capability"] and capability:
-            release_daily_capability_usage(user_id, today, capability, count)
-        if reserved["daily"]:
-            release_daily_api_usage(user_id, today, count)
-        if reserved["paper"]:
-            release_paper_usage(user_id, paper_id, action, today, count)
+        try:
+            if reserved["capability"] and capability:
+                release_daily_capability_usage(user_id, today, capability, count)
+            if reserved["daily"]:
+                release_daily_api_usage(user_id, today, count)
+            if reserved["paper"]:
+                release_paper_usage(user_id, paper_id, action, today, count)
+        except Exception:
+            logger.exception(
+                "reserve_usage rollback failed (user=%s paper=%s action=%s model=%s)",
+                user_id, paper_id, action, model,
+            )
         raise
     except Exception:
         # Any unexpected error path (DB connectivity etc.): roll back what we
