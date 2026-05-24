@@ -162,6 +162,20 @@ def save_paper_meta(paper_dict: dict, user_id: str) -> None:
     if not client:
         return
 
+    paper_id = paper_dict.get("id")
+    if not paper_id:
+        return
+
+    existing = _safe_single(
+        client.table("papers").select("user_id").eq("id", paper_id)
+    )
+    if existing and existing.get("user_id") and existing["user_id"] != user_id:
+        logger.error(
+            "save_paper_meta rejected: paper %s belongs to another user",
+            paper_id,
+        )
+        return
+
     ocr_images_raw = paper_dict.get("ocr_images") or []
     ocr_images: list[dict] = []
     for item in ocr_images_raw:
@@ -348,6 +362,39 @@ def list_papers_meta(
     return rows
 
 
+def delete_paper_dependents(paper_id: str, user_id: str) -> None:
+    """Remove highlights, chunks, exports, and reading state for a paper."""
+    client = get_db()
+    if not client:
+        return
+    try:
+        client.rpc("delete_paper_dependents", {
+            "p_paper_id": paper_id,
+            "p_user_id": user_id,
+        }).execute()
+        return
+    except Exception as exc:
+        logger.warning(
+            "delete_paper_dependents RPC failed for %s/%s (%s); falling back",
+            user_id,
+            paper_id,
+            exc.__class__.__name__,
+        )
+    for table, filters in (
+        ("highlights", {"paper_id": paper_id, "user_id": user_id}),
+        ("paper_chunks", {"paper_id": paper_id, "user_id": user_id}),
+        ("exports", {"paper_id": paper_id, "user_id": user_id}),
+        ("paper_reading_state", {"paper_id": paper_id, "user_id": user_id}),
+    ):
+        try:
+            q = client.table(table).delete()
+            for col, val in filters.items():
+                q = q.eq(col, val)
+            q.execute()
+        except Exception as e:
+            logger.warning("delete_paper_dependents fallback %s failed: %s", table, e)
+
+
 def delete_paper_meta(paper_id: str, user_id: str) -> None:
     """Delete a paper row. Also prunes the id from any workspace arrays so
     deleted papers don't leave dead references in `workspaces.paper_ids`
@@ -355,6 +402,7 @@ def delete_paper_meta(paper_id: str, user_id: str) -> None:
     client = get_db()
     if not client:
         return
+    delete_paper_dependents(paper_id, user_id)
     client.table("papers").delete().eq("id", paper_id).eq("user_id", user_id).execute()
     _clear_list_papers_cache(user_id)
     try:
@@ -840,6 +888,10 @@ def delete_workspace(workspace_id: str, user_id: str) -> None:
 # Stripe webhook idempotency (migration 009)
 # ----------------------------------------------------------------
 
+class StripeDedupError(Exception):
+    """Raised when we cannot persist Stripe webhook idempotency."""
+
+
 def mark_stripe_event_processed(event_id: str, event_type: str) -> bool:
     """Record that we've fully processed this Stripe event. Returns False if
     the event was already recorded (caller should short-circuit and skip
@@ -865,8 +917,8 @@ def mark_stripe_event_processed(event_id: str, event_type: str) -> bool:
         msg = str(e).lower()
         if "duplicate" in msg or "23505" in msg or "unique" in msg:
             return False
-        logger.warning("stripe event dedup insert failed (processing anyway): %s", e)
-        return True
+        logger.error("stripe event dedup insert failed: %s", e)
+        raise StripeDedupError(f"dedup insert failed for {event_id}") from e
 
 
 def is_stripe_event_processed(event_id: str) -> bool:
@@ -1010,12 +1062,14 @@ def delete_highlight(user_id: str, paper_id: str, highlight_id: str) -> bool:
 # ----------------------------------------------------------------
 
 
-def delete_paper_chunks(paper_id: str) -> None:
+def delete_paper_chunks(paper_id: str, user_id: str) -> None:
     client = get_db()
     if not client:
         return
     try:
-        client.table("paper_chunks").delete().eq("paper_id", paper_id).execute()
+        client.table("paper_chunks").delete().eq(
+            "paper_id", paper_id
+        ).eq("user_id", user_id).execute()
     except Exception as e:
         logger.warning("delete_paper_chunks failed: %s", e)
 
@@ -1125,16 +1179,18 @@ def match_paper_chunks(
     paper_ids: list[str],
     query_embedding: list[float],
     *,
+    user_id: str,
     match_count: int = 8,
 ) -> list[dict]:
     client = get_db()
-    if not client or not paper_ids:
+    if not client or not paper_ids or not user_id:
         return []
     try:
         res = client.rpc(
             "match_paper_chunks",
             {
                 "query_embedding": query_embedding,
+                "p_user_id": user_id,
                 "paper_ids": paper_ids,
                 "match_count": match_count,
             },
@@ -1341,3 +1397,28 @@ def list_stale_exports(cutoff_iso: str, *, limit: int = 200) -> list[dict]:
     except Exception as e:
         logger.warning("list_stale_exports failed: %s", e)
         return []
+
+
+def cleanup_stale_exports(max_age_days: int = 30, *, batch_limit: int = 200) -> dict:
+    """Delete completed export rows and storage objects older than max_age_days."""
+    from datetime import datetime, timedelta, timezone
+
+    from . import storage as cloud_storage
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, max_age_days))
+    removed = 0
+    storage_errors = 0
+    for row in list_stale_exports(cutoff.isoformat(), limit=batch_limit):
+        export_id = row.get("id")
+        uid = row.get("user_id")
+        path = row.get("storage_path")
+        if not export_id or not uid:
+            continue
+        if path:
+            try:
+                cloud_storage.delete_file(uid, path)
+            except Exception:
+                storage_errors += 1
+        if delete_export_row(export_id, uid):
+            removed += 1
+    return {"removed_exports": removed, "storage_errors": storage_errors}

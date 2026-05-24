@@ -258,6 +258,11 @@ async def internal_usage_reserve(body: dict = Body(...)):
         raise HTTPException(status_code=400, detail="Missing user_id or kind")
     _validate_id(paper_id, "paper_id")
 
+    if paper_id and kind in ("qa", "selection", "summary", "figure"):
+        from ..services.db import get_paper_meta
+        if not get_paper_meta(paper_id, user_id):
+            raise HTTPException(status_code=403, detail="Paper not found or access denied")
+
     if model:
         model = enforce_model(user_id, model)
 
@@ -433,7 +438,7 @@ async def internal_retrieve(body: dict = Body(...)):
 
     try:
         context, hits = await retrieve_for_paper(
-            validated, query, max_chars=max_chars, top_k=top_k,
+            validated, query, user_id=user_id, max_chars=max_chars, top_k=top_k,
         )
     except Exception:
         logger.exception("internal retrieve failed")
@@ -488,6 +493,7 @@ async def internal_cleanup_trial(body: dict = Body(default={})):
     be retired in stage 6 once the cron is verified running.
     """
     max_age_hours = int(body.get("max_age_hours") or 2)
+    export_ttl_days = int(body.get("export_ttl_days") or 30)
     now = time.time()
     cutoff = now - max_age_hours * 3600
 
@@ -518,7 +524,19 @@ async def internal_cleanup_trial(body: dict = Body(default={})):
     except FileNotFoundError:
         pass
 
-    return {"ok": True, "removed_db": removed_db, "removed_disk": removed_disk}
+    export_cleanup = {"removed_exports": 0, "storage_errors": 0}
+    try:
+        from ..services.db import cleanup_stale_exports
+        export_cleanup = cleanup_stale_exports(max_age_days=export_ttl_days)
+    except Exception:
+        logger.exception("cleanup_stale_exports failed")
+
+    return {
+        "ok": True,
+        "removed_db": removed_db,
+        "removed_disk": removed_disk,
+        **export_cleanup,
+    }
 
 
 # ----------------------------------------------------------------
@@ -535,7 +553,7 @@ async def internal_trial_rate_check(body: dict = Body(...)):
     this when it wants to confirm before allowing an anonymous LLM call.
     """
     ip = (body.get("ip") or "").strip()
-    max_requests = int(body.get("max_requests") or 5)
+    max_requests = int(body.get("max_requests") or 12)
     window_seconds = int(body.get("window_seconds") or 3600)
     if not ip:
         raise HTTPException(status_code=400, detail="Missing ip")

@@ -19,6 +19,7 @@ from ..services.db import (
     store_feedback,
     is_stripe_event_processed,
     mark_stripe_event_processed,
+    StripeDedupError,
 )
 
 MAX_CANCEL_REASON = 200
@@ -518,7 +519,17 @@ async def stripe_webhook(request: Request):
         raise
 
     if event_id:
-        mark_stripe_event_processed(event_id, event_type)
+        try:
+            mark_stripe_event_processed(event_id, event_type)
+        except StripeDedupError:
+            logger.error(
+                "Cannot record Stripe event %s as processed — dedup unavailable",
+                event_id,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Webhook deduplication temporarily unavailable",
+            )
 
     return {"status": "ok"}
 

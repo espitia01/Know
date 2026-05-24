@@ -62,7 +62,7 @@ async def embed_paper(paper_id: str, user_id: str, raw_text: str) -> int:
         vectors = await embed_texts(chunks)
     except EmbeddingProviderError:
         raise
-    delete_paper_chunks(paper_id)
+    delete_paper_chunks(paper_id, user_id)
     rows = [
         {"chunk_index": i, "text": c, "embedding": v, "section": None}
         for i, (c, v) in enumerate(zip(chunks, vectors))
@@ -75,6 +75,7 @@ async def retrieve_for_paper(
     paper_ids: Sequence[str],
     query: str,
     *,
+    user_id: str,
     max_chars: int = 8000,
     top_k: int = 8,
 ) -> tuple[str, list[dict]]:
@@ -83,7 +84,7 @@ async def retrieve_for_paper(
     On embedding/pgvector failure, returns ("", []) so callers can fall back.
     """
     q = (query or "").strip()
-    if not q or not paper_ids:
+    if not q or not paper_ids or not user_id:
         return "", []
 
     try:
@@ -92,7 +93,9 @@ async def retrieve_for_paper(
         logger.info("Retrieval skipped (embed): %s", exc.code)
         return "", []
 
-    hits = match_paper_chunks(list(paper_ids), query_vec, match_count=top_k)
+    hits = match_paper_chunks(
+        list(paper_ids), query_vec, user_id=user_id, match_count=top_k,
+    )
     if not hits:
         return "", []
 

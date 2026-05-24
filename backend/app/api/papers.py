@@ -550,10 +550,9 @@ async def delete_paper(paper_id: str, user_id: str = Depends(require_auth)):
 
     cloud_storage.delete_paper_files(user_id, paper_id)
 
-    from ..services.db import delete_paper_meta, increment_paper_count, delete_reading_state
+    from ..services.db import delete_paper_meta, increment_paper_count
     delete_paper_meta(paper_id, user_id)
     increment_paper_count(user_id, delta=-1)
-    delete_reading_state(user_id, paper_id)
 
     # L8: drop the in-memory per-paper lock now that the paper is gone; otherwise
     # _paper_locks would grow unboundedly in long-lived workers as users churn

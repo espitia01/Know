@@ -1562,7 +1562,7 @@ async def answer_questions(
         try:
             from .retrieval import retrieve_for_paper
             context_block, retrieval_hits = await retrieve_for_paper(
-                [paper_id], " ".join(questions), max_chars=ctx_cap,
+                [paper_id], " ".join(questions), user_id=user_id or "", max_chars=ctx_cap,
             )
         except Exception:
             pass
@@ -1659,7 +1659,7 @@ async def answer_questions_multi(
             try:
                 from .retrieval import retrieve_for_paper
                 retrieved, hits = await retrieve_for_paper(
-                    [pid], query_text, max_chars=chars_per_paper,
+                    [pid], query_text, user_id=user_id or "", max_chars=chars_per_paper,
                 )
                 if retrieved:
                     safe_text = retrieved
@@ -1788,7 +1788,9 @@ async def analyze_figure(
         try:
             from .retrieval import retrieve_for_paper
             q = question or "figure methods results"
-            context_block, _ = await retrieve_for_paper([paper_id], q, max_chars=ctx_cap)
+            context_block, _ = await retrieve_for_paper(
+                [paper_id], q, user_id=user_id or "", max_chars=ctx_cap,
+            )
         except Exception:
             pass
     if not context_block:
