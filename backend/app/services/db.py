@@ -1037,8 +1037,12 @@ def insert_paper_chunks(paper_id: str, user_id: str, rows: list[dict]) -> None:
 # ----------------------------------------------------------------
 
 ALLOWED_READING_TABS = frozenset({
+    # Backend-canonical names…
     "prepare", "summary", "assumptions", "qa", "notes",
     "figures", "selection", "cross", "related",
+    # …plus the aliases the frontend BottomPanel actually emits. Keep
+    # both shapes accepted so a stale client never trips the 400 path.
+    "preread", "assume", "compare", "sources",
 })
 
 

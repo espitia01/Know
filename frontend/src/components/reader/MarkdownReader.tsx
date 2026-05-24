@@ -269,6 +269,85 @@ function collapseFragmentedMathParagraphs(markdown: string): string {
 }
 
 /**
+ * Drop figure references that don't have a caption (`Fig. N.` /
+ * `Figure N.`) within a short lookahead window. Mistral OCR emits one
+ * `![figure](some-id.png)` line per panel image it finds — including
+ * sub-panel crops that the source PDF never displays standalone. For
+ * a paper without compositing, every panel becomes a separate inline
+ * figure with no caption, which is the random-extra-figure issue.
+ */
+function dropOrphanFigureRefs(markdown: string): string {
+  const lines = markdown.split("\n");
+  const captionRe = /^(Fig\.?|Figure)\s+\d+[.:]/i;
+  const imgRe = /^\s*!\[[^\]]*\]\([^)]+\.png\)\s*$/;
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!imgRe.test(line)) {
+      out.push(line);
+      continue;
+    }
+    // Look ahead through the next 6 non-blank lines (or until another
+    // image ref) for a "Fig. N." caption.
+    let hasCaption = false;
+    let seen = 0;
+    for (let j = i + 1; j < lines.length && seen < 6; j++) {
+      const t = lines[j].trim();
+      if (!t) continue;
+      if (imgRe.test(lines[j])) break;
+      seen += 1;
+      if (captionRe.test(t)) {
+        hasCaption = true;
+        break;
+      }
+    }
+    if (!hasCaption) {
+      // Drop the orphan figure ref AND any trailing blank line.
+      if (out.length > 0 && !out[out.length - 1].trim()) out.pop();
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+/**
+ * Mistral's OCR markdown for math frequently emits BOTH the LaTeX form
+ * and a visible ASCII fallback on the same line:
+ *
+ *     reaching $52.7\%$ 52.7% of the peak
+ *     scales as $N^4$ N^4 in our setup
+ *     $\sim 200\,\text{meV}$ ~200 meV binding energy
+ *
+ * When the ASCII run that follows a `$...$` span matches the math
+ * payload (modulo backslashes and braces), it's a duplicate — drop it.
+ * Math stays rendered via KaTeX; the duplicate plain text vanishes.
+ */
+function dedupeInlineMathDuplicates(markdown: string): string {
+  const stripLatex = (s: string) =>
+    s
+      .replace(/\\mathrm\{([^}]*)\}/g, "$1")
+      .replace(/\\text\{([^}]*)\}/g, "$1")
+      .replace(/\\[a-zA-Z]+/g, "")
+      .replace(/[\\\s{}^_]/g, "")
+      .toLowerCase();
+  const stripText = (s: string) =>
+    s.replace(/[\s,]/g, "").toLowerCase();
+  return markdown.replace(
+    /\$([^$\n]{1,80})\$([\s\u00a0]+)([^\s$<][^\s$<]{0,40})/g,
+    (full, math, gap, tail) => {
+      const m = stripLatex(math);
+      const t = stripText(tail);
+      if (m.length < 2 || t.length < 2) return full;
+      if (m === t || m === t.replace(/[%$]/g, "") || m.replace(/[%$]/g, "") === t) {
+        return `$${math}$${gap.replace(/[ \u00a0]+/g, " ")}`.trimEnd();
+      }
+      return full;
+    },
+  );
+}
+
+/**
  * Drop Mistral OCR's ASCII-fallback duplication. Mistral often emits
  * each glyph of a math token as its own paragraph (separated by blank
  * lines) BEFORE the full text run or display math block — producing
@@ -511,6 +590,8 @@ export function MarkdownReader({
         joined = collapseAuthorByline(joined);
         joined = wrapBylineParagraph(joined);
         joined = dropPanelRefsWhenCompositesExist(joined);
+        joined = dropOrphanFigureRefs(joined);
+        joined = dedupeInlineMathDuplicates(joined);
         joined = collapseFragmentedMathParagraphs(joined);
         joined = rewriteOcrImageReferences(joined, paperId, trial);
 
