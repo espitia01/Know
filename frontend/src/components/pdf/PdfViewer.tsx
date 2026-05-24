@@ -871,15 +871,27 @@ export function PdfViewer({
       }>;
     };
 
-    if ((!textLayer || history.length === 0) && !history.some((h) => h.regions?.some((r) => r.pageNum === pageNum))) {
+    const hasRegionsOnPage = history.some((h) =>
+      h.regions?.some((r) => r.pageNum === pageNum),
+    );
+    const textLayerReady = !!(textLayer && textLayer.childElementCount > 0);
+    const canRegionPaint = hasRegionsOnPage && pw > 0 && ph > 0;
+
+    if (history.length === 0) {
       parent.querySelectorAll(overlaySelector).forEach((n) => n.remove());
       if (interactive) peekHost.__knowHighlights = [];
       return;
     }
-    // pdfjs inserts the layer shell before the text spans arrive. Redrawing
-    // in that window used to strip overlays first and then bail — users saw
-    // highlights vanish until another mutation fired.
-    if (textLayer && textLayer.childElementCount === 0 && !history.some((h) => h.regions?.some((r) => r.pageNum === pageNum))) return;
+
+    // Never strip overlays until we can repaint — pdf.js briefly empties the
+    // text layer during zoom / virtualized remounts; stripping first made
+    // explain/derive underlines flash away and often not return.
+    if (mode === "selection" && !textLayerReady && !canRegionPaint) return;
+    if (mode === "highlight" && !textLayer && !canRegionPaint) {
+      parent.querySelectorAll(overlaySelector).forEach((n) => n.remove());
+      if (interactive) peekHost.__knowHighlights = [];
+      return;
+    }
 
     const pageStyle = getComputedStyle(pageEl);
     if (pageStyle.position === "static") pageEl.style.position = "relative";
@@ -923,23 +935,25 @@ export function PdfViewer({
 
     let painted = 0;
     const minTextLen = mode === "highlight" ? 2 : 4;
+    const paintedKeys = new Set<string>();
 
-    // Saved color highlights use persisted pct geometry. Analysis underlines
-    // (explain / derive) re-search the text layer each paint so they stay
-    // glued to the passage — stored pct regions drifted on many PDFs.
+    const paintCapturedRegions = (entry: SelectionAnalysisResult): boolean => {
+      if (!entry.regions?.length || pw <= 0 || ph <= 0) return false;
+      const pageRegions = entry.regions.filter((r) => r.pageNum === pageNum);
+      if (!pageRegions.length) return false;
+      const raw = entry.selected_text?.trim();
+      const entryMinLen = entry.regions.length ? 2 : minTextLen;
+      if (!raw || raw.length < entryMinLen) return false;
+      paintEntryBoxes(entry, pctRegionsToLocalBoxes(pageRegions, metrics));
+      paintedKeys.add(selectionKey(entry));
+      painted += 1;
+      return true;
+    };
+
+    // Saved color highlights use persisted pct geometry.
     if (mode === "highlight") {
       for (const entry of history) {
-        if (!entry.regions?.length || pw <= 0 || ph <= 0) continue;
-        const pageRegions = entry.regions.filter((r) => r.pageNum === pageNum);
-        if (!pageRegions.length) continue;
-        const raw = entry.selected_text?.trim();
-        const entryMinLen = entry.regions?.length ? 2 : minTextLen;
-        if (!raw || raw.length < entryMinLen) continue;
-        paintEntryBoxes(
-          entry,
-          pctRegionsToLocalBoxes(pageRegions, metrics),
-        );
-        painted += 1;
+        paintCapturedRegions(entry);
       }
     }
 
@@ -950,26 +964,11 @@ export function PdfViewer({
             if (!h.regions?.length) return true;
             return !h.regions.some((r) => r.pageNum === pageNum);
           });
-    if (fallbackHistory.length === 0 || !textLayer) {
-      if (!interactive) {
-        if (overlay.childElementCount > 0) parent.appendChild(overlay);
-        return;
-      }
-      if (pageHits.length === 0) {
-        peekHost.__knowHighlights = [];
-        return;
-      }
-      // Fall through to delegated click handler below.
-    } else if (textLayer.childElementCount === 0) {
-      if (!interactive) {
-        if (overlay.childElementCount > 0) parent.appendChild(overlay);
-        return;
-      }
-      if (pageHits.length === 0) {
-        peekHost.__knowHighlights = [];
-        return;
-      }
-    } else {
+
+    const runTextSearch =
+      textLayerReady && !!textLayer && fallbackHistory.length > 0;
+
+    if (runTextSearch) {
     // Build a flat string of all text-node contents under the layer
     // plus a parallel mapping from (raw index in `combined`) → the
     // text node that contains it. We search against a *normalized*
@@ -991,10 +990,6 @@ export function PdfViewer({
     if (!combined || slices.length === 0) {
       if (!interactive) {
         if (overlay.childElementCount > 0) parent.appendChild(overlay);
-        return;
-      }
-      if (pageHits.length === 0) {
-        peekHost.__knowHighlights = [];
         return;
       }
     } else {
@@ -1036,10 +1031,6 @@ export function PdfViewer({
         if (overlay.childElementCount > 0) parent.appendChild(overlay);
         return;
       }
-      if (pageHits.length === 0) {
-        peekHost.__knowHighlights = [];
-        return;
-      }
     } else {
 
     const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1077,6 +1068,16 @@ export function PdfViewer({
       const raw = entry.selected_text?.trim();
       const entryMinLen = hasMathInText(raw ?? "") ? 2 : minTextLen;
       if (!raw || raw.length < entryMinLen) continue;
+
+      // Equations rarely match the text layer verbatim — prefer captured
+      // geometry (painted below) instead of a partial false positive.
+      if (
+        mode === "selection" &&
+        hasMathInText(raw) &&
+        entry.regions?.some((r) => r.pageNum === pageNum)
+      ) {
+        continue;
+      }
 
       // Needle is normalized the same way as the haystack so ligatures,
       // smart quotes, and em-dashes from the LLM-submitted text don't
@@ -1219,11 +1220,21 @@ export function PdfViewer({
         h: r.height,
       }));
       paintEntryBoxes(entry, localRects);
+      paintedKeys.add(selectionKey(entry));
 
       fallbackPainted += 1;
     }
     }
     }
+    }
+
+    // Captured pct geometry when text search misses (equations, ligatures)
+    // or the text layer isn't populated yet.
+    if (mode === "selection" && canRegionPaint) {
+      for (const entry of history) {
+        if (paintedKeys.has(selectionKey(entry))) continue;
+        paintCapturedRegions(entry);
+      }
     }
 
     if (!interactive) {
