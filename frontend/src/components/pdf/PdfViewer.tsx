@@ -924,24 +924,32 @@ export function PdfViewer({
     let painted = 0;
     const minTextLen = mode === "highlight" ? 2 : 4;
 
-    for (const entry of history) {
-      if (!entry.regions?.length || pw <= 0 || ph <= 0) continue;
-      const pageRegions = entry.regions.filter((r) => r.pageNum === pageNum);
-      if (!pageRegions.length) continue;
-      const raw = entry.selected_text?.trim();
-      const entryMinLen = entry.regions?.length ? 2 : minTextLen;
-      if (!raw || raw.length < entryMinLen) continue;
-      paintEntryBoxes(
-        entry,
-        pctRegionsToLocalBoxes(pageRegions, metrics),
-      );
-      painted += 1;
+    // Saved color highlights use persisted pct geometry. Analysis underlines
+    // (explain / derive) re-search the text layer each paint so they stay
+    // glued to the passage — stored pct regions drifted on many PDFs.
+    if (mode === "highlight") {
+      for (const entry of history) {
+        if (!entry.regions?.length || pw <= 0 || ph <= 0) continue;
+        const pageRegions = entry.regions.filter((r) => r.pageNum === pageNum);
+        if (!pageRegions.length) continue;
+        const raw = entry.selected_text?.trim();
+        const entryMinLen = entry.regions?.length ? 2 : minTextLen;
+        if (!raw || raw.length < entryMinLen) continue;
+        paintEntryBoxes(
+          entry,
+          pctRegionsToLocalBoxes(pageRegions, metrics),
+        );
+        painted += 1;
+      }
     }
 
-    const fallbackHistory = history.filter((h) => {
-      if (!h.regions?.length) return true;
-      return !h.regions.some((r) => r.pageNum === pageNum);
-    });
+    const fallbackHistory =
+      mode === "selection"
+        ? history
+        : history.filter((h) => {
+            if (!h.regions?.length) return true;
+            return !h.regions.some((r) => r.pageNum === pageNum);
+          });
     if (fallbackHistory.length === 0 || !textLayer) {
       if (!interactive) {
         if (overlay.childElementCount > 0) parent.appendChild(overlay);
@@ -1205,10 +1213,10 @@ export function PdfViewer({
       if (mergedRects.length === 0) continue;
 
       const localRects = mergedRects.map((r) => ({
-        x: (r.left - frame.refRect.left) * frame.scaleX,
-        y: (r.top - frame.refRect.top) * frame.scaleY,
-        w: r.width * frame.scaleX,
-        h: r.height * frame.scaleY,
+        x: frame.originX + (r.left - frame.refRect.left),
+        y: frame.originY + (r.top - frame.refRect.top),
+        w: r.width,
+        h: r.height,
       }));
       paintEntryBoxes(entry, localRects);
 

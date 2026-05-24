@@ -166,16 +166,19 @@ type PageCaptureFrame = PageHighlightMetrics & {
   scaleY: number;
 };
 
-/** Coordinate frame anchored on the pdf.js text layer (falls back to page box). */
+/** Coordinate frame anchored on the pdf.js canvas (falls back to page box). */
 export function getPageHighlightMetrics(pageEl: HTMLElement): PageCaptureFrame {
   const pageRect = pageEl.getBoundingClientRect();
+  const canvas = pageEl.querySelector(
+    "canvas.react-pdf__Page__canvas",
+  ) as HTMLElement | null;
   const textLayer = pageEl.querySelector(
     ".react-pdf__Page__textContent, .textLayer",
   ) as HTMLElement | null;
-  const ref = textLayer ?? pageEl;
+  const ref = canvas ?? textLayer ?? pageEl;
   const refRect = ref.getBoundingClientRect();
-  const pw = ref.offsetWidth || pageEl.offsetWidth;
-  const ph = ref.offsetHeight || pageEl.offsetHeight;
+  const pw = refRect.width || pageEl.offsetWidth || 1;
+  const ph = refRect.height || pageEl.offsetHeight || 1;
   return {
     pageNum: parseInt(pageEl.getAttribute("data-page-number") || "1", 10),
     originX: refRect.left - pageRect.left,
@@ -183,8 +186,8 @@ export function getPageHighlightMetrics(pageEl: HTMLElement): PageCaptureFrame {
     pw,
     ph,
     refRect,
-    scaleX: pw / (refRect.width || pw || 1),
-    scaleY: ph / (refRect.height || ph || 1),
+    scaleX: 1,
+    scaleY: 1,
   };
 }
 
@@ -253,10 +256,10 @@ function clientRectToLocal(
   frame: PageCaptureFrame,
 ): RectLike {
   return {
-    left: (r.left - frame.refRect.left) * frame.scaleX,
-    top: (r.top - frame.refRect.top) * frame.scaleY,
-    width: r.width * frame.scaleX,
-    height: r.height * frame.scaleY,
+    left: r.left - frame.refRect.left,
+    top: r.top - frame.refRect.top,
+    width: r.width,
+    height: r.height,
   };
 }
 
@@ -273,28 +276,18 @@ export function pctRegionsToLocalBoxes(
   }));
 }
 
-/** Parent element + metrics for highlight overlays (prefer pdf.js text layer). */
+/** Parent element + metrics for highlight overlays (page shell; coords from canvas). */
 export function getHighlightOverlayAnchor(pageEl: HTMLElement): {
   parent: HTMLElement;
   metrics: PageHighlightMetrics;
 } {
-  const textLayer = pageEl.querySelector(
-    ".react-pdf__Page__textContent, .textLayer",
-  ) as HTMLElement | null;
   const frame = getPageHighlightMetrics(pageEl);
-  if (!textLayer) {
-    return { parent: pageEl, metrics: frame };
-  }
-  const layerStyle = getComputedStyle(textLayer);
-  if (layerStyle.position === "static") {
-    textLayer.style.position = "absolute";
-  }
   return {
-    parent: textLayer,
+    parent: pageEl,
     metrics: {
       pageNum: frame.pageNum,
-      originX: 0,
-      originY: 0,
+      originX: frame.originX,
+      originY: frame.originY,
       pw: frame.pw,
       ph: frame.ph,
     },

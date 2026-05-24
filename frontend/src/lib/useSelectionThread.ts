@@ -1,33 +1,16 @@
 "use client";
 
 /**
- * Single source of truth for the migrated selection-stream flow.
+ * Selection explain / derive / follow-up — calls the Python batch
+ * `/api/papers/{id}/selection` endpoint (proven, tier-gated on Railway).
  *
- * Replaces the duplicated streaming logic that used to live in two
- * places (`paper/[id]/page.tsx` selection handler and
- * `BottomPanel.handleFollowUp`) — both built their own
- * AbortController, parsed SSE chunks, and wrote selection state into
- * the zustand store with subtle differences.
- *
- * Wraps `experimental_useObject` against `SelectionResultSchema`
- * (Stage 2). Each `start()` call:
- *   - generates a fresh `clientKey` so threaded UI keys stay stable,
- *   - writes a provisional row into `selectionHistory`,
- *   - syncs the partial `object` into `selectionResult` + the matching
- *     history row on every render,
- *   - on completion, marks `streaming: false` and refreshes usage,
- *   - on error, writes a structured error row that the panel can
- *     display verbatim (incl. tier-cap messaging).
- *
- * Tier gating + paper ownership are enforced server-side (Python
- * /api/internal/usage/reserve), so the hook only translates the
- * structured error detail into UI strings.
+ * The migrated Next.js `selection-stream` + `useObject` path was returning
+ * opaque 500 HTML on production; batch selection is slightly slower to
+ * first token but reliable and already persists via Python.
  */
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { experimental_useObject as useObject } from "@ai-sdk/react";
-import type { SelectionAnalysisResult } from "@/lib/api";
-import { SelectionResultSchema } from "@/lib/server/schemas";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { api, type SelectionAnalysisResult } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { useUserSettings } from "@/lib/UserSettingsContext";
 
@@ -37,7 +20,6 @@ export type StartArgs = {
   action: SelectionAction;
   selectedText: string;
   question?: string;
-  /** Per-request override (follow-up composer); validated server-side. */
   model?: string;
   regions?: SelectionAnalysisResult["regions"];
 };
@@ -58,204 +40,73 @@ function newClientKey(): string {
   return `sel-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-const INCOMPLETE_SELECTION_MSG =
-  "The model didn't return a complete answer. This can happen when the output is cut off or fails validation. Please try again.";
-
-type SelectionPartial = {
-  action?: SelectionAction;
-  body?: string;
-  assumptions?: SelectionAnalysisResult["assumptions"];
-  starting_point?: string;
-  final_result?: string;
-  steps?: SelectionAnalysisResult["steps"];
-};
-
-function hasSelectionContent(partial: SelectionPartial | undefined | null): boolean {
-  if (!partial) return false;
-  if (typeof partial.body === "string" && partial.body.trim().length > 0) return true;
-  if (typeof partial.final_result === "string" && partial.final_result.trim().length > 0) {
-    return true;
+function describeApiError(e: unknown): string {
+  if (e instanceof Error) {
+    const msg = e.message;
+    if (msg.includes("tier_locked") || msg.includes("Limit reached")) {
+      return `**Limit reached.** ${msg}\n\nUpgrade your plan to continue.`;
+    }
+    return msg || "Selection failed.";
   }
-  return Array.isArray(partial.steps) && partial.steps.length > 0;
+  return "Selection failed.";
 }
 
-function describeError(error: unknown): string {
-  if (!error) return "Selection failed.";
-  const message = error instanceof Error ? error.message : String(error);
-  if (message.includes("<!DOCTYPE") || message.includes("Internal Server Error")) {
-    return "The analysis service returned an unexpected error. Please try again.";
-  }
-  try {
-    const parsed = JSON.parse(message) as {
-      detail?: { code?: string; message?: string } | string;
-    };
-    const detail = parsed.detail;
-    if (typeof detail === "string") return detail;
-    if (detail?.message) {
-      const code = detail.code;
-      if (code === "tier_locked" || code === "paper_cap" || code === "daily_cap" || code === "model_cap") {
-        return `**Limit reached.** ${detail.message}\n\nUpgrade your plan to continue.`;
-      }
-      return detail.message;
-    }
-  } catch {
-    /* not JSON; fall through */
-  }
-  return message || "Selection failed.";
+function mapApiResult(
+  started: StartedState,
+  raw: SelectionAnalysisResult,
+): SelectionAnalysisResult {
+  return {
+    action: raw.action || started.action,
+    selected_text: started.selectedText,
+    question: started.question ?? raw.question,
+    explanation: raw.explanation ?? raw.elaboration ?? raw.answer ?? "",
+    assumptions: raw.assumptions,
+    starting_point: raw.starting_point,
+    final_result: raw.final_result,
+    steps: raw.steps,
+    streaming: false,
+    clientKey: started.clientKey,
+    model: raw.model ?? started.model,
+    created_at: Date.now(),
+    regions: started.regions,
+  };
 }
 
 export function useSelectionThread(paperId: string) {
   const { fastModel } = useUserSettings();
-  // Per-paper writers — late results from a slow Derive on paper A land
-  // in A's slot even if the user has switched to paper B by then.
   const setSelectionResultForPaper = useStore((s) => s.setSelectionResultForPaper);
   const setSelectionLoadingForPaper = useStore((s) => s.setSelectionLoadingForPaper);
   const upsertSelectionInHistoryForPaper = useStore((s) => s.upsertSelectionInHistoryForPaper);
   const bumpUsageRefresh = useStore((s) => s.bumpUsageRefresh);
 
-  const startedRef = useRef<StartedState | null>(null);
-  const finalizedRef = useRef<string | null>(null);
-  const lastSyncKey = useRef("");
+  const inflightRef = useRef<AbortController | null>(null);
+  const [error, setError] = useState<Error | undefined>();
+  const [isLoading, setIsLoading] = useState(false);
 
-  const writeErrorResult = useCallback(
-    (started: StartedState, message: string) => {
-      const errResult: SelectionAnalysisResult = {
-        action: started.action,
-        selected_text: started.selectedText,
-        question: started.question,
-        explanation: message,
-        streaming: false,
-        clientKey: started.clientKey,
-        model: started.model,
-      };
-      upsertSelectionInHistoryForPaper(paperId, errResult);
-      setSelectionResultForPaper(paperId, errResult);
-      setSelectionLoadingForPaper(paperId, false);
-      finalizedRef.current = started.clientKey;
-      startedRef.current = null;
-      lastSyncKey.current = "";
-    },
-    [paperId, setSelectionResultForPaper, setSelectionLoadingForPaper, upsertSelectionInHistoryForPaper],
-  );
-
-  const obj = useObject({
-    id: `${paperId}-selection`,
-    api: `/api/papers/${paperId}/selection-stream`,
-    schema: SelectionResultSchema,
-    credentials: "include",
-    onError: (error) => {
-      const started = startedRef.current;
-      if (!started) return;
-      writeErrorResult(started, describeError(error));
-    },
-    onFinish: ({ object, error }) => {
-      const started = startedRef.current;
-      if (!started) return;
-      if (finalizedRef.current === started.clientKey) return;
-
-      if (error) {
-        writeErrorResult(started, describeError(error));
-        return;
-      }
-
-      const partial = object as SelectionPartial | undefined;
-      if (!hasSelectionContent(partial)) {
-        writeErrorResult(started, INCOMPLETE_SELECTION_MSG);
-        return;
-      }
-
-      bumpUsageRefresh();
-      startedRef.current = null;
-      lastSyncKey.current = "";
-    },
-  });
-
-  // Sync partial object → store on every paint. Writes target the
-  // hook's own `paperId` (not whichever paper is currently active),
-  // so panel B never sees A's stream and a slow result for A lands
-  // correctly once the user returns.
-  useEffect(() => {
-    const started = startedRef.current;
-    if (!started) return;
-
-    // Stream already finalized for this clientKey — stop syncing. Without
-    // this guard (and clearing startedRef below) every new `obj.object`
-    // reference from useObject re-writes the store and triggers React #185.
-    if (finalizedRef.current === started.clientKey && !obj.isLoading) {
-      return;
-    }
-
-    const partial = obj.object as SelectionPartial | undefined;
-
-    const isStillStreaming = obj.isLoading;
-    if (!partial && isStillStreaming) return;
-
-    if (!isStillStreaming && !hasSelectionContent(partial)) {
-      if (finalizedRef.current !== started.clientKey) {
-        const msg = obj.error ? describeError(obj.error) : INCOMPLETE_SELECTION_MSG;
-        writeErrorResult(started, msg);
-      }
-      return;
-    }
-
-    const result: SelectionAnalysisResult = {
-      action: started.action,
-      selected_text: started.selectedText,
-      question: started.question,
-      explanation: partial?.body ?? "",
-      assumptions: partial?.assumptions,
-      starting_point: partial?.starting_point,
-      final_result: partial?.final_result,
-      steps: partial?.steps as SelectionAnalysisResult["steps"],
-      streaming: isStillStreaming,
-      clientKey: started.clientKey,
-      model: started.model,
-      created_at: isStillStreaming ? undefined : Date.now(),
-      regions: started.regions,
-    };
-
-    const syncKey = JSON.stringify(result);
-    if (syncKey === lastSyncKey.current) {
-      if (!isStillStreaming) {
-        finalizedRef.current = started.clientKey;
-        startedRef.current = null;
-      }
-      return;
-    }
-    lastSyncKey.current = syncKey;
-
-    upsertSelectionInHistoryForPaper(paperId, result);
-    setSelectionResultForPaper(paperId, result);
-    if (!isStillStreaming) {
-      finalizedRef.current = started.clientKey;
-      startedRef.current = null;
-    }
-  }, [
-    obj.object,
-    obj.isLoading,
-    obj.error,
-    paperId,
-    setSelectionResultForPaper,
-    upsertSelectionInHistoryForPaper,
-    writeErrorResult,
-  ]);
+  const abort = useCallback(() => {
+    inflightRef.current?.abort();
+    inflightRef.current = null;
+    setIsLoading(false);
+  }, []);
 
   const start = useCallback(
     (args: StartArgs) => {
       const trimmed = args.selectedText.trim();
       if (!trimmed) return;
+
+      inflightRef.current?.abort();
+      const controller = new AbortController();
+      inflightRef.current = controller;
+
       const clientKey = newClientKey();
-      const provisionalModel = args.model ?? fastModel;
-      startedRef.current = {
+      const started: StartedState = {
         clientKey,
         action: args.action,
         selectedText: trimmed,
         question: args.question,
-        model: provisionalModel,
+        model: args.model ?? fastModel,
         regions: args.regions,
       };
-      finalizedRef.current = null;
-      lastSyncKey.current = "";
 
       const provisional: SelectionAnalysisResult = {
         action: args.action,
@@ -264,31 +115,71 @@ export function useSelectionThread(paperId: string) {
         explanation: "",
         streaming: true,
         clientKey,
-        model: provisionalModel,
+        model: started.model,
         regions: args.regions,
       };
+
+      setError(undefined);
+      setIsLoading(true);
+      setSelectionLoadingForPaper(paperId, true);
       upsertSelectionInHistoryForPaper(paperId, provisional);
       setSelectionResultForPaper(paperId, provisional);
-      setSelectionLoadingForPaper(paperId, false);
 
-      obj.submit({
-        action: args.action,
-        selected_text: trimmed,
-        question: args.question,
-        ...(args.model ? { model: args.model } : {}),
-      });
+      void (async () => {
+        try {
+          const raw = await api.analyzeSelection(
+            paperId,
+            trimmed,
+            args.action,
+            { question: args.question, signal: controller.signal },
+          );
+          if (controller.signal.aborted) return;
+
+          const result = mapApiResult(started, raw);
+          if (!result.explanation?.trim() && !result.steps?.length && !result.final_result?.trim()) {
+            throw new Error("The model didn't return a complete answer. Please try again.");
+          }
+
+          upsertSelectionInHistoryForPaper(paperId, result);
+          setSelectionResultForPaper(paperId, result);
+          bumpUsageRefresh();
+        } catch (e) {
+          if (controller.signal.aborted) return;
+          const message = describeApiError(e);
+          const errResult: SelectionAnalysisResult = {
+            action: started.action,
+            selected_text: started.selectedText,
+            question: started.question,
+            explanation: message,
+            streaming: false,
+            clientKey: started.clientKey,
+            model: started.model,
+            regions: started.regions,
+          };
+          upsertSelectionInHistoryForPaper(paperId, errResult);
+          setSelectionResultForPaper(paperId, errResult);
+          setError(e instanceof Error ? e : new Error(message));
+        } finally {
+          if (inflightRef.current === controller) {
+            inflightRef.current = null;
+          }
+          setIsLoading(false);
+          setSelectionLoadingForPaper(paperId, false);
+        }
+      })();
     },
-    [obj, fastModel, paperId, setSelectionLoadingForPaper, setSelectionResultForPaper, upsertSelectionInHistoryForPaper],
+    [
+      bumpUsageRefresh,
+      fastModel,
+      paperId,
+      setSelectionLoadingForPaper,
+      setSelectionResultForPaper,
+      upsertSelectionInHistoryForPaper,
+    ],
   );
 
-  const abort = useCallback(() => {
-    obj.stop();
-  }, [obj]);
-
-  // Stable object identity — consumers put this in useEffect deps and
-  // we don't want every render to retrigger downstream effects.
   return useMemo(
-    () => ({ start, abort, error: obj.error, isLoading: obj.isLoading }),
-    [start, abort, obj.error, obj.isLoading],
+    () => ({ start, abort, error, isLoading }),
+    [start, abort, error, isLoading],
   );
 }
