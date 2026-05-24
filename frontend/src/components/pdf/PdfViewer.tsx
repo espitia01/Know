@@ -8,7 +8,7 @@ import { useStore, type PdfRegionHighlight } from "@/lib/store";
 import { normalizeSelectionAction, selectionKey } from "@/lib/selectionActions";
 import { snapshotDomRect } from "@/lib/domRect";
 import { capturePdfViewportUnionToBlob } from "@/lib/pdfSelectionCapture";
-import { captureTextSelectionRegions, pageRangeForSelectionRect } from "@/lib/pdfHighlightRegions";
+import { captureTextSelectionRegions, mergeRectsToLineGroups, pageRangeForSelectionRect } from "@/lib/pdfHighlightRegions";
 import { useReadingState } from "@/hooks/useReadingState";
 import { hasMathInText } from "@/lib/selectionMath";
 
@@ -847,6 +847,9 @@ export function PdfViewer({
     const overlayClass =
       mode === "highlight" ? "know-highlight-overlay" : "know-selection-overlay";
     const interactive = mode === "selection";
+    const pageNum = parseInt(pageEl.getAttribute("data-page-number") || "1", 10);
+    const pw = pageEl.offsetWidth;
+    const ph = pageEl.offsetHeight;
 
     const textLayer = pageEl.querySelector(".react-pdf__Page__textContent, .textLayer") as HTMLElement | null;
 
@@ -857,7 +860,7 @@ export function PdfViewer({
       }>;
     };
 
-    if (!textLayer || history.length === 0) {
+    if ((!textLayer || history.length === 0) && !history.some((h) => h.regions?.some((r) => r.pageNum === pageNum))) {
       pageEl.querySelectorAll(overlaySelector).forEach((n) => n.remove());
       if (interactive) peekHost.__knowHighlights = [];
       return;
@@ -865,11 +868,89 @@ export function PdfViewer({
     // pdfjs inserts the layer shell before the text spans arrive. Redrawing
     // in that window used to strip overlays first and then bail — users saw
     // highlights vanish until another mutation fired.
-    if (textLayer.childElementCount === 0) return;
+    if (textLayer && textLayer.childElementCount === 0 && !history.some((h) => h.regions?.some((r) => r.pageNum === pageNum))) return;
 
     const pageStyle = getComputedStyle(pageEl);
     if (pageStyle.position === "static") pageEl.style.position = "relative";
 
+    pageEl.querySelectorAll(overlaySelector).forEach((n) => n.remove());
+
+    const overlay = document.createElement("div");
+    overlay.className = overlayClass;
+    const pageRect = pageEl.getBoundingClientRect();
+
+    const pageHits: Array<{
+      entry: SelectionAnalysisResult;
+      rects: Array<{ x: number; y: number; w: number; h: number }>;
+    }> = [];
+
+    const paintEntryBoxes = (
+      entry: SelectionAnalysisResult,
+      localRects: Array<{ x: number; y: number; w: number; h: number }>,
+    ) => {
+      const action = normalizeSelectionAction(entry.action);
+      const withColor = entry as SelectionAnalysisResult & { highlight_color?: string };
+      for (const r of localRects) {
+        const div = document.createElement("div");
+        div.className = withColor.highlight_color ? "know-highlight-rect" : "know-selection-underline";
+        if (withColor.highlight_color) {
+          div.setAttribute("data-color", withColor.highlight_color);
+        } else {
+          div.setAttribute("data-action", action);
+        }
+        div.style.left = `${r.x}px`;
+        div.style.top = `${r.y}px`;
+        div.style.width = `${r.w}px`;
+        div.style.height = `${r.h}px`;
+        overlay.appendChild(div);
+      }
+      if (interactive) {
+        pageHits.push({ entry, rects: localRects });
+      }
+    };
+
+    let painted = 0;
+    const minTextLen = mode === "highlight" ? 2 : 4;
+
+    for (const entry of history) {
+      if (!entry.regions?.length || pw <= 0 || ph <= 0) continue;
+      const pageRegions = entry.regions.filter((r) => r.pageNum === pageNum);
+      if (!pageRegions.length) continue;
+      const raw = entry.selected_text?.trim();
+      if (!raw || raw.length < minTextLen) continue;
+      paintEntryBoxes(
+        entry,
+        pageRegions.map((r) => ({
+          x: r.xPct * pw,
+          y: r.yPct * ph,
+          w: r.wPct * pw,
+          h: r.hPct * ph,
+        })),
+      );
+      painted += 1;
+    }
+
+    const fallbackHistory = history.filter((h) => !h.regions?.length);
+    if (fallbackHistory.length === 0 || !textLayer) {
+      if (!interactive) {
+        if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
+        return;
+      }
+      if (pageHits.length === 0) {
+        peekHost.__knowHighlights = [];
+        return;
+      }
+      // Fall through to delegated click handler below.
+    } else if (textLayer.childElementCount === 0) {
+      if (!interactive) {
+        if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
+        return;
+      }
+      if (pageHits.length === 0) {
+        peekHost.__knowHighlights = [];
+        return;
+      }
+    } else {
     // Build a flat string of all text-node contents under the layer
     // plus a parallel mapping from (raw index in `combined`) → the
     // text node that contains it. We search against a *normalized*
@@ -889,10 +970,15 @@ export function PdfViewer({
       combined += text;
     }
     if (!combined || slices.length === 0) {
-      pageEl.querySelectorAll(overlaySelector).forEach((n) => n.remove());
-      if (interactive) peekHost.__knowHighlights = [];
-      return;
-    }
+      if (!interactive) {
+        if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
+        return;
+      }
+      if (pageHits.length === 0) {
+        peekHost.__knowHighlights = [];
+        return;
+      }
+    } else {
 
     // Produce the normalized view + the index mapping back to the raw
     // string index in `combined`. Each raw unit's NFKC expansion (e.g.
@@ -927,10 +1013,15 @@ export function PdfViewer({
       }
     }
     if (!normalized) {
-      pageEl.querySelectorAll(overlaySelector).forEach((n) => n.remove());
-      if (interactive) peekHost.__knowHighlights = [];
-      return;
-    }
+      if (!interactive) {
+        if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
+        return;
+      }
+      if (pageHits.length === 0) {
+        peekHost.__knowHighlights = [];
+        return;
+      }
+    } else {
 
     const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const locate = (rawFlat: number) => {
@@ -941,20 +1032,6 @@ export function PdfViewer({
       }
       return null;
     };
-
-    pageEl.querySelectorAll(overlaySelector).forEach((n) => n.remove());
-
-    const overlay = document.createElement("div");
-    overlay.className = overlayClass;
-    const pageRect = pageEl.getBoundingClientRect();
-
-    // Per-highlight rect geometry, recorded in page-local coordinates
-    // so the delegated click handler below can hit-test a click
-    // against each saved selection without re-measuring the DOM.
-    const pageHits: Array<{
-      entry: SelectionAnalysisResult;
-      rects: Array<{ x: number; y: number; w: number; h: number }>;
-    }> = [];
 
     const seenRanges: Array<[number, number]> = [];
     // Helper: would the candidate range collide with one we already
@@ -975,10 +1052,9 @@ export function PdfViewer({
       return false;
     };
 
-    let painted = 0;
-    const minTextLen = mode === "highlight" ? 2 : 4;
-    for (let i = 0; i < history.length && painted < 32; i++) {
-      const entry = history[i];
+    let fallbackPainted = 0;
+    for (let i = 0; i < fallbackHistory.length && fallbackPainted < 32; i++) {
+      const entry = fallbackHistory[i];
       const raw = entry.selected_text?.trim();
       if (!raw || raw.length < minTextLen) continue;
 
@@ -1111,52 +1187,23 @@ export function PdfViewer({
       } catch {
         continue;
       }
-      const rects = Array.from(range.getClientRects()).filter(
-        (r) => r.width > 0.5 && r.height > 0.5,
+      const mergedRects = mergeRectsToLineGroups(
+        Array.from(range.getClientRects()).filter((r) => r.width > 0.5 && r.height > 0.5),
       );
-      if (rects.length === 0) continue;
+      if (mergedRects.length === 0) continue;
 
-      // Paint the underline bars themselves. These stay
-      // `pointer-events: none` (see globals.css) so starting a new
-      // text selection that overlaps an existing highlight still
-      // works natively. The whole underline is nonetheless made
-      // *clickable* via a delegated handler on `pageEl` further down:
-      // we record each highlight's page-local rect geometry on
-      // `pageHits` and resolve a click back to its entry by point
-      // testing. This is the pattern that finally fixes "nothing
-      // happens when I click my highlights" — the old pill was too
-      // small for users to find.
-      const action = normalizeSelectionAction(entry.action);
-      const localRects: Array<{ x: number; y: number; w: number; h: number }> = [];
-      for (const r of rects) {
-        const div = document.createElement("div");
-        div.className = (entry as SelectionAnalysisResult & { highlight_color?: string }).highlight_color
-          ? "know-highlight-rect"
-          : "know-selection-underline";
-        if ((entry as SelectionAnalysisResult & { highlight_color?: string }).highlight_color) {
-          div.setAttribute(
-            "data-color",
-            (entry as SelectionAnalysisResult & { highlight_color?: string }).highlight_color!,
-          );
-        } else {
-          // `data-action` drives the per-action highlight tint declared
-          // in globals.css. Falling back to "explain" preserves the
-          // original blue for any legacy cached entries that pre-date
-          // the action field.
-          div.setAttribute("data-action", action);
-        }
-        const x = r.left - pageRect.left;
-        const y = r.top - pageRect.top;
-        div.style.left = `${x}px`;
-        div.style.top = `${y}px`;
-        div.style.width = `${r.width}px`;
-        div.style.height = `${r.height}px`;
-        overlay.appendChild(div);
-        localRects.push({ x, y, w: r.width, h: r.height });
-      }
-      pageHits.push({ entry, rects: localRects });
+      const localRects = mergedRects.map((r) => ({
+        x: r.left - pageRect.left,
+        y: r.top - pageRect.top,
+        w: r.width,
+        h: r.height,
+      }));
+      paintEntryBoxes(entry, localRects);
 
-      painted++;
+      fallbackPainted += 1;
+    }
+    }
+    }
     }
 
     if (!interactive) {
@@ -1859,6 +1906,11 @@ export function PdfViewer({
   useEffect(() => {
     if (!zoomFieldDirty.current) setZoomField(String(displayedPercent));
   }, [displayedPercent]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(new CustomEvent("know:pdf-scale-change"));
+  }, [scale]);
 
   const applyZoomFromField = useCallback(() => {
     zoomFieldDirty.current = false;

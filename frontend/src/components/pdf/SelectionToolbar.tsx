@@ -192,9 +192,11 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
     const handler = () => updatePosition();
     window.addEventListener("scroll", handler, true);
     window.addEventListener("resize", handler);
+    window.addEventListener("know:pdf-scale-change", handler);
     return () => {
       window.removeEventListener("scroll", handler, true);
       window.removeEventListener("resize", handler);
+      window.removeEventListener("know:pdf-scale-change", handler);
     };
   }, [updatePosition]);
 
@@ -237,7 +239,7 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
       <div
         role="toolbar"
         aria-label="Selection actions"
-        className="pointer-events-auto flex items-center gap-0.5 rounded-2xl border border-border/70 bg-popover/97 backdrop-blur-xl px-1 py-1 shadow-2xl shadow-black/12 ring-1 ring-black/[0.06] motion-safe:transition-[box-shadow,transform] dark:shadow-black/50 dark:ring-white/[0.08]"
+        className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-border/60 bg-popover/98 backdrop-blur-xl px-1.5 py-1.5 shadow-lg shadow-black/10 ring-1 ring-black/[0.05] motion-safe:transition-[box-shadow,transform] dark:shadow-black/40 dark:ring-white/[0.06]"
       >
         {visibleActions.map((a, i) => {
           const hint = quotaBlocked
@@ -255,10 +257,11 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
               if (quotaBlocked) return;
               onAction(a.id, cleanText);
             }}
+            data-action={a.id}
             data-tooltip={hint}
             title={hint}
             aria-label={quotaBlocked ? "Demo selection limit reached" : `${a.label} — ${hint}`}
-            className={`know-toolbar-btn group flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[12px] font-medium whitespace-nowrap text-muted-foreground hover:bg-accent/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/55 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent active:scale-[0.97] motion-safe:transition-[color,background-color,transform] motion-safe:duration-150 ${i === 0 ? "" : "ml-px"} ${
+            className={`know-toolbar-btn group flex items-center gap-1.5 border-l-2 border-transparent px-2.5 py-1.5 rounded-lg text-[12px] font-medium whitespace-nowrap text-muted-foreground hover:bg-accent/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/55 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent active:scale-[0.97] motion-safe:transition-[color,background-color,transform,border-color] motion-safe:duration-150 ${i === 0 ? "" : "ml-px"} ${
               quotaBlocked ? "opacity-40 cursor-not-allowed hover:bg-transparent hover:text-muted-foreground" : ""
             }`}
           >
@@ -277,8 +280,9 @@ export function SelectionToolbar({ text, rect, onAction, onDismiss, selectionQuo
                 e.stopPropagation();
                 onAction("highlight", cleanText, { highlightColor });
               }}
+              data-action="highlight"
               data-tooltip="Mark this passage with a colored highlight — saved to Highlights."
-              className="know-toolbar-btn flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-[var(--text-xs)] font-medium text-foreground/90 transition-colors motion-safe:duration-150 hover:bg-accent/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              className="know-toolbar-btn flex items-center gap-1 rounded-lg border-l-2 border-transparent px-2.5 py-1.5 text-[var(--text-xs)] font-medium text-foreground/90 transition-colors motion-safe:duration-150 hover:bg-accent/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               <span className={`inline-block h-2.5 w-2.5 rounded-full bg-yellow-200/80 ring-1 ring-border/40 ${highlightColor === "green" ? "!bg-emerald-200/80" : ""} ${highlightColor === "blue" ? "!bg-sky-200/80" : ""} ${highlightColor === "pink" ? "!bg-pink-200/80" : ""}`} />
               Highlight

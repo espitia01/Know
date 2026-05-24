@@ -418,6 +418,14 @@ export interface SelectionAnalysisResult {
   clientKey?: string;
   model?: string;
   created_at?: number;
+  /** Normalized page-local highlight geometry captured at selection time. */
+  regions?: Array<{
+    pageNum: number;
+    xPct: number;
+    yPct: number;
+    wPct: number;
+    hPct: number;
+  }>;
 }
 
 export interface SettingsResponse {

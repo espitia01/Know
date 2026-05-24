@@ -39,6 +39,7 @@ export type StartArgs = {
   question?: string;
   /** Per-request override (follow-up composer); validated server-side. */
   model?: string;
+  regions?: SelectionAnalysisResult["regions"];
 };
 
 type StartedState = {
@@ -47,6 +48,7 @@ type StartedState = {
   selectedText: string;
   question?: string;
   model?: string;
+  regions?: SelectionAnalysisResult["regions"];
 };
 
 function newClientKey(): string {
@@ -204,6 +206,7 @@ export function useSelectionThread(paperId: string) {
       clientKey: started.clientKey,
       model: started.model,
       created_at: isStillStreaming ? undefined : Date.now(),
+      regions: started.regions,
     };
 
     const syncKey = JSON.stringify(result);
@@ -244,6 +247,7 @@ export function useSelectionThread(paperId: string) {
         selectedText: trimmed,
         question: args.question,
         model: provisionalModel,
+        regions: args.regions,
       };
       finalizedRef.current = null;
       lastSyncKey.current = "";
@@ -256,6 +260,7 @@ export function useSelectionThread(paperId: string) {
         streaming: true,
         clientKey,
         model: provisionalModel,
+        regions: args.regions,
       };
       upsertSelectionInHistoryForPaper(paperId, provisional);
       setSelectionResultForPaper(paperId, provisional);

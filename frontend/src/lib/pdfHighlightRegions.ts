@@ -12,6 +12,115 @@ export type CaptureHighlightOptions = {
   pageGap?: number;
 };
 
+export type RectLike = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+export type MergeRectsOptions = {
+  lineTolerance?: number;
+  gapTolerance?: number;
+  horizontalPadding?: number;
+};
+
+function applyHorizontalPadding(rect: RectLike, pad: number): RectLike {
+  if (pad <= 0) return rect;
+  return {
+    left: rect.left - pad,
+    top: rect.top,
+    width: rect.width + pad * 2,
+    height: rect.height,
+  };
+}
+
+/** Merge word-fragment client rects into one wide box per text line. */
+export function mergeRectsToLineGroups(
+  rects: RectLike[],
+  opts: MergeRectsOptions = {},
+): RectLike[] {
+  const gapTolerance = opts.gapTolerance ?? 6;
+  const horizontalPadding = opts.horizontalPadding ?? 1;
+  const filtered = rects.filter((r) => r.width > 0.5 && r.height > 0.5);
+  if (filtered.length === 0) return [];
+
+  const heights = filtered.map((r) => r.height).sort((a, b) => a - b);
+  const medianH = heights[Math.floor(heights.length / 2)] ?? 12;
+  const lineTolerance = opts.lineTolerance ?? Math.max(2, medianH * 0.4);
+
+  const buckets: Array<{ midY: number; rects: RectLike[] }> = [];
+  for (const rect of filtered) {
+    const midY = rect.top + rect.height / 2;
+    let bucket = buckets.find((b) => Math.abs(b.midY - midY) <= lineTolerance);
+    if (!bucket) {
+      bucket = { midY, rects: [] };
+      buckets.push(bucket);
+    }
+    bucket.rects.push(rect);
+  }
+
+  const merged: RectLike[] = [];
+  for (const bucket of buckets) {
+    bucket.rects.sort((a, b) => a.left - b.left);
+    let current = { ...bucket.rects[0]! };
+    for (let i = 1; i < bucket.rects.length; i += 1) {
+      const next = bucket.rects[i]!;
+      const gap = next.left - (current.left + current.width);
+      if (gap <= gapTolerance) {
+        const right = Math.max(current.left + current.width, next.left + next.width);
+        const top = Math.min(current.top, next.top);
+        const bottom = Math.max(current.top + current.height, next.top + next.height);
+        current = {
+          left: current.left,
+          top,
+          width: right - current.left,
+          height: bottom - top,
+        };
+      } else {
+        merged.push(applyHorizontalPadding(current, horizontalPadding));
+        current = { ...next };
+      }
+    }
+    merged.push(applyHorizontalPadding(current, horizontalPadding));
+  }
+
+  return merged;
+}
+
+/** Merge pct regions that belong to the same line on a page. */
+export function mergePctRegionsToLineGroups(
+  regions: CapturedHighlightRegion[],
+): CapturedHighlightRegion[] {
+  const byPage = new Map<number, CapturedHighlightRegion[]>();
+  for (const region of regions) {
+    const list = byPage.get(region.pageNum) ?? [];
+    list.push(region);
+    byPage.set(region.pageNum, list);
+  }
+
+  const out: CapturedHighlightRegion[] = [];
+  for (const [pageNum, pageRegions] of byPage) {
+    const asRects: RectLike[] = pageRegions.map((r) => ({
+      left: r.xPct,
+      top: r.yPct,
+      width: r.wPct,
+      height: r.hPct,
+    }));
+    const merged = mergeRectsToLineGroups(asRects, { horizontalPadding: 0 });
+    for (const rect of merged) {
+      out.push({
+        pageNum,
+        xPct: Math.max(0, rect.left),
+        yPct: Math.max(0, rect.top),
+        wPct: Math.max(0, rect.width),
+        hPct: Math.max(0, rect.height),
+      });
+    }
+  }
+  return out;
+}
+
 function pageBoxFromScroll(
   container: HTMLElement,
   clientY: number,
@@ -54,14 +163,16 @@ export function captureTextSelectionRegions(
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return [];
 
   const range = sel.getRangeAt(0);
-  const rects = [...range.getClientRects()].filter((r) => r.width > 0.5 && r.height > 0.5);
-  if (rects.length === 0) return [];
+  const rawRects = [...range.getClientRects()].filter((r) => r.width > 0.5 && r.height > 0.5);
+  if (rawRects.length === 0) return [];
 
   const pages =
     container?.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]") ?? [];
 
-  const out: CapturedHighlightRegion[] = [];
-  for (const r of rects) {
+  type PendingRect = RectLike & { pageNum: number; pw: number; ph: number; scaleX: number; scaleY: number };
+  const pending: PendingRect[] = [];
+
+  for (const r of rawRects) {
     const cx = r.left + r.width / 2;
     const cy = r.top + r.height / 2;
 
@@ -76,49 +187,71 @@ export function captureTextSelectionRegions(
       }
     }
 
-    let pw = 0;
-    let ph = 0;
-    let x = 0;
-    let y = 0;
-
     if (pageEl) {
-      pw = pageEl.offsetWidth;
-      ph = pageEl.offsetHeight;
+      const pw = pageEl.offsetWidth;
+      const ph = pageEl.offsetHeight;
       if (pw <= 0 || ph <= 0) continue;
       const pageRect = pageEl.getBoundingClientRect();
       const scaleX = pw / (pageRect.width || pw);
       const scaleY = ph / (pageRect.height || ph);
-      x = (r.left - pageRect.left) * scaleX;
-      y = (r.top - pageRect.top) * scaleY;
-      out.push({
+      pending.push({
+        left: (r.left - pageRect.left) * scaleX,
+        top: (r.top - pageRect.top) * scaleY,
+        width: r.width * scaleX,
+        height: r.height * scaleY,
         pageNum,
-        xPct: x / pw,
-        yPct: y / ph,
-        wPct: (r.width * scaleX) / pw,
-        hPct: (r.height * scaleY) / ph,
+        pw,
+        ph,
+        scaleX,
+        scaleY,
       });
       continue;
     }
 
-    // Virtualized pages: estimate page-local box from scroll + stride.
     if (!container) continue;
     const est = pageBoxFromScroll(container, cy, opts);
     if (!est) continue;
-    pw = est.pw;
-    ph = est.ph;
     const containerRect = container.getBoundingClientRect();
     const xDoc = container.scrollLeft + (r.left - containerRect.left);
-    x = Math.max(0, Math.min(pw, xDoc));
-    const yOnPage = est.y;
-    out.push({
+    const x = Math.max(0, Math.min(est.pw, xDoc));
+    pending.push({
+      left: x,
+      top: Math.max(0, est.y),
+      width: Math.min(r.width, est.pw - x),
+      height: r.height,
       pageNum: est.pageNum,
-      xPct: x / pw,
-      yPct: Math.max(0, yOnPage) / ph,
-      wPct: Math.min(r.width, pw - x) / pw,
-      hPct: r.height / ph,
+      pw: est.pw,
+      ph: est.ph,
+      scaleX: 1,
+      scaleY: 1,
     });
   }
-  return out;
+
+  const byPage = new Map<number, PendingRect[]>();
+  for (const item of pending) {
+    const list = byPage.get(item.pageNum) ?? [];
+    list.push(item);
+    byPage.set(item.pageNum, list);
+  }
+
+  const out: CapturedHighlightRegion[] = [];
+  for (const [pageNum, pageRects] of byPage) {
+    const merged = mergeRectsToLineGroups(
+      pageRects.map((r) => ({ left: r.left, top: r.top, width: r.width, height: r.height })),
+    );
+    const sample = pageRects[0]!;
+    for (const rect of merged) {
+      out.push({
+        pageNum,
+        xPct: rect.left / sample.pw,
+        yPct: rect.top / sample.ph,
+        wPct: rect.width / sample.pw,
+        hPct: rect.height / sample.ph,
+      });
+    }
+  }
+
+  return mergePctRegionsToLineGroups(out);
 }
 
 export function pageRangeForSelectionRect(
