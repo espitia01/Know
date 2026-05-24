@@ -19,7 +19,7 @@ import { rateLimit } from "@/lib/server/kv";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const DEFAULT_LIMIT = 5;
+const DEFAULT_LIMIT = 12;
 const DEFAULT_WINDOW_SECONDS = 60 * 60; // 1 hour
 
 function unauthorized(): Response {

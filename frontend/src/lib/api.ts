@@ -504,6 +504,7 @@ export interface PaperSummary {
   // commentary paper, "key_figures_and_tables" on text-only work).
   // Renderers already short-circuit on falsy / empty values.
   overview?: string;
+  tl_dr?: string;
   motivation?: string;
   key_contributions?: string[];
   methodology?: string;

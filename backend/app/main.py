@@ -11,24 +11,19 @@ from fastapi.responses import FileResponse, StreamingResponse, Response
 
 from .config import settings
 from .auth import require_auth
+from .trial import (
+    TRIAL_LLM_RATE_LIMIT,
+    TRIAL_WINDOW,
+    TRIAL_SELECTION_CAP,
+    TrialCapExceeded,
+    reserve_trial_selection,
+    release_trial_selection,
+)
 
-TRIAL_SELECTION_CAP = 2
-
-
-class _TrialCapExceeded(Exception):
-    """Raised when a trial paper has exhausted its selection quota."""
-
-
-def _reserve_trial_selection(p):
-    prev = int(p.cached_analysis.get("trial_selections_used") or 0)
-    if prev >= TRIAL_SELECTION_CAP:
-        raise _TrialCapExceeded()
-    p.cached_analysis["trial_selections_used"] = prev + 1
-
-
-def _release_trial_selection(p):
-    prev = int(p.cached_analysis.get("trial_selections_used") or 0)
-    p.cached_analysis["trial_selections_used"] = max(0, prev - 1)
+# Back-compat aliases used within this module.
+_TrialCapExceeded = TrialCapExceeded
+_reserve_trial_selection = reserve_trial_selection
+_release_trial_selection = release_trial_selection
 
 
 import logging as _logging
@@ -290,12 +285,6 @@ async def get_account_usage(user_id: str = Depends(require_auth)):
     }
 
 
-# --- Trial endpoints (no auth, rate-limited by IP via Supabase) ---
-
-TRIAL_RATE_LIMIT = 5
-TRIAL_WINDOW = 3600
-
-
 def _resolve_client_ip(request: Request) -> str | None:
     """Best-effort caller IP. Honors the first hop of x-forwarded-for
     when the immediate peer is loopback / private (i.e. behind Railway,
@@ -319,19 +308,12 @@ def _resolve_client_ip(request: Request) -> str | None:
     return immediate
 
 
-def _check_trial_rate(request: Request):
-    """Enforce IP-based rate limiting on unauthenticated trial endpoints.
+def _check_trial_llm_rate(request: Request):
+    """Enforce IP-based rate limiting on trial endpoints that invoke LLMs.
 
-    Resolution order:
-      1. Vercel KV-backed limiter (if KNOW_NEXTJS_RATELIMIT_URL is set).
-         This is the primary path post-Stage 6 — survives Railway and
-         Vercel redeploys.
-      2. Supabase RPC ``check_trial_rate``. Authoritative fallback.
-      3. Fail closed with a retryable 503.
-
-    The previous in-memory deque was per-process and reset on every
-    redeploy, leaking free LLM calls to anyone tolerating a redeploy
-    blip. It is gone.
+    Read-only trial routes (GET paper metadata, markdown, pdf, ocr images) do
+    NOT call this — counting them against the hourly bucket caused demo users
+    to hit "rate limited" before using their two allotted selections.
     """
     ip = _resolve_client_ip(request)
     if not ip:
@@ -350,7 +332,7 @@ def _check_trial_rate(request: Request):
                     },
                     json={
                         "ip": ip,
-                        "max_requests": TRIAL_RATE_LIMIT,
+                        "max_requests": TRIAL_LLM_RATE_LIMIT,
                         "window_seconds": TRIAL_WINDOW,
                     },
                 )
@@ -382,7 +364,7 @@ def _check_trial_rate(request: Request):
         try:
             res = client.rpc("check_trial_rate", {
                 "p_ip": ip,
-                "p_max_requests": TRIAL_RATE_LIMIT,
+                "p_max_requests": TRIAL_LLM_RATE_LIMIT,
                 "p_window_seconds": TRIAL_WINDOW,
             }).execute()
         except Exception as e:
@@ -395,17 +377,19 @@ def _check_trial_rate(request: Request):
             raise HTTPException(status_code=429, detail="Trial rate limit exceeded. Sign up to continue.")
         return
 
-    # No Supabase, no Vercel limiter — fail closed. We refuse to hand
-    # out anonymous LLM calls behind no enforcement.
     raise HTTPException(
         status_code=503,
         detail="Trial rate limiter unavailable. Please try again shortly.",
     )
 
 
+# Back-compat alias for any external references.
+_check_trial_rate = _check_trial_llm_rate
+
+
 @app.post("/api/trial/upload")
 async def trial_upload(request: Request):
-    _check_trial_rate(request)
+    _check_trial_llm_rate(request)
 
     from .services.pdf_parser import extract_pdf, save_paper, paper_prompt_text
     from .services.llm import extract_metadata
@@ -498,7 +482,10 @@ async def trial_summary(request: Request, body: dict):
         return paper.cached_analysis["summary"]
 
     try:
-        result = await summarize_paper(paper_prompt_text(paper), model_override="claude-haiku-4-5")
+        model = settings.fast_model
+        result = await summarize_paper(paper_prompt_text(paper), model_override=model)
+        if isinstance(result, dict):
+            result["model"] = model
         paper.cached_analysis["summary"] = result
         save_paper(paper)
         return result
@@ -508,8 +495,7 @@ async def trial_summary(request: Request, body: dict):
 
 
 @app.get("/api/trial/paper/{paper_id}")
-async def trial_get_paper(paper_id: str, request: Request):
-    _check_trial_rate(request)
+async def trial_get_paper(paper_id: str):
     from .api.papers import _validate_id
     _validate_id(paper_id, "paper_id")
     if not paper_id.startswith("trial_"):
@@ -532,8 +518,7 @@ async def trial_get_paper(paper_id: str, request: Request):
 
 
 @app.get("/api/trial/paper/{paper_id}/markdown")
-async def trial_get_paper_markdown(paper_id: str, request: Request):
-    _check_trial_rate(request)
+async def trial_get_paper_markdown(paper_id: str):
     from .api.papers import _validate_id
     _validate_id(paper_id, "paper_id")
     if not paper_id.startswith("trial_"):
@@ -553,8 +538,7 @@ async def trial_get_paper_markdown(paper_id: str, request: Request):
 
 
 @app.get("/api/trial/paper/{paper_id}/ocr-image/{image_id}")
-async def trial_get_ocr_image(paper_id: str, image_id: str, request: Request):
-    _check_trial_rate(request)
+async def trial_get_ocr_image(paper_id: str, image_id: str):
     from .api.papers import _validate_id
     from .services.ocr_mistral import validate_ocr_image_id
     from .services.pdf_parser import load_ocr_image_bytes
@@ -574,8 +558,7 @@ async def trial_get_ocr_image(paper_id: str, image_id: str, request: Request):
 
 
 @app.get("/api/trial/paper/{paper_id}/pdf")
-async def trial_get_pdf(paper_id: str, request: Request):
-    _check_trial_rate(request)
+async def trial_get_pdf(paper_id: str):
     from .api.papers import _validate_id
     _validate_id(paper_id, "paper_id")
     if not paper_id.startswith("trial_"):
@@ -590,7 +573,7 @@ async def trial_get_pdf(paper_id: str, request: Request):
 @app.post("/api/trial/selection-stream")
 async def trial_selection_stream(request: Request, body: dict):
     """Stream Explain/Derive for anonymous trial papers with a strict per-paper cap."""
-    _check_trial_rate(request)
+    _check_trial_llm_rate(request)
     import json as _json
     import asyncio
 
@@ -632,8 +615,25 @@ async def trial_selection_stream(request: Request, body: dict):
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    provider = get_fast_provider(None)
+    try:
+        provider = get_fast_provider(None)
+    except Exception:
+        _main_logger.exception("Trial selection provider setup failed for %s", paper_id)
+        try:
+            mutate_local_paper(paper_id, _release_trial_selection)
+        except Exception:
+            _main_logger.exception(
+                "trial selection quota release failed for %s", paper_id,
+            )
+        raise HTTPException(status_code=503, detail="Streaming is unavailable")
+
     if not hasattr(provider, "stream_complete"):
+        try:
+            mutate_local_paper(paper_id, _release_trial_selection)
+        except Exception:
+            _main_logger.exception(
+                "trial selection quota release failed for %s", paper_id,
+            )
         raise HTTPException(status_code=503, detail="Streaming is unavailable")
 
     system, user_text = _get_selection_prompt(paper_prompt_text(paper), selected_text, action)

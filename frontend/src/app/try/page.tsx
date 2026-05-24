@@ -68,11 +68,11 @@ export default function TrialPage() {
       {/* Trial banner */}
       <div className="bg-foreground text-background text-center py-2.5 px-4">
         <p className="text-[13px] opacity-90">
-          Trial mode — upload a paper to preview its summary.{" "}
+          Demo — structured summary plus 2 grounded selections (Explain / Derive) on this paper.{" "}
           <Link href="/sign-up" className="underline underline-offset-2 font-medium">
             Sign up free
           </Link>{" "}
-          for full access.
+          for prep, Q&amp;A, figures, notes, and 3 selections per paper.
         </p>
       </div>
 
@@ -116,7 +116,7 @@ export default function TrialPage() {
             <div className="space-y-1.5">
               <h1 className="font-display text-[28px] font-bold tracking-[-0.04em] text-foreground">Try Know</h1>
               <p className="text-muted-foreground text-[15px] text-pretty">
-                Upload a paper to see a detailed AI summary — no account needed.
+                Upload a paper for a detailed structured summary and two Explain / Derive selections — no account needed.
               </p>
             </div>
           </div>

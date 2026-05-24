@@ -78,7 +78,7 @@ const TIERS = [
       "Structured summaries on every paper",
       "5 grounded Q&A turns per paper",
       "3 selection analyses per paper",
-      "Claude Haiku for fast answers",
+      "Fast models: Mistral Small, Haiku, GPT-5 Mini",
     ],
   },
   {
@@ -97,7 +97,7 @@ const TIERS = [
       "Figure conversations",
       "Notes anchored to selections",
       "BibTeX and citation export",
-      "Haiku and Sonnet models",
+      "Haiku, Sonnet, and premium OpenAI & Mistral models",
     ],
   },
   {

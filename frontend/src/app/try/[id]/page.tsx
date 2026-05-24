@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -18,6 +19,10 @@ import { api } from "@/lib/api";
 import { consumeSelectionSse } from "@/lib/selectionSse";
 import { SelectionToolbar, type SelectionAction } from "@/components/pdf/SelectionToolbar";
 import { SelectionResultPanel } from "@/components/panel/SelectionResultPanel";
+import { AnalysisSection } from "@/components/analysis/AnalysisSection";
+import { CardMeta } from "@/components/analysis/CardMeta";
+import { ReadMoreProse } from "@/components/analysis/ReadMoreProse";
+import { ensureDisplayMath, firstSentence } from "@/lib/text";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -69,6 +74,20 @@ const TAB_STYLE =
 const MIN_PANEL = 300;
 const MAX_PANEL = 560;
 
+function formatTrialSelectionError(status: number, msg: string): string {
+  const lower = msg.toLowerCase();
+  if (lower.includes("both selections") || lower.includes("selections in this demo")) {
+    return `**Selection limit.** ${msg}\n\nCreate a free account for 3 selections per paper and full analysis tools.`;
+  }
+  if (status === 429 && lower.includes("rate limit")) {
+    return `**Hourly demo limit.** ${msg}\n\nWait a bit or create a free account — your selections on this paper are still available when the limit resets.`;
+  }
+  if (status === 403 || status === 429) {
+    return `**Demo limit.** ${msg}\n\nCreate a free account for full access.`;
+  }
+  return msg;
+}
+
 function TrialSummary({ paperId }: { paperId: string }) {
   const [summary, setSummary] = useState<PaperSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -107,60 +126,161 @@ function TrialSummary({ paperId }: { paperId: string }) {
     );
   }
 
-  const sectionLabel =
-    "mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground";
+  const takeawaySource =
+    (summary as PaperSummary & { tl_dr?: string }).tl_dr ?? summary.overview ?? "";
+  const takeaway = firstSentence(takeawaySource, 240);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-8">
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="font-display text-[var(--text-md)] font-medium tracking-[-0.02em] text-foreground">
+          Summary
+        </h2>
+        {summary.model ? <CardMeta model={summary.model} createdAt={summary.created_at} /> : null}
+      </div>
+
+      {takeaway && (
+        <div className="rounded-[var(--radius-lg)] border border-border/50 bg-card/35 px-4 py-3 dark:bg-card/22">
+          <p className="text-[var(--text-xs)] font-medium uppercase tracking-[0.12em] text-muted-foreground/85">
+            Key takeaway
+          </p>
+          <div className="mt-1 text-[var(--text-sm)] leading-relaxed text-foreground/90">
+            <Md>{takeaway}</Md>
+          </div>
+        </div>
+      )}
+
       {summary.overview && (
-        <section>
-          <h3 className={sectionLabel}>Overview</h3>
-          <Md>{summary.overview}</Md>
-        </section>
+        <AnalysisSection title="Overview">
+          <ReadMoreProse markdown={summary.overview}>
+            <Md>{summary.overview}</Md>
+          </ReadMoreProse>
+        </AnalysisSection>
       )}
       {summary.motivation && (
-        <section>
-          <h3 className={sectionLabel}>Motivation</h3>
+        <AnalysisSection title="Motivation">
           <Md>{summary.motivation}</Md>
-        </section>
+        </AnalysisSection>
       )}
       {summary.key_contributions && summary.key_contributions.length > 0 && (
-        <section>
-          <h3 className={sectionLabel}>Key Contributions</h3>
-          <ul className="space-y-1.5">
+        <AnalysisSection title="Key contributions" count={summary.key_contributions.length}>
+          <ul className="space-y-2">
             {summary.key_contributions.map((c, i) => (
               <li key={i} className="flex gap-2">
-                <span className="mt-0.5 shrink-0 text-[12px] text-muted-foreground/70">{i + 1}.</span>
-                <Md>{c}</Md>
+                <span className="mt-0.5 shrink-0 text-[var(--text-sm)] text-muted-foreground/50">
+                  {i + 1}.
+                </span>
+                <div className="min-w-0 flex-1">
+                  <Md>{c}</Md>
+                </div>
               </li>
             ))}
           </ul>
-        </section>
+        </AnalysisSection>
       )}
       {summary.methodology && (
-        <section>
-          <h3 className={sectionLabel}>Methodology</h3>
-          <Md>{summary.methodology}</Md>
-        </section>
+        <AnalysisSection title="Methodology">
+          <ReadMoreProse markdown={summary.methodology}>
+            <Md>{summary.methodology}</Md>
+          </ReadMoreProse>
+        </AnalysisSection>
       )}
       {summary.main_results && (
-        <section>
-          <h3 className={sectionLabel}>Main Results</h3>
-          <Md>{summary.main_results}</Md>
-        </section>
+        <AnalysisSection title="Main results">
+          <ReadMoreProse markdown={summary.main_results}>
+            <Md>{summary.main_results}</Md>
+          </ReadMoreProse>
+        </AnalysisSection>
+      )}
+      {summary.discussion && (
+        <AnalysisSection title="Discussion">
+          <ReadMoreProse markdown={summary.discussion}>
+            <Md>{summary.discussion}</Md>
+          </ReadMoreProse>
+        </AnalysisSection>
+      )}
+      {summary.key_equations && summary.key_equations.length > 0 && (
+        <AnalysisSection title="Key equations" count={summary.key_equations.length}>
+          <div className="space-y-3">
+            {summary.key_equations.map((eq, i) => {
+              if (!eq) return null;
+              const terms = (eq as { terms?: { symbol?: string; meaning?: string }[] }).terms;
+              return (
+                <div
+                  key={i}
+                  className="overflow-hidden rounded-lg border border-border/50 bg-card/35 dark:bg-card/22"
+                >
+                  <div className="border-b border-border/50 px-4 py-3">
+                    <Md>{ensureDisplayMath(eq.equation)}</Md>
+                  </div>
+                  {eq.meaning && (
+                    <div className="px-4 py-3 text-[var(--text-sm)] leading-relaxed text-muted-foreground">
+                      <Md>{eq.meaning}</Md>
+                    </div>
+                  )}
+                  {terms && terms.length > 0 && (
+                    <div className="border-t border-border/45 bg-muted/[0.06] px-4 py-3">
+                      <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">
+                        Where
+                      </p>
+                      <dl className="grid grid-cols-[minmax(2.5rem,auto)_1fr] gap-x-3 gap-y-1.5 text-[var(--text-sm)] leading-snug">
+                        {terms.map((t, k) => (
+                          <Fragment key={k}>
+                            <dt className="text-foreground">
+                              <Md>{t.symbol ?? ""}</Md>
+                            </dt>
+                            <dd className="text-muted-foreground">
+                              <Md>{t.meaning ?? ""}</Md>
+                            </dd>
+                          </Fragment>
+                        ))}
+                      </dl>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </AnalysisSection>
+      )}
+      {summary.key_figures_and_tables && summary.key_figures_and_tables.length > 0 && (
+        <AnalysisSection title="Key figures & tables" count={summary.key_figures_and_tables.length}>
+          <div className="overflow-hidden rounded-lg border border-border/50 bg-card/35 dark:bg-card/22">
+            {summary.key_figures_and_tables.map((fig, i) => {
+              if (!fig) return null;
+              return (
+                <div
+                  key={i}
+                  className="border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 hover:bg-accent/40"
+                >
+                  <p className="text-[var(--text-sm)] font-medium text-foreground">{fig.id}</p>
+                  <div className="mt-0.5 text-[var(--text-sm)] text-muted-foreground">
+                    <Md>{fig.description ?? ""}</Md>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </AnalysisSection>
       )}
       {summary.limitations && summary.limitations.length > 0 && (
-        <section>
-          <h3 className={sectionLabel}>Limitations</h3>
+        <AnalysisSection title="Limitations" count={summary.limitations.length}>
           <ul className="space-y-1">
             {summary.limitations.map((l, i) => (
               <li key={i} className="flex gap-2">
-                <span className="shrink-0 text-[12px] text-muted-foreground/70">•</span>
-                <Md>{l}</Md>
+                <span className="shrink-0 text-[var(--text-sm)] text-muted-foreground/50">•</span>
+                <div className="min-w-0 flex-1">
+                  <Md>{l}</Md>
+                </div>
               </li>
             ))}
           </ul>
-        </section>
+        </AnalysisSection>
+      )}
+      {summary.future_work && (
+        <AnalysisSection title="Future work">
+          <Md>{summary.future_work}</Md>
+        </AnalysisSection>
       )}
     </div>
   );
@@ -290,10 +410,7 @@ export default function TrialPaperView() {
           const errBody: SelectionAnalysisResult = {
             action,
             selected_text: text,
-            explanation:
-              res.status === 403 || res.status === 429
-                ? `**Demo limit.** ${msg}\n\nCreate a free account for full access.`
-                : msg,
+            explanation: formatTrialSelectionError(res.status, msg),
             streaming: false,
             clientKey,
           };
