@@ -12,6 +12,7 @@ import { selectionKey } from "@/lib/selectionActions";
 // Stage 2: streaming for selection moved to Next.js + AI SDK via this hook.
 // The previous SSE consumer (`consumeSelectionSse`) is still used by the
 // trial flow in `try/[id]/page.tsx`, so we don't delete it yet.
+import { captureCurrentTextSelectionRegions } from "@/lib/pdfHighlightRegions";
 import { useSelectionThread } from "@/lib/useSelectionThread";
 import { SelectionToolbar, type SelectionAction } from "@/components/pdf/SelectionToolbar";
 import { AnalysisPanel, type PanelPosition } from "@/components/panel/BottomPanel";
@@ -1563,7 +1564,8 @@ function PaperContent() {
     text: string,
     meta?: { highlightColor?: string },
   ) => {
-    const capturedRegions = selection?.regions;
+    const freshRegions = captureCurrentTextSelectionRegions();
+    const capturedRegions = freshRegions.length > 0 ? freshRegions : selection?.regions;
     // For analysis actions (explain / derive), wrap the live selection
     // in a transient <mark> BEFORE we clear it. This gives the user a
     // visible "what's being analyzed right now" cue that survives

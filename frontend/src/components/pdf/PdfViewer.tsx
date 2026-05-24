@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, useMemo, type MouseEvent as ReactMouseEvent } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, type MouseEvent as ReactMouseEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Document, Page, pdfjs } from "react-pdf";
 import { api, getAuthHeadersSync, SelectionAnalysisResult } from "@/lib/api";
@@ -8,9 +8,16 @@ import { useStore, type PdfRegionHighlight } from "@/lib/store";
 import { normalizeSelectionAction, selectionKey } from "@/lib/selectionActions";
 import { snapshotDomRect } from "@/lib/domRect";
 import { capturePdfViewportUnionToBlob } from "@/lib/pdfSelectionCapture";
-import { captureTextSelectionRegions, mergeRectsToLineGroups, pageRangeForSelectionRect } from "@/lib/pdfHighlightRegions";
+import {
+  captureTextSelectionRegions,
+  getPageHighlightMetrics,
+  mergeRectsToLineGroups,
+  pageRangeForSelectionRect,
+  pctRegionsToLocalBoxes,
+  registerPdfHighlightCaptureContext,
+} from "@/lib/pdfHighlightRegions";
 import { useReadingState } from "@/hooks/useReadingState";
-import { hasMathInText } from "@/lib/selectionMath";
+import { hasMathInText, selectionHasMath } from "@/lib/selectionMath";
 
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -806,10 +813,12 @@ export function PdfViewer({
       const overlay = document.createElement("div");
       overlay.className = "know-region-overlay";
       overlay.setAttribute("aria-hidden", "true");
-      const pw = pageEl.offsetWidth;
-      const ph = pageEl.offsetHeight;
-      if (pw <= 0 || ph <= 0) return;
-      for (const r of forPage) {
+      const metrics = getPageHighlightMetrics(pageEl);
+      if (metrics.pw <= 0 || metrics.ph <= 0) return;
+      const boxes = pctRegionsToLocalBoxes(forPage, metrics);
+      for (let i = 0; i < boxes.length; i += 1) {
+        const r = forPage[i]!;
+        const box = boxes[i]!;
         if (
           typeof r.xPct !== "number" ||
           typeof r.yPct !== "number" ||
@@ -818,19 +827,19 @@ export function PdfViewer({
         ) {
           continue;
         }
-        const box = document.createElement("div");
+        const div = document.createElement("div");
         if (r.color) {
-          box.className = "know-highlight-rect";
-          box.setAttribute("data-color", r.color);
+          div.className = "know-highlight-rect";
+          div.setAttribute("data-color", r.color);
         } else {
-          box.className = "know-region-highlight";
-          box.setAttribute("data-action", "note");
+          div.className = "know-region-highlight";
+          div.setAttribute("data-action", "note");
         }
-        box.style.left = `${r.xPct * pw}px`;
-        box.style.top = `${r.yPct * ph}px`;
-        box.style.width = `${r.wPct * pw}px`;
-        box.style.height = `${r.hPct * ph}px`;
-        overlay.appendChild(box);
+        div.style.left = `${box.x}px`;
+        div.style.top = `${box.y}px`;
+        div.style.width = `${box.w}px`;
+        div.style.height = `${box.h}px`;
+        overlay.appendChild(div);
       }
       pageEl.appendChild(overlay);
     },
@@ -848,8 +857,8 @@ export function PdfViewer({
       mode === "highlight" ? "know-highlight-overlay" : "know-selection-overlay";
     const interactive = mode === "selection";
     const pageNum = parseInt(pageEl.getAttribute("data-page-number") || "1", 10);
-    const pw = pageEl.offsetWidth;
-    const ph = pageEl.offsetHeight;
+    const metrics = getPageHighlightMetrics(pageEl);
+    const { pw, ph } = metrics;
 
     const textLayer = pageEl.querySelector(".react-pdf__Page__textContent, .textLayer") as HTMLElement | null;
 
@@ -877,7 +886,6 @@ export function PdfViewer({
 
     const overlay = document.createElement("div");
     overlay.className = overlayClass;
-    const pageRect = pageEl.getBoundingClientRect();
 
     const pageHits: Array<{
       entry: SelectionAnalysisResult;
@@ -917,20 +925,19 @@ export function PdfViewer({
       const pageRegions = entry.regions.filter((r) => r.pageNum === pageNum);
       if (!pageRegions.length) continue;
       const raw = entry.selected_text?.trim();
-      if (!raw || raw.length < minTextLen) continue;
+      const entryMinLen = entry.regions?.length ? 2 : minTextLen;
+      if (!raw || raw.length < entryMinLen) continue;
       paintEntryBoxes(
         entry,
-        pageRegions.map((r) => ({
-          x: r.xPct * pw,
-          y: r.yPct * ph,
-          w: r.wPct * pw,
-          h: r.hPct * ph,
-        })),
+        pctRegionsToLocalBoxes(pageRegions, metrics),
       );
       painted += 1;
     }
 
-    const fallbackHistory = history.filter((h) => !h.regions?.length);
+    const fallbackHistory = history.filter((h) => {
+      if (!h.regions?.length) return true;
+      return !h.regions.some((r) => r.pageNum === pageNum);
+    });
     if (fallbackHistory.length === 0 || !textLayer) {
       if (!interactive) {
         if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
@@ -1056,13 +1063,14 @@ export function PdfViewer({
     for (let i = 0; i < fallbackHistory.length && fallbackPainted < 32; i++) {
       const entry = fallbackHistory[i];
       const raw = entry.selected_text?.trim();
-      if (!raw || raw.length < minTextLen) continue;
+      const entryMinLen = hasMathInText(raw ?? "") ? 2 : minTextLen;
+      if (!raw || raw.length < entryMinLen) continue;
 
       // Needle is normalized the same way as the haystack so ligatures,
       // smart quotes, and em-dashes from the LLM-submitted text don't
       // silently miss the PDF's rendering of the same passage.
       const needleNorm = normalizeForSearch(raw).toLowerCase();
-      if (needleNorm.length < minTextLen) continue;
+      if (needleNorm.length < entryMinLen) continue;
 
       // Match strategy:
       //
@@ -1193,10 +1201,10 @@ export function PdfViewer({
       if (mergedRects.length === 0) continue;
 
       const localRects = mergedRects.map((r) => ({
-        x: r.left - pageRect.left,
-        y: r.top - pageRect.top,
-        w: r.width,
-        h: r.height,
+        x: metrics.originX + (r.left - metrics.refRect.left) * metrics.scaleX,
+        y: metrics.originY + (r.top - metrics.refRect.top) * metrics.scaleY,
+        w: r.width * metrics.scaleX,
+        h: r.height * metrics.scaleY,
       }));
       paintEntryBoxes(entry, localRects);
 
@@ -1749,16 +1757,21 @@ export function PdfViewer({
     // Snap outward to whole words before reading the text. Apple Books /
     // Kindle / SciSpace all do this; without it, mid-word releases produce
     // ragged selections and the toolbar fires with truncated tokens.
+    // Skip for math — word snap often expands/shifts equation spans.
     const liveRange = sel.getRangeAt(0);
-    const snapped = snapRangeToWords(liveRange);
-    if (snapped) {
-      stabilizeSelectionAnchors(sel, snapped);
-      if (sel.rangeCount === 0) {
-        const retryRange = snapped;
-        requestAnimationFrame(() => {
-          if (sel.rangeCount > 0) return;
-          stabilizeSelectionAnchors(sel, retryRange);
-        });
+    const preText = sel.toString();
+    const skipWordSnap = selectionHasMath(preText, liveRange);
+    if (!skipWordSnap) {
+      const snapped = snapRangeToWords(liveRange);
+      if (snapped) {
+        stabilizeSelectionAnchors(sel, snapped);
+        if (sel.rangeCount === 0) {
+          const retryRange = snapped;
+          requestAnimationFrame(() => {
+            if (sel.rangeCount > 0) return;
+            stabilizeSelectionAnchors(sel, retryRange);
+          });
+        }
       }
     }
 
@@ -1789,7 +1802,7 @@ export function PdfViewer({
 
     const finishCapture = () => {
       const regions = captureTextSelectionRegions(container, captureOpts);
-      const hasMath = hasMathInText(text);
+      const hasMath = selectionHasMath(text, range);
       const meta = regions.length > 0 || hasMath ? { regions: regions.length > 0 ? regions : undefined, hasMath } : undefined;
       onTextSelected?.(text, rect, meta);
     };
@@ -1807,6 +1820,20 @@ export function PdfViewer({
     }
     finishCapture();
   }, [onTextSelected, onSelectionClear, numPages, visibleRange.start, visibleRange.end]);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container || numPages <= 0) {
+      registerPdfHighlightCaptureContext(null);
+      return () => registerPdfHighlightCaptureContext(null);
+    }
+    const stride = pageHeightRef.current + PAGE_GAP;
+    registerPdfHighlightCaptureContext({
+      container,
+      opts: { numPages, pageStride: stride, pageGap: PAGE_GAP },
+    });
+    return () => registerPdfHighlightCaptureContext(null);
+  }, [numPages, scale]);
 
   const handleMouseUp = useCallback(() => {
     if (marqueeMode) return;

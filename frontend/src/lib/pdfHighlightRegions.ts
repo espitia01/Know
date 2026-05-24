@@ -25,6 +25,35 @@ export type MergeRectsOptions = {
   horizontalPadding?: number;
 };
 
+/** Paint/capture coordinate frame for one mounted pdf.js page. */
+export type PageHighlightMetrics = {
+  pageNum: number;
+  /** Offset of the text layer within `.react-pdf__Page` (overlay parent). */
+  originX: number;
+  originY: number;
+  /** Text-layer width/height used for pct → px conversion. */
+  pw: number;
+  ph: number;
+};
+
+let activeCaptureContext: {
+  container: HTMLElement;
+  opts: CaptureHighlightOptions;
+} | null = null;
+
+/** PdfViewer registers its scroll container + layout opts for action-time re-capture. */
+export function registerPdfHighlightCaptureContext(
+  ctx: { container: HTMLElement; opts: CaptureHighlightOptions } | null,
+): void {
+  activeCaptureContext = ctx;
+}
+
+/** Re-capture pct regions from the live selection (toolbar action click). */
+export function captureCurrentTextSelectionRegions(): CapturedHighlightRegion[] {
+  if (!activeCaptureContext) return [];
+  return captureTextSelectionRegions(activeCaptureContext.container, activeCaptureContext.opts);
+}
+
 function applyHorizontalPadding(rect: RectLike, pad: number): RectLike {
   if (pad <= 0) return rect;
   return {
@@ -121,37 +150,127 @@ export function mergePctRegionsToLineGroups(
   return out;
 }
 
-function pageBoxFromScroll(
+function rectIntersectionArea(a: DOMRectReadOnly, b: DOMRectReadOnly): number {
+  const left = Math.max(a.left, b.left);
+  const top = Math.max(a.top, b.top);
+  const right = Math.min(a.right, b.right);
+  const bottom = Math.min(a.bottom, b.bottom);
+  const w = right - left;
+  const h = bottom - top;
+  return w > 0 && h > 0 ? w * h : 0;
+}
+
+type PageCaptureFrame = PageHighlightMetrics & {
+  refRect: DOMRect;
+  scaleX: number;
+  scaleY: number;
+};
+
+/** Coordinate frame anchored on the pdf.js text layer (falls back to page box). */
+export function getPageHighlightMetrics(pageEl: HTMLElement): PageCaptureFrame {
+  const pageRect = pageEl.getBoundingClientRect();
+  const textLayer = pageEl.querySelector(
+    ".react-pdf__Page__textContent, .textLayer",
+  ) as HTMLElement | null;
+  const ref = textLayer ?? pageEl;
+  const refRect = ref.getBoundingClientRect();
+  const pw = ref.offsetWidth || pageEl.offsetWidth;
+  const ph = ref.offsetHeight || pageEl.offsetHeight;
+  return {
+    pageNum: parseInt(pageEl.getAttribute("data-page-number") || "1", 10),
+    originX: refRect.left - pageRect.left,
+    originY: refRect.top - pageRect.top,
+    pw,
+    ph,
+    refRect,
+    scaleX: pw / (refRect.width || pw || 1),
+    scaleY: ph / (refRect.height || ph || 1),
+  };
+}
+
+function findPageFrameForRect(
+  rect: DOMRectReadOnly,
+  pages: HTMLElement[],
+): PageCaptureFrame | null {
+  let best: { frame: PageCaptureFrame; area: number } | null = null;
+  for (const pageEl of pages) {
+    const pr = pageEl.getBoundingClientRect();
+    const area = rectIntersectionArea(rect, pr);
+    if (area > (best?.area ?? 0)) {
+      best = { frame: getPageHighlightMetrics(pageEl), area };
+    }
+  }
+  return best && best.area > 0 ? best.frame : null;
+}
+
+function pageFrameFromScroll(
   container: HTMLElement,
   clientY: number,
+  clientX: number,
   opts: CaptureHighlightOptions,
-): { pageNum: number; x: number; y: number; w: number; h: number; pw: number; ph: number } | null {
+): PageCaptureFrame | null {
   const numPages = opts.numPages ?? 0;
   const pageGap = opts.pageGap ?? 16;
   const stride = opts.pageStride ?? 0;
   if (numPages <= 0 || stride <= pageGap) return null;
 
-  const pageH = stride - pageGap;
   const containerRect = container.getBoundingClientRect();
   const yInDoc = container.scrollTop + (clientY - containerRect.top);
   const pageNum = Math.max(1, Math.min(numPages, Math.floor(yInDoc / stride) + 1));
+
+  const mounted = container.querySelector<HTMLElement>(
+    `.react-pdf__Page[data-page-number="${pageNum}"]`,
+  );
+  if (mounted) return getPageHighlightMetrics(mounted);
+
+  const pageH = stride - pageGap;
   const pageTop = (pageNum - 1) * stride;
   const yOnPage = yInDoc - pageTop;
-
   const pages = container.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]");
-  let pw = 0;
-  for (const el of pages) {
-    if (parseInt(el.getAttribute("data-page-number") || "0", 10) === pageNum) {
-      pw = el.offsetWidth;
-      break;
-    }
-  }
-  if (pw <= 0) {
-    const first = pages[0] as HTMLElement | undefined;
-    pw = first?.offsetWidth ?? container.clientWidth;
-  }
+  const sample = pages[0];
+  const pw = sample?.offsetWidth ?? container.clientWidth;
   const ph = pageH;
-  return { pageNum, x: 0, y: yOnPage, w: pw, h: 0, pw, ph };
+  const xInContainer = clientX - containerRect.left;
+  return {
+    pageNum,
+    originX: Math.max(0, xInContainer - (container.clientWidth - pw) / 2),
+    originY: yOnPage,
+    pw,
+    ph,
+    refRect: new DOMRect(
+      containerRect.left + Math.max(0, (container.clientWidth - pw) / 2),
+      containerRect.top + (clientY - yOnPage),
+      pw,
+      ph,
+    ),
+    scaleX: 1,
+    scaleY: 1,
+  };
+}
+
+function clientRectToLocal(
+  r: DOMRectReadOnly,
+  frame: PageCaptureFrame,
+): RectLike {
+  return {
+    left: (r.left - frame.refRect.left) * frame.scaleX,
+    top: (r.top - frame.refRect.top) * frame.scaleY,
+    width: r.width * frame.scaleX,
+    height: r.height * frame.scaleY,
+  };
+}
+
+/** Convert stored pct regions to overlay-local px boxes for one page. */
+export function pctRegionsToLocalBoxes(
+  regions: Array<{ xPct: number; yPct: number; wPct: number; hPct: number }>,
+  metrics: PageHighlightMetrics,
+): Array<{ x: number; y: number; w: number; h: number }> {
+  return regions.map((r) => ({
+    x: metrics.originX + r.xPct * metrics.pw,
+    y: metrics.originY + r.yPct * metrics.ph,
+    w: r.wPct * metrics.pw,
+    h: r.hPct * metrics.ph,
+  }));
 }
 
 /** Map each line rect in the current DOM selection to normalized page-local boxes. */
@@ -169,61 +288,25 @@ export function captureTextSelectionRegions(
   const pages =
     container?.querySelectorAll<HTMLElement>(".react-pdf__Page[data-page-number]") ?? [];
 
-  type PendingRect = RectLike & { pageNum: number; pw: number; ph: number; scaleX: number; scaleY: number };
+  type PendingRect = RectLike & { pageNum: number; pw: number; ph: number };
   const pending: PendingRect[] = [];
 
   for (const r of rawRects) {
     const cx = r.left + r.width / 2;
     const cy = r.top + r.height / 2;
 
-    let pageEl: HTMLElement | null = null;
-    let pageNum = 1;
-    for (const el of pages) {
-      const pr = el.getBoundingClientRect();
-      if (cx >= pr.left && cx <= pr.right && cy >= pr.top && cy <= pr.bottom) {
-        pageEl = el;
-        pageNum = parseInt(el.getAttribute("data-page-number") || "1", 10);
-        break;
-      }
+    let frame = findPageFrameForRect(r, [...pages]);
+    if (!frame && container) {
+      frame = pageFrameFromScroll(container, cy, cx, opts);
     }
+    if (!frame || frame.pw <= 0 || frame.ph <= 0) continue;
 
-    if (pageEl) {
-      const pw = pageEl.offsetWidth;
-      const ph = pageEl.offsetHeight;
-      if (pw <= 0 || ph <= 0) continue;
-      const pageRect = pageEl.getBoundingClientRect();
-      const scaleX = pw / (pageRect.width || pw);
-      const scaleY = ph / (pageRect.height || ph);
-      pending.push({
-        left: (r.left - pageRect.left) * scaleX,
-        top: (r.top - pageRect.top) * scaleY,
-        width: r.width * scaleX,
-        height: r.height * scaleY,
-        pageNum,
-        pw,
-        ph,
-        scaleX,
-        scaleY,
-      });
-      continue;
-    }
-
-    if (!container) continue;
-    const est = pageBoxFromScroll(container, cy, opts);
-    if (!est) continue;
-    const containerRect = container.getBoundingClientRect();
-    const xDoc = container.scrollLeft + (r.left - containerRect.left);
-    const x = Math.max(0, Math.min(est.pw, xDoc));
+    const local = clientRectToLocal(r, frame);
     pending.push({
-      left: x,
-      top: Math.max(0, est.y),
-      width: Math.min(r.width, est.pw - x),
-      height: r.height,
-      pageNum: est.pageNum,
-      pw: est.pw,
-      ph: est.ph,
-      scaleX: 1,
-      scaleY: 1,
+      ...local,
+      pageNum: frame.pageNum,
+      pw: frame.pw,
+      ph: frame.ph,
     });
   }
 
@@ -243,10 +326,10 @@ export function captureTextSelectionRegions(
     for (const rect of merged) {
       out.push({
         pageNum,
-        xPct: rect.left / sample.pw,
-        yPct: rect.top / sample.ph,
-        wPct: rect.width / sample.pw,
-        hPct: rect.height / sample.ph,
+        xPct: Math.max(0, rect.left / sample.pw),
+        yPct: Math.max(0, rect.top / sample.ph),
+        wPct: Math.max(0, rect.width / sample.pw),
+        hPct: Math.max(0, rect.height / sample.ph),
       });
     }
   }

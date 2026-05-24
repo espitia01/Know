@@ -84,6 +84,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
+  try {
   const { id: paperId } = await params;
   if (!paperId || !PAPER_ID_RE.test(paperId)) {
     return jsonError(400, "bad_paper_id", "Invalid paper id");
@@ -296,4 +297,15 @@ export async function POST(
       "X-Know-Model": fastModel,
     },
   });
+  } catch (e) {
+    console.error(
+      JSON.stringify({
+        tag: "selection-stream.unhandled",
+        error: e instanceof Error ? e.message : String(e),
+        stack: e instanceof Error ? e.stack?.slice(0, 800) : undefined,
+      }),
+    );
+    const message = e instanceof Error ? e.message : "Internal server error";
+    return jsonError(500, "internal_error", message);
+  }
 }

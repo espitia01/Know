@@ -81,10 +81,10 @@ function hasSelectionContent(partial: SelectionPartial | undefined | null): bool
 
 function describeError(error: unknown): string {
   if (!error) return "Selection failed.";
-  // experimental_useObject surfaces fetch / parse failures as Error
-  // instances; structured 4xx detail bodies come out as e.message
-  // containing the JSON we returned. Try to JSON-parse first.
   const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("<!DOCTYPE") || message.includes("Internal Server Error")) {
+    return "The analysis service returned an unexpected error. Please try again.";
+  }
   try {
     const parsed = JSON.parse(message) as { detail?: { code?: string; message?: string } };
     if (parsed.detail?.message) {
@@ -138,6 +138,7 @@ export function useSelectionThread(paperId: string) {
     id: paperId,
     api: `/api/papers/${paperId}/selection-stream`,
     schema: SelectionResultSchema,
+    credentials: "include",
     onError: (error) => {
       const started = startedRef.current;
       if (!started) return;
