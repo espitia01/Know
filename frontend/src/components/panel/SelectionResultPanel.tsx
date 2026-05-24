@@ -9,6 +9,7 @@ import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { Badge } from "@/components/ui/badge";
 import type { SelectionAnalysisResult } from "@/lib/api";
 import { ACTION_LABELS, normalizeSelectionAction, selectionKey } from "@/lib/selectionActions";
+import { hasMathInText } from "@/lib/selectionMath";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { SectionHeader } from "@/components/panel/SectionHeader";
 import { AnalysisSection } from "@/components/analysis/AnalysisSection";
@@ -18,6 +19,24 @@ import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
 import { useStore } from "@/lib/store";
 import { ModelOverridePill } from "@/components/analysis/ModelOverridePill";
 import { useUserSettings } from "@/lib/UserSettingsContext";
+
+/**
+ * The user's literal `selected_text` is sometimes alphabet-soup glyphs from
+ * the PDF text layer when they selected an equation. Showing that as a quote
+ * looks broken — we render a neutral placeholder instead. `hasMathInText`
+ * already detects this pattern (PDF-garbled math + Unicode + LaTeX cues).
+ */
+function looksLikePdfGarbled(text: string | undefined | null): boolean {
+  if (!text) return false;
+  if (!hasMathInText(text)) return false;
+  // Equations with normal punctuation are still readable; the truly garbled
+  // case has almost no real words. Tokens with ≥3 alphabetic chars and a
+  // vowel are a good proxy for readable words.
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return false;
+  const wordy = tokens.filter((t) => /^[A-Za-z]{3,}$/.test(t) && /[aeiouAEIOU]/.test(t)).length;
+  return wordy / tokens.length < 0.25;
+}
 
 interface SelectionResultPanelProps {
   result: SelectionAnalysisResult | null;
@@ -354,7 +373,7 @@ function ResultCard({
           </span>
           <div className="flex items-center gap-2">
             <CardMeta model={resolvedModel} createdAt={result.created_at} pending={modelPending} />
-            {isStreaming && (
+            {isStreaming && hasContent && (
               <span className="text-[var(--text-xs)] text-muted-foreground/50 motion-safe:animate-pulse">Thinking…</span>
             )}
           </div>
@@ -363,7 +382,19 @@ function ResultCard({
 
       {!hideQuote && (
         <div className="border-l-2 border-border/50 pl-3 text-[var(--text-sm)] italic text-foreground/80 dark:text-foreground/75">
-          &ldquo;{result.selected_text.length > 200 ? result.selected_text.slice(0, 200) + "…" : result.selected_text}&rdquo;
+          {looksLikePdfGarbled(result.selected_text) ? (
+            <span className="not-italic text-muted-foreground/75">
+              Equation from selected passage
+            </span>
+          ) : (
+            <>
+              &ldquo;
+              {result.selected_text.length > 200
+                ? result.selected_text.slice(0, 200) + "…"
+                : result.selected_text}
+              &rdquo;
+            </>
+          )}
         </div>
       )}
 

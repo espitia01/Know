@@ -806,7 +806,17 @@ def _get_selection_prompt(paper_text: str, selected_text: str, action: str) -> t
         "or missing entirely. Layout may look like one character per line or words glued together without spaces — NEVER "
         "preserve that artifact; reconstruct normal flowing prose and cleanly delimited LaTeX. "
         "Use the paper context to infer the correct equations and symbols. "
-        "Always reproduce equations correctly in LaTeX even if the selected text is mangled."
+        "Always reproduce equations correctly in LaTeX even if the selected text is mangled.\n\n"
+        "If the selected text is garbled or unintelligible (alphabet soup like 'cv;c0v0 Z c1 v21234c0'), "
+        "treat it as a CUE about which equation/passage the user pointed at, NOT as the literal content. "
+        "Use the salvageable letters, numbers, and surrounding paper context to identify the exact equation "
+        "or passage the user selected, then analyze THAT directly. Do NOT:\n"
+        " • apologize that the text is corrupted or unreadable,\n"
+        " • quote the garbled string back to the user,\n"
+        " • say 'the selected text appears to be...',\n"
+        " • discuss multiple possibilities — pick the most likely equation and commit to it.\n"
+        "Start your answer immediately with the substantive explanation/derivation as if the user had "
+        "selected the equation cleanly."
     )
 
     passage_explain_stream_md = f"""Explain the following passage from an academic paper clearly and thoroughly.
