@@ -109,6 +109,15 @@ export async function POST(
     }
   } catch (e) {
     if (e instanceof InternalApiError) {
+      if (e.status === 409) {
+        const inner = (e.detail as { detail?: Record<string, unknown> } | undefined)?.detail
+          ?? (e.detail as Record<string, unknown> | undefined);
+        const code = (inner?.code as string) || "paper_text_unavailable";
+        const message =
+          (inner?.message as string) ||
+          "Paper text is not ready yet. Try again in a few seconds once parsing finishes.";
+        return jsonError(409, code, message);
+      }
       const status = e.status === 404 ? 404 : 502;
       const code = e.status === 404 ? "paper_not_found" : "internal_unavailable";
       return jsonError(status, code, e.message);
@@ -167,7 +176,60 @@ export async function POST(
       temperature: 0.3,
       maxOutputTokens: maxOutputTokensFor(analysisModel, "analysis"),
       onFinish: async (event) => {
-        if (event.error) {
+        try {
+          if (event.error) {
+            console.error(
+              JSON.stringify({
+                tag: "summary-stream.finish",
+                paperId,
+                userId: user.userId,
+                hasObject: false,
+                hasError: true,
+                errorMessage: String(event.error).slice(0, 500),
+              }),
+            );
+            await releaseOnFailure();
+            return;
+          }
+          const raw = event.object as PaperSummaryDeep | undefined;
+          const parsed = PaperSummaryDeepSchema.safeParse(raw);
+          const finalObject = parsed.success ? parsed.data : raw;
+          const methodology =
+            typeof finalObject?.methodology === "string"
+              ? finalObject.methodology.trim()
+              : "";
+          if (!methodology) {
+            await releaseOnFailure();
+            return;
+          }
+          console.log(
+            JSON.stringify({
+              tag: "summary-stream.finish",
+              paperId,
+              userId: user.userId,
+              hasObject: true,
+              hasError: false,
+              usage: event.usage,
+            }),
+          );
+          try {
+            await upsertCachedAnalysis({
+              userId: user.userId,
+              paperId,
+              key: "summary_deep",
+              value: { ...finalObject, model: analysisModel } as PaperSummaryDeep,
+            });
+          } catch (err) {
+            console.error(
+              JSON.stringify({
+                tag: "summary-stream.persist",
+                paperId,
+                userId: user.userId,
+                error: err instanceof Error ? err.message : String(err),
+              }),
+            );
+          }
+        } catch (err) {
           console.error(
             JSON.stringify({
               tag: "summary-stream.finish",
@@ -175,60 +237,39 @@ export async function POST(
               userId: user.userId,
               hasObject: false,
               hasError: true,
-              errorMessage: String(event.error).slice(0, 500),
+              errorMessage: err instanceof Error ? err.message : String(err),
             }),
           );
           await releaseOnFailure();
-          return;
-        }
-        const raw = event.object as PaperSummaryDeep | undefined;
-        const parsed = PaperSummaryDeepSchema.safeParse(raw);
-        const finalObject = parsed.success ? parsed.data : raw;
-        const methodology =
-          typeof finalObject?.methodology === "string"
-            ? finalObject.methodology.trim()
-            : "";
-        if (!methodology) {
-          await releaseOnFailure();
-          return;
-        }
-        console.log(
-          JSON.stringify({
-            tag: "summary-stream.finish",
-            paperId,
-            userId: user.userId,
-            hasObject: true,
-            hasError: false,
-            usage: event.usage,
-          }),
-        );
-        try {
-          await upsertCachedAnalysis({
-            userId: user.userId,
-            paperId,
-            key: "summary_deep",
-            value: { ...finalObject, model: analysisModel } as PaperSummaryDeep,
-          });
-        } catch (err) {
-          console.error("[summary-stream] persist failed", err);
         }
       },
       onError: async ({ error }) => {
-        console.error(
-          JSON.stringify({
-            tag: "summary-stream.error",
-            paperId,
-            userId: user.userId,
-            error: String(error).slice(0, 800),
-          }),
-        );
-        await releaseOnFailure();
+        try {
+          console.error(
+            JSON.stringify({
+              tag: "summary-stream.error",
+              paperId,
+              userId: user.userId,
+              error: String(error).slice(0, 800),
+            }),
+          );
+          await releaseOnFailure();
+        } catch (err) {
+          console.error(
+            JSON.stringify({
+              tag: "summary-stream.error",
+              paperId,
+              userId: user.userId,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        }
       },
     });
   } catch (e) {
     await releaseOnFailure();
     const message = e instanceof Error ? e.message : "Provider error";
-    return jsonError(502, "provider_error", message);
+    return jsonError(502, "provider_error", message, { model: analysisModel });
   }
 
   try {

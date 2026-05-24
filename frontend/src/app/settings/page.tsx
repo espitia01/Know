@@ -18,9 +18,7 @@ import { UpgradeScheduledModal } from "@/components/UpgradeScheduledModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AppearanceSection } from "@/components/AppearanceSection";
 import { ModelPicker, ProviderStatusPills } from "@/components/settings/ModelPicker";
-import { modelLabel } from "@/lib/modelLabels";
 import { DISCORD_URL } from "@/lib/constants";
-import { isGoogleDriveConfigured } from "@/lib/googleDrive";
 
 
 const DEFAULT_MODEL = "mistral-small-latest";
@@ -83,6 +81,7 @@ function SettingsContent() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loadError, setLoadError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState("");
   const [billingLoading, setBillingLoading] = useState(false);
   const [resubscribeLoading, setResubscribeLoading] = useState(false);
@@ -105,43 +104,49 @@ function SettingsContent() {
     qa_per_paper_limit: number;
     selections_per_paper_limit: number;
     per_model_usage: { model: string; used: number; limit: number }[];
+    per_capability_usage: { capability: string; label: string; used: number; limit: number }[];
   } | null>(null);
 
   const tier = tierUser?.tier || "free";
-
-  useEffect(() => {
-    api.getSettings().then((s) => {
-      setHasAnthropicKey(Boolean(s.has_anthropic_key));
-      setHasOpenaiKey(Boolean(s.has_openai_key));
-      setHasMistralKey(Boolean(s.has_mistral_key));
-    }).catch(() => {
-      setHasAnthropicKey(false);
-      setHasOpenaiKey(false);
-      setHasMistralKey(false);
-    });
-  }, []);
-
-  useEffect(() => {
-    api.getSettings().then((s) => {
-      setAnalysisModel(s.analysis_model || DEFAULT_MODEL);
-      setFastModel(s.fast_model || DEFAULT_MODEL);
-      setDeepAnalysis(!!s.deep_analysis_enabled);
-      setDeepAllowed(!!s.deep_analysis_allowed);
-      setDeepMultiplier(s.deep_multiplier ?? 2);
-      setTierLimits((s.tier_limits as Record<string, unknown>) ?? null);
-    }).catch(() => setLoadError("Failed to load settings."));
-    api.getModels().then((r) => setModels(r.models)).catch(() => {});
-  }, [tier]);
-
-  // `usageRefreshKey` is bumped every time a panel records a new LLM call,
-  // so the Usage card here stays in sync with the rest of the app without
-  // the user having to reload the settings page.
   const usageRefreshKey = useStore((s) => s.usageRefreshKey);
+
   useEffect(() => {
-    if (tierUser) {
-      api.getAccountUsage().then(setUsage).catch(() => {});
-    }
-  }, [tierUser, usageRefreshKey]);
+    let cancelled = false;
+    setLoading(true);
+    setLoadError("");
+
+    const load = async () => {
+      try {
+        const [settingsRes, modelsRes, usageRes] = await Promise.all([
+          api.getSettings(),
+          api.getModels(),
+          tierUser ? api.getAccountUsage() : Promise.resolve(null),
+        ]);
+        if (cancelled) return;
+
+        setHasAnthropicKey(Boolean(settingsRes.has_anthropic_key));
+        setHasOpenaiKey(Boolean(settingsRes.has_openai_key));
+        setHasMistralKey(Boolean(settingsRes.has_mistral_key));
+        setAnalysisModel(settingsRes.analysis_model || DEFAULT_MODEL);
+        setFastModel(settingsRes.fast_model || DEFAULT_MODEL);
+        setDeepAnalysis(!!settingsRes.deep_analysis_enabled);
+        setDeepAllowed(!!settingsRes.deep_analysis_allowed);
+        setDeepMultiplier(settingsRes.deep_multiplier ?? 2);
+        setTierLimits((settingsRes.tier_limits as Record<string, unknown>) ?? null);
+        setModels(modelsRes.models);
+        if (usageRes) setUsage(usageRes);
+      } catch {
+        if (!cancelled) setLoadError("Failed to load settings.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [tierUser, tier, usageRefreshKey]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -199,6 +204,14 @@ function SettingsContent() {
               <p className="text-[12px] text-destructive">{loadError}</p>
             )}
 
+            {loading ? (
+              <div className="space-y-4 animate-pulse">
+                <div className="h-10 rounded-xl glass-subtle" />
+                <div className="h-32 rounded-xl glass-subtle" />
+                <div className="h-32 rounded-xl glass-subtle" />
+              </div>
+            ) : (
+              <>
             <ModelPicker
               label="Analysis Model"
               hint="(Prepare, Summary, Assumptions, Q&A)"
@@ -236,8 +249,10 @@ function SettingsContent() {
                 mistral: !!hasMistralKey,
               }}
             />
+              </>
+            )}
 
-            {tier !== "researcher" && (
+            {!loading && tier !== "researcher" && (
               <p className="text-[11px] text-muted-foreground/80 text-center pt-2">
                 Upgrade to Researcher to unlock top-tier models.{" "}
                 <button onClick={() => router.push("/#pricing")} className="underline hover:text-muted-foreground transition-colors">
@@ -322,55 +337,6 @@ function SettingsContent() {
             users see the upsell card inside the component). */}
         <AppearanceSection tier={tier} />
 
-        <div id="integrations" className="glass rounded-2xl p-6 space-y-3 scroll-mt-24">
-          <div className="flex items-start gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border bg-card">
-              <svg className="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15a4.5 4.5 0 004.5 4.5h7.004a4.5 4.5 0 00.522-8.972m-1.522-.53A4.501 4.501 0 0016.5 6.75h-1.132m0 0A4.5 4.5 0 0012 2.25H9.75A4.5 4.5 0 006.35 6.75" />
-              </svg>
-            </div>
-            <div className="min-w-0 space-y-2">
-              <p className="text-[14px] font-semibold text-foreground">Google Drive &amp; Workspace</p>
-              {isGoogleDriveConfigured() ? (
-                <>
-                  <p className="text-[12px] leading-relaxed text-muted-foreground">
-                    Import PDFs directly from Google Drive or shared Workspace drives. Sign in with Google,
-                    pick a file, and Know opens it like a normal upload.
-                  </p>
-                  <p className="text-[11px] font-medium text-muted-foreground/90">
-                    Status: <span className="text-foreground/80">available on Dashboard and Library</span>
-                  </p>
-                  <Link
-                    href="/dashboard"
-                    className="inline-flex text-[12px] font-medium text-foreground underline underline-offset-2 hover:text-foreground/90"
-                  >
-                    Open Dashboard to import from Drive
-                  </Link>
-                </>
-              ) : (
-                <>
-                  <p className="text-[12px] leading-relaxed text-muted-foreground">
-                    Drive import is enabled when this deployment has Google OAuth configured. Ask your admin to
-                    set the Google client env vars, then use Dashboard or Library to pick PDFs from Drive.
-                  </p>
-                  <p className="text-[11px] font-medium text-muted-foreground/90">
-                    Status: <span className="text-foreground/80">not configured in this environment</span>
-                    {" · "}
-                    <a
-                      href={DISCORD_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline underline-offset-2 hover:text-foreground/90"
-                    >
-                      Questions on Discord
-                    </a>
-                  </p>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
         <div className="glass rounded-2xl p-6 space-y-3">
           <p className="text-[14px] font-semibold text-foreground">Paper OCR</p>
           <p className="text-[12px] leading-relaxed text-muted-foreground">
@@ -411,18 +377,18 @@ function SettingsContent() {
               hint="Resets at midnight UTC. Counts all AI analyses."
             />
 
-            {usage.per_model_usage && usage.per_model_usage.length > 0 && (
+            {usage.per_capability_usage && usage.per_capability_usage.length > 0 && (
               <div className="pt-2 border-t border-border space-y-3">
                 <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
-                  Per-model daily caps
+                  Shared model caps
                 </p>
-                {usage.per_model_usage.map((m) => (
+                {usage.per_capability_usage.map((row) => (
                   <UsageBar
-                    key={m.model}
-                    label={modelLabel(m.model).short}
-                    used={m.used}
-                    limit={m.limit}
-                    hint={`Daily cap on ${m.model}. Counts toward your total daily API budget. Pick a smaller model in Settings if you hit the cap.`}
+                    key={row.capability}
+                    label={`${row.label} models`}
+                    used={row.used}
+                    limit={row.limit}
+                    hint={`Daily cap on ${row.label.toLowerCase()} models (Haiku, GPT-5 mini, Mistral Small, etc. share this bucket). Counts toward your total daily API budget.`}
                   />
                 ))}
               </div>

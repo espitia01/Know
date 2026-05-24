@@ -46,18 +46,6 @@ const PdfViewer = dynamic(
   },
 );
 
-const MarkdownReader = dynamic(
-  () => import("@/components/reader/MarkdownReader").then((m) => m.MarkdownReader),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex h-full items-center justify-center text-[var(--text-sm)] text-muted-foreground">
-        Preparing readable view…
-      </div>
-    ),
-  },
-);
-
 /**
  * Local alias kept named `Md` so the existing JSX in this trial page
  * (`<Md>{...}</Md>`) didn't have to be churned during the migration.
@@ -589,21 +577,12 @@ export default function TrialPaperView() {
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-muted/30">
-          {ocrStatus === "ready" ? (
-            <MarkdownReader
-              paperId={id}
-              trial
-              onTextSelected={handleTextSelected}
-              onSelectionClear={handleSelectionClear}
-            />
-          ) : (
-            <PdfViewer
-              url={`${API_BASE}/api/trial/paper/${id}/pdf`}
-              paperId={id}
-              onTextSelected={handleTextSelected}
-              onSelectionClear={handleSelectionClear}
-            />
-          )}
+          <PdfViewer
+            url={`${API_BASE}/api/trial/paper/${id}/pdf`}
+            paperId={id}
+            onTextSelected={handleTextSelected}
+            onSelectionClear={handleSelectionClear}
+          />
           {selection && (
             <SelectionToolbar
               text={selection.text}

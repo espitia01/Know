@@ -2,6 +2,7 @@
 
 import { ModelPill } from "@/components/analysis/ModelPill";
 import { OverflowMenu } from "@/components/analysis/OverflowMenu";
+import { ProviderLogo } from "@/components/ProviderLogo";
 import { modelLabel } from "@/lib/modelLabels";
 import { cn } from "@/lib/utils";
 
@@ -31,7 +32,7 @@ export function ModelOverridePill({
         Model (this message)
       </div>
       {options.map((slug) => {
-        const { short, tone } = modelLabel(slug);
+        const { short, tone, provider } = modelLabel(slug);
         const active = slug === model;
         return (
           <button
@@ -44,11 +45,9 @@ export function ModelOverridePill({
             )}
             data-action={tone === "amber" ? "assumptions" : tone === "violet" ? "derive" : "explain"}
           >
-            <span
-              aria-hidden
-              className="h-1.5 w-1.5 shrink-0 rounded-full"
-              style={{ background: "rgb(var(--highlight-rgb) / 0.85)" }}
-            />
+            {provider ? (
+              <ProviderLogo provider={provider} size={12} tone="none" />
+            ) : null}
             <span className="text-foreground/90">{short}</span>
           </button>
         );

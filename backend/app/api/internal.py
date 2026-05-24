@@ -114,6 +114,18 @@ async def internal_paper_text(paper_id: str, user_id: str):
     if len(raw_text) > 200_000:
         raw_text = raw_text[:200_000]
 
+    if not raw_text.strip():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "paper_text_unavailable",
+                "message": (
+                    "Paper text is not ready yet. Try again in a few seconds "
+                    "once parsing finishes."
+                ),
+            },
+        )
+
     return {
         "id": paper.id,
         "title": paper.title or "",

@@ -629,6 +629,93 @@ def release_daily_model_usage(
         logger.error("release_daily_model_usage failed for %s/%s: %s", user_id, model, e)
 
 
+_daily_capability_bootstrap_done = False
+
+
+def _ensure_daily_capability_usage_table(client) -> None:
+    global _daily_capability_bootstrap_done
+    if _daily_capability_bootstrap_done:
+        return
+    try:
+        client.table("daily_capability_usage").select("user_id").limit(1).execute()
+    except Exception as e:
+        logger.warning(
+            "daily_capability_usage not reachable; run migration 023 to "
+            "enable shared capability caps: %s", e,
+        )
+    _daily_capability_bootstrap_done = True
+
+
+def get_daily_capability_count(user_id: str, capability: str) -> int:
+    if not capability:
+        return 0
+    client = get_db()
+    if not client:
+        return 0
+
+    from datetime import datetime, timezone
+    today_str = datetime.now(timezone.utc).date().isoformat()
+
+    _ensure_daily_capability_usage_table(client)
+    row = _safe_single(
+        client.table("daily_capability_usage")
+        .select("count")
+        .eq("user_id", user_id)
+        .eq("date", today_str)
+        .eq("capability", capability)
+    )
+    if row is not None:
+        return int(row.get("count") or 0)
+    return 0
+
+
+def reserve_daily_capability_usage(
+    user_id: str, today_str: str, capability: str, delta: int, max_calls: int
+) -> int:
+    """Atomic shared daily reservation for a model capability tier."""
+    if delta <= 0 or not capability:
+        return 0
+    client = get_db()
+    if not client:
+        return -1
+    _ensure_daily_capability_usage_table(client)
+    res = client.rpc("reserve_daily_capability_usage", {
+        "p_user_id": user_id,
+        "p_date": today_str,
+        "p_capability": capability,
+        "p_delta": int(delta),
+        "p_max": int(max_calls),
+    }).execute()
+    if res and res.data is not None:
+        data = res.data
+        if isinstance(data, list) and data:
+            data = list(data[0].values())[0] if isinstance(data[0], dict) else data[0]
+        return int(data)
+    return -1
+
+
+def release_daily_capability_usage(
+    user_id: str, today_str: str, capability: str, delta: int
+) -> None:
+    if delta <= 0 or not capability:
+        return
+    client = get_db()
+    if not client:
+        return
+    try:
+        client.rpc("release_daily_capability_usage", {
+            "p_user_id": user_id,
+            "p_date": today_str,
+            "p_capability": capability,
+            "p_delta": int(delta),
+        }).execute()
+    except Exception as e:
+        logger.error(
+            "release_daily_capability_usage failed for %s/%s: %s",
+            user_id, capability, e,
+        )
+
+
 def reserve_paper_usage(
     user_id: str, paper_id: str, action: str,
     today_str: str, delta: int, max_count: int,

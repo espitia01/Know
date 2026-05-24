@@ -496,6 +496,8 @@ export function PdfViewer({
   const canvasDpr = usePdfCanvasDeviceRatio();
   const documentOptions = useMemo(
     () => ({
+      // pdf.js logs benign TrueType warnings at INFOS — clamp to ERRORS only.
+      verbosity: pdfjs.VerbosityLevel.ERRORS,
       // Bundling every cmap into /public would be huge; load from npm CDN at
       // the exact pdfjs-dist version we ship (same major/minor as the worker).
       // Needed for many math / unicode / non-Latin PDFs.

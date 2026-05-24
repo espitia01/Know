@@ -1,5 +1,6 @@
 "use client";
 
+import { Check } from "lucide-react";
 import {
   ProviderLogo,
   PROVIDER_LABEL,
@@ -89,18 +90,12 @@ export const MODEL_CATALOG: ModelInfo[] = [
   },
 ];
 
-const PROVIDER_ORDER: ProviderName[] = ["mistral", "openai", "anthropic"];
+const CAPABILITY_ORDER: ModelInfo["tier"][] = ["fast", "balanced", "top"];
 
-const PROVIDER_TONE: Record<ProviderName, "warm" | "cool"> = {
-  mistral: "warm",
-  openai: "cool",
-  anthropic: "cool",
-};
-
-const TIER_BADGE: Record<ModelInfo["tier"], string> = {
-  fast: "fast",
-  balanced: "balanced",
-  top: "top",
+const CAPABILITY_LABEL: Record<ModelInfo["tier"], string> = {
+  fast: "Fast",
+  balanced: "Balanced",
+  top: "Top",
 };
 
 type ProviderKeys = {
@@ -119,6 +114,15 @@ function providerKeyHint(provider: ProviderName): string {
   if (provider === "openai") return "KNOW_OPENAI_API_KEY";
   if (provider === "mistral") return "KNOW_MISTRAL_API_KEY";
   return "KNOW_ANTHROPIC_API_KEY";
+}
+
+function tierAllows(modelId: string, allowedIds: string[]): boolean {
+  return allowedIds.includes(modelId);
+}
+
+function requiredPlanBadge(model: ModelInfo): "Scholar" | "Researcher" {
+  if (model.tier === "top") return "Researcher";
+  return "Scholar";
 }
 
 interface ModelPickerProps {
@@ -141,8 +145,6 @@ export function ModelPicker({
   onChange,
 }: ModelPickerProps) {
   const selected = value || "mistral-small-latest";
-  const allowed = new Set(allowedIds);
-  const visible = MODEL_CATALOG.filter((m) => allowed.has(m.id));
 
   return (
     <div className="space-y-3">
@@ -150,64 +152,75 @@ export function ModelPicker({
         {label}
         <span className="text-muted-foreground/60 ml-1 font-normal">{hint}</span>
       </label>
-      <div className="space-y-4">
-        {PROVIDER_ORDER.map((provider) => {
-          const models = visible.filter((m) => m.provider === provider);
+      <div
+        className="max-h-[280px] overflow-y-auto space-y-4 pr-1"
+        role="radiogroup"
+        aria-label={label}
+      >
+        {CAPABILITY_ORDER.map((capTier) => {
+          const models = MODEL_CATALOG.filter((m) => m.tier === capTier);
           if (models.length === 0) return null;
-          const configured = providerConfigured(provider, keys);
           return (
-            <div key={provider} className="space-y-2">
-              <div className="flex items-center gap-2 px-1">
-                <ProviderLogo provider={provider} size={16} tone={PROVIDER_TONE[provider]} />
-                <span className="text-[12px] font-medium text-foreground/90">
-                  {PROVIDER_LABEL[provider]}
-                </span>
-              </div>
-              <div className="space-y-1.5">
+            <div key={capTier} className="space-y-1.5">
+              <p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {CAPABILITY_LABEL[capTier]}
+              </p>
+              <div className="space-y-1">
                 {models.map((m) => {
-                  const disabled = !configured;
+                  const configured = providerConfigured(m.provider, keys);
+                  const allowed = tierAllows(m.id, allowedIds);
+                  const disabled = !configured || !allowed;
+                  const planBadge = !allowed ? requiredPlanBadge(m) : null;
+                  const isSelected = selected === m.id;
+                  const title = disabled
+                    ? !configured
+                      ? `Server is not configured for ${PROVIDER_LABEL[m.provider]} yet — ask your admin to set ${providerKeyHint(m.provider)}`
+                      : `Available on the ${planBadge} plan.`
+                    : undefined;
+
                   return (
-                    <label
+                    <button
                       key={m.id}
-                      title={
+                      type="button"
+                      role="radio"
+                      aria-checked={isSelected}
+                      aria-disabled={disabled}
+                      name={name}
+                      title={title}
+                      disabled={disabled}
+                      onClick={() => {
+                        if (!disabled) onChange(m.id);
+                      }}
+                      className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-all duration-200 ${
                         disabled
-                          ? `Server is not configured for ${PROVIDER_LABEL[provider]} yet — ask your admin to set ${providerKeyHint(provider)}`
-                          : undefined
-                      }
-                      className={`flex items-start gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
-                        disabled
-                          ? "opacity-45 cursor-not-allowed glass-subtle"
+                          ? "cursor-not-allowed opacity-45 glass-subtle"
                           : "cursor-pointer"
                       } ${
-                        !disabled && selected === m.id
+                        !disabled && isSelected
                           ? "glass-strong shadow-sm"
                           : !disabled
                             ? "glass-subtle hover:bg-accent"
                             : ""
                       }`}
                     >
-                      <input
-                        type="radio"
-                        name={name}
-                        value={m.id}
-                        checked={selected === m.id}
-                        disabled={disabled}
-                        onChange={() => onChange(m.id)}
-                        className="accent-foreground mt-1"
-                      />
-                      <ProviderLogo provider={provider} size={16} tone="none" />
+                      <ProviderLogo provider={m.provider} size={16} tone="none" />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-[13px] font-medium text-foreground">{m.name}</p>
-                          <span className="text-[10px] uppercase tracking-wide text-muted-foreground glass-subtle px-1.5 py-0.5 rounded">
-                            {TIER_BADGE[m.tier]}
-                          </span>
+                          {planBadge && (
+                            <span className="text-[10px] font-medium text-muted-foreground glass-subtle px-1.5 py-0.5 rounded">
+                              {planBadge}
+                            </span>
+                          )}
                         </div>
-                        <p className="text-[11px] text-muted-foreground/80 mt-0.5 leading-relaxed">
+                        <p className="text-[11px] text-muted-foreground/80 mt-0.5 leading-relaxed line-clamp-2">
                           {m.description}
                         </p>
                       </div>
-                    </label>
+                      {isSelected && !disabled && (
+                        <Check className="mt-0.5 h-4 w-4 shrink-0 text-foreground/80" aria-hidden />
+                      )}
+                    </button>
                   );
                 })}
               </div>

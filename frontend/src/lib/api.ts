@@ -1042,5 +1042,11 @@ export const api = {
       qa_per_paper_limit: number;
       selections_per_paper_limit: number;
       per_model_usage: { model: string; used: number; limit: number }[];
+      per_capability_usage: {
+        capability: string;
+        label: string;
+        used: number;
+        limit: number;
+      }[];
     }>(`/api/usage`),
 };

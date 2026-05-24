@@ -27,14 +27,14 @@ logger = logging.getLogger(__name__)
 
 from .services.db import (
     get_user,
-    get_daily_model_count,
+    get_daily_capability_count,
     reserve_daily_api_usage,
-    reserve_daily_model_usage,
+    reserve_daily_capability_usage,
     reserve_daily_export_usage,
     release_daily_export_usage,
     reserve_paper_usage,
     release_daily_api_usage,
-    release_daily_model_usage,
+    release_daily_capability_usage,
     release_paper_usage,
     count_active_exports,
     _MAX_ACTIVE_EXPORTS,
@@ -95,7 +95,27 @@ def canonicalize_model(model: str | None) -> str | None:
         return model
     return MODEL_ALIASES.get(model, model)
 
-# Per-model daily caps (sub-budgets within `daily_api_calls`).
+
+MODEL_TIER = {
+    "claude-haiku-4-5": "fast",
+    "gpt-5-mini": "fast",
+    "mistral-small-latest": "fast",
+    "claude-sonnet-4-6": "balanced",
+    "gpt-5": "balanced",
+    "mistral-medium-latest": "balanced",
+    "claude-opus-4-7": "top",
+    "gpt-5.4": "top",
+    "mistral-large-latest": "top",
+}
+
+CAPABILITY_ORDER = ("fast", "balanced", "top")
+CAPABILITY_LABEL = {
+    "fast": "Fast",
+    "balanced": "Balanced",
+    "top": "Top",
+}
+
+# Shared capability daily caps (sub-budgets within `daily_api_calls`).
 # These exist to prevent a single user from burning the whole daily budget on
 # the most expensive model (e.g. picking Opus for everything on Researcher).
 # A model not listed here is treated as "no extra cap" (i.e. only the overall
@@ -114,11 +134,7 @@ TIER_LIMITS: dict[str, dict] = {
         "best_model": "mistral-small-latest",
         "daily_api_calls": 10,
         "export_daily": {"pdf": 0, "pptx": 0, "podcast": 0},
-        "per_model_daily": {
-            "mistral-small-latest": 10,
-            "claude-haiku-4-5": 10,
-            "gpt-5-mini": 10,
-        },
+        "per_capability_daily": {"fast": 10, "balanced": 0, "top": 0},
     },
     "scholar": {
         "max_papers": 25,
@@ -132,10 +148,7 @@ TIER_LIMITS: dict[str, dict] = {
         "best_model": "claude-sonnet-4-6",
         "daily_api_calls": 100,
         "export_daily": {"pdf": 5, "pptx": 3, "podcast": 0},
-        "per_model_daily": {
-            "mistral-small-latest": 100, "claude-haiku-4-5": 100, "gpt-5-mini": 100,
-            "mistral-medium-latest": 40, "claude-sonnet-4-6": 40, "gpt-5": 40,
-        },
+        "per_capability_daily": {"fast": 100, "balanced": 40, "top": 0},
     },
     "researcher": {
         "max_papers": -1,
@@ -150,11 +163,7 @@ TIER_LIMITS: dict[str, dict] = {
         "best_model": "claude-opus-4-7",
         "daily_api_calls": 300,
         "export_daily": {"pdf": 20, "pptx": 10, "podcast": 3},
-        "per_model_daily": {
-            "mistral-small-latest": 300, "claude-haiku-4-5": 300, "gpt-5-mini": 300,
-            "mistral-medium-latest": 150, "claude-sonnet-4-6": 150, "gpt-5": 150,
-            "mistral-large-latest": 30, "claude-opus-4-7": 30, "gpt-5.4": 30,
-        },
+        "per_capability_daily": {"fast": 300, "balanced": 150, "top": 30},
     },
 }
 
@@ -270,12 +279,50 @@ def reserve_usage(
     tier = get_user_tier(user_id)
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
     today = _today_iso()
+    capability: str | None = None
+
+    if model:
+        model = canonicalize_model(model) or model
 
     # Track which buckets we successfully debited so we can roll back exactly
     # what we charged if a later reservation fails.
-    reserved = {"daily": False, "model": False, "paper": False}
+    reserved = {"daily": False, "capability": False, "paper": False}
 
     try:
+        if model:
+            allowed_models = limits.get("models") or set()
+            if model not in allowed_models:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "model_tier_locked",
+                        "model": model,
+                        "tier": tier,
+                        "message": (
+                            f"{model} is not available on the {tier} plan. "
+                            "Upgrade to unlock this model."
+                        ),
+                    },
+                )
+            capability = MODEL_TIER.get(model)
+            if capability:
+                per_capability = limits.get("per_capability_daily") or {}
+                max_for_capability = int(per_capability.get(capability, 0))
+                if max_for_capability == 0:
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "code": "model_tier_locked",
+                            "model": model,
+                            "capability": capability,
+                            "tier": tier,
+                            "message": (
+                                f"{CAPABILITY_LABEL.get(capability, capability)} models "
+                                f"are not available on the {tier} plan. Upgrade to continue."
+                            ),
+                        },
+                    )
+
         if record_daily:
             max_daily = int(limits.get("daily_api_calls", 20))
             res = reserve_daily_api_usage(user_id, today, count, max_daily)
@@ -294,29 +341,30 @@ def reserve_usage(
                 )
             reserved["daily"] = True
 
-            if model:
-                per_model = limits.get("per_model_daily") or {}
-                if model in per_model:
-                    max_for_model = int(per_model[model])
-                    res2 = reserve_daily_model_usage(
-                        user_id, today, model, count, max_for_model
+            if model and capability:
+                per_capability = limits.get("per_capability_daily") or {}
+                max_for_capability = int(per_capability.get(capability, 0))
+                res2 = reserve_daily_capability_usage(
+                    user_id, today, capability, count, max_for_capability
+                )
+                if res2 == -1:
+                    raise HTTPException(
+                        status_code=429,
+                        detail={
+                            "code": "capability_cap",
+                            "capability": capability,
+                            "model": model,
+                            "limit": max_for_capability,
+                            "tier": tier,
+                            "message": (
+                                f"Daily limit reached for "
+                                f"{CAPABILITY_LABEL.get(capability, capability).lower()} "
+                                f"models ({max_for_capability}/day on {tier} plan). "
+                                "Pick a different model in Settings or try again tomorrow."
+                            ),
+                        },
                     )
-                    if res2 == -1:
-                        raise HTTPException(
-                            status_code=429,
-                            detail={
-                                "code": "model_cap",
-                                "model": model,
-                                "limit": max_for_model,
-                                "tier": tier,
-                                "message": (
-                                    f"Daily limit reached for {model} "
-                                    f"({max_for_model}/day on {tier} plan). "
-                                    "Pick a different model in Settings or try again tomorrow."
-                                ),
-                            },
-                        )
-                    reserved["model"] = True
+                reserved["capability"] = True
 
         limit_key = PER_PAPER_LIMIT_KEYS.get(action)
         max_paper = int(limits.get(limit_key, -1)) if limit_key else -1
@@ -340,8 +388,8 @@ def reserve_usage(
             )
         reserved["paper"] = True
     except HTTPException:
-        if reserved["model"] and model:
-            release_daily_model_usage(user_id, today, model, count)
+        if reserved["capability"] and capability:
+            release_daily_capability_usage(user_id, today, capability, count)
         if reserved["daily"]:
             release_daily_api_usage(user_id, today, count)
         if reserved["paper"]:
@@ -353,12 +401,12 @@ def reserve_usage(
         # a broken reservation.
         logger.exception(
             "reserve_usage 503 (user=%s paper=%s action=%s model=%s tier=%s "
-            "reserved=%s) — check that migrations 005/006/008 have been applied "
+            "reserved=%s) — check that migrations 005/006/008/023 have been applied "
             "and that Supabase is reachable",
             user_id, paper_id, action, model, tier, reserved,
         )
-        if reserved["model"] and model:
-            release_daily_model_usage(user_id, today, model, count)
+        if reserved["capability"] and capability:
+            release_daily_capability_usage(user_id, today, capability, count)
         if reserved["daily"]:
             release_daily_api_usage(user_id, today, count)
         if reserved["paper"]:
@@ -373,6 +421,7 @@ def reserve_usage(
         "paper_id": paper_id,
         "action": action,
         "model": model,
+        "capability": capability,
         "count": count,
         "record_daily": record_daily,
         "today": today,
@@ -397,6 +446,7 @@ def release_usage(token: dict | None) -> None:
     paper_id = token.get("paper_id") or ""
     action = token.get("action") or ""
     model = token.get("model")
+    capability = token.get("capability")
     record_daily = bool(token.get("record_daily", True))
     if not user_id:
         return
@@ -405,9 +455,9 @@ def release_usage(token: dict | None) -> None:
     except Exception:
         pass
     if record_daily:
-        if model:
+        if capability:
             try:
-                release_daily_model_usage(user_id, today, model, count)
+                release_daily_capability_usage(user_id, today, capability, count)
             except Exception:
                 pass
         try:
@@ -457,28 +507,32 @@ def resolve_analysis_model(user_id: str) -> str:
     return enforce_model(user_id, analysis)
 
 
-def get_per_model_daily_usage(user_id: str) -> list[dict]:
-    """Return today's per-model usage rows for the user, restricted to the
-    models the current tier has any cap for. Each row is
-    ``{"model": str, "used": int, "limit": int}``.
-    """
+def get_capability_daily_usage(user_id: str) -> list[dict]:
+    """Return today's shared capability usage rows for the user."""
     tier = get_user_tier(user_id)
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
-    per_model = limits.get("per_model_daily") or {}
+    per_capability = limits.get("per_capability_daily") or {}
     out: list[dict] = []
-    for model in ALL_MODELS:
-        if model not in per_model:
+    for capability in CAPABILITY_ORDER:
+        if capability not in per_capability:
             continue
-        cap = per_model[model]
+        cap = int(per_capability[capability])
         try:
-            used = get_daily_model_count(user_id, model)
+            used = get_daily_capability_count(user_id, capability)
         except Exception:
-            # Display-only path: fall back to 0 to avoid surfacing a DB blip
-            # as a user-visible error. Enforcement still fails closed via
-            # `reserve_usage` above.
             used = 0
-        out.append({"model": model, "used": int(used or 0), "limit": int(cap)})
+        out.append({
+            "capability": capability,
+            "label": CAPABILITY_LABEL[capability],
+            "used": int(used or 0),
+            "limit": cap,
+        })
     return out
+
+
+def get_per_model_daily_usage(user_id: str) -> list[dict]:
+    """Deprecated display helper — per-model caps replaced by capability buckets."""
+    return []
 
 
 _EXPORT_FEATURE_MAP = {"pdf": "export-pdf", "pptx": "export-pptx", "podcast": "export-podcast"}
