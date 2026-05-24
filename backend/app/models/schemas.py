@@ -36,6 +36,7 @@ class ParsedPaper(BaseModel):
     ocr_images: list[OcrImage] = []
     ocr_status: str = "pending"
     ocr_model: str = ""
+    front_matter: dict | None = None
     figures: list[FigureInfo] = []
     has_si: bool = False
     folder: str = ""

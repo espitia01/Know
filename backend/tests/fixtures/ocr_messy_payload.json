@@ -1,0 +1,14 @@
+{
+  "pages": [
+    {
+      "index": 0,
+      "markdown": "VOLUME 90, NUMBER 7 PHYSICAL REVIEW LETTERS\n\n# Moiré Ferroelectricity\n\nAlice Example\n1\n,\n2\n\nBob Other\n3\n3\n\n## Abstract\n\nWe study moiré systems.\n\nreaching $52.7\\%$ 52.7% of the peak.\n\nν\nc\n(\nr̂\n\n$$\\nu_c(\\hat r, \\hat r') = 1/|\\hat r - \\hat r'|.$$\n\n![figure](p0-img-0.png)\nFig. 1. Main result panel.\n\n![figure](p0-img-1.png)\n\n![figure](fig-1.png)\nFig. 2. Composite overview.\n![figure](p0-img-2.png)\n![figure](p0-img-3.png)",
+      "images": []
+    },
+    {
+      "index": 1,
+      "markdown": "VOLUME 90, NUMBER 7 PHYSICAL REVIEW LETTERS\n\n076401-1 0031-9007/03/90(7)/076401(4)$20.00 © 2003 The American Physical Society 076401-1\n\n## Introduction\n\nBody text continues.",
+      "images": []
+    }
+  ]
+}

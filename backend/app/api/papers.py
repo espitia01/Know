@@ -26,7 +26,12 @@ from ..services.pdf_parser import (
     save_paper,
     _forget_paper_lock,
 )
-from ..services.ocr_mistral import MistralOcrUnavailable, run_mistral_ocr, validate_ocr_image_id
+from ..services.ocr_mistral import (
+    MistralOcrUnavailable,
+    recomposite_figures_for_paper,
+    run_mistral_ocr,
+    validate_ocr_image_id,
+)
 from ..services.llm import extract_metadata, polish_note_from_selection, _sanitize_user_text
 from ..services import storage as cloud_storage
 from ..auth import require_auth
@@ -93,6 +98,7 @@ async def _ocr_upload_fields(
             "ocr_images": [],
             "ocr_status": "unsupported",
             "ocr_model": "",
+            "front_matter": None,
         }
 
     try:
@@ -108,6 +114,7 @@ async def _ocr_upload_fields(
             "ocr_images": ocr.images,
             "ocr_status": "ready",
             "ocr_model": ocr.model,
+            "front_matter": ocr.front_matter,
         }
     except MistralOcrUnavailable:
         return {
@@ -116,6 +123,7 @@ async def _ocr_upload_fields(
             "ocr_images": [],
             "ocr_status": "unsupported",
             "ocr_model": "",
+            "front_matter": None,
         }
     except Exception as exc:
         logger.warning("Mistral OCR failed for %s: %s", paper_id, exc)
@@ -125,6 +133,7 @@ async def _ocr_upload_fields(
             "ocr_images": [],
             "ocr_status": "failed",
             "ocr_model": "",
+            "front_matter": None,
         }
 
 
@@ -316,6 +325,7 @@ async def get_paper_markdown(paper_id: str, user_id: str = Depends(require_auth)
         "page_markdown": paper.page_markdown,
         "images": [i.model_dump() for i in paper.ocr_images],
         "ocr_status": paper.ocr_status,
+        "front_matter": paper.front_matter,
     }
 
 
@@ -371,6 +381,7 @@ async def run_paper_ocr(
         p.ocr_images = ocr_fields["ocr_images"]
         p.ocr_status = ocr_fields["ocr_status"]
         p.ocr_model = ocr_fields["ocr_model"]
+        p.front_matter = ocr_fields.get("front_matter")
         if ocr_fields["ocr_status"] == "ready" and ocr_fields["markdown"]:
             from ..services.analysis_source import clear_text_derived_analysis
 
@@ -388,6 +399,53 @@ async def run_paper_ocr(
         "ocr_status": ocr_fields["ocr_status"],
         "markdown_length": len(ocr_fields["markdown"]),
     }
+
+
+@router.post("/{paper_id}/composites/rerun")
+async def rerun_paper_composites(
+    paper_id: str,
+    user_id: str = Depends(require_auth),
+):
+    """Re-run composite figure generation from cached OCR markdown + PDF."""
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    paper = get_paper(paper_id, user_id=user_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    if paper.ocr_status != "ready" or not paper.page_markdown:
+        raise HTTPException(status_code=400, detail="OCR markdown not ready")
+
+    pdf_path = settings.papers_dir / f"{paper_id}.pdf"
+    content = (
+        pdf_path.read_bytes()
+        if pdf_path.exists()
+        else cloud_storage.download_file(user_id, f"{paper_id}.pdf")
+    )
+    if not content:
+        raise HTTPException(status_code=404, detail="PDF not found")
+
+    page_md, images = recomposite_figures_for_paper(
+        content,
+        paper_id,
+        user_id,
+        list(paper.page_markdown),
+        list(paper.ocr_images),
+    )
+    from ..services.ocr_cleanup import clean_ocr_markdown
+
+    page_md, joined = clean_ocr_markdown(page_md, images)
+
+    def _apply(p: ParsedPaper) -> None:
+        p.page_markdown = page_md
+        p.markdown = joined
+        p.ocr_images = images
+
+    try:
+        mutate_paper(paper_id, user_id, _apply)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Paper not found") from None
+
+    return {"status": "ok", "composite_pages": sum(1 for p in page_md if "fig-" in p)}
 
 
 @router.get("/{paper_id}/figures/{fig_id}")

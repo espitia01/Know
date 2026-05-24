@@ -279,11 +279,29 @@ export interface ParsedPaper {
   };
 }
 
+export interface PaperFrontMatterData {
+  title: string;
+  venue?: string;
+  doi?: string;
+  authors: Array<{
+    name: string;
+    superscripts?: string[];
+    corresponding?: boolean;
+    email?: string;
+  }>;
+  affiliations: Array<{
+    tag?: string;
+    text: string;
+  }>;
+  abstract?: string;
+}
+
 export interface PaperMarkdownResponse {
   markdown: string;
   page_markdown: string[];
   images: Array<{ id: string; page: number; bbox?: number[] | null; caption?: string }>;
   ocr_status: string;
+  front_matter?: PaperFrontMatterData | null;
 }
 
 export interface PaperListEntry {

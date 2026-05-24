@@ -107,6 +107,7 @@ def _ocr_fields_from_row(row: dict) -> dict:
         "ocr_images": images,
         "ocr_status": row.get("ocr_status") or "pending",
         "ocr_model": row.get("ocr_model") or "",
+        "front_matter": row.get("front_matter"),
     }
 
 
@@ -765,6 +766,7 @@ def _load_paper_locked(paper_id: str, user_id: str | None) -> ParsedPaper | None
                 paper.ocr_images = ocr["ocr_images"]
                 paper.ocr_status = ocr["ocr_status"]
                 paper.ocr_model = ocr["ocr_model"]
+                paper.front_matter = ocr.get("front_matter")
                 changed = True
             if changed:
                 meta_path.write_text(paper.model_dump_json(indent=2))
@@ -786,6 +788,7 @@ def _load_paper_locked(paper_id: str, user_id: str | None) -> ParsedPaper | None
                 ocr_images=ocr["ocr_images"],
                 ocr_status=ocr["ocr_status"],
                 ocr_model=ocr["ocr_model"],
+                front_matter=ocr.get("front_matter"),
                 # Per F-FIGURES: rebuild figure metadata from Supabase when
                 # the ephemeral Railway paper.json file is missing.
                 figures=[FigureInfo(**f) for f in figures_raw if isinstance(f, dict)],

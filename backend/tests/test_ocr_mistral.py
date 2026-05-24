@@ -10,6 +10,7 @@ import pytest
 
 from app.services.ocr_mistral import (
     MistralOcrUnavailable,
+    _parse_front_matter,
     _rewrite_image_refs,
     group_panels_into_figures,
     render_composite_from_pdf,
@@ -54,7 +55,7 @@ def test_run_mistral_ocr_persists_images(tmp_path, monkeypatch):
             },
             {
                 "index": 0,
-                "markdown": "# Title\n\n![img](img-0.png)",
+                "markdown": "# Title\n\n![img](img-0.png)\nFig. 1. Test figure.",
                 "images": [
                     {
                         "id": "img-0.png",
@@ -85,12 +86,14 @@ def test_run_mistral_ocr_persists_images(tmp_path, monkeypatch):
             call_json = client.post.call_args.kwargs["json"]
             assert call_json["document"]["type"] == "document_url"
             assert call_json["document"]["document_url"].startswith("data:application/pdf;base64,")
+            assert "document_annotation_format" in call_json
             return result
 
     result = asyncio.run(_run())
 
-    assert result.page_markdown == ["# Title\n\n![img](p0-img-0.png)", "Page two"]
-    assert result.markdown == "# Title\n\n![img](p0-img-0.png)\n\n---\n\nPage two"
+    assert result.page_markdown[0].startswith("# Title")
+    assert "p0-img-0.png" in result.page_markdown[0]
+    assert result.page_markdown[1] == "Page two"
     assert result.images[0].id == "p0-img-0.png"
     assert (tmp_path / "paper123" / "ocr" / "p0-img-0.png").exists()
 
@@ -148,3 +151,52 @@ def test_composite_render_falls_back_when_pdf_missing():
         dpi=200,
     )
     assert render_composite_from_pdf(b"not-a-pdf", group) is None
+
+
+def test_parse_front_matter_valid():
+    raw = {
+        "title": "Test Paper",
+        "authors": [{"name": "Alice"}],
+        "affiliations": [{"text": "MIT", "tag": "1"}],
+        "abstract": "We test.",
+    }
+    assert _parse_front_matter(raw) == raw
+
+
+def test_parse_front_matter_invalid():
+    assert _parse_front_matter(None) is None
+    assert _parse_front_matter({"title": "", "authors": [], "affiliations": []}) is None
+    assert _parse_front_matter("not json") is None
+
+
+def test_run_mistral_ocr_parses_front_matter(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.services.ocr_mistral.settings.papers_dir", tmp_path)
+    monkeypatch.setattr("app.services.ocr_mistral.settings.mistral_api_key", "test-key")
+
+    payload = {
+        "model": "mistral-ocr-latest",
+        "document_annotation": {
+            "title": "Annotated Title",
+            "authors": [{"name": "Alice", "superscripts": ["1"]}],
+            "affiliations": [{"tag": "1", "text": "Berkeley"}],
+        },
+        "pages": [{"index": 0, "markdown": "# Annotated Title\n\nBody", "images": []}],
+    }
+
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return payload
+
+    async def _run():
+        with patch("app.services.ocr_mistral.httpx.AsyncClient") as client_cls:
+            client = AsyncMock()
+            client.__aenter__.return_value = client
+            client.post = AsyncMock(return_value=FakeResp())
+            client_cls.return_value = client
+            return await run_mistral_ocr(b"%PDF-1.4 test", "paper456", "user1")
+
+    result = asyncio.run(_run())
+    assert result.front_matter is not None
+    assert result.front_matter["title"] == "Annotated Title"

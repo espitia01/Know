@@ -188,6 +188,7 @@ def save_paper_meta(paper_dict: dict, user_id: str) -> None:
         "ocr_images": ocr_images,
         "ocr_status": paper_dict.get("ocr_status", "pending"),
         "ocr_model": paper_dict.get("ocr_model", ""),
+        "front_matter": paper_dict.get("front_matter"),
     }
     try:
         client.table("papers").upsert(row, on_conflict="id").execute()
@@ -197,7 +198,15 @@ def save_paper_meta(paper_dict: dict, user_id: str) -> None:
             paper_dict.get("id"),
             first_exc,
         )
-        for key in ("raw_text", "markdown", "page_markdown", "ocr_images", "ocr_status", "ocr_model"):
+        for key in (
+            "raw_text",
+            "markdown",
+            "page_markdown",
+            "ocr_images",
+            "ocr_status",
+            "ocr_model",
+            "front_matter",
+        ):
             row.pop(key, None)
         try:
             client.table("papers").upsert(row, on_conflict="id").execute()

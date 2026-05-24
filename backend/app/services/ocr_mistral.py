@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any
 
 import httpx
 
 from ..config import settings
 from ..models.schemas import OcrImage
+from .ocr_cleanup import clean_ocr_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,57 @@ _FIG_CAP_MD_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 _COMPOSITE_BBOX_PAD_PX = 12
+
+FRONT_MATTER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["title", "authors", "affiliations"],
+    "properties": {
+        "title": {"type": "string"},
+        "venue": {
+            "type": "string",
+            "description": "Journal/conference name and year, if visible.",
+        },
+        "doi": {"type": "string"},
+        "authors": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "superscripts": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Affiliation/footnote markers next to the name.",
+                    },
+                    "corresponding": {"type": "boolean"},
+                    "email": {"type": "string"},
+                },
+            },
+        },
+        "affiliations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["text"],
+                "properties": {
+                    "tag": {
+                        "type": "string",
+                        "description": "Superscript marker e.g. '1' or '†'.",
+                    },
+                    "text": {"type": "string"},
+                },
+            },
+        },
+        "abstract": {
+            "type": "string",
+            "description": "Plain text. Math kept as $...$ inline.",
+        },
+    },
+}
 
 
 class MistralOcrUnavailable(Exception):
@@ -51,6 +104,7 @@ class OcrResult:
     page_markdown: list[str]
     images: list[OcrImage] = field(default_factory=list)
     model: str = MISTRAL_OCR_MODEL
+    front_matter: dict[str, Any] | None = None
 
 
 def _api_key() -> str:
@@ -68,6 +122,29 @@ def _decode_image_bytes(raw: str) -> bytes:
         return base64.b64decode(payload, validate=False)
     except (binascii.Error, ValueError) as exc:
         raise RuntimeError("invalid_image_base64") from exc
+
+
+def _parse_front_matter(raw: Any) -> dict[str, Any] | None:
+    """Validate Mistral document_annotation against FRONT_MATTER_SCHEMA shape."""
+    if raw is None:
+        return None
+    data: Any = raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("front_matter JSON parse failed")
+            return None
+    if not isinstance(data, dict):
+        return None
+    title = data.get("title")
+    authors = data.get("authors")
+    affiliations = data.get("affiliations")
+    if not isinstance(title, str) or not title.strip():
+        return None
+    if not isinstance(authors, list) or not isinstance(affiliations, list):
+        return None
+    return data
 
 
 def _infer_image_caption(page_md: str, image_id: str) -> str:
@@ -276,12 +353,19 @@ def apply_composite_figures(
 
         page_composites: list[OcrImage] = []
         page_pending: list[tuple[str, bytes]] = []
-        all_rendered = bool(groups)
+        page_all_rendered = bool(groups)
 
         for group in groups:
             png = render_composite_from_pdf(pdf_bytes, group)
             if not png:
-                all_rendered = False
+                page_all_rendered = False
+                logger.warning(
+                    "composite render failed paper_id=%s page=%s figure_id=%s panel_ids=%s",
+                    paper_id,
+                    page_index,
+                    group.figure_id,
+                    group.panel_image_ids,
+                )
                 continue
             page_pending.append((group.figure_id, png))
             page_composites.append(
@@ -295,7 +379,7 @@ def apply_composite_figures(
                 ),
             )
 
-        if groups and all_rendered:
+        if groups and page_all_rendered:
             new_pages.append(rewritten)
             composite_manifest.extend(page_composites)
             pending_composites.extend(page_pending)
@@ -408,6 +492,14 @@ async def run_mistral_ocr(
                 "include_image_base64": True,
                 "image_limit": 200,
                 "image_min_size": 80,
+                "document_annotation_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "PaperFrontMatter",
+                        "schema": FRONT_MATTER_SCHEMA,
+                        "strict": True,
+                    },
+                },
             },
         )
 
@@ -416,6 +508,7 @@ async def run_mistral_ocr(
         raise RuntimeError(f"mistral_ocr_failed:{resp.status_code}:{detail}")
 
     data = resp.json()
+    front_matter = _parse_front_matter(data.get("document_annotation"))
     pages_raw = data.get("pages") or []
     if not isinstance(pages_raw, list) or not pages_raw:
         raise RuntimeError("mistral_ocr_empty_response")
@@ -495,7 +588,7 @@ async def run_mistral_ocr(
         page_meta,
     )
 
-    joined = "\n\n---\n\n".join(page_markdown)
+    page_markdown, joined = clean_ocr_markdown(page_markdown, manifest)
     if not joined.strip():
         raise RuntimeError("mistral_ocr_empty_markdown")
 
@@ -505,6 +598,7 @@ async def run_mistral_ocr(
         page_markdown=page_markdown,
         images=manifest,
         model=model,
+        front_matter=front_matter,
     )
 
 

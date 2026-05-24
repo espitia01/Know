@@ -548,6 +548,7 @@ async def trial_get_paper_markdown(paper_id: str, request: Request):
         "page_markdown": paper.page_markdown,
         "images": [i.model_dump() for i in paper.ocr_images],
         "ocr_status": paper.ocr_status,
+        "front_matter": paper.front_matter,
     }
 
 

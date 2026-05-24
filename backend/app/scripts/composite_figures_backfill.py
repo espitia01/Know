@@ -4,19 +4,31 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 
 from app.config import settings
 from app.services import storage as cloud_storage
 from app.services.db import get_db
+from app.services.ocr_cleanup import clean_ocr_markdown
 from app.services.ocr_mistral import recomposite_figures_for_paper
 from app.services.pdf_parser import get_paper, mutate_paper
 
 logger = logging.getLogger(__name__)
 
+_COMPOSITE_RE = re.compile(r"(?:^|[^A-Za-z0-9])fig-\d+\.png")
 
-def _process_paper(paper_id: str, user_id: str, dry_run: bool) -> bool:
+
+def _has_composites(page_markdown: list[str]) -> bool:
+    return any(_COMPOSITE_RE.search(page) for page in page_markdown)
+
+
+def _process_paper(paper_id: str, user_id: str, dry_run: bool, force: bool) -> bool:
     paper = get_paper(paper_id, user_id=user_id)
     if not paper or paper.ocr_status != "ready" or not paper.page_markdown:
+        return False
+
+    if _has_composites(paper.page_markdown) and not force:
+        logger.info("Skipping %s — composites already present", paper_id)
         return False
 
     pdf_path = settings.papers_dir / f"{paper_id}.pdf"
@@ -36,7 +48,7 @@ def _process_paper(paper_id: str, user_id: str, dry_run: bool) -> bool:
         list(paper.page_markdown),
         list(paper.ocr_images),
     )
-    joined = "\n\n---\n\n".join(page_md)
+    page_md, joined = clean_ocr_markdown(page_md, images)
 
     def _apply(p):
         p.page_markdown = page_md
@@ -47,7 +59,7 @@ def _process_paper(paper_id: str, user_id: str, dry_run: bool) -> bool:
     return True
 
 
-def main(limit: int, user_id: str | None, dry_run: bool) -> None:
+def main(limit: int, user_id: str | None, dry_run: bool, force: bool) -> None:
     client = get_db()
     if not client:
         raise SystemExit("Database unavailable")
@@ -67,7 +79,7 @@ def main(limit: int, user_id: str | None, dry_run: bool) -> None:
         pid = row["id"]
         uid = row["user_id"]
         try:
-            if _process_paper(pid, uid, dry_run):
+            if _process_paper(pid, uid, dry_run, force):
                 ok += 1
                 logger.info("Composite backfill ok: %s", pid)
         except Exception as exc:
@@ -82,5 +94,6 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=50)
     parser.add_argument("--user-id", default=None)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--force", action="store_true", help="Re-run even when composites exist")
     args = parser.parse_args()
-    main(args.limit, args.user_id, args.dry_run)
+    main(args.limit, args.user_id, args.dry_run, args.force)
