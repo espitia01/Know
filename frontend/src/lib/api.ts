@@ -662,6 +662,7 @@ export const api = {
       signal?: AbortSignal;
       imageBase64?: string;
       regions?: SelectionAnalysisResult["regions"];
+      model?: string;
     },
   ) =>
     request<SelectionAnalysisResult>(`/api/papers/${id}/selection`, {
@@ -673,6 +674,7 @@ export const api = {
         question: extra?.question,
         image_base64: extra?.imageBase64,
         regions: extra?.regions,
+        model: extra?.model,
       }),
       signal: extra?.signal,
     }),
@@ -903,19 +905,32 @@ export const api = {
 
   getSettings: () => getRequest<SettingsResponse>("/api/settings"),
 
-  updateSettings: (data: {
+  updateSettings: async (data: {
     anthropic_api_key?: string;
     analysis_model?: string;
     fast_model?: string;
     background_preset?: string;
     background_opacity?: number;
     deep_analysis_enabled?: boolean;
-  }) =>
-    request<SettingsResponse>("/api/settings", {
+  }) => {
+    const result = await request<SettingsResponse>("/api/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
-    }),
+    });
+    // Stream routes cache prefs server-side; bust after a Settings save.
+    if (typeof window !== "undefined") {
+      try {
+        await fetch("/api/user/invalidate-prefs", {
+          method: "POST",
+          credentials: "include",
+        });
+      } catch {
+        /* best-effort */
+      }
+    }
+    return result;
+  },
 
   getModels: () => getRequest<{ models: string[] }>("/api/settings/models"),
 

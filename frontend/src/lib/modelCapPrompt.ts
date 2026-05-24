@@ -51,12 +51,19 @@ export async function promptModelCap(
   return p;
 }
 
-// Ordered smallest → largest. The "fallback" for a capped model is the
-// largest entry strictly smaller than it that the user's tier still allows.
+// Ordered smallest → largest across providers. The "fallback" for a capped
+// model is the largest entry strictly smaller than it that the user's tier
+// still allows.
 export const MODEL_ORDER = [
+  "mistral-small-latest",
   "claude-haiku-4-5",
+  "gpt-5-mini",
+  "mistral-medium-latest",
   "claude-sonnet-4-6",
+  "gpt-5",
+  "mistral-large-latest",
   "claude-opus-4-7",
+  "gpt-5.4",
 ] as const;
 
 export function pickFallback(

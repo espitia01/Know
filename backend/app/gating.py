@@ -41,16 +41,26 @@ from .services.db import (
 )
 
 ALL_MODELS = [
+    # Anthropic
     "claude-haiku-4-5",
     "claude-sonnet-4-6",
     "claude-opus-4-7",
+    # OpenAI
+    "gpt-5-mini",
+    "gpt-5",
+    "gpt-5.4",
+    # Mistral
+    "mistral-small-latest",
+    "mistral-medium-latest",
+    "mistral-large-latest",
 ]
 
 # Legacy/misnamed aliases that users may still have stored in their
 # saved settings. We silently rewrite these on the fly so the first
-# call after an app update doesn't 4xx against Anthropic. Extend this
+# call after an app update doesn't 4xx against the provider. Extend this
 # map when we retire another model ID.
 MODEL_ALIASES = {
+    # Anthropic
     "claude-opus-4": "claude-opus-4-7",
     "claude-opus-4-0": "claude-opus-4-7",
     "claude-opus-4-1": "claude-opus-4-7",
@@ -58,6 +68,17 @@ MODEL_ALIASES = {
     "claude-opus-4-6": "claude-opus-4-7",
     "claude-sonnet-4-0": "claude-sonnet-4-6",
     "claude-sonnet-4-5": "claude-sonnet-4-6",
+    # OpenAI
+    "gpt-4o": "gpt-5-mini",
+    "gpt-4o-mini": "gpt-5-mini",
+    "gpt-4.1": "gpt-5",
+    "gpt-4.1-mini": "gpt-5-mini",
+    "gpt-4.1-nano": "gpt-5-mini",
+    # Mistral
+    "mistral-small": "mistral-small-latest",
+    "mistral-medium": "mistral-medium-latest",
+    "mistral-large": "mistral-large-latest",
+    "mistral-tiny": "mistral-small-latest",
 }
 
 
@@ -84,14 +105,19 @@ TIER_LIMITS: dict[str, dict] = {
         "max_papers": 3,
         "qa_per_paper": 5,
         "selections_per_paper": 3,
-        # NOTE: "bibtex" intentionally missing — free can't export.
         "features": {"summary", "qa", "selection"},
-        "models": {"claude-haiku-4-5"},
-        "best_model": "claude-haiku-4-5",
+        "models": {
+            "mistral-small-latest",
+            "claude-haiku-4-5",
+            "gpt-5-mini",
+        },
+        "best_model": "mistral-small-latest",
         "daily_api_calls": 10,
         "export_daily": {"pdf": 0, "pptx": 0, "podcast": 0},
         "per_model_daily": {
+            "mistral-small-latest": 10,
             "claude-haiku-4-5": 10,
+            "gpt-5-mini": 10,
         },
     },
     "scholar": {
@@ -99,13 +125,16 @@ TIER_LIMITS: dict[str, dict] = {
         "qa_per_paper": 100,
         "selections_per_paper": 100,
         "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "export-pdf", "export-pptx"},
-        "models": {"claude-haiku-4-5", "claude-sonnet-4-6"},
+        "models": {
+            "mistral-small-latest", "claude-haiku-4-5", "gpt-5-mini",
+            "mistral-medium-latest", "claude-sonnet-4-6", "gpt-5",
+        },
         "best_model": "claude-sonnet-4-6",
         "daily_api_calls": 100,
         "export_daily": {"pdf": 5, "pptx": 3, "podcast": 0},
         "per_model_daily": {
-            "claude-haiku-4-5": 100,
-            "claude-sonnet-4-6": 40,
+            "mistral-small-latest": 100, "claude-haiku-4-5": 100, "gpt-5-mini": 100,
+            "mistral-medium-latest": 40, "claude-sonnet-4-6": 40, "gpt-5": 40,
         },
     },
     "researcher": {
@@ -113,14 +142,18 @@ TIER_LIMITS: dict[str, dict] = {
         "qa_per_paper": -1,
         "selections_per_paper": -1,
         "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "multi-qa", "export-pdf", "export-pptx", "export-podcast"},
-        "models": {"claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7"},
+        "models": {
+            "mistral-small-latest", "claude-haiku-4-5", "gpt-5-mini",
+            "mistral-medium-latest", "claude-sonnet-4-6", "gpt-5",
+            "mistral-large-latest", "claude-opus-4-7", "gpt-5.4",
+        },
         "best_model": "claude-opus-4-7",
         "daily_api_calls": 300,
         "export_daily": {"pdf": 20, "pptx": 10, "podcast": 3},
         "per_model_daily": {
-            "claude-haiku-4-5": 300,
-            "claude-sonnet-4-6": 150,
-            "claude-opus-4-7": 30,
+            "mistral-small-latest": 300, "claude-haiku-4-5": 300, "gpt-5-mini": 300,
+            "mistral-medium-latest": 150, "claude-sonnet-4-6": 150, "gpt-5": 150,
+            "mistral-large-latest": 30, "claude-opus-4-7": 30, "gpt-5.4": 30,
         },
     },
 }

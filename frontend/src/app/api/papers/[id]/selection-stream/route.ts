@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 import { streamObject } from "ai";
 import { zodSchema } from "@ai-sdk/provider-utils";
 
-import { getModelFromSlug, maxOutputTokensFor } from "@/lib/server/llm";
+import { getModelFromSlug, maxOutputTokensFor, defaultSlugFor } from "@/lib/server/llm";
 import { promptDepthForModel } from "@/lib/modelLabels";
 import { requireUser, AuthError } from "@/lib/server/auth";
 import {
@@ -26,8 +26,8 @@ import {
   type SelectionAction,
 } from "@/lib/server/prompts/selection";
 import {
-  ANTHROPIC_CACHE_EPHEMERAL,
   cachedUserMessages,
+  providerOptionsForSlug,
 } from "@/lib/server/promptCache";
 
 export const runtime = "nodejs";
@@ -142,7 +142,7 @@ export async function POST(
         prefs.fast_model,
       );
       if (!fastModel?.trim()) {
-        fastModel = process.env.MODEL_FAST || "claude-haiku-4-5";
+        fastModel = defaultSlugFor("fast");
       }
     } catch (e) {
       if (e instanceof InternalApiError) {
@@ -200,8 +200,10 @@ export async function POST(
         schemaDescription:
           "Structured analysis of a selected passage from an academic paper.",
         system,
-        messages: cachedUserMessages(paperContextText, taskText),
-        providerOptions: ANTHROPIC_CACHE_EPHEMERAL,
+        messages: cachedUserMessages(fastModel, paperContextText, taskText),
+        ...(providerOptionsForSlug(fastModel)
+          ? { providerOptions: providerOptionsForSlug(fastModel) }
+          : {}),
         temperature: 0.2,
         maxOutputTokens: maxTokensForSelection(normalizedAction, fastModel),
         onFinish: async (event) => {

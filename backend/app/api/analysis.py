@@ -54,7 +54,6 @@ from ..services.llm import (
     _resize_image_b64,
     _normalize_latex_delimiters,
     _safe_parse_json,
-    AnthropicProvider,
 )
 from ..services.pdf_parser import (
     append_capped,
@@ -84,6 +83,8 @@ from ..gating import (
     resolve_analysis_model,
     resolve_fast_model,
     get_usage_multiplier,
+    canonicalize_model,
+    enforce_model,
 )
 from ..api.papers import _validate_id, _validate_figure_id, _verify_paper_owner
 
@@ -244,8 +245,16 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
     if not selected_text and not image_b64:
         raise HTTPException(status_code=400, detail="No text selected")
 
+    requested_model = body.get("model")
+    if isinstance(requested_model, str) and requested_model.strip():
+        model_used = enforce_model(
+            user_id, canonicalize_model(requested_model.strip()) or requested_model.strip()
+        )
+    else:
+        model_used = resolve_fast_model(user_id)
+
     token = reserve_usage(
-        user_id, paper_id, "selection", model=resolve_fast_model(user_id),
+        user_id, paper_id, "selection", model=model_used,
         count=get_usage_multiplier(user_id),
     )
     try:
@@ -255,6 +264,7 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
             action,
             user_id=user_id,
             image_b64=image_b64,
+            model_override=model_used,
         )
         if question:
             # Per audit §11.3: keep selected_text identical to what the
@@ -263,6 +273,7 @@ async def selection_analysis(paper_id: str, body: dict, user_id: str = Depends(r
             result["question"] = question
         if sanitized_regions:
             result["regions"] = sanitized_regions
+        result["model"] = model_used
         # Per audit §7.1: append this JSONB item atomically in Postgres
         # instead of read-modify-writing the whole paper row.
         if not append_selection_db(paper_id, user_id, result):

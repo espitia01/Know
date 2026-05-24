@@ -7,29 +7,36 @@
  * env-default fallbacks (`MODEL_ANALYSIS`, `MODEL_FAST`, `MODEL_VISION`).
  *
  * Per-model completion budgets: use `maxOutputTokensFor(slug, role)` so
- * Opus/Sonnet can emit deeper structured output than Haiku on the same
- * route. Do not hard-code a single cap per route.
+ * top-tier models can emit deeper structured output than fast-class models
+ * on the same route. Do not hard-code a single cap per route.
  *
- * Routing prefers AI Gateway when configured; otherwise direct Anthropic.
+ * Routing prefers AI Gateway when configured; otherwise direct provider SDK.
  */
 
 import { anthropic } from "@ai-sdk/anthropic";
+import { openai } from "@ai-sdk/openai";
+import { mistral } from "@ai-sdk/mistral";
 import { gateway } from "@ai-sdk/gateway";
 import type { LanguageModel } from "ai";
 
 export type ModelRole = "analysis" | "fast" | "vision";
 
+type ProviderName = "anthropic" | "openai" | "mistral";
+
 /**
- * Default slugs picked to match the existing Python defaults. Override per
+ * Default slugs — Mistral Small for analysis and fast roles. Override per
  * role with `MODEL_ANALYSIS`, `MODEL_FAST`, `MODEL_VISION` in Vercel env.
- * `claude-opus-4-7` is the current Opus alias — see backend `gating.py`
- * comments for the alias-canonicalization story.
  */
 const DEFAULT_SLUGS: Record<ModelRole, string> = {
-  analysis: "claude-sonnet-4-6",
-  fast: "claude-haiku-4-5",
-  vision: "claude-sonnet-4-6",
+  analysis: "mistral-small-latest",
+  fast: "mistral-small-latest",
+  vision: "mistral-large-latest",
 };
+
+/** Env-backed default slug for a role (used by stream routes as last resort). */
+export function defaultSlugFor(role: ModelRole): string {
+  return slugFor(role);
+}
 
 function slugFor(role: ModelRole): string {
   const env = process.env;
@@ -41,8 +48,7 @@ function slugFor(role: ModelRole): string {
 /**
  * Prefer the Gateway whenever it can authenticate. Gateway picks up either
  * `AI_GATEWAY_API_KEY` (set explicitly) or Vercel OIDC inside a Vercel
- * deploy. Locally without either, falls back to direct Anthropic so `npm
- * run dev` still works against a personal `ANTHROPIC_API_KEY`.
+ * deploy. Locally without either, falls back to direct provider SDKs.
  */
 function preferGateway(): boolean {
   if (process.env.AI_GATEWAY_API_KEY) return true;
@@ -50,11 +56,28 @@ function preferGateway(): boolean {
   return false;
 }
 
-/** Build a language model from an Anthropic slug (Settings or env default). */
-export function getModelFromSlug(slug: string): LanguageModel {
-  if (preferGateway()) {
-    return gateway(`anthropic/${slug}`);
+export function providerForSlug(slug: string): ProviderName {
+  if (slug.startsWith("claude-")) return "anthropic";
+  if (slug.startsWith("gpt-")) return "openai";
+  if (
+    slug.startsWith("mistral-") ||
+    slug.startsWith("ministral-") ||
+    slug.startsWith("magistral-") ||
+    slug.startsWith("pixtral-")
+  ) {
+    return "mistral";
   }
+  return "anthropic";
+}
+
+/** Build a language model from a provider slug (Settings or env default). */
+export function getModelFromSlug(slug: string): LanguageModel {
+  const p = providerForSlug(slug);
+  if (preferGateway()) {
+    return gateway(`${p}/${slug}`);
+  }
+  if (p === "openai") return openai(slug);
+  if (p === "mistral") return mistral(slug);
   return anthropic(slug);
 }
 
@@ -77,21 +100,38 @@ export function modelRouting(): { gateway: boolean; roles: Record<ModelRole, str
   };
 }
 
-/** Completion token budget by user-selected model tier (Bug 3). */
+function isTopTier(slug: string): boolean {
+  return (
+    slug.includes("opus") ||
+    slug.includes("gpt-5.4") ||
+    slug === "gpt-5" ||
+    slug.includes("mistral-large")
+  );
+}
+
+function isBalanced(slug: string): boolean {
+  return (
+    slug.includes("sonnet") ||
+    slug.includes("gpt-4.1") ||
+    slug.includes("mistral-medium")
+  );
+}
+
+/** Completion token budget by user-selected model tier. */
 export function maxOutputTokensFor(slug: string, role: ModelRole): number {
-  const isOpus = slug.includes("opus");
-  const isSonnet = slug.includes("sonnet");
+  const top = isTopTier(slug);
+  const balanced = isBalanced(slug);
   if (role === "analysis") {
-    if (isOpus) return 8000;
-    if (isSonnet) return 6000;
+    if (top) return 8000;
+    if (balanced) return 6000;
     return 4000;
   }
   if (role === "fast") {
-    if (isOpus) return 4000;
-    if (isSonnet) return 3000;
+    if (top) return 4000;
+    if (balanced) return 3000;
     return 2000;
   }
-  if (isOpus) return 4000;
-  if (isSonnet) return 3000;
+  if (top) return 4000;
+  if (balanced) return 3000;
   return 2000;
 }

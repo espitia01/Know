@@ -13,7 +13,7 @@ import { NextResponse } from "next/server";
 import { streamObject } from "ai";
 import { zodSchema } from "@ai-sdk/provider-utils";
 
-import { getModelFromSlug, maxOutputTokensFor } from "@/lib/server/llm";
+import { getModelFromSlug, maxOutputTokensFor, defaultSlugFor } from "@/lib/server/llm";
 import { promptDepthForModel } from "@/lib/modelLabels";
 import { requireUser, AuthError } from "@/lib/server/auth";
 import {
@@ -32,8 +32,8 @@ import {
 } from "@/lib/server/schemas";
 import { buildSummaryDeepPrompt } from "@/lib/server/prompts/summary";
 import {
-  ANTHROPIC_CACHE_EPHEMERAL,
   cachedUserMessages,
+  providerOptionsForSlug,
 } from "@/lib/server/promptCache";
 
 export const runtime = "nodejs";
@@ -105,7 +105,7 @@ export async function POST(
       prefs.analysis_model,
     );
     if (!analysisModel?.trim()) {
-      analysisModel = process.env.MODEL_ANALYSIS || "claude-sonnet-4-6";
+      analysisModel = defaultSlugFor("analysis");
     }
   } catch (e) {
     if (e instanceof InternalApiError) {
@@ -160,8 +160,10 @@ export async function POST(
       schemaDescription:
         "Comprehensive structured summary of an academic paper, including overview, key contributions, methodology, results, discussion, limitations, future work, key equations (with per-variable glossary), and key figures/tables.",
       system,
-      messages: cachedUserMessages(paperContextText, taskText),
-      providerOptions: ANTHROPIC_CACHE_EPHEMERAL,
+      messages: cachedUserMessages(analysisModel, paperContextText, taskText),
+      ...(providerOptionsForSlug(analysisModel)
+        ? { providerOptions: providerOptionsForSlug(analysisModel) }
+        : {}),
       temperature: 0.3,
       maxOutputTokens: maxOutputTokensFor(analysisModel, "analysis"),
       onFinish: async (event) => {

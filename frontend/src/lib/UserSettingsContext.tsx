@@ -20,8 +20,8 @@ import {
 } from "@/lib/backgroundImage";
 import { useTheme } from "@/lib/ThemeProvider";
 
-const DEFAULT_ANALYSIS_MODEL = "claude-sonnet-4-6";
-const DEFAULT_FAST_MODEL = "claude-haiku-4-5";
+const DEFAULT_ANALYSIS_MODEL = "mistral-small-latest";
+const DEFAULT_FAST_MODEL = "mistral-small-latest";
 
 export type UserSettings = {
   analysisModel: string;

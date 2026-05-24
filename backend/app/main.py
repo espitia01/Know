@@ -597,7 +597,6 @@ async def trial_selection_stream(request: Request, body: dict):
     from .api.papers import _validate_id
     from .services.pdf_parser import get_paper, mutate_local_paper, append_capped, paper_prompt_text
     from .services.llm import (
-        AnthropicProvider,
         get_fast_provider,
         _get_selection_prompt,
         _normalize_latex_delimiters,
@@ -634,7 +633,7 @@ async def trial_selection_stream(request: Request, body: dict):
         raise HTTPException(status_code=404, detail="Paper not found")
 
     provider = get_fast_provider(None)
-    if not isinstance(provider, AnthropicProvider):
+    if not hasattr(provider, "stream_complete"):
         raise HTTPException(status_code=503, detail="Streaming is unavailable")
 
     system, user_text = _get_selection_prompt(paper_prompt_text(paper), selected_text, action)

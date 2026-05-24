@@ -30,7 +30,7 @@ import { retrievePaperContext } from "@/lib/server/retrieval";
 import { contextBudget } from "@/lib/server/promptBudgets";
 import { FigureAnalysisSchema, type FigureAnalysis } from "@/lib/server/schemas";
 import { buildFigurePrompt } from "@/lib/server/prompts/figure";
-import { ANTHROPIC_CACHE_EPHEMERAL } from "@/lib/server/promptCache";
+import { providerOptionsForSlug } from "@/lib/server/promptCache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -155,7 +155,9 @@ export async function POST(
       schemaName: "FigureAnalysis",
       schemaDescription: "Structured analysis of a figure from an academic paper.",
       system,
-      providerOptions: ANTHROPIC_CACHE_EPHEMERAL,
+      ...(providerOptionsForSlug(fastModel)
+        ? { providerOptions: providerOptionsForSlug(fastModel) }
+        : {}),
       maxOutputTokens: maxOutputTokensFor(fastModel, "vision"),
       messages: [
         {
@@ -165,7 +167,9 @@ export async function POST(
             {
               type: "text",
               text: paperContextText,
-              providerOptions: ANTHROPIC_CACHE_EPHEMERAL,
+              ...(providerOptionsForSlug(fastModel)
+                ? { providerOptions: providerOptionsForSlug(fastModel) }
+                : {}),
             },
             { type: "text", text: taskText },
           ],

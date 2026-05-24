@@ -7,13 +7,7 @@ import {
   ModelCapPromptInput,
   ModelCapPromptResult,
 } from "@/lib/modelCapPrompt";
-
-const MODEL_LABEL: Record<string, string> = {
-  "claude-haiku-4-5": "Haiku",
-  "claude-sonnet-4-6": "Sonnet",
-  "claude-opus-4-7": "Opus",
-  "claude-opus-4": "Opus",
-};
+import { modelLabel } from "@/lib/modelLabels";
 
 type PendingPrompt = ModelCapPromptInput & {
   fallback: string | null;
@@ -71,9 +65,9 @@ export function ModelCapModal() {
 
   if (!pending) return null;
 
-  const cappedLabel = MODEL_LABEL[pending.cappedModel] || pending.cappedModel;
+  const cappedLabel = modelLabel(pending.cappedModel).short;
   const fallbackLabel = pending.fallback
-    ? MODEL_LABEL[pending.fallback] || pending.fallback
+    ? modelLabel(pending.fallback).short
     : null;
 
   return (

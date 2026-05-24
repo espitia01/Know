@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..config import settings
 from ..models.schemas import SettingsResponse, SettingsUpdate
 from ..auth import require_auth
-from ..gating import get_allowed_models, enforce_model, canonicalize_model, get_user_tier, TIER_LIMITS, DEEP_USAGE_MULTIPLIER, resolve_deep_analysis
+from ..gating import get_allowed_models, enforce_model, canonicalize_model, get_user_tier, TIER_LIMITS, DEEP_USAGE_MULTIPLIER, resolve_deep_analysis, ALL_MODELS
 from ..services.appearance import clamp_background_opacity, normalize_background_preset
 from ..services.db import get_user, get_db
 
@@ -25,15 +25,27 @@ logger = logging.getLogger(__name__)
 def _get_user_model_prefs(user_id: str) -> tuple[str, str]:
     """Return (analysis_model, fast_model) from the user's DB prefs, falling back to defaults.
 
-    Each stored value is canonicalized so stale aliases that were written
-    before a model ID change (e.g. ``claude-opus-4``) don't leak down to
-    the LLM call and produce an Anthropic 4xx for "unknown model". The
-    rewrite is silent: ``update_settings`` opportunistically persists the
-    canonical form the next time the user saves.
+    Each stored value is canonicalized so stale aliases don't leak down to
+    the LLM call. NULL columns resolve to env defaults (mistral-small-latest).
+    Unknown stored slugs fall back to the tier's best_model.
     """
     user = get_user(user_id) or {}
-    analysis = canonicalize_model(user.get("analysis_model")) or settings.analysis_model
-    fast = canonicalize_model(user.get("fast_model")) or settings.fast_model
+    tier = get_user_tier(user_id)
+    tier_default = TIER_LIMITS.get(tier, TIER_LIMITS["free"])["best_model"]
+
+    raw_analysis = user.get("analysis_model")
+    raw_fast = user.get("fast_model")
+
+    analysis = canonicalize_model(raw_analysis) if raw_analysis else None
+    fast = canonicalize_model(raw_fast) if raw_fast else None
+
+    if analysis and analysis not in ALL_MODELS:
+        analysis = tier_default
+    if fast and fast not in ALL_MODELS:
+        fast = tier_default
+
+    analysis = analysis or settings.analysis_model
+    fast = fast or settings.fast_model
     return analysis, fast
 
 
@@ -116,7 +128,7 @@ def _settings_payload(user_id: str, analysis: str, fast: str) -> SettingsRespons
     deep_allowed = tier == "researcher"
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
     return SettingsResponse(
-        has_anthropic_key=True,
+        has_anthropic_key=bool((settings.anthropic_api_key or "").strip()),
         has_openai_key=bool((settings.openai_api_key or "").strip()),
         has_mistral_key=bool((settings.mistral_api_key or "").strip()),
         analysis_model=analysis,

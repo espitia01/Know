@@ -138,6 +138,7 @@ export function useSelectionThread(paperId: string) {
               signal: controller.signal,
               imageBase64: args.imageBase64,
               regions: args.regions,
+              model: started.model,
             },
           );
           if (controller.signal.aborted) return;

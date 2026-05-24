@@ -1,4 +1,4 @@
-"""LLM service abstraction with Anthropic and local model providers."""
+"""LLM service abstraction with Anthropic, OpenAI, and Mistral providers."""
 
 from __future__ import annotations
 
@@ -20,7 +20,6 @@ from .paper_excerpt import build_prepare_excerpt
 from .reference_extract import extract_references_section
 
 logger = logging.getLogger(__name__)
-_warned_missing_key = False
 
 from ..gating import resolve_deep_analysis
 
@@ -179,6 +178,97 @@ def _raise_for_anthropic(response: httpx.Response, *, model: str) -> None:
     else:
         msg = text or f"Anthropic returned HTTP {status}."
     raise LLMProviderError(out_status, msg, model=model)
+
+
+def _raise_for_openai(response: httpx.Response, *, model: str) -> None:
+    """Translate a non-2xx OpenAI chat-completions response."""
+    if response.is_success:
+        return
+    status = response.status_code
+    text = ""
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            err = data.get("error") or {}
+            if isinstance(err, dict):
+                text = str(err.get("message") or "") or str(err.get("type") or "")
+    except Exception:
+        pass
+    if not text:
+        try:
+            text = (response.text or "")[:500]
+        except Exception:
+            text = ""
+    out_status = 502
+    if status == 429:
+        out_status = 429
+    if status == 400 and ("model" in text.lower() or not text):
+        msg = f"Selected model '{model}' is not available from OpenAI. Pick another model in Settings."
+    elif status in (401, 403):
+        msg = "OpenAI authentication failed — the API key in server config is invalid or revoked."
+    elif status == 429:
+        msg = "OpenAI rate limit hit — please wait a moment and try again."
+    elif status >= 500:
+        msg = "OpenAI service is having trouble right now. Please try again in a few moments."
+        out_status = 503
+    else:
+        msg = text or f"OpenAI returned HTTP {status}."
+    raise LLMProviderError(out_status, msg, model=model)
+
+
+def _raise_for_mistral(response: httpx.Response, *, model: str) -> None:
+    """Translate a non-2xx Mistral chat-completions response."""
+    if response.is_success:
+        return
+    status = response.status_code
+    text = ""
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            text = str(data.get("message") or "")
+            if not text:
+                err = data.get("error") or {}
+                if isinstance(err, dict):
+                    text = str(err.get("message") or "") or str(err.get("type") or "")
+    except Exception:
+        pass
+    if not text:
+        try:
+            text = (response.text or "")[:500]
+        except Exception:
+            text = ""
+    out_status = 502
+    if status == 429:
+        out_status = 429
+    if status == 400 and ("model" in text.lower() or not text):
+        msg = f"Selected model '{model}' is not available from Mistral. Pick another model in Settings."
+    elif status in (401, 403):
+        msg = "Mistral authentication failed — the API key in server config is invalid or revoked."
+    elif status == 429:
+        msg = "Mistral rate limit hit — please wait a moment and try again."
+    elif status >= 500:
+        msg = "Mistral service is having trouble right now. Please try again in a few moments."
+        out_status = 503
+    else:
+        msg = text or f"Mistral returned HTTP {status}."
+    raise LLMProviderError(out_status, msg, model=model)
+
+
+def _log_chat_usage(provider: str, model: str, usage: dict) -> None:
+    logger.info(
+        "%s_usage model=%s input=%s output=%s",
+        provider,
+        model,
+        usage.get("prompt_tokens") or usage.get("input_tokens") or 0,
+        usage.get("completion_tokens") or usage.get("output_tokens") or 0,
+    )
+
+
+def _openai_token_fields(slug: str, max_tokens: int) -> dict:
+    """GPT-5+ uses max_completion_tokens; older models use max_tokens."""
+    if slug.startswith("gpt-5"):
+        return {"max_completion_tokens": max_tokens, "max_tokens": max_tokens}
+    return {"max_tokens": max_tokens}
 
 
 _shared_http_client: httpx.AsyncClient | None = None
@@ -381,51 +471,299 @@ class AnthropicProvider(LLMProvider):
                         yield delta.get("text", "")
 
 
+OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
+
+
+class OpenAIProvider(LLMProvider):
+    def __init__(self, api_key: str, model: str):
+        self.api_key = api_key
+        self.model = model
+        self.client = _get_shared_client()
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 4096,
+        *,
+        cache_user_prefix: str | None = None,
+    ) -> str:
+        body = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "stream": False,
+            **_openai_token_fields(self.model, max_tokens),
+        }
+        response = await self.client.post(OPENAI_API_URL, headers=self._headers(), json=body)
+        _raise_for_openai(response, model=self.model)
+        data = response.json()
+        _log_chat_usage("openai", self.model, data.get("usage") or {})
+        choices = data.get("choices") or []
+        if not choices:
+            raise LLMProviderError(502, "OpenAI returned an empty response.", model=self.model)
+        content = choices[0].get("message", {}).get("content")
+        if not content:
+            raise LLMProviderError(502, "OpenAI returned an empty response.", model=self.model)
+        return content
+
+    async def stream_complete(self, system: str, user: str, max_tokens: int = 4096) -> AsyncIterator[str]:
+        body = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "stream": True,
+            **_openai_token_fields(self.model, max_tokens),
+        }
+        async with self.client.stream(
+            "POST", OPENAI_API_URL, headers=self._headers(), json=body
+        ) as response:
+            if not response.is_success:
+                await response.aread()
+                _raise_for_openai(response, model=self.model)
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:]
+                if payload.strip() == "[DONE]":
+                    break
+                try:
+                    event = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                delta = (event.get("choices") or [{}])[0].get("delta") or {}
+                content = delta.get("content")
+                if content:
+                    yield content
+
+    async def complete_with_image(
+        self, system: str, text: str, image_b64: str, media_type: str = "image/png", max_tokens: int = 4096
+    ) -> str:
+        user_content = [
+            {"type": "text", "text": text},
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{media_type};base64,{image_b64}"},
+            },
+        ]
+        body = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_content},
+            ],
+            "stream": False,
+            **_openai_token_fields(self.model, max_tokens),
+        }
+        response = await self.client.post(OPENAI_API_URL, headers=self._headers(), json=body)
+        _raise_for_openai(response, model=self.model)
+        data = response.json()
+        _log_chat_usage("openai", self.model, data.get("usage") or {})
+        choices = data.get("choices") or []
+        if not choices:
+            raise LLMProviderError(502, "OpenAI returned an empty response.", model=self.model)
+        content = choices[0].get("message", {}).get("content")
+        if not content:
+            raise LLMProviderError(502, "OpenAI returned an empty response.", model=self.model)
+        return content
+
+
+class MistralProvider(LLMProvider):
+    def __init__(self, api_key: str, model: str):
+        self.api_key = api_key
+        self.model = model
+        self.client = _get_shared_client()
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    async def complete(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 4096,
+        *,
+        cache_user_prefix: str | None = None,
+    ) -> str:
+        body = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "temperature": 0.2,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "stream": False,
+        }
+        response = await self.client.post(MISTRAL_API_URL, headers=self._headers(), json=body)
+        _raise_for_mistral(response, model=self.model)
+        data = response.json()
+        _log_chat_usage("mistral", self.model, data.get("usage") or {})
+        choices = data.get("choices") or []
+        if not choices:
+            raise LLMProviderError(502, "Mistral returned an empty response.", model=self.model)
+        content = choices[0].get("message", {}).get("content")
+        if not content:
+            raise LLMProviderError(502, "Mistral returned an empty response.", model=self.model)
+        return content
+
+    async def stream_complete(self, system: str, user: str, max_tokens: int = 4096) -> AsyncIterator[str]:
+        body = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "temperature": 0.2,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "stream": True,
+        }
+        async with self.client.stream(
+            "POST", MISTRAL_API_URL, headers=self._headers(), json=body
+        ) as response:
+            if not response.is_success:
+                await response.aread()
+                _raise_for_mistral(response, model=self.model)
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                payload = line[6:]
+                if payload.strip() == "[DONE]":
+                    break
+                try:
+                    event = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                delta = (event.get("choices") or [{}])[0].get("delta") or {}
+                content = delta.get("content")
+                if content:
+                    yield content
+
+    async def complete_with_image(
+        self, system: str, text: str, image_b64: str, media_type: str = "image/png", max_tokens: int = 4096
+    ) -> str:
+        user_content = [
+            {"type": "text", "text": text},
+            {
+                "type": "image_url",
+                "image_url": f"data:{media_type};base64,{image_b64}",
+            },
+        ]
+        body = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "temperature": 0.2,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_content},
+            ],
+            "stream": False,
+        }
+        response = await self.client.post(MISTRAL_API_URL, headers=self._headers(), json=body)
+        _raise_for_mistral(response, model=self.model)
+        data = response.json()
+        _log_chat_usage("mistral", self.model, data.get("usage") or {})
+        choices = data.get("choices") or []
+        if not choices:
+            raise LLMProviderError(502, "Mistral returned an empty response.", model=self.model)
+        content = choices[0].get("message", {}).get("content")
+        if not content:
+            raise LLMProviderError(502, "Mistral returned an empty response.", model=self.model)
+        return content
+
+
+_warned_missing_keys: set[str] = set()
+
+
+def _provider_for_slug(slug: str) -> str:
+    if slug.startswith("claude-"):
+        return "anthropic"
+    if slug.startswith("gpt-"):
+        return "openai"
+    if (
+        slug.startswith("mistral-")
+        or slug.startswith("ministral-")
+        or slug.startswith("magistral-")
+        or slug.startswith("pixtral-")
+    ):
+        return "mistral"
+    raise LLMProviderError(400, f"Unknown model slug: {slug}", model=slug)
+
+
+def _require_api_key(provider_name: str) -> str:
+    if provider_name == "anthropic":
+        key = settings.anthropic_api_key
+        env_name = "KNOW_ANTHROPIC_API_KEY"
+    elif provider_name == "openai":
+        key = settings.openai_api_key
+        env_name = "KNOW_OPENAI_API_KEY"
+    elif provider_name == "mistral":
+        key = settings.mistral_api_key
+        env_name = "KNOW_MISTRAL_API_KEY"
+    else:
+        raise ValueError(f"Unknown provider: {provider_name}")
+    if not key:
+        if provider_name not in _warned_missing_keys:
+            logger.critical(
+                "%s is not set — %s-backed LLM calls will fail until configured.",
+                env_name,
+                provider_name,
+            )
+            _warned_missing_keys.add(provider_name)
+        raise ValueError(f"No API key configured. Set {env_name}.")
+    return key
+
+
+def _make_provider(model: str) -> LLMProvider:
+    provider_name = _provider_for_slug(model)
+    api_key = _require_api_key(provider_name)
+    if provider_name == "openai":
+        return OpenAIProvider(api_key, model=model)
+    if provider_name == "mistral":
+        return MistralProvider(api_key, model=model)
+    return AnthropicProvider(api_key, model=model)
+
+
 # Local-model support (Ollama / OpenAI-compatible local backends) was
 # retired in stage 8 of the AI SDK migration. All LLM calls now go
-# through Anthropic, optionally fronted by Vercel AI Gateway on the
-# Next.js side. If/when local-model support comes back, mount it as a
-# new provider class here — don't resurrect this one.
+# through Anthropic, OpenAI, or Mistral — optionally fronted by Vercel
+# AI Gateway on the Next.js side.
 
 
 def get_provider(user_id: str | None = None) -> LLMProvider:
     """Get the LLM provider for heavy analysis tasks, enforcing tier model limits."""
-    if not settings.anthropic_api_key:
-        global _warned_missing_key
-        if not _warned_missing_key:
-            logger.critical(
-                "KNOW_ANTHROPIC_API_KEY is not set — all LLM-backed endpoints "
-                "will return 503 until it is configured."
-            )
-            _warned_missing_key = True
-        raise ValueError("No API key configured. Set KNOW_ANTHROPIC_API_KEY.")
     model = settings.analysis_model
     if user_id:
         from ..api.settings import _get_user_model_prefs
         model, _ = _get_user_model_prefs(user_id)
         from ..gating import enforce_model
         model = enforce_model(user_id, model)
-    return AnthropicProvider(settings.anthropic_api_key, model=model)
+    return _make_provider(model)
 
 
 def get_fast_provider(user_id: str | None = None) -> LLMProvider:
     """Get a faster LLM provider for interactive tasks, enforcing tier model limits."""
-    if not settings.anthropic_api_key:
-        global _warned_missing_key
-        if not _warned_missing_key:
-            logger.critical(
-                "KNOW_ANTHROPIC_API_KEY is not set — all LLM-backed endpoints "
-                "will return 503 until it is configured."
-            )
-            _warned_missing_key = True
-        raise ValueError("No API key configured. Set KNOW_ANTHROPIC_API_KEY.")
     model = settings.fast_model
     if user_id:
         from ..api.settings import _get_user_model_prefs
         _, model = _get_user_model_prefs(user_id)
         from ..gating import enforce_model
         model = enforce_model(user_id, model)
-    return AnthropicProvider(settings.anthropic_api_key, model=model)
+    return _make_provider(model)
 
 
 def _extract_json(text: str) -> str:
@@ -649,14 +987,25 @@ async def analyze_selection(
     action: str,
     user_id: str | None = None,
     image_b64: str | None = None,
+    *,
+    model_override: str | None = None,
 ) -> dict:
     """Analyze a user-highlighted selection from the PDF using the fast provider.
 
     When ``image_b64`` is provided, the PNG screenshot of the selection is sent
     to a vision-capable model alongside the (probably garbled) text — used for
     equation selections where the PDF text layer is unreadable.
+
+    ``model_override`` is tier-enforced when ``user_id`` is set (Settings pick
+    or one-shot override from the client).
     """
-    provider = get_fast_provider(user_id)
+    if model_override:
+        if user_id:
+            from ..gating import enforce_model
+            model_override = enforce_model(user_id, model_override)
+        provider = _make_provider(model_override)
+    else:
+        provider = get_fast_provider(user_id)
     budget = get_budgets("selection", user_id)
     selected_text = _sanitize_user_text(selected_text, max_chars=budget["selection"])
     paper_text = _sanitize_user_text(paper_text, max_chars=budget["context"])
@@ -755,11 +1104,10 @@ Return JSON:
         "Return ONLY valid JSON.\n\n" + LATEX_FORMAT_INSTRUCTIONS
     )
 
-    if image_b64 and isinstance(provider, AnthropicProvider):
+    if image_b64 and hasattr(provider, "complete_with_image"):
         # The PDF text layer mangled what's actually on the page — usually
-        # an equation. Send the rendered region to Claude vision so the
-        # model can read the LaTeX off the page directly, then run the
-        # standard explain/derive prompt against that.
+        # an equation. Send the rendered region to a vision-capable model
+        # so it can read the LaTeX off the page directly.
         system_vision = (
             system
             + "\n\nIMPORTANT: The image attached is a screenshot of the EXACT selection from "
@@ -772,7 +1120,7 @@ Return JSON:
             resized = _resize_image_b64(image_b64)
             raw = await provider.complete_with_image(system_vision, prompt, resized, max_tokens=3000)
         except Exception:
-            logger.exception("Vision selection failed; falling back to text-only")
+            logger.exception("selection.vision_fallback model=%s", getattr(provider, "model", ""))
             raw = await provider.complete(system, prompt, max_tokens=3000)
     else:
         raw = await provider.complete(system, prompt, max_tokens=3000)
@@ -783,6 +1131,7 @@ Return JSON:
     else:
         result["action"] = action
     result["selected_text"] = selected_text
+    result["model"] = provider.model
     return result
 
 
@@ -1357,7 +1706,7 @@ async def summarize_paper(paper_text: str, model_override: str | None = None, us
         if user_id:
             from ..gating import enforce_model
             model_override = enforce_model(user_id, model_override)
-        provider = AnthropicProvider(settings.anthropic_api_key, model=model_override)
+        provider = _make_provider(model_override)
     else:
         provider = get_provider(user_id)
 
@@ -1427,10 +1776,10 @@ async def analyze_figure(
     user_id: str | None = None,
     paper_id: str | None = None,
 ) -> dict:
-    """Analyze a figure from the paper using Claude's vision capability."""
+    """Analyze a figure from the paper using a vision-capable model."""
     provider = get_fast_provider(user_id)
-    if not isinstance(provider, AnthropicProvider):
-        raise ValueError("Figure analysis requires an Anthropic provider with vision support.")
+    if not hasattr(provider, "complete_with_image"):
+        raise ValueError("Figure analysis requires a provider with vision support.")
 
     image_b64 = _resize_image_b64(image_b64)
     ctx_cap = get_budgets("figure", user_id)["context"]

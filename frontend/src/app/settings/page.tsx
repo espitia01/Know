@@ -8,6 +8,7 @@ import { useClerk, UserButton } from "@clerk/nextjs";
 import { api, clearAuthState } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useUserTier } from "@/lib/UserTierContext";
+import { useUserSettings } from "@/lib/UserSettingsContext";
 import { useStore } from "@/lib/store";
 import { CancelModal } from "@/components/CancelModal";
 import { FeedbackModal } from "@/components/FeedbackModal";
@@ -16,20 +17,13 @@ import { UpgradeConfirmModal } from "@/components/UpgradeConfirmModal";
 import { UpgradeScheduledModal } from "@/components/UpgradeScheduledModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AppearanceSection } from "@/components/AppearanceSection";
+import { ModelPicker, ProviderStatusPills } from "@/components/settings/ModelPicker";
+import { modelLabel } from "@/lib/modelLabels";
 import { DISCORD_URL } from "@/lib/constants";
 import { isGoogleDriveConfigured } from "@/lib/googleDrive";
 
-const MODEL_LABELS: Record<string, string> = {
-  "claude-haiku-4-5": "Fastest — great for quick explanations",
-  "claude-sonnet-4-6": "Balanced — speed and quality",
-  "claude-opus-4-7": "Highest quality — deepest analysis",
-};
 
-const MODEL_SHORT: Record<string, string> = {
-  "claude-haiku-4-5": "Haiku",
-  "claude-sonnet-4-6": "Sonnet",
-  "claude-opus-4-7": "Opus",
-};
+const DEFAULT_MODEL = "mistral-small-latest";
 
 function formatLimit(value: unknown): string {
   if (value === -1) return "Unlimited";
@@ -78,6 +72,7 @@ function SettingsContent() {
   const router = useRouter();
   const { signOut } = useClerk();
   const { user: tierUser, refresh: refreshTier } = useUserTier();
+  const { refresh: refreshUserSettings } = useUserSettings();
   const [models, setModels] = useState<string[]>([]);
   const [analysisModel, setAnalysisModel] = useState("");
   const [fastModel, setFastModel] = useState("");
@@ -98,6 +93,8 @@ function SettingsContent() {
   const [showUpgradeConfirm, setShowUpgradeConfirm] = useState(false);
   const [scheduledUpgradeAt, setScheduledUpgradeAt] = useState<number | null>(null);
   const [showScheduledModal, setShowScheduledModal] = useState(false);
+  const [hasAnthropicKey, setHasAnthropicKey] = useState<boolean | null>(null);
+  const [hasOpenaiKey, setHasOpenaiKey] = useState<boolean | null>(null);
   const [hasMistralKey, setHasMistralKey] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<{
     tier: string;
@@ -111,30 +108,30 @@ function SettingsContent() {
   } | null>(null);
 
   const tier = tierUser?.tier || "free";
-  const showModels = tier !== "free";
 
-  // Re-fetch the user's settings + the allow-listed models any time the
-  // tier changes — not just when `showModels` flips from false → true.
-  // Without the `tier` dependency, upgrading from Scholar to Researcher
-  // in-session left the Opus radio hidden until the user manually
-  // refreshed the page, because `showModels` was already true and React
-  // never re-ran this effect.
   useEffect(() => {
-    api.getSettings().then((s) => setHasMistralKey(Boolean(s.has_mistral_key))).catch(() => setHasMistralKey(false));
+    api.getSettings().then((s) => {
+      setHasAnthropicKey(Boolean(s.has_anthropic_key));
+      setHasOpenaiKey(Boolean(s.has_openai_key));
+      setHasMistralKey(Boolean(s.has_mistral_key));
+    }).catch(() => {
+      setHasAnthropicKey(false);
+      setHasOpenaiKey(false);
+      setHasMistralKey(false);
+    });
   }, []);
 
   useEffect(() => {
-    if (!showModels) return;
     api.getSettings().then((s) => {
-      setAnalysisModel(s.analysis_model);
-      setFastModel(s.fast_model);
+      setAnalysisModel(s.analysis_model || DEFAULT_MODEL);
+      setFastModel(s.fast_model || DEFAULT_MODEL);
       setDeepAnalysis(!!s.deep_analysis_enabled);
       setDeepAllowed(!!s.deep_analysis_allowed);
       setDeepMultiplier(s.deep_multiplier ?? 2);
       setTierLimits((s.tier_limits as Record<string, unknown>) ?? null);
     }).catch(() => setLoadError("Failed to load settings."));
     api.getModels().then((r) => setModels(r.models)).catch(() => {});
-  }, [showModels, tier]);
+  }, [tier]);
 
   // `usageRefreshKey` is bumped every time a panel records a new LLM call,
   // so the Usage card here stays in sync with the rest of the app without
@@ -159,6 +156,7 @@ function SettingsContent() {
       setAnalysisModel(result.analysis_model);
       setFastModel(result.fast_model);
       setDeepAnalysis(!!result.deep_analysis_enabled);
+      await refreshUserSettings();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
@@ -188,94 +186,69 @@ function SettingsContent() {
         </div>
 
         {/* Model Selection */}
-        {showModels && (
-          <div className="space-y-5">
-            <div className="glass rounded-2xl p-6 space-y-5">
-              <div className="flex items-center justify-between">
-                <p className="text-[14px] font-semibold text-foreground">Models</p>
-                <span className="text-[11px] text-muted-foreground glass-subtle px-2.5 py-1 rounded-full font-medium capitalize">
-                  {tier} Plan
-                </span>
-              </div>
-
-              {loadError && (
-                <p className="text-[12px] text-destructive">{loadError}</p>
-              )}
-
-              <div className="space-y-2">
-                <label className="text-[12px] text-muted-foreground font-medium">
-                  Analysis Model
-                  <span className="text-muted-foreground/60 ml-1 font-normal">(Prepare, Summary, Assumptions, Q&A)</span>
-                </label>
-                <div className="space-y-1.5">
-                  {models.map((m) => (
-                    <label
-                      key={m}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all duration-200 ${
-                        analysisModel === m
-                          ? "glass-strong shadow-sm"
-                          : "glass-subtle hover:bg-accent"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="analysis_model"
-                        value={m}
-                        checked={analysisModel === m}
-                        onChange={() => setAnalysisModel(m)}
-                        className="accent-foreground"
-                      />
-                      <div>
-                        <p className="text-[13px] font-medium text-foreground">{m}</p>
-                        <p className="text-[11px] text-muted-foreground/80">{MODEL_LABELS[m] || ""}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2 pt-4 border-t border-border">
-                <label className="text-[12px] text-muted-foreground font-medium">
-                  Selection Model
-                  <span className="text-muted-foreground/60 ml-1 font-normal">(Selection stream, Figures; Explain, Derive)</span>
-                </label>
-                <div className="space-y-1.5">
-                  {models.map((m) => (
-                    <label
-                      key={m}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all duration-200 ${
-                        fastModel === m
-                          ? "glass-strong shadow-sm"
-                          : "glass-subtle hover:bg-accent"
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="fast_model"
-                        value={m}
-                        checked={fastModel === m}
-                        onChange={() => setFastModel(m)}
-                        className="accent-foreground"
-                      />
-                      <div>
-                        <p className="text-[13px] font-medium text-foreground">{m}</p>
-                        <p className="text-[11px] text-muted-foreground/80">{MODEL_LABELS[m] || ""}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {tier !== "researcher" && (
-                <p className="text-[11px] text-muted-foreground/80 text-center pt-2">
-                  Upgrade to Researcher to unlock Opus.{" "}
-                  <button onClick={() => router.push("/#pricing")} className="underline hover:text-muted-foreground transition-colors">
-                    View plans
-                  </button>
-                </p>
-              )}
+        <div className="space-y-5">
+          <div className="glass rounded-2xl p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <p className="text-[14px] font-semibold text-foreground">Models</p>
+              <span className="text-[11px] text-muted-foreground glass-subtle px-2.5 py-1 rounded-full font-medium capitalize">
+                {tier} Plan
+              </span>
             </div>
 
+            {loadError && (
+              <p className="text-[12px] text-destructive">{loadError}</p>
+            )}
+
+            <ModelPicker
+              label="Analysis Model"
+              hint="(Prepare, Summary, Assumptions, Q&A)"
+              name="analysis_model"
+              value={analysisModel}
+              allowedIds={models}
+              keys={{
+                anthropic: !!hasAnthropicKey,
+                openai: !!hasOpenaiKey,
+                mistral: !!hasMistralKey,
+              }}
+              onChange={setAnalysisModel}
+            />
+
+            <div className="pt-4 border-t border-border">
+              <ModelPicker
+                label="Selection Model"
+                hint="(Selection stream, Figures; Explain, Derive)"
+                name="fast_model"
+                value={fastModel}
+                allowedIds={models}
+                keys={{
+                  anthropic: !!hasAnthropicKey,
+                  openai: !!hasOpenaiKey,
+                  mistral: !!hasMistralKey,
+                }}
+                onChange={setFastModel}
+              />
+            </div>
+
+            <ProviderStatusPills
+              keys={{
+                anthropic: !!hasAnthropicKey,
+                openai: !!hasOpenaiKey,
+                mistral: !!hasMistralKey,
+              }}
+            />
+
+            {tier !== "researcher" && (
+              <p className="text-[11px] text-muted-foreground/80 text-center pt-2">
+                Upgrade to Researcher to unlock top-tier models.{" "}
+                <button onClick={() => router.push("/#pricing")} className="underline hover:text-muted-foreground transition-colors">
+                  View plans
+                </button>
+              </p>
+            )}
+          </div>
+
+          {tier !== "free" && (
+          <>
             <div className="glass rounded-2xl p-6 space-y-4">
               <p className="text-[14px] font-semibold text-foreground">Deep analysis (Researcher)</p>
               <p className="text-[12px] text-muted-foreground leading-relaxed">
@@ -323,8 +296,27 @@ function SettingsContent() {
             {saveError && (
               <p className="text-[12px] text-center text-destructive">{saveError}</p>
             )}
-          </div>
-        )}
+          </>
+          )}
+
+          {tier === "free" && (
+            <>
+              <Button
+                onClick={handleSave}
+                disabled={saving}
+                className="w-full text-[13px] h-10 rounded-xl btn-primary-glass border-0"
+              >
+                {saving ? "Saving..." : "Save Settings"}
+              </Button>
+              {saved && (
+                <p className="text-[13px] text-center text-muted-foreground/80 animate-fade-in">Saved.</p>
+              )}
+              {saveError && (
+                <p className="text-[12px] text-center text-destructive">{saveError}</p>
+              )}
+            </>
+          )}
+        </div>
 
         {/* Appearance — background image picker (Scholar+ only; free
             users see the upsell card inside the component). */}
@@ -427,7 +419,7 @@ function SettingsContent() {
                 {usage.per_model_usage.map((m) => (
                   <UsageBar
                     key={m.model}
-                    label={MODEL_SHORT[m.model] || m.model}
+                    label={modelLabel(m.model).short}
                     used={m.used}
                     limit={m.limit}
                     hint={`Daily cap on ${m.model}. Counts toward your total daily API budget. Pick a smaller model in Settings if you hit the cap.`}

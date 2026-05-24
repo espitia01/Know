@@ -34,8 +34,8 @@ import {
 } from "@/lib/server/schemas";
 import { buildSummaryLitePrompt } from "@/lib/server/prompts/summary";
 import {
-  ANTHROPIC_CACHE_EPHEMERAL,
   cachedUserMessages,
+  providerOptionsForSlug,
 } from "@/lib/server/promptCache";
 
 export const runtime = "nodejs";
@@ -148,8 +148,10 @@ export async function POST(
       schemaName: "PaperSummaryLite",
       schemaDescription: "Fast first-impression summary of an academic paper.",
       system,
-      messages: cachedUserMessages(paperContextText, taskText),
-      providerOptions: ANTHROPIC_CACHE_EPHEMERAL,
+      messages: cachedUserMessages(liteModel, paperContextText, taskText),
+      ...(providerOptionsForSlug(liteModel)
+        ? { providerOptions: providerOptionsForSlug(liteModel) }
+        : {}),
       temperature: 0.3,
       // ~2k tokens is plenty for overview + tl_dr + 5 bullets + 3 eqs.
       maxOutputTokens: Math.min(maxOutputTokensFor(liteModel, "fast"), 2500),
