@@ -11,6 +11,7 @@ import { capturePdfViewportUnionToBlob } from "@/lib/pdfSelectionCapture";
 import {
   captureTextSelectionRegions,
   getPageHighlightMetrics,
+  getHighlightOverlayAnchor,
   mergeRectsToLineGroups,
   pageRangeForSelectionRect,
   pctRegionsToLocalBoxes,
@@ -807,13 +808,13 @@ export function PdfViewer({
       pageEl.querySelectorAll(".know-region-overlay").forEach((n) => n.remove());
       if (forPage.length === 0) return;
 
-      const pageStyle = getComputedStyle(pageEl);
-      if (pageStyle.position === "static") pageEl.style.position = "relative";
+      const { parent, metrics } = getHighlightOverlayAnchor(pageEl);
+      const parentStyle = getComputedStyle(parent);
+      if (parentStyle.position === "static") parent.style.position = "relative";
 
       const overlay = document.createElement("div");
       overlay.className = "know-region-overlay";
       overlay.setAttribute("aria-hidden", "true");
-      const metrics = getPageHighlightMetrics(pageEl);
       if (metrics.pw <= 0 || metrics.ph <= 0) return;
       const boxes = pctRegionsToLocalBoxes(forPage, metrics);
       for (let i = 0; i < boxes.length; i += 1) {
@@ -841,7 +842,7 @@ export function PdfViewer({
         div.style.height = `${box.h}px`;
         overlay.appendChild(div);
       }
-      pageEl.appendChild(overlay);
+      parent.appendChild(overlay);
     },
     [],
   );
@@ -857,7 +858,8 @@ export function PdfViewer({
       mode === "highlight" ? "know-highlight-overlay" : "know-selection-overlay";
     const interactive = mode === "selection";
     const pageNum = parseInt(pageEl.getAttribute("data-page-number") || "1", 10);
-    const metrics = getPageHighlightMetrics(pageEl);
+    const frame = getPageHighlightMetrics(pageEl);
+    const { parent, metrics } = getHighlightOverlayAnchor(pageEl);
     const { pw, ph } = metrics;
 
     const textLayer = pageEl.querySelector(".react-pdf__Page__textContent, .textLayer") as HTMLElement | null;
@@ -870,7 +872,7 @@ export function PdfViewer({
     };
 
     if ((!textLayer || history.length === 0) && !history.some((h) => h.regions?.some((r) => r.pageNum === pageNum))) {
-      pageEl.querySelectorAll(overlaySelector).forEach((n) => n.remove());
+      parent.querySelectorAll(overlaySelector).forEach((n) => n.remove());
       if (interactive) peekHost.__knowHighlights = [];
       return;
     }
@@ -881,8 +883,10 @@ export function PdfViewer({
 
     const pageStyle = getComputedStyle(pageEl);
     if (pageStyle.position === "static") pageEl.style.position = "relative";
+    const parentStyle = getComputedStyle(parent);
+    if (parentStyle.position === "static") parent.style.position = "relative";
 
-    pageEl.querySelectorAll(overlaySelector).forEach((n) => n.remove());
+    parent.querySelectorAll(overlaySelector).forEach((n) => n.remove());
 
     const overlay = document.createElement("div");
     overlay.className = overlayClass;
@@ -940,7 +944,7 @@ export function PdfViewer({
     });
     if (fallbackHistory.length === 0 || !textLayer) {
       if (!interactive) {
-        if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
+        if (overlay.childElementCount > 0) parent.appendChild(overlay);
         return;
       }
       if (pageHits.length === 0) {
@@ -950,7 +954,7 @@ export function PdfViewer({
       // Fall through to delegated click handler below.
     } else if (textLayer.childElementCount === 0) {
       if (!interactive) {
-        if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
+        if (overlay.childElementCount > 0) parent.appendChild(overlay);
         return;
       }
       if (pageHits.length === 0) {
@@ -978,7 +982,7 @@ export function PdfViewer({
     }
     if (!combined || slices.length === 0) {
       if (!interactive) {
-        if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
+        if (overlay.childElementCount > 0) parent.appendChild(overlay);
         return;
       }
       if (pageHits.length === 0) {
@@ -1021,7 +1025,7 @@ export function PdfViewer({
     }
     if (!normalized) {
       if (!interactive) {
-        if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
+        if (overlay.childElementCount > 0) parent.appendChild(overlay);
         return;
       }
       if (pageHits.length === 0) {
@@ -1201,10 +1205,10 @@ export function PdfViewer({
       if (mergedRects.length === 0) continue;
 
       const localRects = mergedRects.map((r) => ({
-        x: metrics.originX + (r.left - metrics.refRect.left) * metrics.scaleX,
-        y: metrics.originY + (r.top - metrics.refRect.top) * metrics.scaleY,
-        w: r.width * metrics.scaleX,
-        h: r.height * metrics.scaleY,
+        x: (r.left - frame.refRect.left) * frame.scaleX,
+        y: (r.top - frame.refRect.top) * frame.scaleY,
+        w: r.width * frame.scaleX,
+        h: r.height * frame.scaleY,
       }));
       paintEntryBoxes(entry, localRects);
 
@@ -1215,7 +1219,7 @@ export function PdfViewer({
     }
 
     if (!interactive) {
-      if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
+      if (overlay.childElementCount > 0) parent.appendChild(overlay);
       return;
     }
 
@@ -1245,7 +1249,7 @@ export function PdfViewer({
       hostEl.__knowResolveHighlight = (ev): SelectionAnalysisResult | null => {
         const hits = hostEl.__knowHighlights;
         if (!hits || hits.length === 0) return null;
-        const r = hostEl.getBoundingClientRect();
+        const r = parent.getBoundingClientRect();
         const pad = 3;
         const x = ev.clientX - r.left;
         const y = ev.clientY - r.top;
@@ -1390,7 +1394,7 @@ export function PdfViewer({
           if (hostEl.style.cursor === "pointer") hostEl.style.cursor = "";
           return;
         }
-        const r = hostEl.getBoundingClientRect();
+        const r = parent.getBoundingClientRect();
         const pad = 3;
         const x = ev.clientX - r.left;
         const y = ev.clientY - r.top;
@@ -1413,7 +1417,7 @@ export function PdfViewer({
       });
     }
 
-    if (overlay.childElementCount > 0) pageEl.appendChild(overlay);
+    if (overlay.childElementCount > 0) parent.appendChild(overlay);
   }, [openSelectionFromHistory, removeSelectionFromHistoryForPaper, normalizeForSearch, paperId]);
 
   // Fallback repaint: when the selectionHistory array changes while

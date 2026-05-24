@@ -1,23 +1,6 @@
 /**
  * Migrated selection-stream route (Stage 2 — replaces Python's
  * /api/papers/{id}/selection-stream for authenticated callers).
- *
- * Responsibilities, in order:
- *   1. Validate auth (Clerk) and the request body shape.
- *   2. Pull paper context + reserve usage from Python via /api/internal.
- *   3. Build the prompt for the requested action.
- *   4. streamObject() the SelectionResultSchema using the fast model.
- *   5. On finish: persist the final assembled object into
- *      cached_analysis.selections (best-effort) and release usage if
- *      something blew up mid-stream.
- *
- * Tier-gating is delegated to Python (single source of truth). All
- * 4xx detail bodies follow the structured `{code, message, ...}` shape
- * the frontend already dispatches on.
- *
- * Streaming protocol: AI SDK Data Stream (textStream) — each chunk is
- * a partial-JSON delta that `experimental_useObject` parses into a
- * DeepPartial<SelectionResult> on the client.
  */
 
 import { NextResponse } from "next/server";
@@ -48,7 +31,6 @@ import {
 } from "@/lib/server/promptCache";
 
 export const runtime = "nodejs";
-// Streaming responses must not be cached; force fresh execution per call.
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
@@ -80,223 +62,213 @@ function clip(value: unknown, max: number): string {
   return value.slice(0, max);
 }
 
+/** Strip control chars that can break provider JSON / prompt parsing. */
+function sanitizeSelectionText(text: string): string {
+  let out = "";
+  for (const ch of text) {
+    if (ch === "\n" || ch === "\t" || ch === "\r") {
+      out += ch;
+      continue;
+    }
+    const code = ch.charCodeAt(0);
+    if (code < 32) continue;
+    out += ch;
+  }
+  return out.trim();
+}
+
+function maxTokensForSelection(action: SelectionAction, model: string): number {
+  const base = maxOutputTokensFor(model, "fast");
+  if (action === "derive") return base;
+  if (action === "followup") return Math.min(base, 1800);
+  return Math.min(base, 1400);
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   try {
-  const { id: paperId } = await params;
-  if (!paperId || !PAPER_ID_RE.test(paperId)) {
-    return jsonError(400, "bad_paper_id", "Invalid paper id");
-  }
-
-  // 1. Auth.
-  let user: { userId: string; tier: string };
-  try {
-    user = await requireUser();
-  } catch (e) {
-    if (e instanceof AuthError) return jsonError(e.status, e.code, e.message);
-    return jsonError(401, "unauthorized", "Unauthorized");
-  }
-
-  // 2. Body parse.
-  let body: Record<string, unknown>;
-  try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return jsonError(400, "bad_body", "Body must be valid JSON");
-  }
-  const rawAction = (body.action as string | undefined) ?? "explain";
-  // Legacy `question` action collapses into explain on the new path
-  // (the Python service did the same; preserved here for compat).
-  const normalizedAction =
-    rawAction === "question" ? "explain" : (rawAction as SelectionAction);
-  if (!ALLOWED_ACTIONS.has(normalizedAction)) {
-    return jsonError(
-      400,
-      "bad_action",
-      `Action must be one of: ${[...ALLOWED_ACTIONS].join(", ")}`,
-    );
-  }
-  const selectedText = clip(body.selected_text, MAX_SELECTED_CHARS);
-  if (!selectedText) {
-    return jsonError(400, "bad_selected_text", "selected_text is required");
-  }
-  const question = clip(body.question, MAX_QUESTION_CHARS);
-
-  // 3. Fetch paper context + Settings model prefs (selection = fast model).
-  let paper: { title: string; raw_text: string };
-  let fastModel: string;
-  let deepAnalysis = false;
-  try {
-    const [ctx, prefs] = await Promise.all([
-      fetchPaperContext(paperId, user.userId),
-      fetchUserPrefs(user.userId),
-    ]);
-    paper = { title: ctx.title, raw_text: ctx.raw_text };
-    deepAnalysis = prefs.deep_analysis;
-    fastModel = await resolveStreamModelOverride(
-      user.userId,
-      body,
-      prefs.fast_model,
-    );
-  } catch (e) {
-    if (e instanceof InternalApiError) {
-      // 404 from internal == not owned. Surface as 404 to the caller.
-      const status = e.status === 404 ? 404 : 502;
-      const code = e.status === 404 ? "paper_not_found" : "internal_unavailable";
-      return jsonError(status, code, e.message);
+    const { id: paperId } = await params;
+    if (!paperId || !PAPER_ID_RE.test(paperId)) {
+      return jsonError(400, "bad_paper_id", "Invalid paper id");
     }
-    return jsonError(502, "paper_fetch_failed", "Could not load paper context");
-  }
 
-  // 4. Reserve usage. Python is the single source of truth for
-  //    tier/model/per-paper caps, so its 403/429s pass through verbatim.
-  let usageToken: UsageToken | null = null;
-  try {
-    const reserve = await reserveUsage({
-      userId: user.userId,
-      paperId,
-      kind: "selection",
-      model: fastModel,
-    });
-    usageToken = reserve.token;
-  } catch (e) {
-    if (e instanceof InternalApiError) {
-      const detail = e.detail as { detail?: Record<string, unknown> } | undefined;
-      const inner = (detail?.detail ?? {}) as Record<string, unknown>;
-      const code = (inner.code as string) || (e.status === 403 ? "tier_locked" : "rate_limited");
-      const message = (inner.message as string) || e.message;
-      return jsonError(e.status, code, message, { ...inner });
+    let user: { userId: string; tier: string };
+    try {
+      user = await requireUser();
+    } catch (e) {
+      if (e instanceof AuthError) return jsonError(e.status, e.code, e.message);
+      return jsonError(401, "unauthorized", "Unauthorized");
     }
-    return jsonError(503, "usage_unavailable", "Usage tracking unavailable");
-  }
 
-  // 5. Build prompt + stream.
-  const depth = promptDepthForModel(fastModel);
-  const { system, paperContextText, taskText } = buildSelectionPrompt({
-    action: normalizedAction,
-    selectedText,
-    paperTitle: paper.title,
-    paperContext: paper.raw_text,
-    question,
-    depth,
-    deepAnalysis,
-  });
+    let body: Record<string, unknown>;
+    try {
+      body = (await request.json()) as Record<string, unknown>;
+    } catch {
+      return jsonError(400, "bad_body", "Body must be valid JSON");
+    }
 
-  let releasedOnError = false;
-  const releaseOnFailure = async () => {
-    if (releasedOnError) return;
-    releasedOnError = true;
-    if (usageToken) await releaseUsage(usageToken);
-  };
+    const rawAction = (body.action as string | undefined) ?? "explain";
+    const normalizedAction =
+      rawAction === "question" ? "explain" : (rawAction as SelectionAction);
+    if (!ALLOWED_ACTIONS.has(normalizedAction)) {
+      return jsonError(
+        400,
+        "bad_action",
+        `Action must be one of: ${[...ALLOWED_ACTIONS].join(", ")}`,
+      );
+    }
 
-  let result: ReturnType<typeof streamObject>;
-  try {
-    result = streamObject({
-      model: getModelFromSlug(fastModel),
-      schema: zodSchema(SelectionResultSchema),
-      schemaName: "SelectionResult",
-      schemaDescription:
-        "Structured analysis of a selected passage from an academic paper.",
-      system,
-      messages: cachedUserMessages(paperContextText, taskText),
-      providerOptions: ANTHROPIC_CACHE_EPHEMERAL,
-      // Derive responses with 6–12 step bodies plus assumption arrays
-      // can run several thousand tokens. Default cap on Haiku is
-      // generous, but explicit beats implicit and the Anthropic
-      // default has shifted before.
-      maxOutputTokens: maxOutputTokensFor(fastModel, "fast"),
-      onFinish: async (event) => {
-        console.log(
-          JSON.stringify({
-            tag: "selection-stream.finish",
-            paperId,
-            userId: user.userId,
-            action: normalizedAction,
-            hasObject: !!event.object,
-            hasError: !!event.error,
-            errorMessage: event.error
-              ? String(event.error).slice(0, 500)
-              : undefined,
-            usage: event.usage,
-            cacheRead:
-              (event.usage as { cacheReadInputTokens?: number } | undefined)
-                ?.cacheReadInputTokens ?? 0,
-            cacheCreation:
-              (event.usage as { cacheCreationInputTokens?: number } | undefined)
-                ?.cacheCreationInputTokens ?? 0,
-          }),
-        );
-        // Schema validation failure mid-stream → release usage,
-        // but the client already saw the partial — log and move on.
-        if (event.error) {
-          await releaseOnFailure();
-          return;
-        }
-        const finalObject = event.object as SelectionResult | undefined;
-        if (!finalObject) {
-          await releaseOnFailure();
-          return;
-        }
+    const selectedText = sanitizeSelectionText(clip(body.selected_text, MAX_SELECTED_CHARS));
+    if (!selectedText) {
+      return jsonError(400, "bad_selected_text", "selected_text is required");
+    }
+    const question = clip(body.question, MAX_QUESTION_CHARS);
 
-        // Persist the assembled selection into cached_analysis. We
-        // await directly (rather than scheduling via `after()`)
-        // because `after()` can be cut off on Vercel without Fluid
-        // Compute when the function shuts down. Awaiting trades a
-        // few hundred ms of tail-latency for guaranteed persistence
-        // — the client already has the answer rendered by the time
-        // this resolves, so the user doesn't perceive the delay.
-        try {
-          await upsertCachedAnalysis({
-            userId: user.userId,
-            paperId,
-            key: "selections",
-            value: {
-              action: finalObject.action,
-              selected_text: selectedText,
-              question: question || undefined,
-              // Keep `explanation` for backwards-compat with the
-              // existing SelectionAnalysisResult shape rendered by
-              // SelectionResultPanel/QAPanel.
-              explanation: finalObject.body,
-              assumptions: finalObject.assumptions ?? [],
-              starting_point: finalObject.starting_point,
-              final_result: finalObject.final_result,
-              steps: finalObject.steps ?? [],
-              model: fastModel,
-            },
-          });
-        } catch (err) {
-          console.error("[selection-stream] persist failed", err);
-        }
-      },
-      onError: async ({ error }) => {
-        console.error(
-          JSON.stringify({
-            tag: "selection-stream.error",
-            paperId,
-            userId: user.userId,
-            action: normalizedAction,
-            error: String(error).slice(0, 800),
-          }),
-        );
-        await releaseOnFailure();
-      },
+    let paper: { title: string; raw_text: string };
+    let fastModel: string;
+    let deepAnalysis = false;
+    try {
+      const [ctx, prefs] = await Promise.all([
+        fetchPaperContext(paperId, user.userId),
+        fetchUserPrefs(user.userId),
+      ]);
+      paper = { title: ctx.title, raw_text: ctx.raw_text ?? "" };
+      deepAnalysis = prefs.deep_analysis;
+      fastModel = await resolveStreamModelOverride(
+        user.userId,
+        body,
+        prefs.fast_model,
+      );
+      if (!fastModel?.trim()) {
+        fastModel = process.env.MODEL_FAST || "claude-haiku-4-5";
+      }
+    } catch (e) {
+      if (e instanceof InternalApiError) {
+        const status = e.status === 404 ? 404 : 502;
+        const code = e.status === 404 ? "paper_not_found" : "internal_unavailable";
+        return jsonError(status, code, e.message);
+      }
+      return jsonError(502, "paper_fetch_failed", "Could not load paper context");
+    }
+
+    let usageToken: UsageToken | null = null;
+    try {
+      const reserve = await reserveUsage({
+        userId: user.userId,
+        paperId,
+        kind: "selection",
+        model: fastModel,
+      });
+      usageToken = reserve.token;
+    } catch (e) {
+      if (e instanceof InternalApiError) {
+        const detail = e.detail as { detail?: Record<string, unknown> } | undefined;
+        const inner = (detail?.detail ?? {}) as Record<string, unknown>;
+        const code = (inner.code as string) || (e.status === 403 ? "tier_locked" : "rate_limited");
+        const message = (inner.message as string) || e.message;
+        return jsonError(e.status, code, message, { ...inner });
+      }
+      return jsonError(503, "usage_unavailable", "Usage tracking unavailable");
+    }
+
+    const depth = promptDepthForModel(fastModel);
+    const { system, paperContextText, taskText } = buildSelectionPrompt({
+      action: normalizedAction,
+      selectedText,
+      paperTitle: paper.title,
+      paperContext: paper.raw_text,
+      question,
+      depth,
+      deepAnalysis,
     });
-  } catch (e) {
-    await releaseOnFailure();
-    const message = e instanceof Error ? e.message : "Provider error";
-    return jsonError(502, "provider_error", message);
-  }
 
-  return result.toTextStreamResponse({
-    headers: {
-      "Cache-Control": "no-store, no-transform",
-      "X-Accel-Buffering": "no",
-      "X-Know-Model": fastModel,
-    },
-  });
+    let releasedOnError = false;
+    const releaseOnFailure = async () => {
+      if (releasedOnError) return;
+      releasedOnError = true;
+      if (usageToken) await releaseUsage(usageToken);
+    };
+
+    let result: ReturnType<typeof streamObject>;
+    try {
+      result = streamObject({
+        model: getModelFromSlug(fastModel),
+        schema: zodSchema(SelectionResultSchema),
+        schemaName: "SelectionResult",
+        schemaDescription:
+          "Structured analysis of a selected passage from an academic paper.",
+        system,
+        messages: cachedUserMessages(paperContextText, taskText),
+        providerOptions: ANTHROPIC_CACHE_EPHEMERAL,
+        temperature: 0.2,
+        maxOutputTokens: maxTokensForSelection(normalizedAction, fastModel),
+        onFinish: async (event) => {
+          if (event.error) {
+            await releaseOnFailure();
+            return;
+          }
+          const finalObject = event.object as SelectionResult | undefined;
+          if (!finalObject) {
+            await releaseOnFailure();
+            return;
+          }
+
+          try {
+            await upsertCachedAnalysis({
+              userId: user.userId,
+              paperId,
+              key: "selections",
+              value: {
+                action: finalObject.action,
+                selected_text: selectedText,
+                question: question || undefined,
+                explanation: finalObject.body,
+                assumptions: finalObject.assumptions ?? [],
+                starting_point: finalObject.starting_point,
+                final_result: finalObject.final_result,
+                steps: finalObject.steps ?? [],
+                model: fastModel,
+              },
+            });
+          } catch (err) {
+            console.error("[selection-stream] persist failed", err);
+          }
+        },
+        onError: async ({ error }) => {
+          console.error(
+            JSON.stringify({
+              tag: "selection-stream.error",
+              paperId,
+              userId: user.userId,
+              action: normalizedAction,
+              error: String(error).slice(0, 800),
+            }),
+          );
+          await releaseOnFailure();
+        },
+      });
+    } catch (e) {
+      await releaseOnFailure();
+      const message = e instanceof Error ? e.message : "Provider error";
+      return jsonError(502, "provider_error", message);
+    }
+
+    try {
+      return result.toTextStreamResponse({
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store, no-transform",
+          "X-Accel-Buffering": "no",
+          "X-Know-Model": fastModel,
+        },
+      });
+    } catch (e) {
+      await releaseOnFailure();
+      const message = e instanceof Error ? e.message : "Stream response error";
+      return jsonError(502, "stream_response_error", message);
+    }
   } catch (e) {
     console.error(
       JSON.stringify({

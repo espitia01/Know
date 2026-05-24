@@ -7,7 +7,7 @@ export const DEEP_MULTIPLIER = 2;
 
 export const STD_BUDGETS = {
   summary: { context: 18000 },
-  selection: { context: 6000, selection: 4000 },
+  selection: { context: 4500, selection: 3000 },
   figure: { context: 6000 },
 } as const;
 

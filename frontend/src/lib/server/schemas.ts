@@ -28,7 +28,7 @@ const Assumption = z.object({
 });
 
 const Step = z.object({
-  step_number: z.number().int().positive(),
+  step_number: z.number(),
   prompt: z.string(),
   answer: z.string(),
   explanation: z.string(),

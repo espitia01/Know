@@ -338,7 +338,7 @@ function ResultCard({
   const modelPending = isStreaming && !result.model;
   const hasContent = !!(result.explanation || result.elaboration || result.answer || result.assumptions?.length || result.steps?.length);
   const action = normalizeSelectionAction(result.action);
-  const streamingLabel = action === "followup" ? "Thinking…" : "Generating analysis…";
+  const streamingLabel = "Thinking…";
   return (
     <div className="space-y-3">
       {!hideHeader && (
@@ -355,7 +355,7 @@ function ResultCard({
           <div className="flex items-center gap-2">
             <CardMeta model={resolvedModel} createdAt={result.created_at} pending={modelPending} />
             {isStreaming && (
-              <span className="text-[var(--text-xs)] text-muted-foreground/50 motion-safe:animate-pulse">streaming…</span>
+              <span className="text-[var(--text-xs)] text-muted-foreground/50 motion-safe:animate-pulse">Thinking…</span>
             )}
           </div>
         </div>

@@ -86,13 +86,17 @@ function describeError(error: unknown): string {
     return "The analysis service returned an unexpected error. Please try again.";
   }
   try {
-    const parsed = JSON.parse(message) as { detail?: { code?: string; message?: string } };
-    if (parsed.detail?.message) {
-      const code = parsed.detail.code;
+    const parsed = JSON.parse(message) as {
+      detail?: { code?: string; message?: string } | string;
+    };
+    const detail = parsed.detail;
+    if (typeof detail === "string") return detail;
+    if (detail?.message) {
+      const code = detail.code;
       if (code === "tier_locked" || code === "paper_cap" || code === "daily_cap" || code === "model_cap") {
-        return `**Limit reached.** ${parsed.detail.message}\n\nUpgrade your plan to continue.`;
+        return `**Limit reached.** ${detail.message}\n\nUpgrade your plan to continue.`;
       }
-      return parsed.detail.message;
+      return detail.message;
     }
   } catch {
     /* not JSON; fall through */
@@ -135,7 +139,7 @@ export function useSelectionThread(paperId: string) {
   );
 
   const obj = useObject({
-    id: paperId,
+    id: `${paperId}-selection`,
     api: `/api/papers/${paperId}/selection-stream`,
     schema: SelectionResultSchema,
     credentials: "include",

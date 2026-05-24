@@ -273,6 +273,34 @@ export function pctRegionsToLocalBoxes(
   }));
 }
 
+/** Parent element + metrics for highlight overlays (prefer pdf.js text layer). */
+export function getHighlightOverlayAnchor(pageEl: HTMLElement): {
+  parent: HTMLElement;
+  metrics: PageHighlightMetrics;
+} {
+  const textLayer = pageEl.querySelector(
+    ".react-pdf__Page__textContent, .textLayer",
+  ) as HTMLElement | null;
+  const frame = getPageHighlightMetrics(pageEl);
+  if (!textLayer) {
+    return { parent: pageEl, metrics: frame };
+  }
+  const layerStyle = getComputedStyle(textLayer);
+  if (layerStyle.position === "static") {
+    textLayer.style.position = "absolute";
+  }
+  return {
+    parent: textLayer,
+    metrics: {
+      pageNum: frame.pageNum,
+      originX: 0,
+      originY: 0,
+      pw: frame.pw,
+      ph: frame.ph,
+    },
+  };
+}
+
 /** Map each line rect in the current DOM selection to normalized page-local boxes. */
 export function captureTextSelectionRegions(
   container: HTMLElement | null,
