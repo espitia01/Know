@@ -88,7 +88,18 @@ export function useSummaryStream(paperId: string) {
 
   const abortRef = useRef<AbortController | null>(null);
   const autoRanRef = useRef(false);
+  const autoRanForRef = useRef<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Reset the auto-run guard when the user switches papers — without this
+  // the second paper would never auto-fire its deep summary because the
+  // ref was still set from the first paper's hook instance.
+  useEffect(() => {
+    if (autoRanForRef.current !== paperId) {
+      autoRanRef.current = false;
+      autoRanForRef.current = paperId;
+    }
+  }, [paperId]);
 
   const mergeIntoPaperSlot = useCallback(
     (pid: string, patch: Partial<PaperSummary>) => {

@@ -708,15 +708,23 @@ export const api = {
     id: string,
     selectedText: string,
     action: string,
-    options?: { signal?: AbortSignal; question?: string },
+    options?: {
+      signal?: AbortSignal;
+      question?: string;
+      model?: string;
+      imageBase64?: string;
+    },
   ) => {
     const headers = await authHeaders();
-    const body: Record<string, string> = { selected_text: selectedText, action };
+    const body: Record<string, unknown> = { selected_text: selectedText, action };
     if (options?.question) body.question = options.question;
+    if (options?.model) body.model = options.model;
+    if (options?.imageBase64) body.image_base64 = options.imageBase64;
     return fetch(`${API_BASE}/api/papers/${id}/selection-stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Accept: "text/event-stream",
         ...headers,
       },
       body: JSON.stringify(body),
@@ -815,16 +823,24 @@ export const api = {
       body: JSON.stringify({ figure_id: figureId, question }),
     }),
 
-  analyzeFigureStream: async (id: string, figureId: string, question: string = "", signal?: AbortSignal) => {
+  analyzeFigureStream: async (
+    id: string,
+    figureId: string,
+    question: string = "",
+    options?: { signal?: AbortSignal; model?: string },
+  ) => {
     const headers = await authHeaders();
+    const body: Record<string, unknown> = { figure_id: figureId, question };
+    if (options?.model) body.model = options.model;
     return fetch(`${API_BASE}/api/papers/${id}/figure-qa-stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Accept: "text/event-stream",
         ...headers,
       },
-      body: JSON.stringify({ figure_id: figureId, question }),
-      signal,
+      body: JSON.stringify(body),
+      signal: options?.signal,
     });
   },
 

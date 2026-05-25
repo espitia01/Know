@@ -91,8 +91,17 @@ export function UserTierProvider({ children }: { children: ReactNode }) {
     };
   }, [refresh]);
 
+  // Memoize the value so consumers don't re-render every time this provider
+  // re-renders. Without this, every component reading `useUserTier()` ran
+  // its own callbacks/effects on every parent render — that's a major
+  // contributor to the "freeze on switch papers / settings" symptom.
+  const value = useMemo<UserTierContextValue>(
+    () => ({ user, loading, error, refresh }),
+    [user, loading, error, refresh],
+  );
+
   return (
-    <UserTierContext.Provider value={{ user, loading, error, refresh }}>
+    <UserTierContext.Provider value={value}>
       {children}
       <CancellationBanner user={user} />
       {/* Surface tier-fetch failures instead of silently defaulting to

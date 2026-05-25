@@ -1,15 +1,16 @@
 "use client";
 
 /**
- * Selection explain / derive / follow-up — Railway batch API only.
+ * Selection explain / derive / follow-up — Railway SSE streaming.
+ *
+ * The model returns markdown chunks; we append them onto the live
+ * `explanation` field so users see tokens render in real time
+ * (ChatGPT-style). On `done`, the final markdown is persisted.
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { api, type SelectionAnalysisResult } from "@/lib/api";
-import {
-  normalizeSelectionResult,
-  selectionHasContent,
-} from "@/lib/normalizeSelectionResult";
+import { consumeSelectionSse } from "@/lib/selectionSse";
 import { useStore } from "@/lib/store";
 import { useUserSettings } from "@/lib/UserSettingsContext";
 
@@ -29,7 +30,7 @@ type StartedState = {
   action: SelectionAction;
   selectedText: string;
   question?: string;
-  model?: string;
+  model: string;
   regions?: SelectionAnalysisResult["regions"];
 };
 
@@ -38,33 +39,6 @@ function newClientKey(): string {
     return crypto.randomUUID();
   }
   return `sel-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function describeApiError(e: unknown): string {
-  if (e instanceof Error) {
-    const msg = e.message;
-    if (msg.includes("tier_locked") || msg.includes("Limit reached")) {
-      return `**Limit reached.** ${msg}\n\nUpgrade your plan to continue.`;
-    }
-    return msg || "Selection failed.";
-  }
-  return "Selection failed.";
-}
-
-function mapApiResult(
-  started: StartedState,
-  raw: SelectionAnalysisResult,
-): SelectionAnalysisResult {
-  return normalizeSelectionResult(raw, {
-    action: started.action,
-    selected_text: started.selectedText,
-    question: started.question,
-    streaming: false,
-    clientKey: started.clientKey,
-    model: started.model,
-    created_at: Date.now(),
-    regions: started.regions,
-  });
 }
 
 export function useSelectionThread(paperId: string) {
@@ -122,37 +96,69 @@ export function useSelectionThread(paperId: string) {
       upsertSelectionInHistoryForPaper(paperId, provisional);
       setSelectionResultForPaper(paperId, provisional);
 
+      const updateExplanation = (text: string, streaming: boolean) => {
+        const next: SelectionAnalysisResult = {
+          ...provisional,
+          explanation: text,
+          streaming,
+          created_at: streaming ? provisional.created_at : Date.now(),
+        };
+        upsertSelectionInHistoryForPaper(paperId, next);
+        setSelectionResultForPaper(paperId, next);
+      };
+
       void (async () => {
+        let streamError: string | null = null;
+        let finalText = "";
         try {
-          const raw = await api.analyzeSelection(paperId, textForApi, args.action, {
-            question: args.question,
+          const res = await api.analyzeSelectionStream(paperId, textForApi, args.action, {
             signal: controller.signal,
+            question: args.question,
             model: started.model,
             imageBase64: args.imageBase64,
-            regions: args.regions,
           });
+          if (!res.ok || !res.body) {
+            const detail = await res.text().catch(() => "");
+            // FastAPI error bodies are JSON: pull out the structured detail
+            // before throwing so the UI shows a real reason.
+            try {
+              const parsed = JSON.parse(detail) as { detail?: { message?: string } | string };
+              const msg =
+                typeof parsed.detail === "string"
+                  ? parsed.detail
+                  : parsed.detail?.message;
+              throw new Error(msg || `Selection stream failed (${res.status})`);
+            } catch {
+              throw new Error(detail || `Selection stream failed (${res.status})`);
+            }
+          }
+          await consumeSelectionSse(
+            res.body.getReader(),
+            controller.signal,
+            {
+              onChunk: (accumulated) => updateExplanation(accumulated, true),
+              onDone: (full) => {
+                finalText = full;
+              },
+              onError: (message) => {
+                streamError = message;
+              },
+            },
+          );
           if (controller.signal.aborted) return;
-
-          const result = mapApiResult(started, raw);
-          if (!selectionHasContent(result)) {
+          if (streamError) throw new Error(streamError);
+          if (!finalText.trim()) {
             throw new Error("The model didn't return a complete answer. Please try again.");
           }
-
-          upsertSelectionInHistoryForPaper(paperId, result);
-          setSelectionResultForPaper(paperId, result);
+          updateExplanation(finalText, false);
           bumpUsageRefresh();
         } catch (e) {
           if (controller.signal.aborted) return;
-          const message = describeApiError(e);
+          const message = e instanceof Error ? e.message : "Selection failed.";
           const errResult: SelectionAnalysisResult = {
-            action: started.action,
-            selected_text: started.selectedText,
-            question: started.question,
+            ...provisional,
             explanation: message,
             streaming: false,
-            clientKey: started.clientKey,
-            model: started.model,
-            regions: started.regions,
           };
           upsertSelectionInHistoryForPaper(paperId, errResult);
           setSelectionResultForPaper(paperId, errResult);

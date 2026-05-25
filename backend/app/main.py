@@ -706,6 +706,7 @@ async def trial_selection_stream(request: Request, body: dict):
 
 from .api.papers import router as papers_router
 from .api.analysis import router as analysis_router
+from .api.streaming import router as streaming_router
 from .api.search import router as search_router
 from .api.settings import router as settings_router
 from .api.billing import router as billing_router
@@ -714,6 +715,9 @@ from .api.exports import router as exports_router
 
 app.include_router(papers_router)
 app.include_router(analysis_router)
+# Streaming routes (selection-stream, figure-qa-stream) — registered after
+# analysis so its prefix collisions resolve via FastAPI's first-match rule.
+app.include_router(streaming_router)
 app.include_router(search_router)
 app.include_router(settings_router)
 app.include_router(billing_router)

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { api, type FigureInfo, type FigureAnalysis, type ParsedPaper } from "@/lib/api";
+import { consumeSelectionSse } from "@/lib/selectionSse";
 import {
   analysisFiguresFromPaper,
   figurePreviewUrl,
@@ -392,13 +393,61 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           ],
         }));
 
-        const result = await api.analyzeFigure(paperId, figId, q);
-        if (controller.signal.aborted) return;
+        const updateAssistant = (text: string, streaming: boolean) => {
+          setConversations((prev) => {
+            const msgs = [...(prev[figId] || [])];
+            const lastIdx = msgs.length - 1;
+            if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
+              msgs[lastIdx] = {
+                role: "assistant",
+                text,
+                streaming,
+                model: resolvedModel,
+              };
+            }
+            return { ...prev, [figId]: msgs };
+          });
+        };
 
-        const finalText = (
-          q ? (result.answer ?? result.description) : (result.description ?? result.answer)
-        )?.trim();
-        if (!finalText) {
+        const res = await api.analyzeFigureStream(paperId, figId, q, {
+          signal: controller.signal,
+          model: resolvedModel,
+        });
+        if (!res.ok || !res.body) {
+          const detail = await res.text().catch(() => "");
+          let msg = detail || `Figure analysis failed (${res.status})`;
+          try {
+            const parsed = JSON.parse(detail) as { detail?: { message?: string } | string };
+            const m =
+              typeof parsed.detail === "string"
+                ? parsed.detail
+                : parsed.detail?.message;
+            if (m) msg = m;
+          } catch {
+            /* not JSON */
+          }
+          throw new Error(msg);
+        }
+
+        let streamError: string | null = null;
+        let finalText = "";
+        await consumeSelectionSse(
+          res.body.getReader(),
+          controller.signal,
+          {
+            onChunk: (accumulated) => updateAssistant(accumulated, true),
+            onDone: (full) => {
+              finalText = full;
+            },
+            onError: (message) => {
+              streamError = message;
+            },
+          },
+        );
+
+        if (controller.signal.aborted) return;
+        if (streamError) throw new Error(streamError);
+        if (!finalText.trim()) {
           throw new Error(
             "The model didn't return a complete figure analysis. Please try again.",
           );
@@ -407,31 +456,17 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         const cacheEntry: FigureAnalysis = {
           figure_id: figId,
           question: q,
-          description: result.description ?? finalText,
-          key_observations: result.key_observations ?? [],
-          relation_to_paper: result.relation_to_paper ?? "",
-          methodology_shown: result.methodology_shown,
-          takeaway: result.takeaway,
-          answer: result.answer,
-          model: result.model ?? resolvedModel,
+          description: finalText,
+          key_observations: [],
+          relation_to_paper: "",
+          answer: q ? finalText : undefined,
+          model: resolvedModel,
           created_at: Date.now(),
         };
         appendFigureAnalysisToCaches(paperId, cacheEntry);
         setFigureModelOverride(null);
-        setStreamModel(cacheEntry.model ?? resolvedModel);
-        setConversations((prev) => {
-          const msgs = [...(prev[figId] || [])];
-          const lastIdx = msgs.length - 1;
-          if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
-            msgs[lastIdx] = {
-              role: "assistant",
-              text: finalText,
-              streaming: false,
-              model: cacheEntry.model ?? resolvedModel,
-            };
-          }
-          return { ...prev, [figId]: msgs };
-        });
+        setStreamModel(resolvedModel);
+        updateAssistant(finalText, false);
       } catch (e) {
         if (controller.signal.aborted) return;
         setConversations((prev) => {
