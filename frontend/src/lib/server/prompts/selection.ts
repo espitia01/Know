@@ -3,7 +3,9 @@
  */
 
 const SHARED_RULES = `Output rules (strict):
-- Math: use $...$ for inline math, $$...$$ for display math. Place display math on its own line. NEVER bare LaTeX commands, Unicode math symbols, or HTML outside of math delimiters.
+- Math: use $...$ for inline math, $$...$$ for display math on its own line. Each opener has EXACTLY one matching closer of the same length — never $$$ to close a $$ block, never $ inside a $$ block. Example correct: $$V(R, z) = P(R)/(2\\epsilon_0)$$  Example WRONG: $$V(R, z) = P(R)/(2\\epsilon_0)$$$ (three dollar signs).
+- NEVER use \\( \\) or \\[ \\] delimiters; only $ and $$.
+- NEVER emit Unicode math symbols (σ, μ, ∑, ∫…) outside math delimiters; always write them as LaTeX commands inside $...$.
 - Prose: clean English with normal spacing. Never preserve "one-glyph-per-line" salad or run-on sentences from the PDF; reconstruct using context.
 - Honesty: if the passage is not mathematical, write prose. Do not invent equations.`;
 

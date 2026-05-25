@@ -14,7 +14,9 @@
 
 const SHARED_RULES = `Output rules (strict):
 - Use markdown for all narrative fields.
-- Math: inline math goes in $...$, display math in $$...$$ on its own line. NEVER bare LaTeX commands or Unicode math symbols outside math delimiters.
+- Math: inline math goes in $...$, display math in $$...$$ on its own line. Each opener has EXACTLY one matching closer of the same length — never $$$ to close a $$ block, never $ inside a $$ block, never $$ inside an inline $...$ span. Example correct closure: $$E = mc^2$$  Example WRONG: $$E = mc^2$$$ (three dollar signs).
+- NEVER use \\( \\) or \\[ \\] delimiters; only $ and $$.
+- NEVER emit Unicode math symbols (σ, μ, ∑, ∫…) outside math delimiters; always write \\sigma, \\mu, \\sum, \\int, etc. inside $...$.
 - Don't preserve PDF artifacts like one-glyph-per-line or run-on words; reconstruct using paper context.`;
 
 import type { PromptDepth } from "@/lib/server/promptDepth";

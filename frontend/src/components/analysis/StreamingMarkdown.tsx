@@ -21,7 +21,7 @@
 
 import "katex/dist/katex.min.css";
 
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { Streamdown } from "streamdown";
 import { createMathPlugin } from "@streamdown/math";
 import { code } from "@streamdown/code";
@@ -29,6 +29,30 @@ import { code } from "@streamdown/code";
 const math = createMathPlugin({ singleDollarTextMath: true });
 
 const STREAMDOWN_PLUGINS = { math, code };
+
+/**
+ * Repair the most common math-delimiter mistakes the LLM emits before
+ * Streamdown sees them. Without this, a stray `$` adjacent to a `$$`
+ * block (e.g. `$$expr$$$`) opens an unclosed inline-math span and the
+ * rest of the paragraph renders as broken vertical glyph salad.
+ *
+ * Conservative: only collapse runs of 3+ dollar signs and convert the
+ * legacy `\(...\)` / `\[...\]` delimiters that occasionally slip past
+ * the system prompt. Anything else stays untouched.
+ */
+function sanitizeMathDelimiters(input: string): string {
+  if (!input) return input;
+  let out = input;
+  // Collapse runs of 3+ dollar signs to `$$`. Catches:
+  //   $$expr$$$  (trailing extra $)  -> $$expr$$
+  //   $$$expr$$  (leading extra $)   -> $$expr$$
+  out = out.replace(/\${3,}/g, "$$$$");
+  // Legacy delimiters from prompts that sometimes leak from older training
+  // data even when the system prompt forbids them.
+  out = out.replace(/\\\[/g, "\n$$\n").replace(/\\\]/g, "\n$$\n");
+  out = out.replace(/\\\(/g, "$").replace(/\\\)/g, "$");
+  return out;
+}
 
 type StreamingMarkdownProps = {
   /** Raw markdown. May contain `$...$` / `$$...$$` math. */
@@ -61,7 +85,8 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({
   size = "sm",
   className,
 }: StreamingMarkdownProps) {
-  const text = typeof children === "string" ? children : "";
+  const raw = typeof children === "string" ? children : "";
+  const text = useMemo(() => sanitizeMathDelimiters(raw), [raw]);
   return (
     <div className={[SIZE_CLASS[size], "analysis-content", className].filter(Boolean).join(" ")}>
       <Streamdown
