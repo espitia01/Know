@@ -5,7 +5,13 @@ import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
 
 const COLLAPSE_CHAR_THRESHOLD = 600;
 
-/** Collapse long static prose; skip while streaming (Bug 5). */
+/**
+ * Collapse long static prose; skip while streaming.
+ *
+ * Defaults to **open**: long selection answers, summary sections, etc.
+ * are now visible by default — users were missing them behind a
+ * "Read more" affordance.
+ */
 export function ReadMoreProse({
   children,
   markdown,
@@ -16,7 +22,7 @@ export function ReadMoreProse({
   streaming?: boolean;
 }) {
   const long = markdown.length > COLLAPSE_CHAR_THRESHOLD;
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
 
   if (streaming || !long) {
     return <>{children}</>;

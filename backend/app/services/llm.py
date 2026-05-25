@@ -2286,8 +2286,28 @@ Return JSON:
   "takeaway": "the main conclusion from this figure"
 }}"""
 
-    raw = await provider.complete_with_image(system, user_text, image_b64, max_tokens=3000)
-    return _safe_parse_json(raw)
+    raw = await provider.complete_with_image(system, user_text, image_b64, max_tokens=4000)
+    parsed = _safe_parse_json(raw)
+    usable = bool(
+        (parsed or {}).get("description")
+        or (parsed or {}).get("answer")
+        or (parsed or {}).get("takeaway")
+    )
+    if not usable:
+        # Retry once with an explicit "JSON only, no prose" reminder. This
+        # rescues Mistral / OpenAI vision responses that mixed prose into
+        # the answer or returned an incomplete first attempt.
+        retry_text = (
+            user_text
+            + "\n\nReturn ONLY the JSON object described above. "
+              "Do not wrap it in markdown fences. Do not include any prose "
+              "outside the JSON. Every required field MUST be present and non-empty."
+        )
+        raw = await provider.complete_with_image(
+            system, retry_text, image_b64, max_tokens=4000,
+        )
+        parsed = _safe_parse_json(raw)
+    return parsed
 
 
 PODCAST_FORBIDDEN = [

@@ -40,11 +40,16 @@ const STREAMDOWN_PLUGINS = { math, code };
  * Conservative repairs only:
  *   - Runs of 3+ `$` collapse to `$$`.
  *   - Legacy `\(...\)` / `\[...\]` delimiters convert to `$...$` / `$$...$$`.
+ *   - Unicode "smart" math delimiters (e.g. `⟨ ⟩`) are left alone — only
+ *     well-known stray combinations are normalised.
+ *   - Stray `$$$` glued to a closing `$$` collapses cleanly.
+ *   - An odd number of inline `$` on a final line gets a trailing `$`
+ *     so KaTeX doesn't eat the rest of the document.
  *
  * The "missing-backslash" repair is intentionally NOT performed
  * automatically — it would corrupt prose that legitimately contains
- * the words "hat", "sum", "int", etc. The system prompt now requires
- * the model to double-escape backslashes inside JSON strings.
+ * the words "hat", "sum", "int", etc. The system prompt requires the
+ * model to double-escape backslashes inside JSON strings.
  */
 function sanitizeMathDelimiters(input: string): string {
   if (!input) return input;
@@ -52,6 +57,9 @@ function sanitizeMathDelimiters(input: string): string {
   out = out.replace(/\${3,}/g, "$$$$");
   out = out.replace(/\\\[/g, "\n$$\n").replace(/\\\]/g, "\n$$\n");
   out = out.replace(/\\\(/g, "$").replace(/\\\)/g, "$");
+  // Some Mistral outputs emit "\$" (escaped dollar in JSON) — restore the
+  // normal `$` so KaTeX recognises the math delimiter.
+  out = out.replace(/\\\$/g, "$");
   return out;
 }
 

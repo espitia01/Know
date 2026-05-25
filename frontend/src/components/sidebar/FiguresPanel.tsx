@@ -530,22 +530,42 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         </div>
 
         <div className="flex-1 overflow-y-auto min-h-0 py-3 space-y-3">
-          <button
-            type="button"
-            onClick={() => setLightboxFig(selected)}
-            className="block w-full cursor-zoom-in overflow-hidden rounded-lg border border-border/60 bg-card/20 transition-colors hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            title="Click to expand"
-            aria-label="Expand figure"
-          >
-            <AuthImage
-              src={figureSrc(selected.id)}
-              alt={selected.caption || selected.id}
-              className="w-full object-contain max-h-[250px]"
-            />
-          </button>
+          <div className="relative group">
+            <button
+              type="button"
+              onClick={() => setLightboxFig(selected)}
+              className="block w-full cursor-zoom-in overflow-hidden rounded-lg border border-border/60 bg-card/20 transition-colors hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              title="Click to expand"
+              aria-label="Expand figure"
+            >
+              <AuthImage
+                src={figureSrc(selected.id)}
+                alt={selected.caption || selected.id}
+                className="w-full object-contain max-h-[250px]"
+              />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightboxFig(selected);
+              }}
+              className="absolute top-2 right-2 inline-flex h-8 items-center gap-1.5 rounded-md border border-border/60 bg-card/85 px-2.5 text-[var(--text-xs)] font-medium text-foreground/90 shadow-[var(--shadow-xs)] backdrop-blur-sm transition-colors hover:bg-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              aria-label="Expand figure"
+              title="Expand figure"
+            >
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M15 3h6v6" />
+                <path d="M9 21H3v-6" />
+                <path d="M21 3l-7 7" />
+                <path d="M3 21l7-7" />
+              </svg>
+              Expand
+            </button>
+          </div>
 
           {selected.caption && (
-            <p className="text-[var(--text-xs)] text-muted-foreground/60 italic leading-relaxed line-clamp-3">
+            <p className="text-[var(--text-xs)] text-muted-foreground/75 italic leading-relaxed whitespace-pre-line">
               {selected.caption}
             </p>
           )}

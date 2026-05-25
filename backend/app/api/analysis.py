@@ -940,6 +940,22 @@ async def figure_qa(paper_id: str, body: dict, user_id: str = Depends(require_au
         result = await analyze_figure(
             paper_prompt_text(paper), image_b64, question, user_id=user_id, paper_id=paper_id,
         )
+        # `analyze_figure` returns {} when the model emits non-JSON or the
+        # response is empty. Surface that as a clear 502 so the client can
+        # show "model didn't return a complete answer" instead of crashing
+        # the chat thread on a missing field.
+        usable = bool(
+            (result or {}).get("description")
+            or (result or {}).get("answer")
+            or (result or {}).get("takeaway")
+        )
+        if not usable:
+            release_usage(token)
+            raise HTTPException(
+                status_code=502,
+                detail="Figure analysis returned no content. Please retry.",
+            )
+
         result["figure_id"] = fig_id
         result["question"] = question
 

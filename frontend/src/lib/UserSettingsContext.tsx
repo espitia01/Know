@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -114,11 +115,16 @@ export function UserSettingsProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const value: UserSettingsContextValue = {
-    ...settings,
-    refresh,
-    updateOptimistically,
-  };
+  // Memoize so consumers don't re-render on every parent render. Without
+  // this, every component reading `useUserSettings()` (the paper page,
+  // SummaryPanel, FiguresPanel, useSummaryStream, useSelectionThread, …)
+  // got a new context object each render and tore down/re-created their
+  // own callbacks — which manifested as a multi-second freeze the moment
+  // the parent re-rendered (e.g. after closing the settings page).
+  const value = useMemo<UserSettingsContextValue>(
+    () => ({ ...settings, refresh, updateOptimistically }),
+    [settings, refresh, updateOptimistically],
+  );
 
   return <UserSettingsContext.Provider value={value}>{children}</UserSettingsContext.Provider>;
 }
