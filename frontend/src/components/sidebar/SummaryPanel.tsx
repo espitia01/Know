@@ -16,6 +16,10 @@ import {
   summaryAutoRetryCooldownUntil,
 } from "@/lib/analysisState";
 import { ensureDisplayMath, firstSentence } from "@/lib/text";
+import {
+  hasSummaryDeepBody,
+  summaryIsComplete,
+} from "@/lib/summaryState";
 interface SummaryPanelProps {
   paperId: string;
 }
@@ -75,10 +79,11 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   const summaryRaw = (summaryFromStore ??
     paperCachedSummary ??
     null) as Partial<PaperSummary> | null;
-  const hasBody = hasSummaryBody(summaryRaw);
-  const summary = hasBody ? summaryRaw : null;
-  const isLoading =
-    (summaryLoading || hasActiveRequest(paperId, "summary")) && !hasBody;
+  const isComplete = summaryIsComplete(summaryRaw);
+  const isGenerating =
+    summaryLoading || hasActiveRequest(paperId, "summary");
+  const summary = isComplete ? summaryRaw : null;
+  const isLoading = isGenerating && !isComplete;
 
   const runSummaryStream = useCallback(() => {
     if (hasActiveRequest(paperId, "summary")) return;
@@ -93,28 +98,34 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
     start();
   }, [paperId]);
 
-  if (!summary && isLoading) {
+  if (isLoading) {
     return (
       <div className="flex flex-col items-center gap-2 py-6">
         <div className="w-full max-w-[16rem]">
           <AnalysisProgress kind="summary" paperId={paperId} />
         </div>
-        <p className="text-[var(--text-xs)] text-muted-foreground/85">Generating detailed summary…</p>
+        <p className="text-[var(--text-xs)] text-muted-foreground/85">
+          Generating detailed summary…
+        </p>
       </div>
     );
   }
 
   if (!summary) {
     const errMsg = manualError || storedError;
+    const liteOnly =
+      hasSummaryBody(summaryRaw) && !hasSummaryDeepBody(summaryRaw);
     return (
       <EmptyState
         title={errMsg ? "Failed to generate summary" : "Summary not available yet"}
         body={
           errMsg ||
-          "Generate a detailed overview, contributions, methods, results, and limitations. Generation often takes 30–90 seconds once started."
+          (liteOnly
+            ? "The overview finished but the deep sections did not. Retry to generate methodology, results, and discussion."
+            : "Generate a detailed overview, contributions, methods, results, and limitations. Generation often takes 30–90 seconds once started.")
         }
         cta={{
-          label: errMsg ? "Retry" : "Generate Summary",
+          label: errMsg || liteOnly ? "Retry" : "Generate Summary",
           onClick: () => {
             void runSummaryStream();
           },
@@ -124,35 +135,6 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   }
 
   const s = summary!;
-  const stillStreaming = isLoading;
-  // Two-phase summary (PROMPT_7 Track D): the panel is "ready" as soon
-  // as the lite phase has overview + key_contributions, even though the
-  // deep phase is still streaming methodology / results / discussion.
-  // We show an inline "Loading deep dive…" hint while deep streams.
-  const liteReady =
-    typeof s.overview === "string" &&
-    s.overview.trim().length > 0 &&
-    Array.isArray(s.key_contributions) &&
-    s.key_contributions.length > 0;
-  const deepReady =
-    typeof s.methodology === "string" && s.methodology.trim().length > 0;
-  const deepStreaming = stillStreaming && liteReady && !deepReady;
-
-  const FIELD_ORDER = [
-    "overview",
-    "motivation",
-    "methodology",
-    "main_results",
-    "discussion",
-    "future_work",
-  ] as const;
-  const streamingCursorField = (() => {
-    if (!stillStreaming) return null;
-    for (const f of FIELD_ORDER) {
-      if (!s[f]) return f;
-    }
-    return null;
-  })();
 
   const takeawaySource =
     (s as PaperSummary & { tl_dr?: string }).tl_dr ?? s.overview ?? "";
@@ -167,7 +149,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
           Summary
         </h2>
         {s.model ? (
-          <CardMeta model={s.model} createdAt={s.created_at} pending={stillStreaming} />
+          <CardMeta model={s.model} createdAt={s.created_at} pending={false} />
         ) : null}
       </div>
 
@@ -182,45 +164,16 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
         </div>
       )}
 
-      {deepStreaming && (
-        <div
-          role="status"
-          className="flex items-center gap-2 rounded-[var(--radius-md)] border border-border/40 bg-muted/[0.08] px-3 py-2 text-[var(--text-xs)] text-muted-foreground/85"
-        >
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40" />
-          Loading methodology, results, discussion, and limitations…
-        </div>
-      )}
-
-      {liteReady && !deepReady && !stillStreaming && storedError && (
-        <div className="rounded-[var(--radius-md)] border border-border/50 bg-muted/[0.08] px-3 py-2.5 text-[var(--text-xs)] text-muted-foreground">
-          <p>{storedError}</p>
-          <button
-            type="button"
-            className="mt-2 text-[var(--text-xs)] font-medium text-foreground underline-offset-2 hover:underline"
-            onClick={() => {
-              void runSummaryStream();
-            }}
-          >
-            Retry deep sections
-          </button>
-        </div>
-      )}
-
       {s.overview && (
         <AnalysisSection title="Overview">
-          <ReadMoreProse markdown={s.overview} streaming={stillStreaming && streamingCursorField === "overview"}>
-            <StreamingMarkdown streaming={streamingCursorField === "overview"}>
-              {s.overview}
-            </StreamingMarkdown>
+          <ReadMoreProse markdown={s.overview}>
+            <StreamingMarkdown>{s.overview}</StreamingMarkdown>
           </ReadMoreProse>
         </AnalysisSection>
       )}
       {s.motivation && (
         <AnalysisSection title="Motivation">
-          <StreamingMarkdown streaming={streamingCursorField === "motivation"}>
-            {s.motivation}
-          </StreamingMarkdown>
+          <StreamingMarkdown>{s.motivation}</StreamingMarkdown>
         </AnalysisSection>
       )}
       {s.key_contributions && s.key_contributions.length > 0 && (
@@ -241,28 +194,22 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.methodology && (
         <AnalysisSection title="Methodology">
-          <ReadMoreProse markdown={s.methodology} streaming={stillStreaming && streamingCursorField === "methodology"}>
-            <StreamingMarkdown streaming={streamingCursorField === "methodology"}>
-              {s.methodology}
-            </StreamingMarkdown>
+          <ReadMoreProse markdown={s.methodology}>
+            <StreamingMarkdown>{s.methodology}</StreamingMarkdown>
           </ReadMoreProse>
         </AnalysisSection>
       )}
       {s.main_results && (
         <AnalysisSection title="Main results">
-          <ReadMoreProse markdown={s.main_results} streaming={stillStreaming && streamingCursorField === "main_results"}>
-            <StreamingMarkdown streaming={streamingCursorField === "main_results"}>
-              {s.main_results}
-            </StreamingMarkdown>
+          <ReadMoreProse markdown={s.main_results}>
+            <StreamingMarkdown>{s.main_results}</StreamingMarkdown>
           </ReadMoreProse>
         </AnalysisSection>
       )}
       {s.discussion && (
         <AnalysisSection title="Discussion">
-          <ReadMoreProse markdown={s.discussion} streaming={stillStreaming && streamingCursorField === "discussion"}>
-            <StreamingMarkdown streaming={streamingCursorField === "discussion"}>
-              {s.discussion}
-            </StreamingMarkdown>
+          <ReadMoreProse markdown={s.discussion}>
+            <StreamingMarkdown>{s.discussion}</StreamingMarkdown>
           </ReadMoreProse>
         </AnalysisSection>
       )}
@@ -346,9 +293,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
       )}
       {s.future_work && (
         <AnalysisSection title="Future work">
-          <StreamingMarkdown streaming={streamingCursorField === "future_work"}>
-            {s.future_work}
-          </StreamingMarkdown>
+          <StreamingMarkdown>{s.future_work}</StreamingMarkdown>
         </AnalysisSection>
       )}
     </div>

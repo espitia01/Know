@@ -25,6 +25,7 @@ import { memo, useMemo } from "react";
 import { Streamdown } from "streamdown";
 import { createMathPlugin } from "@streamdown/math";
 import { code } from "@streamdown/code";
+import { sanitizeStreamdownMath } from "@/lib/streamdownMath";
 
 const math = createMathPlugin({ singleDollarTextMath: true });
 
@@ -32,37 +33,8 @@ const STREAMDOWN_PLUGINS = { math, code };
 
 /**
  * Repair common LLM-emitted markup mistakes before Streamdown sees the
- * source. Without this, a stray `$` adjacent to a `$$` block opens an
- * unclosed inline-math span (rest of paragraph renders as vertical
- * glyph salad), and JSON-stripped LaTeX backslashes turn `\hat{H}`
- * into the literal word `hat{H}` outside any math.
- *
- * Conservative repairs only:
- *   - Runs of 3+ `$` collapse to `$$`.
- *   - Legacy `\(...\)` / `\[...\]` delimiters convert to `$...$` / `$$...$$`.
- *   - Unicode "smart" math delimiters (e.g. `⟨ ⟩`) are left alone — only
- *     well-known stray combinations are normalised.
- *   - Stray `$$$` glued to a closing `$$` collapses cleanly.
- *   - An odd number of inline `$` on a final line gets a trailing `$`
- *     so KaTeX doesn't eat the rest of the document.
- *
- * The "missing-backslash" repair is intentionally NOT performed
- * automatically — it would corrupt prose that legitimately contains
- * the words "hat", "sum", "int", etc. The system prompt requires the
- * model to double-escape backslashes inside JSON strings.
+ * source. See `streamdownMath.ts` for the full repair list.
  */
-function sanitizeMathDelimiters(input: string): string {
-  if (!input) return input;
-  let out = input;
-  out = out.replace(/\${3,}/g, "$$$$");
-  out = out.replace(/\\\[/g, "\n$$\n").replace(/\\\]/g, "\n$$\n");
-  out = out.replace(/\\\(/g, "$").replace(/\\\)/g, "$");
-  // Some Mistral outputs emit "\$" (escaped dollar in JSON) — restore the
-  // normal `$` so KaTeX recognises the math delimiter.
-  out = out.replace(/\\\$/g, "$");
-  return out;
-}
-
 type StreamingMarkdownProps = {
   /** Raw markdown. May contain `$...$` / `$$...$$` math. */
   children: string | null | undefined;
@@ -95,7 +67,7 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({
   className,
 }: StreamingMarkdownProps) {
   const raw = typeof children === "string" ? children : "";
-  const text = useMemo(() => sanitizeMathDelimiters(raw), [raw]);
+  const text = useMemo(() => sanitizeStreamdownMath(raw), [raw]);
   return (
     <div className={[SIZE_CLASS[size], "analysis-content", className].filter(Boolean).join(" ")}>
       <Streamdown

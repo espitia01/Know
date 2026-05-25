@@ -384,6 +384,7 @@ class AnthropicProvider(LLMProvider):
         self, system: str, text: str, image_b64: str, media_type: str = "image/png", max_tokens: int = 4096
     ) -> str:
         """Send a message with both text and an image (vision)."""
+        raw_b64 = _normalize_image_base64(image_b64) or image_b64
         response = await self.client.post(
             ANTHROPIC_API_URL,
             headers={
@@ -404,7 +405,7 @@ class AnthropicProvider(LLMProvider):
                                 "source": {
                                     "type": "base64",
                                     "media_type": media_type,
-                                    "data": image_b64,
+                                    "data": raw_b64,
                                 },
                             },
                             {"type": "text", "text": text},
@@ -421,6 +422,7 @@ class AnthropicProvider(LLMProvider):
         self, system: str, text: str, image_b64: str, media_type: str = "image/png", max_tokens: int = 4096
     ) -> AsyncIterator[str]:
         """Stream a vision response token-by-token."""
+        raw_b64 = _normalize_image_base64(image_b64) or image_b64
         async with self.client.stream(
             "POST",
             ANTHROPIC_API_URL,
@@ -443,7 +445,7 @@ class AnthropicProvider(LLMProvider):
                                 "source": {
                                     "type": "base64",
                                     "media_type": media_type,
-                                    "data": image_b64,
+                                    "data": raw_b64,
                                 },
                             },
                             {"type": "text", "text": text},
@@ -660,6 +662,7 @@ class OpenAIProvider(LLMProvider):
     async def complete_with_image(
         self, system: str, text: str, image_b64: str, media_type: str = "image/png", max_tokens: int = 4096
     ) -> str:
+        raw_b64 = _normalize_image_base64(image_b64) or image_b64
         if _openai_uses_responses_api(self.model):
             body = {
                 "model": self.model,
@@ -671,7 +674,7 @@ class OpenAIProvider(LLMProvider):
                             {"type": "input_text", "text": text},
                             {
                                 "type": "input_image",
-                                "image_url": f"data:{media_type};base64,{image_b64}",
+                                "image_url": f"data:{media_type};base64,{raw_b64}",
                             },
                         ],
                     }
@@ -695,7 +698,7 @@ class OpenAIProvider(LLMProvider):
             {"type": "text", "text": text},
             {
                 "type": "image_url",
-                "image_url": {"url": f"data:{media_type};base64,{image_b64}"},
+                "image_url": {"url": f"data:{media_type};base64,{raw_b64}"},
             },
         ]
         body = {
@@ -808,11 +811,12 @@ class MistralProvider(LLMProvider):
     async def complete_with_image(
         self, system: str, text: str, image_b64: str, media_type: str = "image/png", max_tokens: int = 4096
     ) -> str:
+        raw_b64 = _normalize_image_base64(image_b64) or image_b64
         user_content = [
             {"type": "text", "text": text},
             {
                 "type": "image_url",
-                "image_url": f"data:{media_type};base64,{image_b64}",
+                "image_url": f"data:{media_type};base64,{raw_b64}",
             },
         ]
         body = {
@@ -956,10 +960,62 @@ def _safe_parse_json(raw: str) -> dict:
     return _normalize_latex_delimiters(result)
 
 
+def _repair_orphan_period_display_close(s: str) -> str:
+    """GPT often closes display math with `.$$` instead of `$$`."""
+
+    def repl_open(m: re.Match[str]) -> str:
+        body = m.group(1).strip()
+        if not body or not re.search(
+            r"\\(?:sum|binom|frac|prod|int|substack|left|right|mathcal|mathrm)|[_^{}]|\^",
+            body,
+        ):
+            return m.group(0)
+        return f"$$\n{body}.\n$$"
+
+    s = re.sub(r"\$\$([\s\S]*?)\.\$\$", repl_open, s)
+
+    def repl_plain(m: re.Match[str]) -> str:
+        before, expr = m.group(1), m.group(2).strip()
+        if not expr or "$$" in expr:
+            return m.group(0)
+        if not re.search(
+            r"\\(?:sum|binom|frac|prod|int|substack|left|right|mathcal|mathrm)|[_^{}]|\^",
+            expr,
+        ):
+            return m.group(0)
+        if not re.search(r"[=+\-*/^]|\\(?:sum|binom|frac)|\([A-Za-z0-9+-]+\)\^", expr):
+            return m.group(0)
+        return f"{before}\n$$\n{expr}.\n$$"
+
+    # Only apply the bare `(expr).$$` repair outside existing $$…$$ spans.
+    parts: list[str] = []
+    last = 0
+    for m in re.finditer(r"\$\$[\s\S]*?\$\$", s):
+        if m.start() > last:
+            chunk = s[last : m.start()]
+            parts.append(re.sub(r"([^$]|^)([^$\n]{6,}?)\.\$\$", repl_plain, chunk))
+        parts.append(m.group(0))
+        last = m.end()
+    if last < len(s):
+        parts.append(re.sub(r"([^$]|^)([^$\n]{6,}?)\.\$\$", repl_plain, s[last:]))
+    return "".join(parts) if parts else s
+
+
+def _repair_comma_display_close(s: str) -> str:
+    """GPT sometimes closes `$$…` with `,$$` instead of `$$`."""
+    return re.sub(
+        r"\$\$([\s\S]*?),(\s*)\$\$(?!\$)",
+        lambda m: f"$$\n{m.group(1).strip()},{m.group(2)}\n$$",
+        s,
+    )
+
+
 def _normalize_latex_delimiters(obj):
     """Convert \\( \\) to $ and \\[ \\] to $$ in all string values for remark-math compatibility."""
     if isinstance(obj, str):
         s = obj
+        s = _repair_orphan_period_display_close(s)
+        s = _repair_comma_display_close(s)
         s = re.sub(r'\\\[', '\n$$\n', s)
         s = re.sub(r'\\\]', '\n$$\n', s)
         s = re.sub(r'\\\(', '$', s)
@@ -2190,17 +2246,39 @@ Return JSON with all the above fields."""
     return _safe_parse_json(raw)
 
 
+def _normalize_image_base64(image_b64: str | None) -> str | None:
+    """Return raw base64 payload without a data-URL prefix."""
+    if not isinstance(image_b64, str):
+        return None
+    s = image_b64.strip()
+    if not s:
+        return None
+    # Clients may send `data:image/png;base64,XXXX`. Providers re-wrap with
+    # their own prefix — strip first to avoid `data:...;base64,data:...`.
+    if s.startswith("data:"):
+        comma = s.find(",")
+        if comma >= 0:
+            s = s[comma + 1 :].strip()
+    if len(s) > 6_500_000:
+        return None
+    return s or None
+
+
 def _resize_image_b64(image_b64: str, max_dim: int = MAX_IMAGE_DIMENSION) -> str:
     """Downscale a base64 PNG if either dimension exceeds max_dim. Uses PyMuPDF."""
     import base64
     import fitz
 
+    normalized = _normalize_image_base64(image_b64)
+    if not normalized:
+        return image_b64
+
     try:
-        raw = base64.b64decode(image_b64)
+        raw = base64.b64decode(normalized)
         pix = fitz.Pixmap(raw)
         w, h = pix.width, pix.height
         if w <= max_dim and h <= max_dim:
-            return image_b64
+            return normalized
 
         scale = max_dim / max(w, h)
         new_w, new_h = int(w * scale), int(h * scale)
@@ -2215,7 +2293,7 @@ def _resize_image_b64(image_b64: str, max_dim: int = MAX_IMAGE_DIMENSION) -> str
 
         return base64.b64encode(out_pix.tobytes("png")).decode("utf-8")
     except Exception:
-        return image_b64
+        return normalized
 
 
 async def analyze_figure(

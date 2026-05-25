@@ -50,6 +50,7 @@ from ..services.llm import (
     LLMProviderError,
     _coerce_markdown_field,
     _make_provider,
+    _normalize_latex_delimiters,
     _resize_image_b64,
     _safe_parse_json,
     _sanitize_user_text,
@@ -243,8 +244,8 @@ async def selection_stream(
                     system, user_prompt, resized, max_tokens=3000,
                 )
                 if full:
-                    accumulated = full
-                    yield _sse_event({"type": "chunk", "text": full})
+                    accumulated = _normalize_latex_delimiters(full)
+                    yield _sse_event({"type": "chunk", "text": accumulated})
                 yield _sse_event({"type": "done", "full_text": accumulated})
                 _persist_selection_streamed(
                     paper_id, user_id,
@@ -262,10 +263,11 @@ async def selection_stream(
                 yield _sse_event({"type": "chunk", "text": chunk})
 
             yield _sse_event({"type": "done", "full_text": accumulated})
+            normalized = _normalize_latex_delimiters(accumulated)
             _persist_selection_streamed(
                 paper_id, user_id,
                 action=action, selected_text=selected_clean,
-                question=question, explanation=accumulated, model=model_used,
+                question=question, explanation=normalized, model=model_used,
             )
         except LLMProviderError as exc:
             if not released:
