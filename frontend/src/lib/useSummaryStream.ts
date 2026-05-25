@@ -11,11 +11,18 @@
  * (schema `PaperSummaryDeepSchema`, which now contains every field
  * the panel renders). Persistence still lives under
  * `cached_analysis.summary_deep` so legacy reads keep working.
+ *
+ * The Python `/api/papers/{id}/summary` batch fallback was retired
+ * after Railway's edge proxy started killing its long-running
+ * non-streaming response with a 502 at ~20s. The Vercel streaming
+ * route now returns typed JSON errors for every failure mode it
+ * can detect (missing key, gateway 4xx/5xx, missing paper text,
+ * usage cap), so users see real errors instead of a 502 from a
+ * doomed fallback request.
  */
 
 import { useCallback, useEffect, useRef } from "react";
 import { experimental_useObject as useObject } from "@ai-sdk/react";
-import { api } from "@/lib/api";
 import {
   PaperSummaryDeepSchema,
   type PaperSummary,
@@ -31,8 +38,6 @@ import {
   markRequestStart,
   clearProgressStart,
 } from "@/lib/analysisState";
-
-const FALLBACK_MS = 90_000;
 
 function describeError(error: unknown): string {
   if (!error) return "Summary generation failed. Try again.";
@@ -85,18 +90,9 @@ export function useSummaryStream(paperId: string) {
   const setSummaryLoadingForPaper = useStore((s) => s.setSummaryLoadingForPaper);
   const updateCachedAnalysis = useStore((s) => s.updateCachedAnalysis);
 
-  const fallbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fallbackStarted = useRef(false);
   const startedFor = useRef<string | null>(null);
   const partialRef = useRef<Partial<PaperSummaryDeep> | undefined>(undefined);
   const modelRef = useRef<string | undefined>(undefined);
-
-  const clearFallbackTimer = useCallback(() => {
-    if (fallbackTimer.current != null) {
-      clearTimeout(fallbackTimer.current);
-      fallbackTimer.current = null;
-    }
-  }, []);
 
   const mergeIntoPaperSlot = useCallback(
     (pid: string, patch: Partial<PaperSummary>) => {
@@ -129,39 +125,15 @@ export function useSummaryStream(paperId: string) {
     [mergeIntoPaperSlot, setSummaryError, updateCachedAnalysis],
   );
 
-  const runBatchFallback = useCallback(
-    async (pid: string) => {
-      if (fallbackStarted.current) return;
-      fallbackStarted.current = true;
-      clearFallbackTimer();
-      setSummaryLoadingForPaper(pid, true);
-      try {
-        const summary = await api.getSummary(pid);
-        if (hasOverview(summary)) {
-          mergeIntoPaperSlot(pid, summary as PaperSummary);
-          updateCachedAnalysis(pid, { summary });
-          setSummaryError(pid, null);
-          autoAnalyzedPapers.add(`${pid}:summary`);
-          return;
-        }
-        setSummaryError(pid, "Summary generation returned empty results. Try again.");
-      } catch (e) {
-        setSummaryError(pid, describeError(e));
-      } finally {
-        startedFor.current = null;
-        markRequestEnd(pid, "summary");
-        clearProgressStart(pid, "summary");
-        activeSummaryStreamStoppers.delete(pid);
-        setSummaryLoadingForPaper(pid, false);
-      }
+  const cleanup = useCallback(
+    (pid: string) => {
+      startedFor.current = null;
+      markRequestEnd(pid, "summary");
+      clearProgressStart(pid, "summary");
+      activeSummaryStreamStoppers.delete(pid);
+      setSummaryLoadingForPaper(pid, false);
     },
-    [
-      clearFallbackTimer,
-      mergeIntoPaperSlot,
-      setSummaryError,
-      setSummaryLoadingForPaper,
-      updateCachedAnalysis,
-    ],
+    [setSummaryLoadingForPaper],
   );
 
   const obj = useObject({
@@ -170,33 +142,30 @@ export function useSummaryStream(paperId: string) {
     schema: PaperSummaryDeepSchema,
     credentials: "include",
     onError: (error) => {
-      clearFallbackTimer();
       const pid = startedFor.current;
-      startedFor.current = null;
       if (!pid) return;
       setSummaryError(pid, describeError(error));
-      setSummaryLoadingForPaper(pid, false);
+      cleanup(pid);
     },
     onFinish: ({ object, error }) => {
-      clearFallbackTimer();
       const pid = startedFor.current;
-      startedFor.current = null;
       if (!pid) return;
       const candidate = (object ?? partialRef.current) as
         | Partial<PaperSummaryDeep>
         | undefined;
       if (hasBody(candidate)) {
         finishSummary(pid, candidate as PaperSummaryDeep);
-        markRequestEnd(pid, "summary");
-        clearProgressStart(pid, "summary");
-        activeSummaryStreamStoppers.delete(pid);
-        setSummaryLoadingForPaper(pid, false);
+        cleanup(pid);
         return;
       }
-      if (error) setSummaryError(pid, describeError(error));
-      // Stream finished without methodology — fall back to the
-      // batch endpoint so the user gets *something*.
-      void runBatchFallback(pid);
+      // No methodology streamed — surface whatever upstream error we got
+      // (or a generic empty-result message). The Python /summary fallback
+      // was retired because Railway's edge proxy 502'd it at ~20s.
+      const msg = error
+        ? describeError(error)
+        : "Summary generation returned empty results. Try again.";
+      setSummaryError(pid, msg);
+      cleanup(pid);
     },
   });
 
@@ -239,32 +208,21 @@ export function useSummaryStream(paperId: string) {
       return;
     }
 
-    fallbackStarted.current = false;
     startedFor.current = pid;
     modelRef.current = analysisModel;
     lastMergeKey.current = "";
     markRequestStart(pid, "summary");
     activeSummaryStreamStoppers.set(pid, () => {
-      clearFallbackTimer();
       obj.stop();
     });
     setSummaryError(pid, null);
     setSummaryLoadingForPaper(pid, true);
     clearProgressStart(pid, "summary");
-    clearFallbackTimer();
-    fallbackTimer.current = setTimeout(() => {
-      if (!obj.isLoading) return;
-      if (hasBody(partialRef.current as Partial<PaperSummary>)) return;
-      obj.stop();
-      void runBatchFallback(pid);
-    }, FALLBACK_MS);
     obj.submit({});
   }, [
     paperId,
     analysisModel,
     obj,
-    clearFallbackTimer,
-    runBatchFallback,
     setSummaryError,
     setSummaryLoadingForPaper,
   ]);
@@ -277,15 +235,10 @@ export function useSummaryStream(paperId: string) {
   }, [paperId, start]);
 
   const stop = useCallback(() => {
-    clearFallbackTimer();
     obj.stop();
     const pid = startedFor.current || paperId;
-    startedFor.current = null;
-    markRequestEnd(pid, "summary");
-    clearProgressStart(pid, "summary");
-    activeSummaryStreamStoppers.delete(pid);
-    setSummaryLoadingForPaper(pid, false);
-  }, [paperId, obj, clearFallbackTimer, setSummaryLoadingForPaper]);
+    cleanup(pid);
+  }, [paperId, obj, cleanup]);
 
   return {
     start,
