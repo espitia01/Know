@@ -1284,7 +1284,10 @@ Return JSON:
         result["action"] = action
     result["selected_text"] = selected_text
     result["model"] = provider.model
-    return _normalize_selection_result(result)
+    result = _normalize_selection_result(result)
+    if not _selection_has_content(result):
+        raise ValueError("Selection returned empty payload")
+    return result
 
 
 def _sanitize_user_text(text: str, *, max_chars: int = 10000) -> str:
@@ -1669,22 +1672,75 @@ def _normalize_selection_result(result: dict) -> dict:
                     }
                 )
             out["assumptions"] = norm_assumptions
-    if "steps" in out and isinstance(out.get("steps"), list):
+    if not out.get("steps") and out.get("derivation_steps"):
+        out["steps"] = out["derivation_steps"]
+
+    raw_steps = out.get("steps")
+    if isinstance(raw_steps, list):
         norm_steps = []
-        for step in out["steps"]:
+        for step in raw_steps:
             if not isinstance(step, dict):
                 continue
+            sn = step.get("step_number")
+            if isinstance(sn, str) and sn.isdigit():
+                sn = int(sn)
+            elif not isinstance(sn, int):
+                sn = len(norm_steps) + 1
             norm_steps.append(
                 {
-                    "step_number": step.get("step_number") if isinstance(step.get("step_number"), int) else 0,
+                    "step_number": sn,
                     "prompt": _coerce_markdown_field(step.get("prompt")),
-                    "answer": _coerce_markdown_field(step.get("answer")),
+                    "answer": _coerce_markdown_field(
+                        step.get("answer") or step.get("expression") or step.get("result")
+                    ),
                     "explanation": _coerce_markdown_field(step.get("explanation")),
                     "hint": _coerce_markdown_field(step.get("hint")),
                 }
             )
         out["steps"] = norm_steps
+
+    if not _coerce_markdown_field(out.get("explanation")).strip():
+        steps = out.get("steps")
+        if isinstance(steps, list) and steps:
+            parts: list[str] = []
+            title = _coerce_markdown_field(out.get("title")).strip()
+            if title:
+                parts.append(f"## {title}")
+            sp = _coerce_markdown_field(out.get("starting_point")).strip()
+            if sp:
+                parts.append(f"**Starting point:** {sp}")
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                n = step.get("step_number") or 0
+                ans = _coerce_markdown_field(step.get("answer"))
+                expl = _coerce_markdown_field(step.get("explanation"))
+                block = f"**Step {n}:** {ans}".strip()
+                if expl:
+                    block = f"{block}\n\n{expl}".strip()
+                if block.replace("*", "").strip():
+                    parts.append(block)
+            fr = _coerce_markdown_field(out.get("final_result")).strip()
+            if fr:
+                parts.append(f"**Result:** {fr}")
+            if parts:
+                out["explanation"] = "\n\n".join(parts)
     return out
+
+
+def _selection_has_content(result: dict) -> bool:
+    if _coerce_markdown_field(result.get("explanation")).strip():
+        return True
+    steps = result.get("steps")
+    if isinstance(steps, list) and len(steps) > 0:
+        return True
+    if _coerce_markdown_field(result.get("final_result")).strip():
+        return True
+    if _coerce_markdown_field(result.get("starting_point")).strip():
+        return True
+    if isinstance(result.get("assumptions"), list) and len(result["assumptions"]) > 0:
+        return True
+    return False
 
 
 def _coerce_assumptions(raw_items: object) -> list[dict]:
@@ -2011,6 +2067,60 @@ Keep the response compact. At most 3 key_equations. Paper excerpt:
             for x in parsed["key_contributions"]
             if _coerce_markdown_field(x).strip()
         ]
+    parsed["model"] = provider.model
+    return parsed
+
+
+async def summarize_paper_deep(
+    paper_text: str,
+    model_override: str | None = None,
+    user_id: str | None = None,
+) -> dict:
+    """Deep summary body (methodology, results, discussion, etc.)."""
+    if model_override:
+        if user_id:
+            from ..gating import enforce_model
+            model_override = enforce_model(user_id, model_override)
+        provider = _make_provider(model_override)
+    else:
+        provider = get_provider(user_id)
+
+    cap = min(get_budgets("summary", user_id)["context"], 6000)
+    paper_text = _sanitize_user_text(paper_text, max_chars=cap)
+
+    system = (
+        "You are an expert science editor. Return ONLY valid JSON with no markdown fences.\n\n"
+        + LATEX_FORMAT_INSTRUCTIONS
+    )
+    user = f"""Write the detailed body of an academic paper summary in JSON only:
+{{
+  "motivation": "3-5 sentences",
+  "methodology": "1-2 paragraphs",
+  "main_results": "1-2 paragraphs",
+  "discussion": "1-2 paragraphs",
+  "limitations": ["short bullets"],
+  "future_work": "2-3 sentences",
+  "key_figures_and_tables": [{{"id": "Fig. 1", "description": "..."}}]
+}}
+
+Always include non-empty methodology, main_results, and discussion. Paper excerpt:
+{paper_text[:cap]}"""
+
+    raw = await provider.complete(system, user, max_tokens=3500)
+    parsed = _safe_parse_json(raw)
+    for key in ("motivation", "methodology", "main_results", "discussion", "future_work"):
+        if key in parsed:
+            parsed[key] = _coerce_markdown_field(parsed.get(key))
+    if isinstance(parsed.get("limitations"), list):
+        parsed["limitations"] = [
+            _coerce_markdown_field(x).strip()
+            for x in parsed["limitations"]
+            if _coerce_markdown_field(x).strip()
+        ]
+    methodology = _coerce_markdown_field(parsed.get("methodology")).strip()
+    if not methodology:
+        raise ValueError("Deep summary returned empty methodology")
+    parsed["methodology"] = methodology
     parsed["model"] = provider.model
     return parsed
 

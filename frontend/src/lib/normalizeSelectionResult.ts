@@ -22,6 +22,14 @@ export function coerceMarkdownField(value: unknown): string {
   return String(value);
 }
 
+export function selectionHasContent(result: SelectionAnalysisResult): boolean {
+  if (result.explanation?.trim()) return true;
+  if (result.steps?.length) return true;
+  if (result.final_result?.trim()) return true;
+  if (result.starting_point?.trim()) return true;
+  return false;
+}
+
 export function normalizeSelectionResult(
   raw: SelectionAnalysisResult,
   fallback?: Partial<SelectionAnalysisResult>,
@@ -45,15 +53,38 @@ export function normalizeSelectionResult(
       }))
     : undefined;
 
+  let explanation = coerceMarkdownField(
+    raw.explanation ?? raw.elaboration ?? raw.answer,
+  );
+
+  const action = coerceMarkdownField(raw.action) || fallback?.action || "explain";
+  if (!explanation.trim() && action === "derive" && steps?.length) {
+    const parts: string[] = [];
+    const title = raw.title != null ? coerceMarkdownField(raw.title) : "";
+    if (title.trim()) parts.push(`## ${title.trim()}`);
+    const sp =
+      raw.starting_point != null ? coerceMarkdownField(raw.starting_point) : "";
+    if (sp.trim()) parts.push(`**Starting point:** ${sp.trim()}`);
+    for (const step of steps) {
+      const n = step.step_number || 0;
+      const ans = step.answer?.trim() || step.expression?.trim() || "";
+      const expl = step.explanation?.trim() || "";
+      let block = ans ? `**Step ${n}:** ${ans}` : "";
+      if (expl) block = block ? `${block}\n\n${expl}` : expl;
+      if (block) parts.push(block);
+    }
+    const fr = raw.final_result != null ? coerceMarkdownField(raw.final_result) : "";
+    if (fr.trim()) parts.push(`**Result:** ${fr.trim()}`);
+    explanation = parts.join("\n\n");
+  }
+
   return {
     ...fallback,
     ...raw,
-    action: coerceMarkdownField(raw.action) || fallback?.action || "explain",
+    action,
     selected_text: coerceMarkdownField(raw.selected_text) || fallback?.selected_text || "",
     question: raw.question != null ? coerceMarkdownField(raw.question) : fallback?.question,
-    explanation: coerceMarkdownField(
-      raw.explanation ?? raw.elaboration ?? raw.answer,
-    ),
+    explanation,
     elaboration: raw.elaboration != null ? coerceMarkdownField(raw.elaboration) : undefined,
     answer: raw.answer != null ? coerceMarkdownField(raw.answer) : undefined,
     title: raw.title != null ? coerceMarkdownField(raw.title) : undefined,

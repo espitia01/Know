@@ -47,6 +47,7 @@ from ..services.llm import (
     generate_derivation_exercise,
     summarize_paper,
     summarize_paper_lite,
+    summarize_paper_deep,
     get_fast_provider,
     get_provider,
     _coerce_assumptions,
@@ -709,6 +710,56 @@ async def summary_lite(paper_id: str, body: dict = Body(default={}), user_id: st
         release_usage(token)
         logger.exception("summary_lite failed for %s", paper_id)
         raise HTTPException(status_code=500, detail="Summary preview failed. Please try again.")
+
+
+@router.post("/{paper_id}/summary-deep")
+async def summary_deep(paper_id: str, body: dict = Body(default={}), user_id: str = Depends(require_auth)):
+    """Deep summary sections on Railway (methodology, results, discussion, …)."""
+    check_feature_access(user_id, "summary")
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    paper = get_paper(paper_id, user_id=user_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    requested_model = body.get("model") if isinstance(body, dict) else None
+    if isinstance(requested_model, str) and requested_model.strip():
+        model_used = enforce_model(
+            user_id, canonicalize_model(requested_model.strip()) or requested_model.strip()
+        )
+    else:
+        model_used = resolve_analysis_model(user_id)
+
+    token = reserve_usage(
+        user_id, paper_id, "summary", model=model_used,
+        count=get_usage_multiplier(user_id),
+    )
+    try:
+        result = await summarize_paper_deep(
+            paper_prompt_text(paper),
+            model_override=model_used,
+            user_id=user_id,
+        )
+        try:
+            mutate_paper(
+                paper_id,
+                user_id,
+                lambda p: p.cached_analysis.__setitem__("summary_deep", result),
+            )
+        except Exception:
+            logger.exception("Failed to persist summary_deep for %s", paper_id)
+        return result
+    except HTTPException:
+        release_usage(token)
+        raise
+    except ValueError as exc:
+        release_usage(token)
+        logger.warning("summary_deep failed for %s: %s", paper_id, exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception:
+        release_usage(token)
+        logger.exception("summary_deep failed for %s", paper_id)
+        raise HTTPException(status_code=500, detail="Summary deep section failed. Please try again.")
 
 
 @router.post("/{paper_id}/summary")

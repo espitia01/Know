@@ -7,7 +7,10 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { api, type SelectionAnalysisResult } from "@/lib/api";
-import { normalizeSelectionResult } from "@/lib/normalizeSelectionResult";
+import {
+  normalizeSelectionResult,
+  selectionHasContent,
+} from "@/lib/normalizeSelectionResult";
 import { useStore } from "@/lib/store";
 import { useUserSettings } from "@/lib/UserSettingsContext";
 
@@ -131,11 +134,7 @@ export function useSelectionThread(paperId: string) {
           if (controller.signal.aborted) return;
 
           const result = mapApiResult(started, raw);
-          if (
-            !result.explanation?.trim() &&
-            !result.steps?.length &&
-            !result.final_result?.trim()
-          ) {
+          if (!selectionHasContent(result)) {
             throw new Error("The model didn't return a complete answer. Please try again.");
           }
 

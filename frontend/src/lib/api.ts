@@ -779,6 +779,14 @@ export const api = {
       signal: options?.signal,
     }),
 
+  getSummaryDeep: (id: string, options?: { signal?: AbortSignal; model?: string }) =>
+    request<PaperSummary>(`/api/papers/${id}/summary-deep`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(options?.model ? { model: options.model } : {}),
+      signal: options?.signal,
+    }),
+
   getSummaryStream: async (id: string, signal?: AbortSignal) => {
     const headers = await authHeaders();
     return fetch(`${API_BASE}/api/papers/${id}/summary-stream`, {

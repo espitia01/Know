@@ -186,7 +186,22 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
           className="flex items-center gap-2 rounded-[var(--radius-md)] border border-border/40 bg-muted/[0.08] px-3 py-2 text-[var(--text-xs)] text-muted-foreground/85"
         >
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-foreground/40" />
-          Loading the deep dive (methodology, results, discussion)…
+          Loading methodology, results, discussion, and limitations…
+        </div>
+      )}
+
+      {liteReady && !deepReady && !stillStreaming && storedError && (
+        <div className="rounded-[var(--radius-md)] border border-border/50 bg-muted/[0.08] px-3 py-2.5 text-[var(--text-xs)] text-muted-foreground">
+          <p>{storedError}</p>
+          <button
+            type="button"
+            className="mt-2 text-[var(--text-xs)] font-medium text-foreground underline-offset-2 hover:underline"
+            onClick={() => {
+              void runSummaryStream();
+            }}
+          >
+            Retry deep sections
+          </button>
         </div>
       )}
 
