@@ -55,7 +55,13 @@ interface SelectionResultPanelProps {
   paperId?: string;
 }
 
-function FollowUpThreadList({ followups }: { followups: SelectionAnalysisResult[] }) {
+function FollowUpThreadList({
+  followups,
+  onDelete,
+}: {
+  followups: SelectionAnalysisResult[];
+  onDelete?: (followup: SelectionAnalysisResult) => void;
+}) {
   const prevCount = useRef(0);
   const [openKey, setOpenKey] = useState<string | null>(null);
 
@@ -93,22 +99,46 @@ function FollowUpThreadList({ followups }: { followups: SelectionAnalysisResult[
         const open = openKey === k;
         const q = f.question || f.selected_text;
         return (
-          <AnalysisAccordionRow
-            key={k}
-            open={open}
-            onOpenChange={(next) => setOpenKey(next ? k : null)}
-            title={q}
-            leading={
-              <span
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-muted/35 text-[10px] font-medium tabular-nums text-muted-foreground"
-                aria-hidden
+          <div key={k} className="group/follow relative">
+            <AnalysisAccordionRow
+              open={open}
+              onOpenChange={(next) => setOpenKey(next ? k : null)}
+              title={q}
+              leading={
+                <span
+                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-muted/35 text-[10px] font-medium tabular-nums text-muted-foreground"
+                  aria-hidden
+                >
+                  {i + 1}
+                </span>
+              }
+            >
+              <ResultCard result={f} hideHeader hideQuote />
+            </AnalysisAccordionRow>
+            {onDelete && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete(f);
+                }}
+                aria-label="Delete this follow-up"
+                title="Delete follow-up"
+                className="absolute right-2 top-2 rounded-md p-1.5 text-muted-foreground/55 opacity-0 transition-opacity duration-150 hover:bg-destructive/15 hover:text-destructive focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring group-hover/follow:opacity-100 group-focus-within/follow:opacity-100"
               >
-                {i + 1}
-              </span>
-            }
-          >
-            <ResultCard result={f} hideHeader hideQuote />
-          </AnalysisAccordionRow>
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={1.8}
+                  aria-hidden
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
         );
       })}
     </div>
@@ -142,6 +172,14 @@ export function SelectionResultPanel({
     removeSelectionFromHistoryForPaper(paperId, root);
     void api
       .deleteSelection(paperId, root.selected_text ?? "", root.action ?? "explain")
+      .catch(() => {});
+  };
+
+  const handleDeleteFollowUp = (followup: SelectionAnalysisResult) => {
+    if (!paperId) return;
+    removeSelectionFromHistoryForPaper(paperId, followup);
+    void api
+      .deleteSelection(paperId, followup.selected_text ?? "", followup.action ?? "followup")
       .catch(() => {});
   };
 
@@ -209,7 +247,10 @@ export function SelectionResultPanel({
       {t.followups.length > 0 && (
         <div>
           <SectionHeader title="Follow-ups" count={t.followups.length} eyebrow className="mb-2" />
-          <FollowUpThreadList followups={t.followups} />
+          <FollowUpThreadList
+            followups={t.followups}
+            onDelete={paperId ? handleDeleteFollowUp : undefined}
+          />
         </div>
       )}
     </div>

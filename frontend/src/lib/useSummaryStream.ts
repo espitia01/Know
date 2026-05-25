@@ -108,10 +108,13 @@ export function useSummaryStream(paperId: string) {
 
   const finishSummary = useCallback(
     (pid: string, summary: PaperSummaryDeep) => {
+      // The server forces `model`/`created_at`; never trust LLM-filled
+      // values (Mistral has been seen hallucinating phrases like
+      // "arXiv v1 + peer-reviewed condensation" into the model slot).
       const withMeta: PaperSummary = {
         ...summary,
-        model: summary.model ?? modelRef.current,
-        created_at: summary.created_at ?? Date.now(),
+        model: modelRef.current,
+        created_at: Date.now(),
       };
       mergeIntoPaperSlot(pid, withMeta);
       const merged = useStore.getState().summaryByPaper[pid] ?? withMeta;

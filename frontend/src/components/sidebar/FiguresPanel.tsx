@@ -430,17 +430,25 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           }
         };
 
+        // Stick to one narrative field for the duration of the stream
+        // so we don't flicker between a long description and a short
+        // answer mid-render. With a question, prefer `answer`; without
+        // one, prefer `description`. Whichever field we lock onto stays
+        // the source until the stream ends.
+        const primaryField: "answer" | "description" = q ? "answer" : "description";
         while (true) {
           if (controller.signal.aborted) { await reader.cancel(); break; }
           const { done, value } = await reader.read();
           if (done) break;
           jsonAccum += decoder.decode(value, { stream: true });
-          // Try to parse the partial JSON document; pull the most-
-          // useful narrative field for the visible assistant bubble.
           const partial = await parsePartialJson(jsonAccum);
           const obj = (partial.value as Partial<FigureAnalysis> | undefined) ?? null;
           if (obj) {
-            const next = (obj.answer ?? obj.description ?? "") as string;
+            // Prefer the locked field; fall back to whichever field the
+            // model actually populated first if the primary is still empty.
+            const fallback =
+              primaryField === "answer" ? obj.description : obj.answer;
+            const next = ((obj[primaryField] ?? fallback) ?? "") as string;
             if (next && next !== lastDisplay) {
               lastDisplay = next;
               scheduleDisplay();
@@ -459,7 +467,11 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         // persisted in cached_analysis.figure_analyses.
         const finalParsed = await parsePartialJson(jsonAccum);
         const finalObj = (finalParsed.value as Partial<FigureAnalysis> | undefined) ?? {};
-        const finalText = (finalObj.answer ?? finalObj.description ?? lastDisplay ?? "") as string;
+        // Final commit prefers the same field we streamed under so we
+        // don't swap to a shorter sibling once the stream closes.
+        const finalText = ((q
+          ? (finalObj.answer ?? finalObj.description)
+          : (finalObj.description ?? finalObj.answer)) ?? lastDisplay ?? "") as string;
         if (!finalText.trim()) {
           throw new Error(
             "The model didn't return a complete figure analysis. Please try again.",

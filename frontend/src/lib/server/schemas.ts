@@ -116,9 +116,12 @@ const KeyFigure = z.object({
     .describe("Markdown description of what the figure/table shows and why it matters."),
 });
 
+// Note: `model` and `created_at` are intentionally NOT in the streaming
+// schemas. Earlier iterations exposed them as optional fields the LLM
+// could fill, and Mistral hallucinated values like "arXiv v1 + peer-
+// reviewed condensation" into the `model` slot. Server-side metadata
+// belongs to the route, not the model.
 export const PaperSummaryLiteSchema = z.object({
-  model: z.string().optional(),
-  created_at: z.number().optional(),
   overview: z.string().describe("3–5 sentence high-level overview of what the paper does and why it matters."),
   tl_dr: z
     .string()
@@ -136,8 +139,6 @@ export const PaperSummaryLiteSchema = z.object({
 export type PaperSummaryLite = z.infer<typeof PaperSummaryLiteSchema>;
 
 export const PaperSummaryDeepSchema = z.object({
-  model: z.string().optional(),
-  created_at: z.number().optional(),
   overview: z
     .string()
     .optional()

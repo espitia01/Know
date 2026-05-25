@@ -151,7 +151,9 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
       question,
       model: followUpModelOverride ?? undefined,
     });
-    setFollowUpModelOverride(null);
+    // Keep the override across follow-ups in this thread — once the
+    // user picks Haiku for follow-ups they expect the next one to
+    // stay on Haiku, not snap back to the default fast model.
   };
 
   return (
