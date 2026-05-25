@@ -1015,6 +1015,11 @@ def _coerce_qa_item(raw: dict, fallback_question: str | None = None) -> dict | N
 def _parse_qa_payload(raw: str, questions: list[str]) -> dict:
     """Parse batch Q&A JSON with prose + partial-structure fallbacks."""
     parsed = _safe_parse_json(raw)
+    if not parsed:
+        repaired = _try_fence_repair_json(raw)
+        if repaired:
+            parsed = _normalize_latex_delimiters(repaired)
+
     items_raw: list = []
     if isinstance(parsed, dict):
         raw_items = parsed.get("items")
@@ -1038,7 +1043,9 @@ def _parse_qa_payload(raw: str, questions: list[str]) -> dict:
 
     if not items or not any(_coerce_markdown_field(it.get("answer")).strip() for it in items):
         text = _coerce_markdown_field(raw).strip()
-        if text and not text.lstrip().startswith("{"):
+        # When JSON repair failed (common with truncated LLM output), fall back
+        # to treating the whole model response as a single markdown answer.
+        if len(text) > 20:
             label = questions[0] if len(questions) == 1 else " / ".join(questions[:3])
             return {"items": [{"question": label, "answer": text}]}
         raise ValueError("Q&A returned empty payload")

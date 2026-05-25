@@ -57,6 +57,7 @@ from ..services.llm import (
     _resize_image_b64,
     _normalize_latex_delimiters,
     _safe_parse_json,
+    LLMProviderError,
 )
 from ..services.pdf_parser import (
     append_capped,
@@ -644,7 +645,11 @@ async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)
     except ValueError as exc:
         release_usage(token)
         logger.warning("Q&A 503 for paper %s: %s", paper_id, exc)
-        raise HTTPException(status_code=503, detail="Q&A service temporarily unavailable.")
+        raise HTTPException(status_code=503, detail=str(exc) or "Q&A service temporarily unavailable.")
+    except LLMProviderError as exc:
+        release_usage(token)
+        logger.warning("Q&A provider error for paper %s: %s", paper_id, exc.message)
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
     except HTTPException:
         release_usage(token)
         raise

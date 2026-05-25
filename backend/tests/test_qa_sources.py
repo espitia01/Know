@@ -85,8 +85,19 @@ def test_answer_questions_sanitizes_invalid_sources():
     assert resp.items[0].sources[0].paper_id == "p1"
 
 
+def test_parse_qa_payload_uses_prose_when_json_empty():
+    raw = (
+        "The paper introduces a variational approach to exciton-phonon coupling "
+        "with improved numerical stability across temperature ranges."
+    )
+    result = llm._parse_qa_payload(raw, ["What is the model?"])
+    assert "variational" in result["items"][0]["answer"].lower()
+
+
 def test_parse_qa_payload_raises_on_empty():
     import pytest
 
     with pytest.raises(ValueError, match="empty payload"):
         llm._parse_qa_payload('{"items": []}', ["What is this?"])
+    with pytest.raises(ValueError, match="empty payload"):
+        llm._parse_qa_payload("{}", ["What is this?"])
