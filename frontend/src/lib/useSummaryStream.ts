@@ -1,16 +1,15 @@
 "use client";
 
 /**
- * Summary streaming on Railway.
+ * Summary generation on Railway — batch-first for reliability.
  *
- * Two SSE calls in sequence:
- *   1. summary-lite-stream — fast preview (overview, tl_dr, key contributions, equations)
- *   2. summary-deep-stream — methodology / results / discussion / limitations / etc.
+ * 1. POST /summary-lite  → merge immediately (overview appears)
+ * 2. POST /summary-deep  → merge (methodology / results / discussion)
  *
- * Each emits progressive `object` events the client merges into the
- * per-paper summary slot, so users see fields fill in token-by-token
- * (ChatGPT-style). On any 405 (stale Railway deploy) we fall back to
- * the legacy POST /summary which has been deployed forever.
+ * On 405/404 (stale deploy) or batch failure → legacy POST /summary.
+ *
+ * Aborts in-flight work when the user switches papers so multiple
+ * concurrent LLM calls + KaTeX re-renders don't freeze the tab.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -20,7 +19,6 @@ import {
   hasSummaryOverview,
   summaryIsComplete,
 } from "@/lib/summaryState";
-import { consumeObjectSse } from "@/lib/objectSse";
 import { useStore } from "@/lib/store";
 import { useUserSettings } from "@/lib/UserSettingsContext";
 import {
@@ -29,12 +27,16 @@ import {
   summaryStreamStarters,
   markRequestEnd,
   markRequestStart,
+  markSummaryAttemptFailed,
   clearProgressStart,
 } from "@/lib/analysisState";
 
 function describeError(error: unknown): string {
   if (!error) return "Summary generation failed. Try again.";
   const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("OpenAI returned an empty response")) {
+    return "The model returned an empty response. Try a different model in Settings, or retry.";
+  }
   try {
     const parsed = JSON.parse(message) as {
       detail?: { code?: string; message?: string } | string;
@@ -50,15 +52,15 @@ function describeError(error: unknown): string {
   return message || "Summary generation failed. Try again.";
 }
 
-function isMethodNotAllowed(err: unknown): boolean {
+function isUnavailableEndpoint(err: unknown): boolean {
   if (!err) return false;
   const msg = err instanceof Error ? err.message : String(err);
   return (
     msg.includes("Method Not Allowed") ||
     msg.includes("405") ||
+    msg.includes("404") ||
     msg.includes("Backend rejected the request method") ||
-    msg.includes("Not Found") ||
-    msg.includes("404")
+    msg.includes("Not Found")
   );
 }
 
@@ -78,55 +80,31 @@ function mergeSummary(
   return dropNulls({ ...(prev ?? {}), ...patch }) as PaperSummary;
 }
 
-async function streamSummaryPhase(
-  paperId: string,
-  phase: "lite" | "deep",
-  model: string,
-  signal: AbortSignal,
-  onObject: (partial: Partial<PaperSummary>) => void,
-): Promise<Partial<PaperSummary>> {
-  const fetcher = phase === "lite" ? api.streamSummaryLite : api.streamSummaryDeep;
-  const res = await fetcher(paperId, { signal, model });
-  if (!res.ok || !res.body) {
-    let message = `Summary stream failed (${res.status})`;
-    const detail = await res.text().catch(() => "");
-    try {
-      const parsed = JSON.parse(detail) as { detail?: { message?: string } | string };
-      const m =
-        typeof parsed.detail === "string" ? parsed.detail : parsed.detail?.message;
-      if (m) message = m;
-    } catch {
-      if (detail) message = detail;
+/** Shallow-enough equality to skip store writes during streaming merges. */
+function summaryPatchEqual(
+  prev: PaperSummary | null,
+  next: PaperSummary,
+): boolean {
+  if (!prev) return false;
+  for (const key of Object.keys(next) as (keyof PaperSummary)[]) {
+    const a = prev[key];
+    const b = next[key];
+    if (Array.isArray(a) && Array.isArray(b)) {
+      if (a.length !== b.length) return false;
+      if (a.some((v, i) => v !== b[i])) return false;
+      continue;
     }
-    if (res.status === 405 || res.status === 404) {
-      throw new Error(`Method Not Allowed (${res.status}): ${message}`);
-    }
-    throw new Error(message);
+    if (a !== b) return false;
   }
-  let last: Partial<PaperSummary> = {};
-  let streamError: string | null = null;
-  await consumeObjectSse<Partial<PaperSummary>>(
-    res.body.getReader(),
-    signal,
-    {
-      onObject: (partial) => {
-        last = partial;
-        onObject(partial);
-      },
-      onDone: (final) => {
-        last = final ?? last;
-      },
-      onError: (msg) => {
-        streamError = msg;
-      },
-    },
-  );
-  if (streamError) throw new Error(streamError);
-  return last;
+  return true;
 }
 
 export function useSummaryStream(paperId: string) {
   const { analysisModel, fastModel } = useUserSettings();
+  const analysisModelRef = useRef(analysisModel);
+  const fastModelRef = useRef(fastModel);
+  analysisModelRef.current = analysisModel;
+  fastModelRef.current = fastModel;
 
   const setSummaryForPaper = useStore((s) => s.setSummaryForPaper);
   const setSummaryError = useStore((s) => s.setSummaryError);
@@ -134,27 +112,52 @@ export function useSummaryStream(paperId: string) {
   const updateCachedAnalysis = useStore((s) => s.updateCachedAnalysis);
 
   const abortRef = useRef<AbortController | null>(null);
-  const autoRanRef = useRef(false);
-  const autoRanForRef = useRef<string | null>(null);
+  const inflightForRef = useRef<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Abort when switching papers or unmounting — prevents N concurrent
+  // summary calls + KaTeX re-renders from freezing the tab.
   useEffect(() => {
-    if (autoRanForRef.current !== paperId) {
-      autoRanRef.current = false;
-      autoRanForRef.current = paperId;
-    }
+    return () => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+      if (inflightForRef.current) {
+        markRequestEnd(inflightForRef.current, "summary");
+        activeSummaryStreamStoppers.delete(inflightForRef.current);
+        inflightForRef.current = null;
+      }
+    };
   }, [paperId]);
 
   const mergeIntoPaperSlot = useCallback(
     (pid: string, patch: Partial<PaperSummary>) => {
       const prev = useStore.getState().summaryByPaper[pid] ?? null;
       const next = mergeSummary(prev, patch);
-      const prevJson = prev ? JSON.stringify(prev) : "";
-      const nextJson = JSON.stringify(next);
-      if (prevJson === nextJson) return;
+      if (summaryPatchEqual(prev, next as PaperSummary)) return;
       setSummaryForPaper(pid, next as PaperSummary);
     },
     [setSummaryForPaper],
+  );
+
+  const runLegacyFallback = useCallback(
+    async (pid: string, controller: AbortController) => {
+      const full = await api.getSummary(pid, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      if (!hasSummaryOverview(full)) {
+        throw new Error("Summary returned empty. Try again.");
+      }
+      mergeIntoPaperSlot(pid, {
+        ...(dropNulls(full as Record<string, unknown>) as Partial<PaperSummary>),
+        model: full.model ?? analysisModelRef.current,
+        created_at: Date.now(),
+      });
+      updateCachedAnalysis(pid, {
+        summary: useStore.getState().summaryByPaper[pid] ?? (full as PaperSummary),
+        summary_lite: full as PaperSummary,
+        summary_deep: hasSummaryDeepBody(full) ? (full as PaperSummary) : undefined,
+      });
+    },
+    [mergeIntoPaperSlot, updateCachedAnalysis],
   );
 
   const runGenerate = useCallback(
@@ -162,41 +165,27 @@ export function useSummaryStream(paperId: string) {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
+      inflightForRef.current = pid;
       setIsLoading(true);
       setSummaryLoadingForPaper(pid, true);
       setSummaryError(pid, null);
       markRequestStart(pid, "summary");
       activeSummaryStreamStoppers.set(pid, () => controller.abort());
 
-      const runLegacyFallback = async () => {
-        const full = await api.getSummary(pid);
-        if (controller.signal.aborted) return;
-        if (!hasSummaryOverview(full)) {
-          throw new Error("Summary returned empty. Try again.");
-        }
-        mergeIntoPaperSlot(pid, {
-          ...(dropNulls(full as Record<string, unknown>) as Partial<PaperSummary>),
-          model: full.model ?? analysisModel,
-          created_at: Date.now(),
-        });
-        updateCachedAnalysis(pid, {
-          summary: useStore.getState().summaryByPaper[pid] ?? (full as PaperSummary),
-          summary_lite: full as PaperSummary,
-          summary_deep: hasSummaryDeepBody(full) ? (full as PaperSummary) : undefined,
-        });
-      };
+      const fast = fastModelRef.current;
+      const analysis = analysisModelRef.current;
 
       try {
         if (phase === "full") {
-          let liteFinal: Partial<PaperSummary> = {};
+          let lite: PaperSummary;
           try {
-            liteFinal = await streamSummaryPhase(
-              pid, "lite", fastModel, controller.signal,
-              (partial) => mergeIntoPaperSlot(pid, partial),
-            );
+            lite = await api.getSummaryLite(pid, {
+              signal: controller.signal,
+              model: fast,
+            });
           } catch (err) {
-            if (isMethodNotAllowed(err)) {
-              await runLegacyFallback();
+            if (isUnavailableEndpoint(err)) {
+              await runLegacyFallback(pid, controller);
               setSummaryError(pid, null);
               autoAnalyzedPapers.add(`${pid}:summary`);
               return;
@@ -204,24 +193,25 @@ export function useSummaryStream(paperId: string) {
             throw err;
           }
           if (controller.signal.aborted) return;
-          if (!hasSummaryOverview(liteFinal)) {
+          if (!hasSummaryOverview(lite)) {
             throw new Error("Summary preview returned empty. Try again.");
           }
+          mergeIntoPaperSlot(pid, dropNulls(lite as Record<string, unknown>));
           updateCachedAnalysis(pid, {
-            summary: useStore.getState().summaryByPaper[pid] ?? (liteFinal as PaperSummary),
-            summary_lite: liteFinal as PaperSummary,
+            summary: useStore.getState().summaryByPaper[pid] ?? (lite as PaperSummary),
+            summary_lite: lite as PaperSummary,
           });
         }
 
-        let deepFinal: Partial<PaperSummary> = {};
+        let deep: PaperSummary;
         try {
-          deepFinal = await streamSummaryPhase(
-            pid, "deep", analysisModel, controller.signal,
-            (partial) => mergeIntoPaperSlot(pid, partial),
-          );
+          deep = await api.getSummaryDeep(pid, {
+            signal: controller.signal,
+            model: analysis,
+          });
         } catch (err) {
-          if (isMethodNotAllowed(err)) {
-            await runLegacyFallback();
+          if (isUnavailableEndpoint(err)) {
+            await runLegacyFallback(pid, controller);
             setSummaryError(pid, null);
             autoAnalyzedPapers.add(`${pid}:summary`);
             return;
@@ -229,23 +219,24 @@ export function useSummaryStream(paperId: string) {
           throw err;
         }
         if (controller.signal.aborted) return;
-        if (!hasSummaryDeepBody(deepFinal)) {
+        if (!hasSummaryDeepBody(deep)) {
           throw new Error("Summary deep section returned empty. Try again.");
         }
 
         mergeIntoPaperSlot(pid, {
-          ...(dropNulls(deepFinal as Record<string, unknown>) as Partial<PaperSummary>),
-          model: deepFinal.model ?? analysisModel,
+          ...(dropNulls(deep as Record<string, unknown>) as Partial<PaperSummary>),
+          model: deep.model ?? analysis,
           created_at: Date.now(),
         });
         updateCachedAnalysis(pid, {
-          summary: useStore.getState().summaryByPaper[pid] ?? (deepFinal as PaperSummary),
-          summary_deep: deepFinal as PaperSummary,
+          summary: useStore.getState().summaryByPaper[pid] ?? (deep as PaperSummary),
+          summary_deep: deep as PaperSummary,
         });
         setSummaryError(pid, null);
         autoAnalyzedPapers.add(`${pid}:summary`);
       } catch (e) {
         if (controller.signal.aborted) return;
+        markSummaryAttemptFailed(pid);
         const existing = useStore.getState().summaryByPaper[pid];
         const msg = describeError(e);
         if (hasSummaryOverview(existing) && !hasSummaryDeepBody(existing)) {
@@ -257,6 +248,9 @@ export function useSummaryStream(paperId: string) {
         if (abortRef.current === controller) {
           abortRef.current = null;
         }
+        if (inflightForRef.current === pid) {
+          inflightForRef.current = null;
+        }
         setIsLoading(false);
         setSummaryLoadingForPaper(pid, false);
         markRequestEnd(pid, "summary");
@@ -265,9 +259,8 @@ export function useSummaryStream(paperId: string) {
       }
     },
     [
-      analysisModel,
-      fastModel,
       mergeIntoPaperSlot,
+      runLegacyFallback,
       setSummaryError,
       setSummaryLoadingForPaper,
       updateCachedAnalysis,
@@ -286,15 +279,6 @@ export function useSummaryStream(paperId: string) {
     const phase = hasSummaryOverview(existing) ? "deep" : "full";
     clearProgressStart(pid, "summary");
     void runGenerate(pid, phase);
-  }, [paperId, isLoading, runGenerate]);
-
-  useEffect(() => {
-    if (autoRanRef.current || isLoading) return;
-    const existing = useStore.getState().summaryByPaper[paperId] ?? null;
-    if (hasSummaryOverview(existing) && !hasSummaryDeepBody(existing)) {
-      autoRanRef.current = true;
-      void runGenerate(paperId, "deep");
-    }
   }, [paperId, isLoading, runGenerate]);
 
   useEffect(() => {

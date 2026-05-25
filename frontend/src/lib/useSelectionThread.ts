@@ -8,7 +8,7 @@
  * (ChatGPT-style). On `done`, the final markdown is persisted.
  */
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type SelectionAnalysisResult } from "@/lib/api";
 import { consumeSelectionSse } from "@/lib/selectionSse";
 import { useStore } from "@/lib/store";
@@ -58,6 +58,14 @@ export function useSelectionThread(paperId: string) {
     setIsLoading(false);
     setSelectionLoadingForPaper(paperId, false);
   }, [paperId, setSelectionLoadingForPaper]);
+
+  // Abort in-flight selection when switching papers.
+  useEffect(() => {
+    return () => {
+      inflightRef.current?.abort();
+      inflightRef.current = null;
+    };
+  }, [paperId]);
 
   const start = useCallback(
     (args: StartArgs) => {

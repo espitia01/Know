@@ -151,7 +151,13 @@ export function syncAutoAnalyzeGuardsFromCache(
     autoAnalyzedPapers.delete(`${paperId}:assumptions`);
   }
 
-  const hasSummary = !!(cache.summary || sessionCache.summary);
+  const hasSummary =
+    !!(cache.summary?.methodology && String(cache.summary.methodology).trim()) ||
+    !!(sessionCache.summary?.methodology && String(sessionCache.summary.methodology).trim()) ||
+    !!(cache.summary_deep?.methodology && String(cache.summary_deep.methodology).trim()) ||
+    !!(sessionCache.summary_deep?.methodology && String(sessionCache.summary_deep.methodology).trim()) ||
+    !!(cache.summary?.overview && cache.summary?.methodology) ||
+    !!(sessionCache.summary?.overview && sessionCache.summary?.methodology);
   if (hasSummary) {
     autoAnalyzedPapers.add(`${paperId}:summary`);
   } else {
@@ -164,6 +170,18 @@ export function allowAutoAnalyzeRetry(paperId: string) {
   autoAnalyzedPapers.delete(`${paperId}:preReading`);
   autoAnalyzedPapers.delete(`${paperId}:assumptions`);
   autoAnalyzedPapers.delete(`${paperId}:summary`);
+}
+
+/** Last auto-summary failure per paper — suppress retry storms for 60s. */
+export const summaryAutoRetryCooldownUntil = new Map<string, number>();
+
+export function summaryCooldownActive(paperId: string): boolean {
+  const until = summaryAutoRetryCooldownUntil.get(paperId) ?? 0;
+  return Date.now() < until;
+}
+
+export function markSummaryAttemptFailed(paperId: string) {
+  summaryAutoRetryCooldownUntil.set(paperId, Date.now() + 60_000);
 }
 
 /** Abort an in-flight summary stream for a paper (e.g. when switching away). */

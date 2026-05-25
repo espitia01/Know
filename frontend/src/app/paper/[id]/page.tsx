@@ -55,6 +55,8 @@ import {
   preReadingAutoRetryCooldownUntil,
   markAssumptionsAttemptFailed,
   assumptionsCooldownActive,
+  abortActiveSummaryStream,
+  summaryCooldownActive,
 } from "@/lib/analysisState";
 import { useSummaryStream, kickoffSummaryStream } from "@/lib/useSummaryStream";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
@@ -1213,7 +1215,8 @@ function PaperContent() {
     if (
       !summaryComplete &&
       canAccess(tierUser?.tier || "free", "summary") &&
-      !hasActiveRequest(pid, "summary")
+      !hasActiveRequest(pid, "summary") &&
+      !summaryCooldownActive(pid)
     ) {
       if (summaryKickoffForRef.current !== pid) {
         summaryKickoffForRef.current = pid;
@@ -1250,10 +1253,10 @@ function PaperContent() {
 
   const handleSwitchPaper = useCallback((id: string) => {
     if (id === activePaperId && id === paperId) return;
-    // Track A+B: per-paper state means no global reset on switch, and
-    // streams for the previous paper keep running into their own slot.
-    // We only sync auto-analyze guards so a paper whose first-pass
-    // Prepare quietly failed can retry on re-entry.
+    // Stop in-flight summary for the paper we're leaving — otherwise
+    // multiple concurrent LLM streams + KaTeX re-renders freeze the tab.
+    abortActiveSummaryStream(activePaperId);
+    selectionThread.abort();
     setSelection(null);
     const nextCache = useStore.getState().papersById[id]?.cached_analysis ?? {};
     syncAutoAnalyzeGuardsFromCache(id, nextCache, nextCache);
@@ -1267,7 +1270,7 @@ function PaperContent() {
     } else {
       pendingNavRef.current = null;
     }
-  }, [activePaperId, paperId, router]);
+  }, [activePaperId, paperId, router, selectionThread]);
 
   const handleAddPaper = useCallback((id: string, title: string) => {
     // Register the paper in the multi-paper session tab bar…

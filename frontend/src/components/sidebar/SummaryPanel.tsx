@@ -13,6 +13,7 @@ import {
   clearProgressStart,
   hasActiveRequest,
   summaryStreamStarters,
+  summaryAutoRetryCooldownUntil,
 } from "@/lib/analysisState";
 import { ensureDisplayMath, firstSentence } from "@/lib/text";
 interface SummaryPanelProps {
@@ -82,6 +83,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   const runSummaryStream = useCallback(() => {
     if (hasActiveRequest(paperId, "summary")) return;
     setManualError(null);
+    summaryAutoRetryCooldownUntil.delete(paperId);
     clearProgressStart(paperId, "summary");
     const start = summaryStreamStarters.get(paperId);
     if (!start) {

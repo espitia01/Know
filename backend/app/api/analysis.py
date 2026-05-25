@@ -845,6 +845,7 @@ async def summary_deep(paper_id: str, body: dict = Body(default={}), user_id: st
 
 @router.post("/{paper_id}/summary")
 async def summary(paper_id: str, user_id: str = Depends(require_auth)):
+    """Legacy one-shot summary — runs lite + deep sequentially."""
     check_feature_access(user_id, "summary")
     _validate_id(paper_id, "paper_id")
     _verify_paper_owner(paper_id, user_id)
@@ -852,40 +853,46 @@ async def summary(paper_id: str, user_id: str = Depends(require_auth)):
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
+    fast_model = resolve_fast_model(user_id)
+    analysis_model = resolve_analysis_model(user_id)
     token = reserve_usage(
-        user_id, paper_id, "api_call", model=resolve_analysis_model(user_id)
+        user_id, paper_id, "summary", model=analysis_model,
+        count=get_usage_multiplier(user_id),
     )
-    summary_payload = None
+    merged: dict = {}
+    text = paper_prompt_text(paper)
     try:
-        result = await summarize_paper(paper_prompt_text(paper), user_id=user_id)
-        if not result or not result.get("overview"):
+        lite = await summarize_paper_lite(text, model_override=fast_model, user_id=user_id)
+        if not lite.get("overview"):
             release_usage(token)
-            raise HTTPException(status_code=502, detail="Summary generation returned empty results. Please retry.")
-        summary_payload = result
-        return result
-    except ValueError as exc:
-        release_usage(token)
-        logger.warning("Analysis endpoint 503 for paper %s: %s", paper_id, exc)
-        raise HTTPException(status_code=503, detail="Service temporarily unavailable.")
+            raise HTTPException(status_code=502, detail="Summary preview returned empty.")
+        merged.update(lite)
+        deep = await summarize_paper_deep(text, model_override=analysis_model, user_id=user_id)
+        if not _coerce_markdown_field(deep.get("methodology")).strip():
+            release_usage(token)
+            raise HTTPException(status_code=502, detail="Summary deep section returned empty.")
+        merged.update(deep)
+        merged["model"] = deep.get("model") or analysis_model
+        try:
+            def _persist(p):
+                p.cached_analysis["summary_lite"] = lite
+                p.cached_analysis["summary_deep"] = deep
+                p.cached_analysis["summary"] = {**(p.cached_analysis.get("summary") or {}), **merged}
+            mutate_paper(paper_id, user_id, _persist)
+        except Exception:
+            logger.exception("Failed to persist summary for %s", paper_id)
+        return merged
     except HTTPException:
         release_usage(token)
         raise
+    except ValueError as exc:
+        release_usage(token)
+        logger.warning("summary failed for %s: %s", paper_id, exc)
+        raise HTTPException(status_code=502, detail=str(exc))
     except Exception:
         release_usage(token)
         logger.exception("Summary generation failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Summary generation failed. Please try again.")
-    finally:
-        if summary_payload is not None:
-            try:
-                # Per F-HYDRATION: keep completed summaries durable even if
-                # response serialization or a client disconnect follows.
-                mutate_paper(
-                    paper_id,
-                    user_id,
-                    lambda p: p.cached_analysis.__setitem__("summary", summary_payload),
-                )
-            except Exception:
-                logger.exception("Failed to persist summary for %s", paper_id)
 
 
 # /{paper_id}/summary-stream now runs on Next.js + AI SDK at the same

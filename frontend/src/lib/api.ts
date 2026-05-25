@@ -771,11 +771,12 @@ export const api = {
       body: JSON.stringify({}),
     }),
 
-  getSummary: (id: string) =>
+  getSummary: (id: string, options?: { signal?: AbortSignal }) =>
     request<PaperSummary>(`/api/papers/${id}/summary`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
+      signal: options?.signal,
     }),
 
   /** Fast summary preview on Railway (avoids Vercel 60s Hobby timeout). */
