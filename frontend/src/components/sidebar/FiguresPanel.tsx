@@ -14,6 +14,7 @@ import { useStore } from "@/lib/store";
 // renders via Streamdown.
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
 import { CardMeta } from "@/components/analysis/CardMeta";
+import { ModelPill } from "@/components/analysis/ModelPill";
 import { ModelOverridePill } from "@/components/analysis/ModelOverridePill";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { useUserSettings } from "@/lib/UserSettingsContext";
@@ -26,6 +27,7 @@ interface ChatMessage {
   role: "user" | "assistant";
   text: string;
   streaming?: boolean;
+  model?: string;
 }
 
 function chatsFromFigureAnalyses(analyses: FigureAnalysis[] | undefined): Record<string, ChatMessage[]> {
@@ -37,7 +39,7 @@ function chatsFromFigureAnalyses(analyses: FigureAnalysis[] | undefined): Record
     const q = (a.question || "").trim();
     out[fid].push({ role: "user", text: q || "Analyze this figure" });
     const body = ((a.description || a.answer) || "").trim();
-    out[fid].push({ role: "assistant", text: body });
+    out[fid].push({ role: "assistant", text: body, model: a.model });
   }
   return out;
 }
@@ -407,7 +409,10 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
         // Add a streaming assistant message that we'll update in place.
         setConversations((prev) => ({
           ...prev,
-          [figId]: [...(prev[figId] || []), { role: "assistant", text: "", streaming: true }],
+          [figId]: [
+            ...(prev[figId] || []),
+            { role: "assistant", text: "", streaming: true, model: resolvedModel },
+          ],
         }));
 
         const flushDisplay = () => {
@@ -495,7 +500,12 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           const msgs = [...(prev[figId] || [])];
           const lastIdx = msgs.length - 1;
           if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
-            msgs[lastIdx] = { role: "assistant", text: finalText, streaming: false };
+            msgs[lastIdx] = {
+              role: "assistant",
+              text: finalText,
+              streaming: false,
+              model: headerModel ?? resolvedModel,
+            };
           }
           return { ...prev, [figId]: msgs };
         });
@@ -698,7 +708,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
                   </div>
                 ) : (
                   <div key={i} className="flex justify-start w-full">
-                    <div className="w-full max-w-[95%] rounded-lg border border-border/60 bg-card/30 px-3 py-2.5">
+                    <div className="w-full max-w-[95%] rounded-lg border border-border/60 bg-card/30 px-3 py-2.5 space-y-2">
                       {msg.streaming && !msg.text && (
                         <div className="space-y-2">
                           <div className="w-full max-w-xs">
@@ -711,6 +721,11 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
                         <StreamingMarkdown streaming={msg.streaming}>
                           {msg.text}
                         </StreamingMarkdown>
+                      )}
+                      {msg.model && (
+                        <div className="flex justify-end">
+                          <ModelPill slug={msg.model} pending={msg.streaming} />
+                        </div>
                       )}
                     </div>
                   </div>

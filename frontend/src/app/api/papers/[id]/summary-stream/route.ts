@@ -1,12 +1,9 @@
 /**
- * Migrated summary-stream route (Stage 3 — replaces Python's
- * /api/papers/{id}/summary-stream for authenticated callers).
+ * Migrated summary-stream route — replaces Python's
+ * /api/papers/{id}/summary-stream for authenticated callers.
  *
- * Uses the user's Settings analysis model (via internal model prefs):
- * pull paper context → reserve usage → streamObject(PaperSummary). On
- * finish, persist the assembled summary into cached_analysis.summary
- * via the internal upsert (replaces the old `event.type === "done"`
- * branch that wrote it from Python).
+ * Pre-flight peek + text-delta passthrough is shared with the
+ * other migrated streaming routes via `buildStreamObjectResponse`.
  */
 
 import { NextResponse } from "next/server";
@@ -35,6 +32,10 @@ import {
   cachedUserMessages,
   providerOptionsForSlug,
 } from "@/lib/server/promptCache";
+import {
+  buildStreamObjectResponse,
+  isStreamErrorPayload,
+} from "@/lib/server/streamObjectResponse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,24 +47,22 @@ const PAPER_ID_RE = /^[a-zA-Z0-9_-]+$/;
 const DEPLOY_SHA =
   (process.env.VERCEL_GIT_COMMIT_SHA || process.env.COMMIT_SHA || "dev").slice(0, 12);
 
-function withDeployHeader(res: Response): Response {
-  try {
-    res.headers.set("X-Know-Deploy", DEPLOY_SHA);
-  } catch {
-    /* immutable headers — best-effort */
-  }
-  return res;
-}
-
 function jsonError(
   status: number,
   code: string,
   message: string,
   extra: Record<string, unknown> = {},
 ): Response {
-  return withDeployHeader(
-    NextResponse.json({ detail: { code, message, deploy: DEPLOY_SHA, ...extra } }, { status }),
+  const res = NextResponse.json(
+    { detail: { code, message, deploy: DEPLOY_SHA, ...extra } },
+    { status },
   );
+  try {
+    res.headers.set("X-Know-Deploy", DEPLOY_SHA);
+  } catch {
+    /* immutable headers — best-effort */
+  }
+  return res;
 }
 
 function parseInternalDetail(detail: unknown): Record<string, unknown> {
@@ -331,139 +330,21 @@ export async function POST(
       return jsonError(502, "provider_error", message, { model: analysisModel });
     }
 
-    // Pre-flight using the full event stream. Read events until either a
-    // text-delta arrives (model is producing output — safe to start the
-    // streaming Response) or an error event fires (return typed JSON 502
-    // BEFORE we hand any Response to Next.js, which would otherwise turn
-    // the lazy error into a generic 500). Buffered text-deltas seen during
-    // the peek are re-emitted at the start of the streaming body so the
-    // client's useObject sees the same byte sequence AI SDK's own
-    // `toTextStreamResponse` would have produced.
-    type ObjectStreamPart =
-      | { type: "text-delta"; textDelta: string }
-      | { type: "object"; object: Partial<PaperSummaryDeep> }
-      | { type: "finish"; [key: string]: unknown }
-      | { type: "error"; error: unknown };
-
-    const fullReader = (
-      result.fullStream as ReadableStream<ObjectStreamPart>
-    ).getReader();
-    const bufferedDeltas: string[] = [];
-    let preflightError: unknown = null;
-    let sawTextDelta = false;
-    const PEEK_TIMEOUT_MS = 25_000;
-    const deadline = Date.now() + PEEK_TIMEOUT_MS;
-
-    try {
-      while (!sawTextDelta && preflightError === null) {
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) break;
-        const peeked = await Promise.race([
-          fullReader.read(),
-          new Promise<{ done: true; value: undefined }>((resolve) =>
-            setTimeout(() => resolve({ done: true, value: undefined }), remaining),
-          ),
-        ]);
-        if (peeked.done) break;
-        const evt = peeked.value;
-        if (!evt) continue;
-        if (evt.type === "text-delta") {
-          bufferedDeltas.push(evt.textDelta);
-          sawTextDelta = true;
-          break;
-        }
-        if (evt.type === "error") {
-          preflightError = evt.error;
-          break;
-        }
-        // 'object' / 'finish' events carry no bytes for the text stream;
-        // skip and keep peeking.
-      }
-    } catch (e) {
-      preflightError = e;
-    }
-
-    if (preflightError !== null) {
-      try {
-        fullReader.releaseLock();
-      } catch {
-        /* ignore */
-      }
-      await releaseOnFailure();
-      const message =
-        preflightError instanceof Error
-          ? preflightError.message
-          : String(preflightError);
-      console.error(
-        JSON.stringify({
-          tag: "summary-stream.preflight",
-          paperId,
-          userId: user.userId,
-          model: analysisModel,
-          error: message.slice(0, 800),
-        }),
-      );
-      return jsonError(502, "provider_error", message, { model: analysisModel });
-    }
-
-    const encoder = new TextEncoder();
-    const passthrough = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        try {
-          for (const delta of bufferedDeltas) {
-            if (delta) controller.enqueue(encoder.encode(delta));
-          }
-          while (true) {
-            const { done, value } = await fullReader.read();
-            if (done) break;
-            if (!value) continue;
-            if (value.type === "text-delta") {
-              if (value.textDelta) {
-                controller.enqueue(encoder.encode(value.textDelta));
-              }
-            } else if (value.type === "error") {
-              // onError on streamObject already logged + released.
-              break;
-            }
-            // 'object' / 'finish' events: no bytes for text stream.
-          }
-          try {
-            fullReader.releaseLock();
-          } catch {
-            /* already released */
-          }
-          controller.close();
-        } catch (err) {
-          console.error(
-            JSON.stringify({
-              tag: "summary-stream.passthrough",
-              paperId,
-              userId: user.userId,
-              model: analysisModel,
-              error: err instanceof Error ? err.message : String(err),
-            }),
-          );
-          try {
-            controller.close();
-          } catch {
-            /* already closed */
-          }
-        }
-      },
+    const response = await buildStreamObjectResponse<PaperSummaryDeep>(result, {
+      model: analysisModel,
+      releaseOnFailure,
+      logTag: "summary-stream",
+      logContext: { paperId, userId: user.userId },
     });
-
-    return withDeployHeader(
-      new Response(passthrough, {
-        status: 200,
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "Cache-Control": "no-store, no-transform",
-          "X-Accel-Buffering": "no",
-          "X-Know-Model": analysisModel,
-          "X-Know-Deploy": DEPLOY_SHA,
-        },
-      }),
-    );
+    if (isStreamErrorPayload(response)) {
+      return jsonError(
+        response.status,
+        response.body.detail.code,
+        response.body.detail.message,
+        { model: response.body.detail.model },
+      );
+    }
+    return response;
   } catch (e) {
     await releaseOnFailure();
     console.error(

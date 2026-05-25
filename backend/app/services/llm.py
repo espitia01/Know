@@ -472,7 +472,19 @@ class AnthropicProvider(LLMProvider):
 
 
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
+
+
+def _openai_uses_responses_api(slug: str) -> bool:
+    """GPT-5+ family is served exclusively through the Responses API on
+    most accounts; chat-completions returns "Selected model 'gpt-5-mini'
+    is not available" even when the model exists in the catalog. Older
+    chat models (gpt-4o, gpt-4.1, etc.) keep using chat-completions.
+    """
+    if not slug:
+        return False
+    return slug.startswith("gpt-5") or slug.startswith("o1") or slug.startswith("o3")
 
 
 class OpenAIProvider(LLMProvider):
@@ -486,6 +498,55 @@ class OpenAIProvider(LLMProvider):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+
+    @staticmethod
+    def _extract_responses_text(data: dict) -> str:
+        """Pull text out of a Responses-API JSON envelope."""
+        # Convenience aggregate the SDK populates.
+        text = data.get("output_text")
+        if isinstance(text, str) and text.strip():
+            return text
+        chunks: list[str] = []
+        for item in data.get("output") or []:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") != "message":
+                continue
+            for piece in item.get("content") or []:
+                if isinstance(piece, dict) and piece.get("type") in (
+                    "output_text",
+                    "text",
+                ):
+                    val = piece.get("text") or ""
+                    if isinstance(val, str):
+                        chunks.append(val)
+        return "".join(chunks)
+
+    async def _complete_via_responses(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int,
+    ) -> str:
+        body = {
+            "model": self.model,
+            "instructions": system,
+            "input": user,
+            "max_output_tokens": int(max_tokens),
+            "stream": False,
+        }
+        response = await self.client.post(
+            OPENAI_RESPONSES_URL, headers=self._headers(), json=body
+        )
+        _raise_for_openai(response, model=self.model)
+        data = response.json()
+        _log_chat_usage("openai", self.model, data.get("usage") or {})
+        text = self._extract_responses_text(data)
+        if not text:
+            raise LLMProviderError(
+                502, "OpenAI returned an empty response.", model=self.model
+            )
+        return text
 
     async def complete(
         self,
@@ -505,6 +566,8 @@ class OpenAIProvider(LLMProvider):
             if cache_user_prefix
             else user
         )
+        if _openai_uses_responses_api(self.model):
+            return await self._complete_via_responses(system, merged_user, max_tokens)
         body = {
             "model": self.model,
             "messages": [
@@ -527,6 +590,38 @@ class OpenAIProvider(LLMProvider):
         return content
 
     async def stream_complete(self, system: str, user: str, max_tokens: int = 4096) -> AsyncIterator[str]:
+        if _openai_uses_responses_api(self.model):
+            body = {
+                "model": self.model,
+                "instructions": system,
+                "input": user,
+                "max_output_tokens": int(max_tokens),
+                "stream": True,
+            }
+            async with self.client.stream(
+                "POST", OPENAI_RESPONSES_URL, headers=self._headers(), json=body
+            ) as response:
+                if not response.is_success:
+                    await response.aread()
+                    _raise_for_openai(response, model=self.model)
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload.strip() == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    # Responses-API SSE: response.output_text.delta carries the
+                    # incremental text. Some shapes nest it under different keys
+                    # depending on the model — handle both.
+                    if event.get("type") == "response.output_text.delta":
+                        delta = event.get("delta")
+                        if isinstance(delta, str) and delta:
+                            yield delta
+            return
         body = {
             "model": self.model,
             "messages": [
@@ -560,6 +655,37 @@ class OpenAIProvider(LLMProvider):
     async def complete_with_image(
         self, system: str, text: str, image_b64: str, media_type: str = "image/png", max_tokens: int = 4096
     ) -> str:
+        if _openai_uses_responses_api(self.model):
+            body = {
+                "model": self.model,
+                "instructions": system,
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": text},
+                            {
+                                "type": "input_image",
+                                "image_url": f"data:{media_type};base64,{image_b64}",
+                            },
+                        ],
+                    }
+                ],
+                "max_output_tokens": int(max_tokens),
+                "stream": False,
+            }
+            response = await self.client.post(
+                OPENAI_RESPONSES_URL, headers=self._headers(), json=body
+            )
+            _raise_for_openai(response, model=self.model)
+            data = response.json()
+            _log_chat_usage("openai", self.model, data.get("usage") or {})
+            content = self._extract_responses_text(data)
+            if not content:
+                raise LLMProviderError(
+                    502, "OpenAI returned an empty response.", model=self.model
+                )
+            return content
         user_content = [
             {"type": "text", "text": text},
             {

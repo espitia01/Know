@@ -74,9 +74,35 @@ def test_make_provider_mistral(mock_settings):
     assert isinstance(provider, MistralProvider)
 
 
-def test_openai_complete_uses_max_completion_tokens():
+def test_openai_complete_uses_responses_api_for_gpt5():
+    """gpt-5+ slugs route through /v1/responses, not /v1/chat/completions."""
     async def run():
         provider = OpenAIProvider("sk-test", "gpt-5-mini")
+        mock_response = MagicMock()
+        mock_response.is_success = True
+        mock_response.json.return_value = {
+            "output_text": "hello",
+            "usage": {"input_tokens": 1, "output_tokens": 2},
+        }
+        provider.client = AsyncMock()
+        provider.client.post = AsyncMock(return_value=mock_response)
+        result = await provider.complete("sys", "user", max_tokens=512)
+        assert result == "hello"
+        url = provider.client.post.call_args.args[0]
+        assert url.endswith("/v1/responses")
+        body = provider.client.post.call_args.kwargs["json"]
+        assert body["model"] == "gpt-5-mini"
+        assert body["instructions"] == "sys"
+        assert body["input"] == "user"
+        assert body["max_output_tokens"] == 512
+
+    asyncio.run(run())
+
+
+def test_openai_complete_uses_chat_completions_for_legacy():
+    """Pre-GPT-5 slugs (gpt-4o, gpt-4.1, etc.) keep using chat-completions."""
+    async def run():
+        provider = OpenAIProvider("sk-test", "gpt-4o-mini")
         mock_response = MagicMock()
         mock_response.is_success = True
         mock_response.json.return_value = {
@@ -87,7 +113,9 @@ def test_openai_complete_uses_max_completion_tokens():
         provider.client.post = AsyncMock(return_value=mock_response)
         result = await provider.complete("sys", "user", max_tokens=512)
         assert result == "hello"
+        url = provider.client.post.call_args.args[0]
+        assert url.endswith("/v1/chat/completions")
         body = provider.client.post.call_args.kwargs["json"]
-        assert body["max_completion_tokens"] == 512
+        assert body["max_tokens"] == 512
 
     asyncio.run(run())

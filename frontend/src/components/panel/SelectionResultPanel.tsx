@@ -18,6 +18,7 @@ import { ReadMoreProse } from "@/components/analysis/ReadMoreProse";
 import { AnalysisAccordionRow } from "@/components/panel/AnalysisAccordionRow";
 import { useStore } from "@/lib/store";
 import { ModelOverridePill } from "@/components/analysis/ModelOverridePill";
+import { ModelPill } from "@/components/analysis/ModelPill";
 import { useUserSettings } from "@/lib/UserSettingsContext";
 import { api } from "@/lib/api";
 
@@ -103,7 +104,14 @@ function FollowUpThreadList({
             <AnalysisAccordionRow
               open={open}
               onOpenChange={(next) => setOpenKey(next ? k : null)}
-              title={q}
+              title={
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate">{q}</span>
+                  {f.model && (
+                    <ModelPill slug={f.model} pending={!!f.streaming} />
+                  )}
+                </span>
+              }
               leading={
                 <span
                   className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-muted/35 text-[10px] font-medium tabular-nums text-muted-foreground"
