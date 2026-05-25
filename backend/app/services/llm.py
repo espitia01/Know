@@ -495,11 +495,21 @@ class OpenAIProvider(LLMProvider):
         *,
         cache_user_prefix: str | None = None,
     ) -> str:
+        # OpenAI doesn't have Anthropic-style ephemeral prompt caching, but
+        # callers (analyze_paper, extract_assumptions) pass the real prompt
+        # via cache_user_prefix and only a stub via user. If we ignored the
+        # prefix the model would receive an empty/whitespace user message
+        # and return junk that fails downstream JSON parsing as a 503.
+        merged_user = (
+            f"{cache_user_prefix}\n\n{user}".strip()
+            if cache_user_prefix
+            else user
+        )
         body = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "user", "content": merged_user},
             ],
             "stream": False,
             **_openai_token_fields(self.model, max_tokens),
@@ -599,13 +609,22 @@ class MistralProvider(LLMProvider):
         *,
         cache_user_prefix: str | None = None,
     ) -> str:
+        # Same fix as OpenAI: when callers route the bulk of the prompt
+        # through cache_user_prefix (analyze_paper, extract_assumptions),
+        # silently dropping it sends an empty user message and the model
+        # answers with junk that fails JSON parsing -> 503.
+        merged_user = (
+            f"{cache_user_prefix}\n\n{user}".strip()
+            if cache_user_prefix
+            else user
+        )
         body = {
             "model": self.model,
             "max_tokens": max_tokens,
             "temperature": 0.2,
             "messages": [
                 {"role": "system", "content": system},
-                {"role": "user", "content": user},
+                {"role": "user", "content": merged_user},
             ],
             "stream": False,
         }

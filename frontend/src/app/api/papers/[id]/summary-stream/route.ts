@@ -219,6 +219,7 @@ export async function POST(
     }
 
     let result: ReturnType<typeof streamObject>;
+    let streamError: unknown = null;
     try {
       result = streamObject({
         model: getModelFromSlug(analysisModel),
@@ -302,12 +303,14 @@ export async function POST(
           }
         },
         onError: async ({ error }) => {
+          streamError = error;
           try {
             console.error(
               JSON.stringify({
                 tag: "summary-stream.error",
                 paperId,
                 userId: user.userId,
+                model: analysisModel,
                 error: String(error).slice(0, 800),
               }),
             );
@@ -330,23 +333,110 @@ export async function POST(
       return jsonError(502, "provider_error", message, { model: analysisModel });
     }
 
+    // Pre-flight: peek the first event of the partial-object stream so we
+    // can surface lazy provider failures (missing key, gateway 4xx/5xx,
+    // unsupported structured output) as a typed JSON 502 BEFORE returning
+    // the streaming Response. Without this, AI SDK's lazy stream errors
+    // happen after we hand the Response to Next.js, which surfaces them
+    // as a generic 500 to the client.
+    let firstChunk: Partial<PaperSummaryDeep> | undefined;
     try {
-      return withDeployHeader(
-        result.toTextStreamResponse({
-          headers: {
-            "Content-Type": "text/plain; charset=utf-8",
-            "Cache-Control": "no-store, no-transform",
-            "X-Accel-Buffering": "no",
-            "X-Know-Model": analysisModel,
-            "X-Know-Deploy": DEPLOY_SHA,
-          },
-        }),
-      );
+      const reader = result.partialObjectStream.getReader();
+      const PEEK_TIMEOUT_MS = 25_000;
+      const peeked = await Promise.race([
+        reader.read(),
+        new Promise<{ done: true; value: undefined }>((resolve) =>
+          setTimeout(() => resolve({ done: true, value: undefined }), PEEK_TIMEOUT_MS),
+        ),
+      ]);
+      reader.releaseLock();
+      if (streamError) {
+        await releaseOnFailure();
+        const errMsg = streamError instanceof Error ? streamError.message : String(streamError);
+        console.error(
+          JSON.stringify({
+            tag: "summary-stream.preflight",
+            paperId,
+            userId: user.userId,
+            model: analysisModel,
+            error: errMsg.slice(0, 800),
+          }),
+        );
+        return jsonError(502, "provider_error", errMsg, { model: analysisModel });
+      }
+      if (!peeked.done && peeked.value !== undefined) {
+        firstChunk = peeked.value as Partial<PaperSummaryDeep>;
+      }
     } catch (e) {
       await releaseOnFailure();
-      const message = e instanceof Error ? e.message : "Stream response error";
-      return jsonError(502, "stream_response_error", message, { model: analysisModel });
+      const message = e instanceof Error ? e.message : "Provider error";
+      console.error(
+        JSON.stringify({
+          tag: "summary-stream.preflight",
+          paperId,
+          userId: user.userId,
+          model: analysisModel,
+          error: message.slice(0, 800),
+        }),
+      );
+      return jsonError(502, "provider_error", message, { model: analysisModel });
     }
+
+    // Build a fresh ReadableStream that re-emits the peeked first chunk
+    // followed by the rest of the partial-object stream as JSON-text. The
+    // client's useObject reads accumulating JSON via parsePartialJson so
+    // the format must mirror what AI SDK's toTextStreamResponse would
+    // have emitted (the latest partial JSON, repeatedly).
+    const encoder = new TextEncoder();
+    const passthrough = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          if (firstChunk !== undefined) {
+            controller.enqueue(encoder.encode(JSON.stringify(firstChunk)));
+          }
+          const reader = result.partialObjectStream.getReader();
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value !== undefined) {
+              controller.enqueue(encoder.encode(JSON.stringify(value)));
+            }
+          }
+          reader.releaseLock();
+          controller.close();
+        } catch (err) {
+          // onError already logged + released; just terminate cleanly so
+          // the client's useObject sees end-of-stream.
+          console.error(
+            JSON.stringify({
+              tag: "summary-stream.passthrough",
+              paperId,
+              userId: user.userId,
+              model: analysisModel,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+          try {
+            controller.close();
+          } catch {
+            /* already closed */
+          }
+        }
+      },
+    });
+
+    return withDeployHeader(
+      new Response(passthrough, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store, no-transform",
+          "X-Accel-Buffering": "no",
+          "X-Know-Model": analysisModel,
+          "X-Know-Deploy": DEPLOY_SHA,
+        },
+      }),
+    );
   } catch (e) {
     await releaseOnFailure();
     console.error(
