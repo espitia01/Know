@@ -760,18 +760,6 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2 rounded-xl border border-border/50 bg-muted/25 px-3.5 py-2.5 text-[11px] text-muted-foreground">
-        <span>{figures.length} figure{figures.length === 1 ? "" : "s"} from Mistral OCR</span>
-        <button
-          type="button"
-          onClick={handleRerunOcr}
-          disabled={reextracting || loading}
-          className="font-medium text-foreground/90 underline-offset-2 hover:underline disabled:opacity-40"
-        >
-          {reextracting ? "Running OCR…" : "Re-run OCR"}
-        </button>
-      </div>
-
       {ocrError && (
         <p className="text-[var(--text-xs)] text-destructive/90" role="alert">
           {ocrError}

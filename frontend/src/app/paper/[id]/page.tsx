@@ -1696,6 +1696,12 @@ function PaperContent() {
     // instead of guessing from context.
     if (!startedFor) return;
     setPanelVisible(true);
+    // Eagerly mark Selection as loading BEFORE the async image capture
+    // below so showSelectionTab flips true synchronously. Without this,
+    // the snap-back useEffect in AnalysisPanel sees activeTab="selection"
+    // but showSelectionTab=false and demotes us to Summary while we wait
+    // for the FileReader-based base64 encode (~50–200 ms).
+    useStore.getState().setSelectionLoadingForPaper(startedFor, true);
     setActiveTab("selection");
 
     let imageBase64: string | undefined;
