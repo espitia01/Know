@@ -31,24 +31,25 @@ const math = createMathPlugin({ singleDollarTextMath: true });
 const STREAMDOWN_PLUGINS = { math, code };
 
 /**
- * Repair the most common math-delimiter mistakes the LLM emits before
- * Streamdown sees them. Without this, a stray `$` adjacent to a `$$`
- * block (e.g. `$$expr$$$`) opens an unclosed inline-math span and the
- * rest of the paragraph renders as broken vertical glyph salad.
+ * Repair common LLM-emitted markup mistakes before Streamdown sees the
+ * source. Without this, a stray `$` adjacent to a `$$` block opens an
+ * unclosed inline-math span (rest of paragraph renders as vertical
+ * glyph salad), and JSON-stripped LaTeX backslashes turn `\hat{H}`
+ * into the literal word `hat{H}` outside any math.
  *
- * Conservative: only collapse runs of 3+ dollar signs and convert the
- * legacy `\(...\)` / `\[...\]` delimiters that occasionally slip past
- * the system prompt. Anything else stays untouched.
+ * Conservative repairs only:
+ *   - Runs of 3+ `$` collapse to `$$`.
+ *   - Legacy `\(...\)` / `\[...\]` delimiters convert to `$...$` / `$$...$$`.
+ *
+ * The "missing-backslash" repair is intentionally NOT performed
+ * automatically — it would corrupt prose that legitimately contains
+ * the words "hat", "sum", "int", etc. The system prompt now requires
+ * the model to double-escape backslashes inside JSON strings.
  */
 function sanitizeMathDelimiters(input: string): string {
   if (!input) return input;
   let out = input;
-  // Collapse runs of 3+ dollar signs to `$$`. Catches:
-  //   $$expr$$$  (trailing extra $)  -> $$expr$$
-  //   $$$expr$$  (leading extra $)   -> $$expr$$
   out = out.replace(/\${3,}/g, "$$$$");
-  // Legacy delimiters from prompts that sometimes leak from older training
-  // data even when the system prompt forbids them.
   out = out.replace(/\\\[/g, "\n$$\n").replace(/\\\]/g, "\n$$\n");
   out = out.replace(/\\\(/g, "$").replace(/\\\)/g, "$");
   return out;

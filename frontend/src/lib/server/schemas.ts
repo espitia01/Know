@@ -21,15 +21,19 @@
 
 import { z } from "zod";
 
-// All fields are nullable rather than optional so the JSON Schema we
-// hand OpenAI's strict structured output mode lists every property in
-// `required` (strict mode rejects schemas where any property in
-// `properties` is missing from `required`). The renderer treats null
-// the same as missing.
+// All "optional-feeling" fields use `.nullable().default(null)` so the
+// JSON Schema we hand OpenAI's strict structured-output mode lists every
+// property in `required` (strict mode rejects schemas where any property
+// in `properties` is missing from `required`) AND Zod parsing accepts
+// payloads where Mistral / Anthropic skip a field entirely (those
+// providers don't enforce strict mode and frequently omit fields they
+// have nothing for). `.default(null)` substitutes `null` when the field
+// is absent from the model's output. The renderer treats null and
+// undefined the same.
 const Assumption = z.object({
   type: z.enum(["explicit", "implicit"]),
   statement: z.string(),
-  significance: z.string().nullable(),
+  significance: z.string().nullable().default(null),
 });
 
 const Step = z.object({
@@ -37,7 +41,7 @@ const Step = z.object({
   prompt: z.string(),
   answer: z.string(),
   explanation: z.string(),
-  hint: z.string().nullable(),
+  hint: z.string().nullable().default(null),
 });
 
 /**
@@ -50,13 +54,14 @@ export const SelectionResultSchema = z.object({
   body: z
     .string()
     .nullable()
+    .default(null)
     .describe(
       "Primary markdown narrative. Use $...$ for inline math and $$...$$ for display math. NEVER bare LaTeX commands, Unicode math symbols, or raw HTML.",
     ),
-  assumptions: z.array(Assumption).nullable(),
-  starting_point: z.string().nullable(),
-  final_result: z.string().nullable(),
-  steps: z.array(Step).nullable(),
+  assumptions: z.array(Assumption).nullable().default(null),
+  starting_point: z.string().nullable().default(null),
+  final_result: z.string().nullable().default(null),
+  steps: z.array(Step).nullable().default(null),
 });
 
 export type SelectionResult = z.infer<typeof SelectionResultSchema>;
@@ -106,12 +111,10 @@ const KeyEquation = z.object({
   meaning: z
     .string()
     .describe("Markdown one-paragraph explanation of what this equation says and why it matters in the paper."),
-  // OpenAI strict structured output requires every property in `required`.
-  // Use `.nullable()` instead of `.optional()` so the field is always
-  // present (possibly null) and the schema validates.
   terms: z
     .array(KeyEquationTerm)
     .nullable()
+    .default(null)
     .describe(
       "Per-variable glossary: every distinct symbol appearing in the equation, with its meaning. Include constants like $\\\\epsilon_0$ as well as variables. Aim for completeness.",
     ),
@@ -124,22 +127,22 @@ const KeyFigure = z.object({
     .describe("Markdown description of what the figure/table shows and why it matters."),
 });
 
-// Note: `model` and `created_at` are intentionally NOT in the streaming
-// schemas. Earlier iterations exposed them as optional fields the LLM
-// could fill, and Mistral hallucinated values like "arXiv v1 + peer-
-// reviewed condensation" into the `model` slot. Server-side metadata
-// belongs to the route, not the model.
+// `model` and `created_at` are server-side metadata, intentionally NOT
+// in the streaming schemas (Mistral once hallucinated "arXiv v1 + peer-
+// reviewed condensation" into the model slot).
 //
-// All optional-feeling fields use `.nullable()` because OpenAI's strict
-// structured-output mode rejects any property in `properties` that
-// isn't also in `required`. With `.nullable()` the property is always
-// emitted (possibly null) and the renderer treats null the same as
-// missing.
+// Optional-feeling fields use `.nullable().default(null)`:
+//   - OpenAI strict structured-output rejects properties in `properties`
+//     that are missing from `required`; `.nullable()` keeps them in.
+//   - Mistral / Anthropic don't enforce strict mode and frequently omit
+//     fields entirely; `.default(null)` lets Zod accept the missing key
+//     instead of erroring with "Type validation failed".
 export const PaperSummaryLiteSchema = z.object({
   overview: z.string().describe("3–5 sentence high-level overview of what the paper does and why it matters."),
   tl_dr: z
     .string()
     .nullable()
+    .default(null)
     .describe("One-sentence takeaway. Math-aware ($...$ allowed)."),
   key_contributions: z
     .array(z.string())
@@ -147,6 +150,7 @@ export const PaperSummaryLiteSchema = z.object({
   key_equations: z
     .array(KeyEquation)
     .nullable()
+    .default(null)
     .describe("Up to 3 most important equations."),
 });
 
@@ -156,35 +160,50 @@ export const PaperSummaryDeepSchema = z.object({
   overview: z
     .string()
     .nullable()
+    .default(null)
     .describe("3–5 sentence high-level overview of what the paper does and why it matters."),
   tl_dr: z
     .string()
     .nullable()
+    .default(null)
     .describe("One-sentence takeaway with the single most important result. Math-aware ($...$ allowed)."),
   key_contributions: z
     .array(z.string())
     .nullable()
+    .default(null)
     .describe("1–2 sentence bullets, 3–5 items, ordered by importance."),
   motivation: z
     .string()
     .nullable()
+    .default(null)
     .describe("3–5 sentences on why this work was done and what gap it fills."),
   methodology: z
     .string()
     .nullable()
+    .default(null)
     .describe("1–2 paragraph markdown explanation of the methods, models, or theoretical framework."),
   main_results: z
     .string()
     .nullable()
+    .default(null)
     .describe("1–2 paragraph markdown describing the key findings; quantitative numbers in $...$ delimiters."),
   discussion: z
     .string()
     .nullable()
+    .default(null)
     .describe("1–2 paragraph markdown — what the results mean, how they compare to prior work."),
-  limitations: z.array(z.string()).nullable(),
-  future_work: z.string().nullable().describe("2–3 sentences on follow-up research this enables."),
-  key_equations: z.array(KeyEquation).nullable().describe("Up to 4 of the paper's most important equations, each with a per-variable glossary."),
-  key_figures_and_tables: z.array(KeyFigure).nullable(),
+  limitations: z.array(z.string()).nullable().default(null),
+  future_work: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("2–3 sentences on follow-up research this enables."),
+  key_equations: z
+    .array(KeyEquation)
+    .nullable()
+    .default(null)
+    .describe("Up to 4 of the paper's most important equations, each with a per-variable glossary."),
+  key_figures_and_tables: z.array(KeyFigure).nullable().default(null),
 });
 
 export type PaperSummaryDeep = z.infer<typeof PaperSummaryDeepSchema>;
@@ -235,13 +254,14 @@ export type PaperSummary = z.infer<typeof PaperSummarySchema>;
  */
 export const FigureAnalysisSchema = z.object({
   description: z.string().describe("Markdown description of the figure."),
-  key_observations: z.array(z.string()).nullable(),
-  methodology_shown: z.string().nullable(),
-  relation_to_paper: z.string().nullable(),
-  takeaway: z.string().nullable(),
+  key_observations: z.array(z.string()).nullable().default(null),
+  methodology_shown: z.string().nullable().default(null),
+  relation_to_paper: z.string().nullable().default(null),
+  takeaway: z.string().nullable().default(null),
   answer: z
     .string()
     .nullable()
+    .default(null)
     .describe("If a user question was asked, the direct markdown answer goes here."),
 });
 

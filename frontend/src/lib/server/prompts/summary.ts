@@ -14,9 +14,10 @@
 
 const SHARED_RULES = `Output rules (strict):
 - Use markdown for all narrative fields.
+- JSON-string LaTeX: every backslash inside a JSON string MUST be doubled. Write "\\\\hat{H}" so JSON parses to "\\hat{H}". A SINGLE backslash before a non-escape char (\\h, \\v, \\m, \\f, \\e, \\b…) is dropped by JSON parsers and the LaTeX command is destroyed. Example correct: "$$\\\\sum_{n\\\\mathbf{k}} \\\\varepsilon_{n\\\\mathbf{k}}$$".
 - Math: inline math goes in $...$, display math in $$...$$ on its own line. Each opener has EXACTLY one matching closer of the same length — never $$$ to close a $$ block, never $ inside a $$ block, never $$ inside an inline $...$ span. Example correct closure: $$E = mc^2$$  Example WRONG: $$E = mc^2$$$ (three dollar signs).
-- NEVER use \\( \\) or \\[ \\] delimiters; only $ and $$.
-- NEVER emit Unicode math symbols (σ, μ, ∑, ∫…) outside math delimiters; always write \\sigma, \\mu, \\sum, \\int, etc. inside $...$.
+- NEVER use \\\\( \\\\) or \\\\[ \\\\] delimiters; only $ and $$.
+- NEVER emit Unicode math symbols (σ, μ, ∑, ∫…) outside math delimiters; always write \\\\sigma, \\\\mu, \\\\sum, \\\\int, etc. inside $...$.
 - Don't preserve PDF artifacts like one-glyph-per-line or run-on words; reconstruct using paper context.`;
 
 import type { PromptDepth } from "@/lib/server/promptDepth";
