@@ -33,6 +33,7 @@ import {
   type PaperSummaryLite,
 } from "@/lib/server/schemas";
 import { buildSummaryLitePrompt } from "@/lib/server/prompts/summary";
+import { capPaperRawText } from "@/lib/server/paperTextCap";
 import {
   cachedUserMessages,
   providerOptionsForSlug,
@@ -89,7 +90,7 @@ export async function POST(
       fetchPaperContext(paperId, user.userId),
       fetchUserPrefs(user.userId),
     ]);
-    paper = { title: ctx.title, raw_text: ctx.raw_text };
+    paper = { title: ctx.title, raw_text: capPaperRawText(ctx.raw_text) };
     deepAnalysis = prefs.deep_analysis;
     liteModel = await resolveStreamModelOverride(
       user.userId,

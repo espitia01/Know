@@ -30,6 +30,7 @@ import {
   providerOptionsForSlug,
 } from "@/lib/server/promptCache";
 import { streamResponseHeaders } from "@/lib/server/streamObjectResponse";
+import { capPaperRawText } from "@/lib/server/paperTextCap";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -190,7 +191,7 @@ export async function POST(
         fetchPaperContext(paperId, user.userId),
         fetchUserPrefs(user.userId),
       ]);
-      paper = { title: ctx.title, raw_text: ctx.raw_text ?? "" };
+      paper = { title: ctx.title, raw_text: capPaperRawText(ctx.raw_text) };
       deepAnalysis = prefs.deep_analysis;
       fastModel = await resolveStreamModelOverride(
         user.userId,

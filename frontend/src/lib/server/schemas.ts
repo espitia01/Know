@@ -209,6 +209,52 @@ export const PaperSummaryDeepSchema = z.object({
 export type PaperSummaryDeep = z.infer<typeof PaperSummaryDeepSchema>;
 
 /**
+ * Phase-2 body only (lite phase already filled overview / tl_dr / bullets).
+ * Smaller schema → less `streamObject` partial JSON in memory on Vercel.
+ */
+export const PaperSummaryDeepBodySchema = z.object({
+  motivation: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("3–5 sentences on why this work was done and what gap it fills."),
+  methodology: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("1–2 paragraph markdown explanation of the methods, models, or theoretical framework."),
+  main_results: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("1–2 paragraph markdown describing the key findings; quantitative numbers in $...$ delimiters."),
+  discussion: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("1–2 paragraph markdown — what the results mean, how they compare to prior work."),
+  limitations: z.array(z.string()).nullable().default(null),
+  future_work: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("2–3 sentences on follow-up research this enables."),
+  key_equations: z
+    .array(KeyEquation)
+    .max(3)
+    .nullable()
+    .default(null)
+    .describe("Up to 3 important equations with glossaries."),
+  key_figures_and_tables: z
+    .array(KeyFigure)
+    .max(4)
+    .nullable()
+    .default(null),
+});
+
+export type PaperSummaryDeepBody = z.infer<typeof PaperSummaryDeepBodySchema>;
+
+/**
  * Combined `PaperSummary` is the union of lite + deep — what the panel
  * actually renders. Slots that the lite phase didn't populate fall to
  * the deep phase's values, and vice versa.

@@ -99,6 +99,36 @@ export function buildSummaryDeepPrompt(args: {
   return { system, paperContextText, taskText };
 }
 
+/** Phase 2 after lite — omits overview / tl_dr / key_contributions. */
+export function buildSummaryDeepBodyPrompt(args: {
+  paperTitle: string;
+  paperContext: string;
+  depth?: PromptDepth;
+  deepAnalysis?: boolean;
+}): { system: string; paperContextText: string; taskText: string } {
+  const depthLine = depthSuffix(args.depth);
+  const depthBlock = depthLine ? `\n\n${depthLine}` : "";
+
+  const system = [
+    `You are an expert science editor producing the detailed body of an academic paper summary. The reader already has a short overview — fill only the deep-dive fields below.`,
+    SHARED_RULES,
+    `- "motivation": 3–5 sentences on why this work was done and what gap it fills.`,
+    `- "methodology": 1–2 paragraph markdown explanation of the methods, models, or theoretical framework.`,
+    `- "main_results": 1–2 paragraph markdown describing the key findings, including quantitative numbers in math delimiters.`,
+    `- "discussion": 1–2 paragraph markdown — what the results mean, how they compare to prior work.`,
+    `- "limitations": array of short markdown strings with caveats the authors mention OR that are evident.`,
+    `- "future_work": 2–3 sentences on follow-up research this enables.`,
+    `- "key_equations": optional array of up to 3 items {"equation", "meaning", "terms"}. "equation" MUST use $$...$$ on its own line.`,
+    `- "key_figures_and_tables": array of up to 4 items {"id", "description"}.`,
+    depthBlock,
+  ].join("\n\n");
+
+  const paperContextText = buildContext(args.paperTitle, args.paperContext, args.deepAnalysis);
+  const taskText = `Return the structured object. Always include non-empty "methodology", "main_results", and "discussion".`;
+
+  return { system, paperContextText, taskText };
+}
+
 /**
  * Back-compat for any direct importer (e.g. tests). Delegates to the
  * deep prompt — equivalent to the pre-split combined prompt.

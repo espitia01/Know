@@ -74,7 +74,14 @@ const MODEL_CAP_DETAIL_RE =
   /Daily limit reached for (\S+) \((\d+)\/day on (\S+) plan\)/;
 
 type StructuredErrorDetail = {
-  code?: "daily_cap" | "model_cap" | "paper_cap" | "daily_export_cap" | "export_tier" | "export_concurrent";
+  code?:
+    | "daily_cap"
+    | "model_cap"
+    | "paper_cap"
+    | "daily_export_cap"
+    | "export_tier"
+    | "export_concurrent"
+    | "prepare_empty";
   model?: string;
   limit?: number;
   tier?: string;

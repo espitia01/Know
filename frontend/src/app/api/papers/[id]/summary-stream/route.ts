@@ -25,10 +25,11 @@ import {
 } from "@/lib/server/internalApi";
 import { fetchUserPrefs } from "@/lib/server/userPrefs";
 import {
-  PaperSummaryDeepSchema,
-  type PaperSummaryDeep,
+  PaperSummaryDeepBodySchema,
+  type PaperSummaryDeepBody,
 } from "@/lib/server/schemas";
-import { buildSummaryDeepPrompt } from "@/lib/server/prompts/summary";
+import { buildSummaryDeepBodyPrompt } from "@/lib/server/prompts/summary";
+import { capPaperRawText } from "@/lib/server/paperTextCap";
 import {
   cachedUserMessages,
   providerOptionsForSlug,
@@ -41,8 +42,6 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const PAPER_ID_RE = /^[a-zA-Z0-9_-]+$/;
-/** Cap text shipped into prompts — full OCR payloads can exceed Vercel memory. */
-const PROMPT_SOURCE_CAP = 80_000;
 
 const DEPLOY_SHA =
   (process.env.VERCEL_GIT_COMMIT_SHA || process.env.COMMIT_SHA || "dev").slice(0, 12);
@@ -145,7 +144,7 @@ export async function POST(
         fetchPaperContext(paperId, user.userId),
         fetchUserPrefs(user.userId),
       ]);
-      const raw = (ctx.raw_text ?? "").slice(0, PROMPT_SOURCE_CAP);
+      const raw = capPaperRawText(ctx.raw_text);
       paper = {
         title: ctx.title ?? "Untitled paper",
         raw_text: raw,
@@ -206,7 +205,7 @@ export async function POST(
     let taskText: string;
     try {
       const depth = promptDepthForModel(analysisModel);
-      ({ system, paperContextText, taskText } = buildSummaryDeepPrompt({
+      ({ system, paperContextText, taskText } = buildSummaryDeepBodyPrompt({
         paperTitle: paper.title,
         paperContext: paper.raw_text,
         depth,
@@ -223,10 +222,10 @@ export async function POST(
     try {
       result = streamObject({
         model: getModelFromSlug(analysisModel),
-        schema: zodSchema(PaperSummaryDeepSchema),
-        schemaName: "PaperSummaryDeep",
+        schema: zodSchema(PaperSummaryDeepBodySchema),
+        schemaName: "PaperSummaryDeepBody",
         schemaDescription:
-          "Comprehensive structured summary of an academic paper, including overview, key contributions, methodology, results, discussion, limitations, future work, key equations (with per-variable glossary), and key figures/tables.",
+          "Deep-dive summary body: methodology, results, discussion, limitations, future work, key equations, and figures.",
         system,
         messages: cachedUserMessages(analysisModel, paperContextText, taskText),
         ...(providerOptionsForSlug(analysisModel)
@@ -251,8 +250,8 @@ export async function POST(
               await releaseOnFailure();
               return;
             }
-            const raw = event.object as PaperSummaryDeep | undefined;
-            const parsed = PaperSummaryDeepSchema.safeParse(raw);
+            const raw = event.object as PaperSummaryDeepBody | undefined;
+            const parsed = PaperSummaryDeepBodySchema.safeParse(raw);
             const finalObject = parsed.success ? parsed.data : raw;
             const methodology =
               typeof finalObject?.methodology === "string"
@@ -277,7 +276,7 @@ export async function POST(
                 userId: user.userId,
                 paperId,
                 key: "summary_deep",
-                value: { ...finalObject, model: analysisModel } as PaperSummaryDeep,
+                value: { ...finalObject, model: analysisModel } as PaperSummaryDeepBody,
               });
             } catch (err) {
               console.error(

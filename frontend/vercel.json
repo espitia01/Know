@@ -4,10 +4,12 @@
   "buildCommand": "npm run build",
   "functions": {
     "app/api/papers/[id]/selection-stream/route.ts": { "maxDuration": 300, "memory": 3008 },
+    "app/api/papers/[id]/summary-lite-stream/route.ts": { "maxDuration": 120, "memory": 3008 },
     "app/api/papers/[id]/summary-stream/route.ts": { "maxDuration": 300, "memory": 3008 },
     "app/api/papers/[id]/figure-qa-stream/route.ts": { "maxDuration": 300, "memory": 3008 },
     "app/api/papers/[id]/qa/route.ts": { "maxDuration": 300, "memory": 3008 },
     "src/app/api/papers/[id]/selection-stream/route.ts": { "maxDuration": 300, "memory": 3008 },
+    "src/app/api/papers/[id]/summary-lite-stream/route.ts": { "maxDuration": 120, "memory": 3008 },
     "src/app/api/papers/[id]/summary-stream/route.ts": { "maxDuration": 300, "memory": 3008 },
     "src/app/api/papers/[id]/figure-qa-stream/route.ts": { "maxDuration": 300, "memory": 3008 },
     "src/app/api/papers/[id]/qa/route.ts": { "maxDuration": 300, "memory": 3008 }

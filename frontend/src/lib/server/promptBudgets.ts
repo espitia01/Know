@@ -6,8 +6,8 @@
 export const DEEP_MULTIPLIER = 2;
 
 export const STD_BUDGETS = {
-  /** Kept ≤12k on Vercel — larger excerpts + streamObject OOM'd (SIGABRT). */
-  summary: { context: 12000 },
+  /** Two-phase summary: each Vercel invocation gets a smaller excerpt. */
+  summary: { context: 6000 },
   selection: { context: 4500, selection: 3000 },
   figure: { context: 6000 },
 } as const;

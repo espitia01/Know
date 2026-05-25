@@ -122,9 +122,9 @@ export function maxOutputTokensFor(slug: string, role: ModelRole): number {
   const top = isTopTier(slug);
   const balanced = isBalanced(slug);
   if (role === "analysis") {
-    if (top) return 6000;
-    if (balanced) return 4500;
-    return 3000;
+    if (top) return 3500;
+    if (balanced) return 2800;
+    return 2200;
   }
   if (role === "fast") {
     if (top) return 4000;
