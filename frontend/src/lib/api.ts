@@ -816,6 +816,42 @@ export const api = {
       signal: options?.signal,
     }),
 
+  /** Stream the lite summary preview as progressive JSON objects (SSE). */
+  streamSummaryLite: async (
+    id: string,
+    options?: { signal?: AbortSignal; model?: string },
+  ) => {
+    const headers = await authHeaders();
+    return fetch(`${API_BASE}/api/papers/${id}/summary-lite-stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        ...headers,
+      },
+      body: JSON.stringify(options?.model ? { model: options.model } : {}),
+      signal: options?.signal,
+    });
+  },
+
+  /** Stream the deep summary body as progressive JSON objects (SSE). */
+  streamSummaryDeep: async (
+    id: string,
+    options?: { signal?: AbortSignal; model?: string },
+  ) => {
+    const headers = await authHeaders();
+    return fetch(`${API_BASE}/api/papers/${id}/summary-deep-stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        ...headers,
+      },
+      body: JSON.stringify(options?.model ? { model: options.model } : {}),
+      signal: options?.signal,
+    });
+  },
+
   analyzeFigure: (id: string, figureId: string, question: string = "") =>
     request<FigureAnalysis>(`/api/papers/${id}/figure-qa`, {
       method: "POST",

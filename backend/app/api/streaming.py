@@ -48,9 +48,12 @@ from ..gating import (
 from ..services.llm import (
     LATEX_FORMAT_INSTRUCTIONS,
     LLMProviderError,
+    _coerce_markdown_field,
     _make_provider,
     _resize_image_b64,
+    _safe_parse_json,
     _sanitize_user_text,
+    get_budgets,
     get_fast_provider,
 )
 from ..services.pdf_parser import (
@@ -78,6 +81,17 @@ def _resolve_model(user_id: str, body: dict) -> str:
         slug = canonicalize_model(requested.strip()) or requested.strip()
         return enforce_model(user_id, slug)
     return resolve_fast_model(user_id)
+
+
+def _resolve_analysis_model_with_override(user_id: str, body: dict) -> str:
+    """Like _resolve_model but defaults to the user's *analysis* model."""
+    from ..gating import resolve_analysis_model
+
+    requested = body.get("model") if isinstance(body, dict) else None
+    if isinstance(requested, str) and requested.strip():
+        slug = canonicalize_model(requested.strip()) or requested.strip()
+        return enforce_model(user_id, slug)
+    return resolve_analysis_model(user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +287,298 @@ async def selection_stream(
             # If we never produced any tokens, the user got nothing — refund.
             if not released and not accumulated:
                 release_usage(token)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Summary streaming
+# ---------------------------------------------------------------------------
+
+
+def _summary_lite_prompts(paper_text: str, cap: int) -> tuple[str, str]:
+    system = (
+        "You are an expert science editor. Return ONLY valid JSON with no markdown fences.\n\n"
+        + LATEX_FORMAT_INSTRUCTIONS
+    )
+    user = (
+        "Summarize this paper's first impression in JSON only:\n"
+        "{\n"
+        '  "overview": "3-5 sentences",\n'
+        '  "tl_dr": "one sentence takeaway",\n'
+        '  "key_contributions": ["3-5 short bullets"],\n'
+        '  "key_equations": [{"equation": "$$...$$", "meaning": "one paragraph"}]\n'
+        "}\n\n"
+        "Keep the response compact. At most 3 key_equations. Paper excerpt:\n"
+        f"{paper_text[:cap]}"
+    )
+    return system, user
+
+
+def _summary_deep_prompts(paper_text: str, cap: int) -> tuple[str, str]:
+    system = (
+        "You are an expert science editor. Return ONLY valid JSON with no markdown fences.\n\n"
+        + LATEX_FORMAT_INSTRUCTIONS
+    )
+    user = (
+        "Write the detailed body of an academic paper summary in JSON only:\n"
+        "{\n"
+        '  "motivation": "3-5 sentences",\n'
+        '  "methodology": "1-2 paragraphs",\n'
+        '  "main_results": "1-2 paragraphs",\n'
+        '  "discussion": "1-2 paragraphs",\n'
+        '  "limitations": ["short bullets"],\n'
+        '  "future_work": "2-3 sentences",\n'
+        '  "key_figures_and_tables": [{"id": "Fig. 1", "description": "..."}]\n'
+        "}\n\n"
+        "Always include non-empty methodology, main_results, and discussion. Paper excerpt:\n"
+        f"{paper_text[:cap]}"
+    )
+    return system, user
+
+
+def _normalize_summary_object(parsed: dict) -> dict:
+    """Coerce streamed summary fields into renderable shapes."""
+    if not isinstance(parsed, dict):
+        return {}
+    out: dict = {}
+    for key in ("overview", "tl_dr", "motivation", "methodology", "main_results", "discussion", "future_work"):
+        if key in parsed and parsed[key] is not None:
+            value = _coerce_markdown_field(parsed.get(key))
+            if value:
+                out[key] = value
+    if isinstance(parsed.get("key_contributions"), list):
+        items = [
+            _coerce_markdown_field(x).strip()
+            for x in parsed["key_contributions"]
+            if _coerce_markdown_field(x).strip()
+        ]
+        if items:
+            out["key_contributions"] = items
+    if isinstance(parsed.get("limitations"), list):
+        items = [
+            _coerce_markdown_field(x).strip()
+            for x in parsed["limitations"]
+            if _coerce_markdown_field(x).strip()
+        ]
+        if items:
+            out["limitations"] = items
+    if isinstance(parsed.get("key_equations"), list):
+        out["key_equations"] = [
+            {
+                "equation": _coerce_markdown_field(eq.get("equation") if isinstance(eq, dict) else eq),
+                "meaning": _coerce_markdown_field(eq.get("meaning") if isinstance(eq, dict) else ""),
+            }
+            for eq in parsed["key_equations"]
+            if eq
+        ]
+    if isinstance(parsed.get("key_figures_and_tables"), list):
+        out["key_figures_and_tables"] = [
+            {
+                "id": _coerce_markdown_field(fig.get("id") if isinstance(fig, dict) else ""),
+                "description": _coerce_markdown_field(fig.get("description") if isinstance(fig, dict) else ""),
+            }
+            for fig in parsed["key_figures_and_tables"]
+            if fig
+        ]
+    return out
+
+
+async def _stream_structured_summary(
+    provider,
+    system: str,
+    user_prompt: str,
+    *,
+    max_tokens: int,
+) -> AsyncIterator[bytes]:
+    """Stream the LLM, parse partial JSON, emit object updates as SSE.
+
+    Uses _safe_parse_json's brace-repair so each accumulated chunk
+    yields the largest valid prefix as a partial dict. The client gets
+    a stream of progressively richer objects to merge into UI state.
+    """
+    accumulated = ""
+    last_emitted: dict = {}
+    try:
+        async for chunk in provider.stream_complete(system, user_prompt, max_tokens=max_tokens):
+            if not chunk:
+                continue
+            accumulated += chunk
+            # Cheap incremental parse: only attempt repair every ~64 chars
+            # of new tokens. Calling _safe_parse_json on every single token
+            # is wasteful and pegs the event loop on the brace-counting.
+            if len(accumulated) - len(json.dumps(last_emitted, ensure_ascii=False)) < 32:
+                continue
+            parsed = _safe_parse_json(accumulated)
+            normalized = _normalize_summary_object(parsed)
+            if normalized and normalized != last_emitted:
+                last_emitted = normalized
+                yield _sse_event({"type": "object", "object": normalized})
+
+        # Final pass: re-parse without the throttle so we always emit the
+        # complete object, even if no chunk crossed the 32-char window.
+        parsed = _safe_parse_json(accumulated)
+        normalized = _normalize_summary_object(parsed)
+        if normalized:
+            yield _sse_event({"type": "object", "object": normalized})
+            yield _sse_event({"type": "done", "object": normalized})
+        else:
+            yield _sse_event(
+                {
+                    "type": "error",
+                    "message": "Summary stream returned no parseable JSON.",
+                }
+            )
+    except LLMProviderError as exc:
+        yield _sse_event({"type": "error", "message": exc.message})
+
+
+@router.post("/{paper_id}/summary-lite-stream")
+async def summary_lite_stream(
+    paper_id: str,
+    body: dict = Body(default={}),
+    user_id: str = Depends(require_auth),
+):
+    """Stream the lite (preview) summary as progressive JSON objects."""
+    check_feature_access(user_id, "summary")
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    paper = get_paper(paper_id, user_id=user_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    model_used = _resolve_model(user_id, body)
+    provider = _make_provider(model_used)
+    cap = min(get_budgets("summary", user_id)["context"], 6000)
+    paper_clean = _sanitize_user_text(paper_prompt_text(paper) or "", max_chars=cap)
+    system, user_prompt = _summary_lite_prompts(paper_clean, cap)
+
+    token = reserve_usage(
+        user_id, paper_id, "summary", model=model_used,
+        count=get_usage_multiplier(user_id),
+    )
+
+    async def event_stream() -> AsyncIterator[bytes]:
+        produced = False
+        last_object: dict = {}
+        try:
+            yield _sse_event({"type": "start", "model": model_used, "phase": "lite"})
+            async for ev in _stream_structured_summary(
+                provider, system, user_prompt, max_tokens=2000,
+            ):
+                produced = True
+                # Capture the latest object so we can persist on completion.
+                try:
+                    parsed = json.loads(ev.decode("utf-8")[6:])
+                    if isinstance(parsed, dict) and isinstance(parsed.get("object"), dict):
+                        last_object = parsed["object"]
+                except Exception:
+                    pass
+                yield ev
+
+            if last_object.get("overview"):
+                last_object["model"] = model_used
+                try:
+                    mutate_paper(
+                        paper_id, user_id,
+                        lambda p: p.cached_analysis.__setitem__("summary_lite", last_object),
+                    )
+                except Exception:
+                    logger.exception("Failed to persist summary_lite for %s", paper_id)
+            else:
+                if not produced:
+                    release_usage(token)
+        except asyncio.CancelledError:
+            if not produced:
+                release_usage(token)
+            raise
+        except Exception as exc:
+            logger.exception("summary-lite-stream failed for %s", paper_id)
+            if not produced:
+                release_usage(token)
+            yield _sse_event({"type": "error", "message": str(exc) or "Summary preview failed."})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/{paper_id}/summary-deep-stream")
+async def summary_deep_stream(
+    paper_id: str,
+    body: dict = Body(default={}),
+    user_id: str = Depends(require_auth),
+):
+    """Stream the deep summary body as progressive JSON objects."""
+    check_feature_access(user_id, "summary")
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    paper = get_paper(paper_id, user_id=user_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    model_used = _resolve_analysis_model_with_override(user_id, body)
+    provider = _make_provider(model_used)
+    cap = min(get_budgets("summary", user_id)["context"], 6000)
+    paper_clean = _sanitize_user_text(paper_prompt_text(paper) or "", max_chars=cap)
+    system, user_prompt = _summary_deep_prompts(paper_clean, cap)
+
+    token = reserve_usage(
+        user_id, paper_id, "summary", model=model_used,
+        count=get_usage_multiplier(user_id),
+    )
+
+    async def event_stream() -> AsyncIterator[bytes]:
+        produced = False
+        last_object: dict = {}
+        try:
+            yield _sse_event({"type": "start", "model": model_used, "phase": "deep"})
+            async for ev in _stream_structured_summary(
+                provider, system, user_prompt, max_tokens=3500,
+            ):
+                produced = True
+                try:
+                    parsed = json.loads(ev.decode("utf-8")[6:])
+                    if isinstance(parsed, dict) and isinstance(parsed.get("object"), dict):
+                        last_object = parsed["object"]
+                except Exception:
+                    pass
+                yield ev
+
+            if last_object.get("methodology"):
+                last_object["model"] = model_used
+                try:
+                    def _persist(p):
+                        p.cached_analysis["summary_deep"] = last_object
+                        merged = {**(p.cached_analysis.get("summary") or {}), **last_object}
+                        p.cached_analysis["summary"] = merged
+                    mutate_paper(paper_id, user_id, _persist)
+                except Exception:
+                    logger.exception("Failed to persist summary_deep for %s", paper_id)
+            else:
+                if not produced:
+                    release_usage(token)
+        except asyncio.CancelledError:
+            if not produced:
+                release_usage(token)
+            raise
+        except Exception as exc:
+            logger.exception("summary-deep-stream failed for %s", paper_id)
+            if not produced:
+                release_usage(token)
+            yield _sse_event({"type": "error", "message": str(exc) or "Summary deep section failed."})
 
     return StreamingResponse(
         event_stream(),
