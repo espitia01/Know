@@ -17,8 +17,11 @@ import type { streamObject } from "ai";
  *     `toTextStreamResponse` would produce; or
  *   - an `error` event fires (return JSON 502 directly).
  *
- * `peekTimeoutMs` defaults to 25 s, generous enough for cold provider
- * starts but short enough to surface stuck calls.
+ * Vercel's `maxDuration` on the route is the only timeout we need —
+ * a custom `Promise.race` against `setTimeout` would leave the
+ * underlying `fullReader.read()` pending, which then throws
+ * "Cannot read from a reader that has a pending read" the first time
+ * the passthrough tries to read again.
  */
 
 const DEPLOY_SHA =
@@ -39,8 +42,6 @@ export type StreamObjectResponseOptions = {
   logTag?: string;
   /** Optional context for log lines. */
   logContext?: Record<string, unknown>;
-  /** Override the 25 s peek window. */
-  peekTimeoutMs?: number;
 };
 
 export type StreamObjectErrorPayload = {
@@ -52,26 +53,21 @@ export async function buildStreamObjectResponse<T>(
   result: ReturnType<typeof streamObject>,
   opts: StreamObjectResponseOptions,
 ): Promise<Response | StreamObjectErrorPayload> {
-  const peekTimeoutMs = opts.peekTimeoutMs ?? 25_000;
   const fullReader = (
     result.fullStream as unknown as ReadableStream<ObjectStreamPart<T>>
   ).getReader();
   const bufferedDeltas: string[] = [];
   let preflightError: unknown = null;
   let sawTextDelta = false;
-  const deadline = Date.now() + peekTimeoutMs;
+  let streamExhausted = false;
 
   try {
     while (!sawTextDelta && preflightError === null) {
-      const remaining = deadline - Date.now();
-      if (remaining <= 0) break;
-      const peeked = await Promise.race([
-        fullReader.read(),
-        new Promise<{ done: true; value: undefined }>((resolve) =>
-          setTimeout(() => resolve({ done: true, value: undefined }), remaining),
-        ),
-      ]);
-      if (peeked.done) break;
+      const peeked = await fullReader.read();
+      if (peeked.done) {
+        streamExhausted = true;
+        break;
+      }
       const evt = peeked.value;
       if (!evt) continue;
       if (evt.type === "text-delta") {
@@ -136,15 +132,17 @@ export async function buildStreamObjectResponse<T>(
         for (const delta of bufferedDeltas) {
           if (delta) controller.enqueue(encoder.encode(delta));
         }
-        while (true) {
-          const { done, value } = await fullReader.read();
-          if (done) break;
-          if (!value) continue;
-          if (value.type === "text-delta") {
-            if (value.textDelta) controller.enqueue(encoder.encode(value.textDelta));
-          } else if (value.type === "error") {
-            // streamObject's onError already logged + released.
-            break;
+        if (!streamExhausted) {
+          while (true) {
+            const { done, value } = await fullReader.read();
+            if (done) break;
+            if (!value) continue;
+            if (value.type === "text-delta") {
+              if (value.textDelta) controller.enqueue(encoder.encode(value.textDelta));
+            } else if (value.type === "error") {
+              // streamObject's onError already logged + released.
+              break;
+            }
           }
         }
         try {
