@@ -339,7 +339,12 @@ class AnthropicProvider(LLMProvider):
             usage.get("input_tokens", 0),
             usage.get("output_tokens", 0),
         )
-        return data["content"][0]["text"]
+        text = data["content"][0].get("text") if data.get("content") else None
+        if not isinstance(text, str) or not text.strip():
+            raise LLMProviderError(
+                502, "Anthropic returned an empty response.", model=self.model
+            )
+        return text
 
     async def stream_complete(self, system: str, user: str, max_tokens: int = 4096) -> AsyncIterator[str]:
         """Stream a text response token-by-token."""
@@ -1048,7 +1053,9 @@ def _parse_qa_payload(raw: str, questions: list[str]) -> dict:
         if len(text) > 20:
             label = questions[0] if len(questions) == 1 else " / ".join(questions[:3])
             return {"items": [{"question": label, "answer": text}]}
-        raise ValueError("Q&A returned empty payload")
+        raise ValueError(
+            f"Q&A returned empty payload (model response was {len(text)} characters)"
+        )
 
     if len(items) < len(questions):
         answered = {
@@ -2139,7 +2146,16 @@ Return JSON:
 }}"""
 
     raw = await provider.complete(system, user, max_tokens=8192)
-    payload = _parse_qa_payload(raw, questions)
+    try:
+        payload = _parse_qa_payload(raw, questions)
+    except ValueError:
+        logger.warning(
+            "Q&A parse failed model=%s raw_len=%s preview=%r",
+            getattr(provider, "model", "?"),
+            len(raw or ""),
+            (raw or "")[:120],
+        )
+        raise
     if retrieval_hits:
         hits = _sanitize_qa_source_hits(retrieval_hits)
         if hits:

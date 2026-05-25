@@ -143,7 +143,7 @@ async function request<T>(
           (typeof body?.detail === "string" && body.detail === "Method Not Allowed")
         ) {
           message =
-            "Backend rejected the request method. Confirm NEXT_PUBLIC_API_URL is your Railway URL (not the Vercel app) and redeploy the backend.";
+            "This API route only accepts POST. If you see this while using Q&A, ignore any GET /qa lines in server logs — the app calls POST; GET 405s are usually manual probes.";
         }
         if (status === 503 && typeof body?.detail === "string" && body.detail.trim()) {
           message = body.detail.trim();

@@ -93,8 +93,8 @@ async def limit_json_body(request: Request, call_next):
             return JSONResponse(status_code=413, content={"detail": "Request body too large"})
     response = await call_next(request)
     if response.status_code == 405:
-        _main_logger.warning(
-            "405 Method Not Allowed: %s %s (check client uses POST, not GET)",
+        _main_logger.info(
+            "405 Method Not Allowed: %s %s",
             request.method,
             request.url.path,
         )
