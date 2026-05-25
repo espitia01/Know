@@ -5,16 +5,15 @@ import type { streamObject } from "ai";
 /**
  * Convert a `streamObject` result into a streaming HTTP Response while
  * surfacing lazy provider failures as typed JSON before returning the
- * Response. Without preflight, AI SDK lazy stream errors become a generic
- * Next.js 500 after headers would have been sent.
+ * Response.
  *
  * Preflight tees `result.fullStream` and waits for the first `object` or
- * `text-delta` event (Haiku often emits structured partials before text
- * deltas). A hard timeout prevents blocking until Vercel's `maxDuration`
- * returns a generic HTML 500.
+ * `text-delta` event. Timeout uses `reader.cancel()` — never `Promise.race`
+ * on `reader.read()`, which leaves a pending read and can crash the
+ * route with "Cannot read from a reader that has a pending read".
  *
- * The client branch is filtered to text deltas only — same bytes as
- * `result.toTextStreamResponse()` for `experimental_useObject`.
+ * The client branch is filtered to text deltas only (same as
+ * `result.toTextStreamResponse()` for `experimental_useObject`).
  */
 
 const DEPLOY_SHA =
@@ -70,24 +69,38 @@ function isProgressPart(part: ObjectStreamPart | undefined): boolean {
   return part.type === "text-delta" && !!textDeltaFromPart(part);
 }
 
+function isAbortError(e: unknown): boolean {
+  if (!e || typeof e !== "object") return false;
+  const name = (e as { name?: string }).name;
+  return name === "AbortError";
+}
+
 async function preflightPeek(
   peek: ReadableStream<ObjectStreamPart>,
 ): Promise<{ ok: true } | { ok: false; error: unknown }> {
   const reader = peek.getReader();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        reject(
-          new Error(
-            "Timed out waiting for the model to start streaming. Try again or pick a faster model in Settings.",
-          ),
-        );
-      }, PREFLIGHT_TIMEOUT_MS);
-    });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    void reader.cancel("preflight_timeout");
+  }, PREFLIGHT_TIMEOUT_MS);
 
+  try {
     while (true) {
-      const next = await Promise.race([reader.read(), timeout]);
+      let next: ReadableStreamReadResult<ObjectStreamPart>;
+      try {
+        next = await reader.read();
+      } catch (e) {
+        if (timedOut || isAbortError(e)) {
+          return {
+            ok: false,
+            error: new Error(
+              "Timed out waiting for the model to start streaming. Try again or pick a faster model in Settings.",
+            ),
+          };
+        }
+        return { ok: false, error: e };
+      }
       if (next.done) {
         return { ok: false, error: new Error("Model returned no output") };
       }
@@ -100,10 +113,8 @@ async function preflightPeek(
         return { ok: true };
       }
     }
-  } catch (e) {
-    return { ok: false, error: e };
   } finally {
-    if (timer) clearTimeout(timer);
+    clearTimeout(timer);
     try {
       reader.releaseLock();
     } catch {
@@ -207,6 +218,17 @@ export async function buildStreamObjectResponse(
       "X-Know-Deploy": DEPLOY_SHA,
     },
   });
+}
+
+/** Same headers as `buildStreamObjectResponse` for `toTextStreamResponse` fallbacks. */
+export function streamResponseHeaders(model: string): Record<string, string> {
+  return {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-store, no-transform",
+    "X-Accel-Buffering": "no",
+    "X-Know-Model": model,
+    "X-Know-Deploy": DEPLOY_SHA,
+  };
 }
 
 export function isStreamErrorPayload(

@@ -2,8 +2,9 @@
  * Migrated summary-stream route — replaces Python's
  * /api/papers/{id}/summary-stream for authenticated callers.
  *
- * Pre-flight peek + text-delta passthrough is shared with the
- * other migrated streaming routes via `buildStreamObjectResponse`.
+ * Streams via `toTextStreamResponse` (same path as figure-qa-stream).
+ * Preflight tee was removed: racing `reader.read()` left pending reads
+ * that crashed the route with a generic Next.js 500 HTML page.
  */
 
 import { NextResponse } from "next/server";
@@ -32,10 +33,7 @@ import {
   cachedUserMessages,
   providerOptionsForSlug,
 } from "@/lib/server/promptCache";
-import {
-  buildStreamObjectResponse,
-  isStreamErrorPayload,
-} from "@/lib/server/streamObjectResponse";
+import { streamResponseHeaders } from "@/lib/server/streamObjectResponse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -233,7 +231,8 @@ export async function POST(
           : {}),
         temperature: 0.3,
         maxOutputTokens: maxOutputTokensFor(analysisModel, "analysis"),
-        onFinish: async (event) => {
+        onFinish: (event) => {
+          void (async () => {
           try {
             if (event.error) {
               console.error(
@@ -300,9 +299,11 @@ export async function POST(
             );
             await releaseOnFailure();
           }
+          })();
         },
-        onError: async ({ error }) => {
+        onError: ({ error }) => {
           providerFailed = error;
+          void (async () => {
           try {
             console.error(
               JSON.stringify({
@@ -324,6 +325,7 @@ export async function POST(
               }),
             );
           }
+          })();
         },
       });
     } catch (e) {
@@ -332,7 +334,7 @@ export async function POST(
       return jsonError(502, "provider_error", message, { model: analysisModel });
     }
 
-    // Let lazy provider failures enqueue before we peek the stream.
+    // Yield once so synchronous provider rejections hit onError first.
     await new Promise<void>((resolve) => setImmediate(resolve));
     if (providerFailed) {
       const message =
@@ -342,38 +344,9 @@ export async function POST(
       return jsonError(502, "provider_error", message, { model: analysisModel });
     }
 
-    try {
-      const response = await buildStreamObjectResponse(result, {
-        model: analysisModel,
-        releaseOnFailure,
-        logTag: "summary-stream",
-        logContext: { paperId, userId: user.userId },
-      });
-      if (isStreamErrorPayload(response)) {
-        return jsonError(
-          response.status,
-          response.body.detail.code,
-          response.body.detail.message,
-          { model: response.body.detail.model },
-        );
-      }
-      return response;
-    } catch (streamErr) {
-      await releaseOnFailure();
-      console.error(
-        JSON.stringify({
-          tag: "summary-stream.stream_setup",
-          paperId,
-          userId: user.userId,
-          model: analysisModel,
-          error:
-            streamErr instanceof Error ? streamErr.message : String(streamErr),
-        }),
-      );
-      const message =
-        streamErr instanceof Error ? streamErr.message : "Stream setup failed";
-      return jsonError(502, "stream_setup_failed", message, { model: analysisModel });
-    }
+    return result.toTextStreamResponse({
+      headers: streamResponseHeaders(analysisModel),
+    });
   } catch (e) {
     await releaseOnFailure();
     console.error(

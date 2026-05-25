@@ -42,6 +42,9 @@ import {
 function describeError(error: unknown): string {
   if (!error) return "Summary generation failed. Try again.";
   const message = error instanceof Error ? error.message : String(error);
+  if (message.includes("<!DOCTYPE html") || message.includes("Internal Server Error")) {
+    return "Summary request failed on the server (500). Wait for the latest deploy, then retry; if it persists, check Vercel function logs for summary-stream.";
+  }
   try {
     const parsed = JSON.parse(message) as {
       detail?: { code?: string; message?: string; model?: string };
