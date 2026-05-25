@@ -934,10 +934,10 @@ async def get_paper_reading_state(paper_id: str, user_id: str = Depends(require_
     _verify_paper_owner(paper_id, user_id)
     from ..services.db import get_reading_state
 
-    row = get_reading_state(user_id, paper_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="No reading state")
-    return row
+    # "No saved progress yet" is a valid steady state — return null instead
+    # of 404 so the frontend doesn't paint a console error on every first
+    # paper open.
+    return get_reading_state(user_id, paper_id)
 
 
 @router.put("/{paper_id}/reading-state")

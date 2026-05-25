@@ -43,13 +43,27 @@ export const maxDuration = 300;
 
 const PAPER_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
+const DEPLOY_SHA =
+  (process.env.VERCEL_GIT_COMMIT_SHA || process.env.COMMIT_SHA || "dev").slice(0, 12);
+
+function withDeployHeader(res: Response): Response {
+  try {
+    res.headers.set("X-Know-Deploy", DEPLOY_SHA);
+  } catch {
+    /* immutable headers — best-effort */
+  }
+  return res;
+}
+
 function jsonError(
   status: number,
   code: string,
   message: string,
   extra: Record<string, unknown> = {},
 ): Response {
-  return NextResponse.json({ detail: { code, message, ...extra } }, { status });
+  return withDeployHeader(
+    NextResponse.json({ detail: { code, message, deploy: DEPLOY_SHA, ...extra } }, { status }),
+  );
 }
 
 function parseInternalDetail(detail: unknown): Record<string, unknown> {
@@ -317,14 +331,17 @@ export async function POST(
     }
 
     try {
-      return result.toTextStreamResponse({
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "Cache-Control": "no-store, no-transform",
-          "X-Accel-Buffering": "no",
-          "X-Know-Model": analysisModel,
-        },
-      });
+      return withDeployHeader(
+        result.toTextStreamResponse({
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "no-store, no-transform",
+            "X-Accel-Buffering": "no",
+            "X-Know-Model": analysisModel,
+            "X-Know-Deploy": DEPLOY_SHA,
+          },
+        }),
+      );
     } catch (e) {
       await releaseOnFailure();
       const message = e instanceof Error ? e.message : "Stream response error";
