@@ -23,9 +23,9 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { experimental_useObject as useObject } from "@ai-sdk/react";
+import type { PaperSummary } from "@/lib/api";
 import {
   PaperSummaryDeepSchema,
-  type PaperSummary,
   type PaperSummaryDeep,
 } from "@/lib/server/schemas";
 import { useStore } from "@/lib/store";
@@ -65,11 +65,16 @@ function describeError(error: unknown): string {
   return message || "Summary generation failed. Try again.";
 }
 
-function hasOverview(value: Partial<PaperSummary> | null | undefined): boolean {
+type SummaryLike = {
+  overview?: string | null;
+  methodology?: string | null;
+} | null | undefined;
+
+function hasOverview(value: SummaryLike): boolean {
   return typeof value?.overview === "string" && value.overview.trim().length > 0;
 }
 
-function hasBody(value: Partial<PaperSummary> | null | undefined): boolean {
+function hasBody(value: SummaryLike): boolean {
   return (
     typeof value?.methodology === "string" && value.methodology.trim().length > 0
   );
@@ -80,6 +85,22 @@ function mergeSummary(
   patch: Partial<PaperSummary>,
 ): PaperSummary {
   return { ...(prev ?? {}), ...patch } as PaperSummary;
+}
+
+/**
+ * Convert a streamed `PaperSummaryDeep` (whose fields are
+ * `.nullable()` for OpenAI's strict structured-output mode) into the
+ * renderer's `PaperSummary` shape (`string | undefined`). Strips null
+ * values so downstream consumers that key on falsy don't have to
+ * worry about explicit nulls.
+ */
+function dropNulls(value: Partial<PaperSummaryDeep>): Partial<PaperSummary> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (v === null) continue;
+    out[k] = v;
+  }
+  return out as Partial<PaperSummary>;
 }
 
 export function useSummaryStream(paperId: string) {
@@ -111,11 +132,11 @@ export function useSummaryStream(paperId: string) {
       // The server forces `model`/`created_at`; never trust LLM-filled
       // values (Mistral has been seen hallucinating phrases like
       // "arXiv v1 + peer-reviewed condensation" into the model slot).
-      const withMeta: PaperSummary = {
-        ...summary,
+      const withMeta = {
+        ...dropNulls(summary),
         model: modelRef.current,
         created_at: Date.now(),
-      };
+      } as PaperSummary;
       mergeIntoPaperSlot(pid, withMeta);
       const merged = useStore.getState().summaryByPaper[pid] ?? withMeta;
       updateCachedAnalysis(pid, {
@@ -199,7 +220,10 @@ export function useSummaryStream(paperId: string) {
     const mergeKey = JSON.stringify(partial);
     if (mergeKey === lastMergeKey.current) return;
     lastMergeKey.current = mergeKey;
-    mergeIntoPaperSlot(pid, { ...partial, model: modelRef.current } as Partial<PaperSummary>);
+    mergeIntoPaperSlot(pid, {
+      ...dropNulls(partial),
+      model: modelRef.current,
+    });
   }, [obj.object, obj.isLoading, mergeIntoPaperSlot]);
 
   const start = useCallback(() => {

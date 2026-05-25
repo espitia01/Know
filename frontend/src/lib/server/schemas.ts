@@ -21,10 +21,15 @@
 
 import { z } from "zod";
 
+// All fields are nullable rather than optional so the JSON Schema we
+// hand OpenAI's strict structured output mode lists every property in
+// `required` (strict mode rejects schemas where any property in
+// `properties` is missing from `required`). The renderer treats null
+// the same as missing.
 const Assumption = z.object({
   type: z.enum(["explicit", "implicit"]),
   statement: z.string(),
-  significance: z.string().optional(),
+  significance: z.string().nullable(),
 });
 
 const Step = z.object({
@@ -32,7 +37,7 @@ const Step = z.object({
   prompt: z.string(),
   answer: z.string(),
   explanation: z.string(),
-  hint: z.string().optional(),
+  hint: z.string().nullable(),
 });
 
 /**
@@ -44,14 +49,14 @@ export const SelectionResultSchema = z.object({
   action: z.enum(["explain", "derive", "followup"]),
   body: z
     .string()
-    .optional()
+    .nullable()
     .describe(
-      "Primary markdown narrative. Use $...$ for inline math and $$...$$ for display math. NEVER bare LaTeX commands, Unicode math symbols, or raw HTML."
+      "Primary markdown narrative. Use $...$ for inline math and $$...$$ for display math. NEVER bare LaTeX commands, Unicode math symbols, or raw HTML.",
     ),
-  assumptions: z.array(Assumption).optional(),
-  starting_point: z.string().optional(),
-  final_result: z.string().optional(),
-  steps: z.array(Step).optional(),
+  assumptions: z.array(Assumption).nullable(),
+  starting_point: z.string().nullable(),
+  final_result: z.string().nullable(),
+  steps: z.array(Step).nullable(),
 });
 
 export type SelectionResult = z.infer<typeof SelectionResultSchema>;
@@ -101,11 +106,14 @@ const KeyEquation = z.object({
   meaning: z
     .string()
     .describe("Markdown one-paragraph explanation of what this equation says and why it matters in the paper."),
+  // OpenAI strict structured output requires every property in `required`.
+  // Use `.nullable()` instead of `.optional()` so the field is always
+  // present (possibly null) and the schema validates.
   terms: z
     .array(KeyEquationTerm)
-    .optional()
+    .nullable()
     .describe(
-      "Per-variable glossary: every distinct symbol appearing in the equation, with its meaning. Include constants like $\\\\epsilon_0$ as well as variables. Aim for completeness."
+      "Per-variable glossary: every distinct symbol appearing in the equation, with its meaning. Include constants like $\\\\epsilon_0$ as well as variables. Aim for completeness.",
     ),
 });
 
@@ -121,18 +129,24 @@ const KeyFigure = z.object({
 // could fill, and Mistral hallucinated values like "arXiv v1 + peer-
 // reviewed condensation" into the `model` slot. Server-side metadata
 // belongs to the route, not the model.
+//
+// All optional-feeling fields use `.nullable()` because OpenAI's strict
+// structured-output mode rejects any property in `properties` that
+// isn't also in `required`. With `.nullable()` the property is always
+// emitted (possibly null) and the renderer treats null the same as
+// missing.
 export const PaperSummaryLiteSchema = z.object({
   overview: z.string().describe("3–5 sentence high-level overview of what the paper does and why it matters."),
   tl_dr: z
     .string()
-    .optional()
+    .nullable()
     .describe("One-sentence takeaway. Math-aware ($...$ allowed)."),
   key_contributions: z
     .array(z.string())
     .describe("1–2 sentence bullets, 3–5 items, ordered by importance."),
   key_equations: z
     .array(KeyEquation)
-    .optional()
+    .nullable()
     .describe("Up to 3 most important equations."),
 });
 
@@ -141,36 +155,36 @@ export type PaperSummaryLite = z.infer<typeof PaperSummaryLiteSchema>;
 export const PaperSummaryDeepSchema = z.object({
   overview: z
     .string()
-    .optional()
+    .nullable()
     .describe("3–5 sentence high-level overview of what the paper does and why it matters."),
   tl_dr: z
     .string()
-    .optional()
+    .nullable()
     .describe("One-sentence takeaway with the single most important result. Math-aware ($...$ allowed)."),
   key_contributions: z
     .array(z.string())
-    .optional()
+    .nullable()
     .describe("1–2 sentence bullets, 3–5 items, ordered by importance."),
   motivation: z
     .string()
-    .optional()
+    .nullable()
     .describe("3–5 sentences on why this work was done and what gap it fills."),
   methodology: z
     .string()
-    .optional()
+    .nullable()
     .describe("1–2 paragraph markdown explanation of the methods, models, or theoretical framework."),
   main_results: z
     .string()
-    .optional()
+    .nullable()
     .describe("1–2 paragraph markdown describing the key findings; quantitative numbers in $...$ delimiters."),
   discussion: z
     .string()
-    .optional()
+    .nullable()
     .describe("1–2 paragraph markdown — what the results mean, how they compare to prior work."),
-  limitations: z.array(z.string()).optional(),
-  future_work: z.string().optional().describe("2–3 sentences on follow-up research this enables."),
-  key_equations: z.array(KeyEquation).optional().describe("Up to 4 of the paper's most important equations, each with a per-variable glossary."),
-  key_figures_and_tables: z.array(KeyFigure).optional(),
+  limitations: z.array(z.string()).nullable(),
+  future_work: z.string().nullable().describe("2–3 sentences on follow-up research this enables."),
+  key_equations: z.array(KeyEquation).nullable().describe("Up to 4 of the paper's most important equations, each with a per-variable glossary."),
+  key_figures_and_tables: z.array(KeyFigure).nullable(),
 });
 
 export type PaperSummaryDeep = z.infer<typeof PaperSummaryDeepSchema>;
@@ -179,21 +193,34 @@ export type PaperSummaryDeep = z.infer<typeof PaperSummaryDeepSchema>;
  * Combined `PaperSummary` is the union of lite + deep — what the panel
  * actually renders. Slots that the lite phase didn't populate fall to
  * the deep phase's values, and vice versa.
+ *
+ * The renderer accepts both `undefined` (legacy cached payloads from
+ * earlier schema revisions) and `null` (newer streamed output where
+ * every field is `.nullable()` for OpenAI's strict structured-output
+ * requirement). Renderer treats null and undefined the same.
  */
+const PaperSummaryKeyEquation = z.object({
+  equation: z.string(),
+  meaning: z.string(),
+  terms: z
+    .array(z.object({ symbol: z.string(), meaning: z.string() }))
+    .nullish(),
+});
+
 export const PaperSummarySchema = z.object({
-  model: z.string().optional(),
-  created_at: z.number().optional(),
-  overview: z.string().optional(),
-  tl_dr: z.string().optional(),
-  motivation: z.string().optional(),
-  key_contributions: z.array(z.string()).optional(),
-  methodology: z.string().optional(),
-  main_results: z.string().optional(),
-  discussion: z.string().optional(),
-  limitations: z.array(z.string()).optional(),
-  future_work: z.string().optional(),
-  key_equations: z.array(KeyEquation).optional(),
-  key_figures_and_tables: z.array(KeyFigure).optional(),
+  model: z.string().nullish(),
+  created_at: z.number().nullish(),
+  overview: z.string().nullish(),
+  tl_dr: z.string().nullish(),
+  motivation: z.string().nullish(),
+  key_contributions: z.array(z.string()).nullish(),
+  methodology: z.string().nullish(),
+  main_results: z.string().nullish(),
+  discussion: z.string().nullish(),
+  limitations: z.array(z.string()).nullish(),
+  future_work: z.string().nullish(),
+  key_equations: z.array(PaperSummaryKeyEquation).nullish(),
+  key_figures_and_tables: z.array(KeyFigure).nullish(),
 });
 
 export type PaperSummary = z.infer<typeof PaperSummarySchema>;
@@ -202,18 +229,19 @@ export type PaperSummary = z.infer<typeof PaperSummarySchema>;
  * Schema for the migrated `figure-qa-stream` route.
  *
  * Two shapes share one schema: free-form analysis (no question) and
- * direct Q&A (with `answer`). Optional fields keep the JSON small for
- * the case the model didn't fill them.
+ * direct Q&A (with `answer`). Nullable fields keep OpenAI's strict
+ * structured-output mode happy while still letting the renderer treat
+ * unfilled fields as missing.
  */
 export const FigureAnalysisSchema = z.object({
   description: z.string().describe("Markdown description of the figure."),
-  key_observations: z.array(z.string()).optional(),
-  methodology_shown: z.string().optional(),
-  relation_to_paper: z.string().optional(),
-  takeaway: z.string().optional(),
+  key_observations: z.array(z.string()).nullable(),
+  methodology_shown: z.string().nullable(),
+  relation_to_paper: z.string().nullable(),
+  takeaway: z.string().nullable(),
   answer: z
     .string()
-    .optional()
+    .nullable()
     .describe("If a user question was asked, the direct markdown answer goes here."),
 });
 

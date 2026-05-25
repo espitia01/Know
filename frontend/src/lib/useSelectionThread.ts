@@ -74,7 +74,7 @@ function describeError(error: unknown): string {
 }
 
 function coerceAssumptions(
-  raw: SelectionResult["assumptions"],
+  raw: SelectionResult["assumptions"] | null | undefined,
 ): SelectionAnalysisResult["assumptions"] {
   if (!raw) return undefined;
   return raw.map((a) => ({
@@ -85,7 +85,7 @@ function coerceAssumptions(
 }
 
 function coerceSteps(
-  raw: SelectionResult["steps"],
+  raw: SelectionResult["steps"] | null | undefined,
 ): SelectionAnalysisResult["steps"] {
   if (!raw) return undefined;
   return raw.map((s) => ({
@@ -109,8 +109,8 @@ function projectPartial(
     question: started.question,
     explanation: partial?.body ?? "",
     assumptions: coerceAssumptions(partial?.assumptions),
-    starting_point: partial?.starting_point,
-    final_result: partial?.final_result,
+    starting_point: partial?.starting_point ?? undefined,
+    final_result: partial?.final_result ?? undefined,
     steps: coerceSteps(partial?.steps),
     streaming,
     clientKey: started.clientKey,
