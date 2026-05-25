@@ -138,6 +138,9 @@ async function request<T>(
           message =
             "Backend rejected the request method. Confirm NEXT_PUBLIC_API_URL is your Railway URL (not the Vercel app) and redeploy the backend.";
         }
+        if (structured?.code === "prepare_empty") {
+          message = structured.message || message;
+        }
       } catch {
         // Non-JSON response; fall through with default message.
       }

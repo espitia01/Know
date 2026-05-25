@@ -42,8 +42,12 @@ import {
 function describeError(error: unknown): string {
   if (!error) return "Summary generation failed. Try again.";
   const message = error instanceof Error ? error.message : String(error);
-  if (message.includes("<!DOCTYPE html") || message.includes("Internal Server Error")) {
-    return "Summary request failed on the server (500). Wait for the latest deploy, then retry; if it persists, check Vercel function logs for summary-stream.";
+  if (
+    message.includes("<!DOCTYPE html") ||
+    message.includes("Internal Server Error") ||
+    message.includes("SIGABRT")
+  ) {
+    return "Summary crashed on the server (out of memory or stream error). Retry after the latest deploy; if it persists, try a smaller paper or Haiku/Mistral Small in Settings.";
   }
   try {
     const parsed = JSON.parse(message) as {

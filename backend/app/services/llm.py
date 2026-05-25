@@ -571,7 +571,7 @@ class OpenAIProvider(LLMProvider):
         )
         if _openai_uses_responses_api(self.model):
             return await self._complete_via_responses(system, merged_user, max_tokens)
-        body = {
+        body: dict = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system},
@@ -580,6 +580,8 @@ class OpenAIProvider(LLMProvider):
             "stream": False,
             **_openai_token_fields(self.model, max_tokens),
         }
+        if "ONLY valid JSON" in system or "Return ONLY valid JSON" in system:
+            body["response_format"] = {"type": "json_object"}
         response = await self.client.post(OPENAI_API_URL, headers=self._headers(), json=body)
         _raise_for_openai(response, model=self.model)
         data = response.json()
@@ -747,7 +749,7 @@ class MistralProvider(LLMProvider):
             if cache_user_prefix
             else user
         )
-        body = {
+        body: dict = {
             "model": self.model,
             "max_tokens": max_tokens,
             "temperature": 0.2,
@@ -757,6 +759,8 @@ class MistralProvider(LLMProvider):
             ],
             "stream": False,
         }
+        if "ONLY valid JSON" in system or "Return ONLY valid JSON" in system:
+            body["response_format"] = {"type": "json_object"}
         response = await self.client.post(MISTRAL_API_URL, headers=self._headers(), json=body)
         _raise_for_mistral(response, model=self.model)
         data = response.json()
@@ -1422,22 +1426,26 @@ Paper context:
 # Analysis functions (use Sonnet or user-configured provider)
 # ---------------------------------------------------------------------------
 
-async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
-    """Run pre-reading analysis on paper content."""
-    provider = get_provider(user_id)
-    paper_text_full = _sanitize_user_text(paper_text, max_chars=200_000)
-    paper_text = build_prepare_excerpt(paper_text_full, max_chars=15000)
+def _build_prepare_user_prompt(
+    paper_text: str,
+    bib_for_prompt: str,
+    *,
+    simplified: bool = False,
+) -> str:
+    if simplified:
+        return f"""Analyze this paper and return ONLY a JSON object with:
+1. "definitions": array of {{"term": "...", "definition": "...", "source": "..."}} (at least 2 if possible)
+2. "research_questions": array of {{"question": "...", "context": "..."}} (at least 1)
+3. "concepts": array of {{"name": "...", "description": "...", "importance": "..."}} (at least 2)
+4. "reference_summaries": []
+5. "reference_clusters": []
+6. "prior_work_topics": []
+7. "prior_work": []
 
-    bib_excerpt = extract_references_section(paper_text_full, max_chars=14000)
-    bib_for_prompt = bib_excerpt[-12000:] if len(bib_excerpt) > 12000 else bib_excerpt
-
-    system = (
-        "You are an expert science educator. Analyze the given academic paper and extract structured information "
-        "to help a student prepare before reading. Return ONLY valid JSON with no other text.\n\n"
-        + LATEX_FORMAT_INSTRUCTIONS
-    )
-
-    user = f"""Analyze this paper and return a JSON object with these fields:
+Paper body:
+{paper_text}
+"""
+    return f"""Analyze this paper and return a JSON object with these fields:
 
 1. "definitions": array of {{"term": "...", "definition": "...", "source": "..."}} — key technical terms. Use LaTeX in strings as needed ($...$ / $$...$$).
 2. "research_questions": array of {{"question": "...", "context": "..."}}.
@@ -1472,24 +1480,37 @@ REFERENCE LIST excerpt (ground truth for citations — use for matching titles a
 {bib_for_prompt if bib_for_prompt else "(no isolated reference block detected — infer carefully from the body above)"}
 """
 
+
+async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
+    """Run pre-reading analysis on paper content."""
+    provider = get_provider(user_id)
     model_slug = getattr(provider, "model", "unknown")
-    raw = await provider.complete(
-        system,
-        "\n",
-        max_tokens=12000,
-        cache_user_prefix=user,
+    paper_text_full = _sanitize_user_text(paper_text, max_chars=200_000)
+    paper_text = build_prepare_excerpt(paper_text_full, max_chars=12000)
+
+    bib_excerpt = extract_references_section(paper_text_full, max_chars=10000)
+    bib_for_prompt = bib_excerpt[-8000:] if len(bib_excerpt) > 8000 else bib_excerpt
+
+    system = (
+        "You are an expert science educator. Analyze the given academic paper and extract structured information "
+        "to help a student prepare before reading. Return ONLY valid JSON with no other text.\n\n"
+        + LATEX_FORMAT_INSTRUCTIONS
     )
+
+    user = _build_prepare_user_prompt(paper_text, bib_for_prompt, simplified=False)
+
+    async def _run(user_prompt: str, max_tokens: int) -> str:
+        return await provider.complete(
+            system,
+            "\n",
+            max_tokens=max_tokens,
+            cache_user_prefix=user_prompt,
+        )
+
+    raw = await _run(user, 10000)
     result = _safe_parse_json(raw)
     if _is_usable_prepare_payload(result):
         return result
-
-    if len(raw.strip()) < 200:
-        logger.warning(
-            "Prepare empty payload model=%s raw=%s",
-            model_slug,
-            raw.strip()[:200],
-        )
-        raise ValueError("Prepare returned empty payload")
 
     repaired = _try_fence_repair_json(raw)
     if repaired:
@@ -1498,9 +1519,35 @@ REFERENCE LIST excerpt (ground truth for citations — use for matching titles a
             return repaired
 
     logger.warning(
-        "Prepare unusable JSON model=%s raw_len=%s",
+        "Prepare retry model=%s raw_len=%s",
         model_slug,
         len(raw),
+    )
+    retry_user = _build_prepare_user_prompt(paper_text, "", simplified=True)
+    raw_retry = await _run(retry_user, 6000)
+    result = _safe_parse_json(raw_retry)
+    if _is_usable_prepare_payload(result):
+        return result
+
+    repaired = _try_fence_repair_json(raw_retry)
+    if repaired:
+        repaired = _normalize_latex_delimiters(repaired)
+        if _is_usable_prepare_payload(repaired):
+            return repaired
+
+    if len(raw.strip()) < 200 and len(raw_retry.strip()) < 200:
+        logger.warning(
+            "Prepare empty payload model=%s raw=%s",
+            model_slug,
+            raw.strip()[:200],
+        )
+        raise ValueError("Prepare returned empty payload")
+
+    logger.warning(
+        "Prepare unusable JSON model=%s raw_len=%s retry_len=%s",
+        model_slug,
+        len(raw),
+        len(raw_retry),
     )
     raise ValueError("Prepare returned empty payload")
 

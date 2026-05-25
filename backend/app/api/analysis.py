@@ -159,7 +159,17 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
     except ValueError as exc:
         release_usage(token)
         logger.warning("Analysis 503 for paper %s: %s", paper_id, exc)
-        raise HTTPException(status_code=503, detail="Analysis service temporarily unavailable.")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "prepare_empty",
+                "message": (
+                    "Pre-reading analysis could not be parsed. "
+                    "Try again or switch to another model in Settings."
+                ),
+                "model": resolve_analysis_model(user_id),
+            },
+        )
     except HTTPException:
         release_usage(token)
         raise

@@ -1,7 +1,6 @@
 /**
  * Migrated selection-stream route. Mirrors summary-stream's hardened
- * pre-flight peek so lazy provider failures (Mistral / OpenAI / gateway)
- * surface as typed JSON 502 instead of a Next.js 500.
+ * Streams via `toTextStreamResponse` (no fullStream tee — caused SIGABRT on Vercel).
  */
 
 import { NextResponse } from "next/server";
@@ -30,10 +29,7 @@ import {
   cachedUserMessages,
   providerOptionsForSlug,
 } from "@/lib/server/promptCache";
-import {
-  buildStreamObjectResponse,
-  isStreamErrorPayload,
-} from "@/lib/server/streamObjectResponse";
+import { streamResponseHeaders } from "@/lib/server/streamObjectResponse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -246,6 +242,7 @@ export async function POST(
       deepAnalysis,
     });
 
+    let providerFailed: unknown = null;
     let result: ReturnType<typeof streamObject>;
     try {
       result = streamObject({
@@ -261,7 +258,8 @@ export async function POST(
           : {}),
         temperature: 0.2,
         maxOutputTokens: maxTokensForSelection(normalizedAction, fastModel),
-        onFinish: async (event) => {
+        onFinish: (event) => {
+          void (async () => {
           try {
             if (event.error) {
               await releaseOnFailure();
@@ -310,8 +308,11 @@ export async function POST(
             );
             await releaseOnFailure();
           }
+          })();
         },
-        onError: async ({ error }) => {
+        onError: ({ error }) => {
+          providerFailed = error;
+          void (async () => {
           try {
             console.error(
               JSON.stringify({
@@ -327,6 +328,7 @@ export async function POST(
           } catch {
             /* swallow */
           }
+          })();
         },
       });
     } catch (e) {
@@ -335,21 +337,18 @@ export async function POST(
       return jsonError(502, "provider_error", message, { model: fastModel });
     }
 
-    const response = await buildStreamObjectResponse(result, {
-      model: fastModel,
-      releaseOnFailure,
-      logTag: "selection-stream",
-      logContext: { paperId, userId: user.userId, action: normalizedAction },
-    });
-    if (isStreamErrorPayload(response)) {
-      return jsonError(
-        response.status,
-        response.body.detail.code,
-        response.body.detail.message,
-        { model: response.body.detail.model },
-      );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (providerFailed) {
+      const message =
+        providerFailed instanceof Error
+          ? providerFailed.message
+          : String(providerFailed);
+      return jsonError(502, "provider_error", message, { model: fastModel });
     }
-    return response;
+
+    return result.toTextStreamResponse({
+      headers: streamResponseHeaders(fastModel),
+    });
   } catch (e) {
     await releaseOnFailure();
     console.error(

@@ -41,6 +41,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const PAPER_ID_RE = /^[a-zA-Z0-9_-]+$/;
+/** Cap text shipped into prompts — full OCR payloads can exceed Vercel memory. */
+const PROMPT_SOURCE_CAP = 80_000;
 
 const DEPLOY_SHA =
   (process.env.VERCEL_GIT_COMMIT_SHA || process.env.COMMIT_SHA || "dev").slice(0, 12);
@@ -143,9 +145,10 @@ export async function POST(
         fetchPaperContext(paperId, user.userId),
         fetchUserPrefs(user.userId),
       ]);
+      const raw = (ctx.raw_text ?? "").slice(0, PROMPT_SOURCE_CAP);
       paper = {
         title: ctx.title ?? "Untitled paper",
-        raw_text: ctx.raw_text ?? "",
+        raw_text: raw,
       };
       if (!paper.raw_text.trim()) {
         return jsonError(
