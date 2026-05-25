@@ -632,10 +632,7 @@ async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)
         result = await answer_questions(
             paper_prompt_text(paper), req.questions, user_id=user_id, paper_id=paper_id,
         )
-        if isinstance(result, dict) and "items" in result:
-            resp = QAResponse(**result)
-        else:
-            resp = QAResponse(items=[QAItem(**item) for item in result])
+        resp = QAResponse(**result)
         payload = resp.model_dump()
         if not append_qa_session_db(paper_id, user_id, payload):
             def _apply(p):
@@ -1053,22 +1050,21 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
         result = await answer_questions_multi(
             paper_texts, questions, user_id=user_id, paper_ids=paper_ids,
         )
-        payload = result if isinstance(result, dict) and "items" in result else {"items": result}
+        payload = result if isinstance(result, dict) and "items" in result else {"items": []}
+        resp = QAResponse(**payload)
         primary_id = paper_ids[0]
 
         def _apply_cross(p):
             entry = {
                 "questions": questions,
-                "items": payload.get("items") or [],
+                "items": resp.model_dump().get("items") or [],
                 "paper_ids": paper_ids,
             }
             append_capped(p.cached_analysis, "cross_paper_qa", entry)
 
         mutate_paper(primary_id, user_id, _apply_cross)
 
-        if isinstance(result, dict) and "items" in result:
-            return result
-        return {"items": result}
+        return resp.model_dump()
     except ValueError as exc:
         for t in tokens:
             release_usage(t)

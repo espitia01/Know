@@ -960,6 +960,100 @@ def _safe_parse_json(raw: str) -> dict:
     return _normalize_latex_delimiters(result)
 
 
+def _sanitize_qa_source_hits(hits: list[dict] | None) -> list[dict]:
+    """Drop malformed retrieval hits so QAResponse validation does not 500."""
+    clean: list[dict] = []
+    if not isinstance(hits, list):
+        return clean
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        paper_id = hit.get("paper_id")
+        chunk_index = hit.get("chunk_index")
+        snippet = hit.get("snippet") or hit.get("text") or hit.get("content")
+        if not isinstance(paper_id, str) or not paper_id.strip():
+            continue
+        if not isinstance(chunk_index, int):
+            try:
+                chunk_index = int(chunk_index)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue
+        snippet_text = _coerce_markdown_field(snippet).strip()[:240]
+        if not snippet_text:
+            continue
+        entry: dict = {
+            "paper_id": paper_id.strip(),
+            "chunk_index": chunk_index,
+            "snippet": snippet_text,
+        }
+        section = hit.get("section")
+        if isinstance(section, str) and section.strip():
+            entry["section"] = section.strip()
+        sim = hit.get("similarity")
+        if isinstance(sim, (int, float)):
+            entry["similarity"] = float(sim)
+        clean.append(entry)
+    return clean
+
+
+def _coerce_qa_item(raw: dict, fallback_question: str | None = None) -> dict | None:
+    q = _coerce_markdown_field(raw.get("question") or fallback_question or "").strip()
+    a = _coerce_markdown_field(
+        raw.get("answer") or raw.get("body") or raw.get("text") or raw.get("content") or ""
+    ).strip()
+    if not q and not a:
+        return None
+    item: dict = {
+        "question": q or (fallback_question or "Question"),
+        "answer": a,
+    }
+    if isinstance(raw.get("sources"), list):
+        item["sources"] = _sanitize_qa_source_hits(raw["sources"])
+    return item
+
+
+def _parse_qa_payload(raw: str, questions: list[str]) -> dict:
+    """Parse batch Q&A JSON with prose + partial-structure fallbacks."""
+    parsed = _safe_parse_json(raw)
+    items_raw: list = []
+    if isinstance(parsed, dict):
+        raw_items = parsed.get("items")
+        if isinstance(raw_items, list):
+            items_raw = raw_items
+        elif isinstance(parsed.get("answers"), list):
+            items_raw = parsed["answers"]
+    elif isinstance(parsed, list):
+        items_raw = parsed
+
+    items: list[dict] = []
+    for i, raw_item in enumerate(items_raw):
+        fallback_q = questions[i] if i < len(questions) else None
+        if isinstance(raw_item, dict):
+            coerced = _coerce_qa_item(raw_item, fallback_q)
+            if coerced:
+                items.append(coerced)
+        elif isinstance(raw_item, str) and raw_item.strip():
+            q = fallback_q or (questions[0] if questions else "Question")
+            items.append({"question": q, "answer": raw_item.strip()})
+
+    if not items or not any(_coerce_markdown_field(it.get("answer")).strip() for it in items):
+        text = _coerce_markdown_field(raw).strip()
+        if text and not text.lstrip().startswith("{"):
+            label = questions[0] if len(questions) == 1 else " / ".join(questions[:3])
+            return {"items": [{"question": label, "answer": text}]}
+        raise ValueError("Q&A returned empty payload")
+
+    if len(items) < len(questions):
+        answered = {
+            _coerce_markdown_field(it.get("question")).strip().lower() for it in items
+        }
+        for q in questions:
+            if q.strip().lower() not in answered:
+                items.append({"question": q, "answer": ""})
+    limit = len(questions) or len(items)
+    return {"items": items[:limit]}
+
+
 def _repair_orphan_period_display_close(s: str) -> str:
     """GPT often closes display math with `.$$` instead of `$$`."""
 
@@ -2038,16 +2132,13 @@ Return JSON:
 }}"""
 
     raw = await provider.complete(system, user, max_tokens=8192)
-    parsed = _safe_parse_json(raw)
-    # Stamp retrieval hits on each item so the UI can render "Show passage"
-    # chips. The model didn't pick per-question hits — Track D retrieves once
-    # for the whole batch — so each answer carries the same set. A future
-    # iteration can re-rank per-question if needed.
-    if isinstance(parsed, dict) and isinstance(parsed.get("items"), list) and retrieval_hits:
-        for item in parsed["items"]:
-            if isinstance(item, dict):
-                item["sources"] = retrieval_hits
-    return parsed
+    payload = _parse_qa_payload(raw, questions)
+    if retrieval_hits:
+        hits = _sanitize_qa_source_hits(retrieval_hits)
+        if hits:
+            for item in payload["items"]:
+                item["sources"] = hits
+    return payload
 
 
 MULTI_QA_TOTAL_CHAR_BUDGET = 30_000
@@ -2125,15 +2216,13 @@ Return JSON:
 }}"""
 
     raw = await provider.complete(system, user, max_tokens=8192)
-    parsed = _safe_parse_json(raw)
-    # Stamp the union of per-paper retrieval hits on every answer. Cross-paper
-    # answers don't have a 1:1 mapping between question and source paper, so
-    # we let the UI render every retrieved chunk and group by paper id there.
-    if isinstance(parsed, dict) and isinstance(parsed.get("items"), list) and all_hits:
-        for item in parsed["items"]:
-            if isinstance(item, dict):
-                item["sources"] = all_hits
-    return parsed
+    payload = _parse_qa_payload(raw, questions)
+    if all_hits:
+        hits = _sanitize_qa_source_hits(all_hits)
+        if hits:
+            for item in payload["items"]:
+                item["sources"] = hits
+    return payload
 
 
 async def summarize_paper_lite(

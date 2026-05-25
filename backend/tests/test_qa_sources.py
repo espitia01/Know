@@ -54,3 +54,39 @@ def test_answer_questions_omits_sources_when_no_retrieval():
     items = result.get("items") if isinstance(result, dict) else None
     assert items
     assert items[0].get("sources", []) == []
+
+
+def test_answer_questions_sanitizes_invalid_sources():
+    fake_hits = [
+        {"paper_id": None, "chunk_index": 0, "snippet": "bad"},
+        {
+            "paper_id": "p1",
+            "chunk_index": 2,
+            "section": "Intro",
+            "snippet": "Valid snippet",
+            "similarity": 0.9,
+        },
+    ]
+    with patch.object(llm, "get_provider", return_value=_FakeProvider()):
+        with patch(
+            "app.services.retrieval.retrieve_for_paper",
+            new=AsyncMock(return_value=("ctx", fake_hits)),
+        ):
+            result = asyncio.run(
+                llm.answer_questions(
+                    "raw paper text", ["what is the model?"], user_id="u1", paper_id="p1"
+                )
+            )
+    from app.models.schemas import QAResponse
+
+    resp = QAResponse(**result)
+    assert len(resp.items) == 1
+    assert len(resp.items[0].sources) == 1
+    assert resp.items[0].sources[0].paper_id == "p1"
+
+
+def test_parse_qa_payload_raises_on_empty():
+    import pytest
+
+    with pytest.raises(ValueError, match="empty payload"):
+        llm._parse_qa_payload('{"items": []}', ["What is this?"])

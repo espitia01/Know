@@ -131,6 +131,11 @@ export function QAPanel({ paperId }: QAPanelProps) {
     try {
       // TODO(workspaces): restore api.askQuestionsMulti when WORKSPACE_FEATURES_TEMPORARILY_DISABLED flips.
       const result = await api.askQuestions(paperId, toAnswer);
+      if (!result.items?.length) {
+        setQAErrorKind("error");
+        setQAError("No answers were returned. Try again.");
+        return;
+      }
       setQAResultsForPaper(paperId, [...qaResults, ...result.items]);
       clearQuestions();
       bumpUsageRefresh();
