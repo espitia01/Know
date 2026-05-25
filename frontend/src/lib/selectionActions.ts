@@ -32,8 +32,10 @@ export function selectionKey(r: SelectionAnalysisResult): string {
   const norm = normalizeSelectionAction(r.action);
   const identityText =
     norm === "followup"
-      ? `${r.question ?? ""}\n${r.selected_text ?? ""}`
-      : (r.selected_text ?? "");
+      ? `${typeof r.question === "string" ? r.question : ""}\n${typeof r.selected_text === "string" ? r.selected_text : ""}`
+      : typeof r.selected_text === "string"
+        ? r.selected_text
+        : "";
   // IMPORTANT: Never mix in explanation/elaboration/answer — those mutate on every streamed
   // SSE chunk without clientKey, which would churn React keys and re-run accordion effects on
   // every token (freezing the page when Selection tab mounts or a highlight opens the pane).

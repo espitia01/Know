@@ -41,7 +41,7 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-/** Lite never exceeds 30 s in practice; cap at 60 s with Vercel headroom. */
+/** Deprecated: lite runs on Railway (`/api/papers/.../summary-lite`). Kept for old clients. */
 export const maxDuration = 60;
 
 const PAPER_ID_RE = /^[a-zA-Z0-9_-]+$/;

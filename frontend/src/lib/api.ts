@@ -766,6 +766,17 @@ export const api = {
   getSummary: (id: string) =>
     request<PaperSummary>(`/api/papers/${id}/summary`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }),
+
+  /** Fast summary preview on Railway (avoids Vercel 60s Hobby timeout). */
+  getSummaryLite: (id: string, options?: { signal?: AbortSignal; model?: string }) =>
+    request<PaperSummary>(`/api/papers/${id}/summary-lite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(options?.model ? { model: options.model } : {}),
+      signal: options?.signal,
     }),
 
   getSummaryStream: async (id: string, signal?: AbortSignal) => {

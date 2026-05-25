@@ -31,8 +31,8 @@ const rowItemClass =
   "border-b border-border/60 px-4 py-3 last:border-b-0 motion-safe:transition-colors motion-safe:duration-150 motion-safe:ease-out hover:bg-accent/40";
 
 /** Strip redundant type labels often echoed by the model now that tabs split explicit vs implicit. */
-function assumptionStatementDisplay(statement: string, type: string): string {
-  let t = statement.trim();
+function assumptionStatementDisplay(statement: unknown, type: string): string {
+  let t = typeof statement === "string" ? statement.trim() : String(statement ?? "").trim();
   /* Model sometimes emits `\dot Implicit` / `\. Implicit` scraps before prose. */
   t = t.replace(/\\dot\s*\{?\s*Implicit\s*\}?\.?/gi, "").trim();
   t = t.replace(/\\dot\s*\{?\s*Explicit\s*\}?\.?/gi, "").trim();

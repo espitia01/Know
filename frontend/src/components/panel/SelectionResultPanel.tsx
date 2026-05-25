@@ -29,6 +29,7 @@ import { api } from "@/lib/api";
  * already detects this pattern (PDF-garbled math + Unicode + LaTeX cues).
  */
 function looksLikePdfGarbled(text: string | undefined | null): boolean {
+  if (text == null || typeof text !== "string") return false;
   if (!text) return false;
   if (!hasMathInText(text)) return false;
   // Equations with normal punctuation are still readable; the truly garbled

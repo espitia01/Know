@@ -1,21 +1,16 @@
 "use client";
 
 /**
- * Two-phase summary (lite → deep) so each Vercel invocation gets a fresh
- * heap. A single monolithic `PaperSummaryDeep` stream was OOMing at ~1.8 GB.
- *
- * Lite: `/summary-lite-stream` (small schema, fast model).
- * Deep: `/summary-stream` (body-only schema, analysis model).
+ * Two-phase summary: lite preview on Railway (no Vercel 60s cap),
+ * deep body streamed on Vercel `/summary-stream`.
  */
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { experimental_useObject as useObject } from "@ai-sdk/react";
-import type { PaperSummary } from "@/lib/api";
+import { api, type PaperSummary } from "@/lib/api";
 import {
   PaperSummaryDeepBodySchema,
-  PaperSummaryLiteSchema,
   type PaperSummaryDeepBody,
-  type PaperSummaryLite,
 } from "@/lib/server/schemas";
 import { useStore } from "@/lib/store";
 import { useUserSettings } from "@/lib/UserSettingsContext";
@@ -35,9 +30,10 @@ function describeError(error: unknown): string {
     message.includes("<!DOCTYPE html") ||
     message.includes("Internal Server Error") ||
     message.includes("SIGABRT") ||
-    message.includes("heap out of memory")
+    message.includes("heap out of memory") ||
+    message.includes("504")
   ) {
-    return "Summary crashed on the server (out of memory). Retry after deploy; if it persists, try Haiku/Mistral Small or a shorter paper.";
+    return "Summary timed out or crashed on the server. Retry in a moment; use Haiku/Mistral Small if it persists.";
   }
   try {
     const parsed = JSON.parse(message) as {
@@ -72,14 +68,6 @@ function hasDeepBody(value: { methodology?: string | null } | null | undefined):
   );
 }
 
-function mergeSummary(
-  prev: PaperSummary | null,
-  patch: Partial<PaperSummary>,
-): PaperSummary {
-  const merged = { ...(prev ?? {}), ...patch };
-  return dropNulls(merged) as PaperSummary;
-}
-
 function dropNulls<T extends Record<string, unknown>>(value: Partial<T>): Partial<T> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value)) {
@@ -87,6 +75,14 @@ function dropNulls<T extends Record<string, unknown>>(value: Partial<T>): Partia
     out[k] = v;
   }
   return out as Partial<T>;
+}
+
+function mergeSummary(
+  prev: PaperSummary | null,
+  patch: Partial<PaperSummary>,
+): PaperSummary {
+  const merged = { ...(prev ?? {}), ...patch };
+  return dropNulls(merged) as PaperSummary;
 }
 
 export function useSummaryStream(paperId: string) {
@@ -97,10 +93,11 @@ export function useSummaryStream(paperId: string) {
   const setSummaryLoadingForPaper = useStore((s) => s.setSummaryLoadingForPaper);
   const updateCachedAnalysis = useStore((s) => s.updateCachedAnalysis);
 
+  const liteAbortRef = useRef<AbortController | null>(null);
   const liteStartedFor = useRef<string | null>(null);
   const deepStartedFor = useRef<string | null>(null);
-  const liteModelRef = useRef<string | undefined>(undefined);
   const deepModelRef = useRef<string | undefined>(undefined);
+  const [liteLoading, setLiteLoading] = useState(false);
 
   const mergeIntoPaperSlot = useCallback(
     (pid: string, patch: Partial<PaperSummary>) => {
@@ -124,67 +121,6 @@ export function useSummaryStream(paperId: string) {
     },
     [setSummaryLoadingForPaper],
   );
-
-  const finishLite = useCallback(
-    (pid: string, summary: PaperSummaryLite) => {
-      setSummaryError(pid, null);
-      mergeIntoPaperSlot(pid, dropNulls(summary) as Partial<PaperSummary>);
-      updateCachedAnalysis(pid, {
-        summary_lite: { ...summary, model: liteModelRef.current },
-      });
-    },
-    [mergeIntoPaperSlot, setSummaryError, updateCachedAnalysis],
-  );
-
-  const finishDeep = useCallback(
-    (pid: string, summary: PaperSummaryDeepBody) => {
-      mergeIntoPaperSlot(pid, {
-        ...(dropNulls(summary) as Partial<PaperSummary>),
-        model: deepModelRef.current,
-      });
-      const merged = useStore.getState().summaryByPaper[pid];
-      updateCachedAnalysis(pid, {
-        summary_deep: { ...summary, model: deepModelRef.current },
-        summary: merged ?? { ...summary, model: deepModelRef.current },
-      });
-      setSummaryError(pid, null);
-      autoAnalyzedPapers.add(`${pid}:summary`);
-    },
-    [mergeIntoPaperSlot, setSummaryError, updateCachedAnalysis],
-  );
-
-  const liteObj = useObject({
-    id: `${paperId}-lite`,
-    api: `/api/papers/${paperId}/summary-lite-stream`,
-    schema: PaperSummaryLiteSchema,
-    credentials: "include",
-    onError: (error) => {
-      const pid = liteStartedFor.current;
-      liteStartedFor.current = null;
-      if (!pid) return;
-      setSummaryError(pid, describeError(error));
-      finishLoadingFlag(pid);
-    },
-    onFinish: ({ object, error }) => {
-      const pid = liteStartedFor.current;
-      liteStartedFor.current = null;
-      if (!pid) return;
-      const candidate = object as Partial<PaperSummaryLite> | undefined;
-      if (hasOverview(candidate)) {
-        finishLite(pid, candidate as PaperSummaryLite);
-        finishLoadingFlag(pid);
-        startDeepRef.current(pid);
-        return;
-      }
-      setSummaryError(
-        pid,
-        error ? describeError(error) : "Summary preview returned empty. Try again.",
-      );
-      finishLoadingFlag(pid);
-    },
-  });
-
-  const startDeepRef = useRef<(pid: string) => void>(() => {});
 
   const deepObj = useObject({
     id: `${paperId}-deep`,
@@ -215,7 +151,18 @@ export function useSummaryStream(paperId: string) {
       if (!pid) return;
       const candidate = object as Partial<PaperSummaryDeepBody> | undefined;
       if (hasDeepBody(candidate)) {
-        finishDeep(pid, candidate as PaperSummaryDeepBody);
+        const body = dropNulls(candidate ?? {}) as Partial<PaperSummary>;
+        mergeIntoPaperSlot(pid, {
+          ...body,
+          model: deepModelRef.current,
+        });
+        const merged = useStore.getState().summaryByPaper[pid];
+        updateCachedAnalysis(pid, {
+          summary_deep: { ...body, model: deepModelRef.current },
+          summary: merged ?? { ...body, model: deepModelRef.current },
+        });
+        setSummaryError(pid, null);
+        autoAnalyzedPapers.add(`${pid}:summary`);
         markRequestEnd(pid, "summary");
         clearProgressStart(pid, "summary");
         activeSummaryStreamStoppers.delete(pid);
@@ -223,37 +170,22 @@ export function useSummaryStream(paperId: string) {
         return;
       }
       const existing = useStore.getState().summaryByPaper[pid];
-      if (!hasOverview(existing)) {
-        setSummaryError(
-          pid,
-          error ? describeError(error) : "Summary deep section returned empty. Try again.",
-        );
-      } else {
-        setSummaryError(
-          pid,
-          error
+      setSummaryError(
+        pid,
+        hasOverview(existing)
+          ? error
             ? `Overview loaded, but the deep dive failed: ${describeError(error)}`
-            : "Overview loaded, but methodology did not stream. Try again.",
-        );
-      }
+            : "Overview loaded, but methodology did not stream. Try again."
+          : error
+            ? describeError(error)
+            : "Summary deep section returned empty. Try again.",
+      );
       markRequestEnd(pid, "summary");
       clearProgressStart(pid, "summary");
       activeSummaryStreamStoppers.delete(pid);
       finishLoadingFlag(pid);
     },
   });
-
-  useEffect(() => {
-    const pid = liteStartedFor.current;
-    if (!pid) return;
-    const partial = liteObj.object as Partial<PaperSummaryLite> | undefined;
-    if (partial && (partial.overview || partial.tl_dr || partial.key_contributions?.length)) {
-      mergeIntoPaperSlot(pid, {
-        ...(dropNulls(partial) as Partial<PaperSummary>),
-        model: liteModelRef.current,
-      });
-    }
-  }, [liteObj.object, mergeIntoPaperSlot]);
 
   useEffect(() => {
     const pid = deepStartedFor.current;
@@ -278,10 +210,62 @@ export function useSummaryStream(paperId: string) {
     [analysisModel, deepObj, setSummaryLoadingForPaper],
   );
 
-  startDeepRef.current = startDeep;
+  const runLite = useCallback(
+    async (pid: string) => {
+      liteAbortRef.current?.abort();
+      const controller = new AbortController();
+      liteAbortRef.current = controller;
+      liteStartedFor.current = pid;
+      setLiteLoading(true);
+      setSummaryLoadingForPaper(pid, true);
+      try {
+        const lite = await api.getSummaryLite(pid, {
+          signal: controller.signal,
+          model: fastModel,
+        });
+        if (controller.signal.aborted) return;
+        if (!hasOverview(lite)) {
+          throw new Error("Summary preview returned empty. Try again.");
+        }
+        setSummaryError(pid, null);
+        mergeIntoPaperSlot(pid, {
+          ...dropNulls(lite as Record<string, unknown>) as Partial<PaperSummary>,
+          model: lite.model ?? fastModel,
+          created_at: Date.now(),
+        });
+        updateCachedAnalysis(pid, { summary_lite: lite });
+        liteStartedFor.current = null;
+        setLiteLoading(false);
+        finishLoadingFlag(pid);
+        startDeep(pid);
+      } catch (e) {
+        if (controller.signal.aborted) return;
+        liteStartedFor.current = null;
+        setLiteLoading(false);
+        setSummaryError(pid, describeError(e));
+        markRequestEnd(pid, "summary");
+        clearProgressStart(pid, "summary");
+        activeSummaryStreamStoppers.delete(pid);
+        finishLoadingFlag(pid);
+      } finally {
+        if (liteAbortRef.current === controller) {
+          liteAbortRef.current = null;
+        }
+      }
+    },
+    [
+      fastModel,
+      finishLoadingFlag,
+      mergeIntoPaperSlot,
+      setSummaryError,
+      setSummaryLoadingForPaper,
+      startDeep,
+      updateCachedAnalysis,
+    ],
+  );
 
   const start = useCallback(() => {
-    if (liteObj.isLoading || deepObj.isLoading) return;
+    if (liteLoading || deepObj.isLoading) return;
     const pid = paperId;
 
     const existing = useStore.getState().summaryByPaper[pid] ?? null;
@@ -291,6 +275,7 @@ export function useSummaryStream(paperId: string) {
     if (hasOverview(existing) && !hasDeepBody(existing)) {
       markRequestStart(pid, "summary");
       activeSummaryStreamStoppers.set(pid, () => {
+        liteAbortRef.current?.abort();
         deepObj.stop();
       });
       setSummaryError(pid, null);
@@ -299,26 +284,15 @@ export function useSummaryStream(paperId: string) {
       return;
     }
 
-    liteStartedFor.current = pid;
-    liteModelRef.current = fastModel;
     markRequestStart(pid, "summary");
     activeSummaryStreamStoppers.set(pid, () => {
-      liteObj.stop();
+      liteAbortRef.current?.abort();
       deepObj.stop();
     });
     setSummaryError(pid, null);
-    setSummaryLoadingForPaper(pid, true);
     clearProgressStart(pid, "summary");
-    liteObj.submit({});
-  }, [
-    paperId,
-    fastModel,
-    liteObj,
-    deepObj,
-    setSummaryError,
-    setSummaryLoadingForPaper,
-    startDeep,
-  ]);
+    void runLite(pid);
+  }, [paperId, liteLoading, deepObj, runLite, setSummaryError, startDeep]);
 
   useEffect(() => {
     summaryStreamStarters.set(paperId, start);
@@ -328,22 +302,23 @@ export function useSummaryStream(paperId: string) {
   }, [paperId, start]);
 
   const stop = useCallback(() => {
-    liteObj.stop();
+    liteAbortRef.current?.abort();
     deepObj.stop();
     const pid = liteStartedFor.current || deepStartedFor.current || paperId;
     liteStartedFor.current = null;
     deepStartedFor.current = null;
+    setLiteLoading(false);
     markRequestEnd(pid, "summary");
     clearProgressStart(pid, "summary");
     activeSummaryStreamStoppers.delete(pid);
     finishLoadingFlag(pid);
-  }, [paperId, liteObj, deepObj, finishLoadingFlag]);
+  }, [paperId, deepObj, finishLoadingFlag]);
 
   return {
     start,
     stop,
-    isLoading: liteObj.isLoading || deepObj.isLoading,
-    error: liteObj.error ?? deepObj.error,
+    isLoading: liteLoading || deepObj.isLoading,
+    error: deepObj.error,
   };
 }
 

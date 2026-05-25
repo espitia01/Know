@@ -1284,7 +1284,7 @@ Return JSON:
         result["action"] = action
     result["selected_text"] = selected_text
     result["model"] = provider.model
-    return result
+    return _normalize_selection_result(result)
 
 
 def _sanitize_user_text(text: str, *, max_chars: int = 10000) -> str:
@@ -1617,6 +1617,76 @@ Return JSON:
     return _safe_parse_json(raw)
 
 
+def _coerce_markdown_field(value: object) -> str:
+    """Coerce LLM JSON fields to plain strings (Mistral sometimes nests prose)."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, list):
+        return "\n\n".join(_coerce_markdown_field(v) for v in value if v is not None).strip()
+    if isinstance(value, dict):
+        for key in ("text", "content", "markdown", "body", "explanation", "answer"):
+            if key in value:
+                return _coerce_markdown_field(value[key])
+        return ""
+    return str(value)
+
+
+def _normalize_selection_result(result: dict) -> dict:
+    """Ensure selection payloads are safe for the TS client (string fields only)."""
+    out = dict(result)
+    for key in (
+        "explanation",
+        "elaboration",
+        "answer",
+        "title",
+        "starting_point",
+        "final_result",
+    ):
+        if key in out:
+            out[key] = _coerce_markdown_field(out.get(key))
+    if "assumptions" in out:
+        items = out.get("assumptions")
+        if isinstance(items, list):
+            norm_assumptions = []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                statement = _coerce_markdown_field(item.get("statement")).strip()
+                if not statement:
+                    continue
+                type_val = _coerce_markdown_field(item.get("type")).strip().lower()
+                if type_val not in ("explicit", "implicit"):
+                    type_val = "implicit"
+                norm_assumptions.append(
+                    {
+                        "statement": statement,
+                        "type": type_val,
+                        "significance": _coerce_markdown_field(item.get("significance")),
+                    }
+                )
+            out["assumptions"] = norm_assumptions
+    if "steps" in out and isinstance(out.get("steps"), list):
+        norm_steps = []
+        for step in out["steps"]:
+            if not isinstance(step, dict):
+                continue
+            norm_steps.append(
+                {
+                    "step_number": step.get("step_number") if isinstance(step.get("step_number"), int) else 0,
+                    "prompt": _coerce_markdown_field(step.get("prompt")),
+                    "answer": _coerce_markdown_field(step.get("answer")),
+                    "explanation": _coerce_markdown_field(step.get("explanation")),
+                    "hint": _coerce_markdown_field(step.get("hint")),
+                }
+            )
+        out["steps"] = norm_steps
+    return out
+
+
 def _coerce_assumptions(raw_items: object) -> list[dict]:
     """Normalize LLM assumption rows; drop empty or malformed entries."""
     if not isinstance(raw_items, list):
@@ -1892,6 +1962,56 @@ Return JSON:
         for item in parsed["items"]:
             if isinstance(item, dict):
                 item["sources"] = all_hits
+    return parsed
+
+
+async def summarize_paper_lite(
+    paper_text: str,
+    model_override: str | None = None,
+    user_id: str | None = None,
+) -> dict:
+    """Fast first-impression summary (overview + bullets + a few equations)."""
+    if model_override:
+        if user_id:
+            from ..gating import enforce_model
+            model_override = enforce_model(user_id, model_override)
+        provider = _make_provider(model_override)
+    else:
+        provider = get_fast_provider(user_id)
+
+    cap = min(get_budgets("summary", user_id)["context"], 6000)
+    paper_text = _sanitize_user_text(paper_text, max_chars=cap)
+
+    system = (
+        "You are an expert science editor. Return ONLY valid JSON with no markdown fences.\n\n"
+        + LATEX_FORMAT_INSTRUCTIONS
+    )
+    user = f"""Summarize this paper's first impression in JSON only:
+{{
+  "overview": "3-5 sentences",
+  "tl_dr": "one sentence takeaway",
+  "key_contributions": ["3-5 short bullets"],
+  "key_equations": [{{"equation": "$$...$$", "meaning": "one paragraph"}}]
+}}
+
+Keep the response compact. At most 3 key_equations. Paper excerpt:
+{paper_text[:cap]}"""
+
+    raw = await provider.complete(system, user, max_tokens=2000)
+    parsed = _safe_parse_json(raw)
+    overview = _coerce_markdown_field(parsed.get("overview")).strip()
+    if not overview:
+        raise ValueError("Lite summary returned empty overview")
+    parsed["overview"] = overview
+    if "tl_dr" in parsed:
+        parsed["tl_dr"] = _coerce_markdown_field(parsed.get("tl_dr"))
+    if isinstance(parsed.get("key_contributions"), list):
+        parsed["key_contributions"] = [
+            _coerce_markdown_field(x).strip()
+            for x in parsed["key_contributions"]
+            if _coerce_markdown_field(x).strip()
+        ]
+    parsed["model"] = provider.model
     return parsed
 
 

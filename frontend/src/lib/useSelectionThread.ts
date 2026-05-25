@@ -7,6 +7,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { api, type SelectionAnalysisResult } from "@/lib/api";
+import { normalizeSelectionResult } from "@/lib/normalizeSelectionResult";
 import { useStore } from "@/lib/store";
 import { useUserSettings } from "@/lib/UserSettingsContext";
 
@@ -52,21 +53,16 @@ function mapApiResult(
   started: StartedState,
   raw: SelectionAnalysisResult,
 ): SelectionAnalysisResult {
-  return {
-    action: raw.action || started.action,
+  return normalizeSelectionResult(raw, {
+    action: started.action,
     selected_text: started.selectedText,
-    question: started.question ?? raw.question,
-    explanation: raw.explanation ?? raw.elaboration ?? raw.answer ?? "",
-    assumptions: raw.assumptions,
-    starting_point: raw.starting_point,
-    final_result: raw.final_result,
-    steps: raw.steps,
+    question: started.question,
     streaming: false,
     clientKey: started.clientKey,
-    model: raw.model ?? started.model,
+    model: started.model,
     created_at: Date.now(),
     regions: started.regions,
-  };
+  });
 }
 
 export function useSelectionThread(paperId: string) {
