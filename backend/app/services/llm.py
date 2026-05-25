@@ -993,11 +993,45 @@ def _repair_orphan_period_display_close(s: str) -> str:
     for m in re.finditer(r"\$\$[\s\S]*?\$\$", s):
         if m.start() > last:
             chunk = s[last : m.start()]
-            parts.append(re.sub(r"([^$]|^)([^$\n]{6,}?)\.\$\$", repl_plain, chunk))
+            parts.append(re.sub(r"(^|[^\\$])(\\(?:\\.|[^$]){5,}?)\.\$\$", repl_plain, chunk))
         parts.append(m.group(0))
         last = m.end()
     if last < len(s):
-        parts.append(re.sub(r"([^$]|^)([^$\n]{6,}?)\.\$\$", repl_plain, s[last:]))
+        parts.append(re.sub(r"(^|[^\\$])(\\(?:\\.|[^$]){5,}?)\.\$\$", repl_plain, s[last:]))
+    return "".join(parts) if parts else s
+
+
+def _repair_orphan_display_close(s: str) -> str:
+    """GPT closes display math with `$$` but never opens it (`\\left[...\\right]$$`)."""
+
+    def repl_plain(m: re.Match[str]) -> str:
+        before, expr = m.group(1), m.group(2).strip()
+        if not expr or "$$" in expr:
+            return m.group(0)
+        if not re.search(
+            r"\\(?:sum|binom|frac|prod|int|substack|left|right|mathcal|mathrm)|[_^{}]|\^",
+            expr,
+        ):
+            return m.group(0)
+        if not re.search(r"[=+\-*/^]|\\(?:sum|binom|frac)|\([A-Za-z0-9+-]+\)\^", expr):
+            return m.group(0)
+        if (
+            not re.search(r"\\(?:left|right|frac|sum|binom|int|prod|mathbf|mathrm|omega)", expr)
+            and len(expr) < 24
+        ):
+            return m.group(0)
+        return f"{before}\n$$\n{expr}\n$$"
+
+    parts: list[str] = []
+    last = 0
+    for m in re.finditer(r"\$\$[\s\S]*?\$\$", s):
+        if m.start() > last:
+            chunk = s[last : m.start()]
+            parts.append(re.sub(r"(^|[^\\$])(\\(?:\\.|[^$]){5,}?)\$\$(?!\$)", repl_plain, chunk))
+        parts.append(m.group(0))
+        last = m.end()
+    if last < len(s):
+        parts.append(re.sub(r"(^|[^\\$])(\\(?:\\.|[^$]){5,}?)\$\$(?!\$)", repl_plain, s[last:]))
     return "".join(parts) if parts else s
 
 
@@ -1015,6 +1049,7 @@ def _normalize_latex_delimiters(obj):
     if isinstance(obj, str):
         s = obj
         s = _repair_orphan_period_display_close(s)
+        s = _repair_orphan_display_close(s)
         s = _repair_comma_display_close(s)
         s = re.sub(r'\\\[', '\n$$\n', s)
         s = re.sub(r'\\\]', '\n$$\n', s)

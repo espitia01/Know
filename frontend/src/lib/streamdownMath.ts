@@ -6,7 +6,8 @@
  * and idempotent — only fix well-known GPT/Mistral failure modes.
  */
 
-const MATH_REGION = /(\$\$[\s\S]*?\$\$|\$(?!\$)(?:\\.|[^$])*?\$)/g;
+const MATH_REGION =
+  /(\$\$[\s\S]*?\$\$|(?<!\$)\$(?!\$)(?:\\.|[^$])*?(?<!\$)\$(?!\$))/g;
 
 function looksLikeBareDisplayMath(expr: string): boolean {
   const t = expr.trim();
@@ -45,7 +46,7 @@ function repairPeriodDisplayClose(input: string): string {
 
 function repairOrphanPeriodInPlain(segment: string): string {
   return segment.replace(
-    /([^$]|^)([^$\n]{6,}?)\.\$\$/g,
+    /(^|[^\\$])(\\(?:\\.|[^$]){5,}?)\.\$\$/g,
     (full, before: string, expr: string) => {
       const trimmed = expr.trim();
       if (!trimmed || trimmed.includes("$$")) return full;
@@ -53,6 +54,39 @@ function repairOrphanPeriodInPlain(segment: string): string {
       return `${before}\n$$\n${trimmed}.\n$$`;
     },
   );
+}
+
+function repairOrphanDisplayCloseInPlain(segment: string): string {
+  return segment.replace(
+    /(^|[^\\$])(\\(?:\\.|[^$]){5,}?)\$\$(?!\$)/g,
+    (full, before: string, expr: string) => {
+      const trimmed = expr.trim();
+      if (!trimmed || trimmed.includes("$$")) return full;
+      if (!looksLikeBareDisplayMath(trimmed)) return full;
+      if (
+        !/\\(?:left|right|frac|sum|binom|int|prod|mathbf|mathrm|omega)/.test(trimmed) &&
+        trimmed.length < 24
+      ) {
+        return full;
+      }
+      return `${before}\n$$\n${trimmed}\n$$`;
+    },
+  );
+}
+
+/** GPT closes display math with `$$` but never opens it (`\\left[...\\right]$$`). */
+function repairOrphanDisplayClose(input: string): string {
+  const parts: string[] = [];
+  let last = 0;
+  MATH_REGION.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = MATH_REGION.exec(input)) !== null) {
+    if (m.index > last) parts.push(repairOrphanDisplayCloseInPlain(input.slice(last, m.index)));
+    parts.push(m[0]);
+    last = m.index + m[0].length;
+  }
+  if (last < input.length) parts.push(repairOrphanDisplayCloseInPlain(input.slice(last)));
+  return parts.join("");
 }
 
 /** GPT sometimes closes an opened `$$` block with `,$$` instead of `$$`. */
@@ -104,6 +138,7 @@ export function sanitizeStreamdownMath(input: string): string {
   out = out.replace(/\\\(/g, "$").replace(/\\\)/g, "$");
   out = out.replace(/\\\$/g, "$");
   out = repairPeriodDisplayClose(out);
+  out = repairOrphanDisplayClose(out);
   out = repairCommaDisplayClose(out);
   out = wrapBareDisplayMathRuns(out);
   out = out.split("\n").map(balanceInlineDollars).join("\n");
