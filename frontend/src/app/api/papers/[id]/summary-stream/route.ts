@@ -219,7 +219,6 @@ export async function POST(
     }
 
     let result: ReturnType<typeof streamObject>;
-    let streamError: unknown = null;
     try {
       result = streamObject({
         model: getModelFromSlug(analysisModel),
@@ -303,7 +302,6 @@ export async function POST(
           }
         },
         onError: async ({ error }) => {
-          streamError = error;
           try {
             console.error(
               JSON.stringify({
@@ -333,43 +331,69 @@ export async function POST(
       return jsonError(502, "provider_error", message, { model: analysisModel });
     }
 
-    // Pre-flight: peek the first event of the partial-object stream so we
-    // can surface lazy provider failures (missing key, gateway 4xx/5xx,
-    // unsupported structured output) as a typed JSON 502 BEFORE returning
-    // the streaming Response. Without this, AI SDK's lazy stream errors
-    // happen after we hand the Response to Next.js, which surfaces them
-    // as a generic 500 to the client.
-    let firstChunk: Partial<PaperSummaryDeep> | undefined;
+    // Pre-flight using the full event stream. Read events until either a
+    // text-delta arrives (model is producing output — safe to start the
+    // streaming Response) or an error event fires (return typed JSON 502
+    // BEFORE we hand any Response to Next.js, which would otherwise turn
+    // the lazy error into a generic 500). Buffered text-deltas seen during
+    // the peek are re-emitted at the start of the streaming body so the
+    // client's useObject sees the same byte sequence AI SDK's own
+    // `toTextStreamResponse` would have produced.
+    type ObjectStreamPart =
+      | { type: "text-delta"; textDelta: string }
+      | { type: "object"; object: Partial<PaperSummaryDeep> }
+      | { type: "finish"; [key: string]: unknown }
+      | { type: "error"; error: unknown };
+
+    const fullReader = (
+      result.fullStream as ReadableStream<ObjectStreamPart>
+    ).getReader();
+    const bufferedDeltas: string[] = [];
+    let preflightError: unknown = null;
+    let sawTextDelta = false;
+    const PEEK_TIMEOUT_MS = 25_000;
+    const deadline = Date.now() + PEEK_TIMEOUT_MS;
+
     try {
-      const reader = result.partialObjectStream.getReader();
-      const PEEK_TIMEOUT_MS = 25_000;
-      const peeked = await Promise.race([
-        reader.read(),
-        new Promise<{ done: true; value: undefined }>((resolve) =>
-          setTimeout(() => resolve({ done: true, value: undefined }), PEEK_TIMEOUT_MS),
-        ),
-      ]);
-      reader.releaseLock();
-      if (streamError) {
-        await releaseOnFailure();
-        const errMsg = streamError instanceof Error ? streamError.message : String(streamError);
-        console.error(
-          JSON.stringify({
-            tag: "summary-stream.preflight",
-            paperId,
-            userId: user.userId,
-            model: analysisModel,
-            error: errMsg.slice(0, 800),
-          }),
-        );
-        return jsonError(502, "provider_error", errMsg, { model: analysisModel });
-      }
-      if (!peeked.done && peeked.value !== undefined) {
-        firstChunk = peeked.value as Partial<PaperSummaryDeep>;
+      while (!sawTextDelta && preflightError === null) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+        const peeked = await Promise.race([
+          fullReader.read(),
+          new Promise<{ done: true; value: undefined }>((resolve) =>
+            setTimeout(() => resolve({ done: true, value: undefined }), remaining),
+          ),
+        ]);
+        if (peeked.done) break;
+        const evt = peeked.value;
+        if (!evt) continue;
+        if (evt.type === "text-delta") {
+          bufferedDeltas.push(evt.textDelta);
+          sawTextDelta = true;
+          break;
+        }
+        if (evt.type === "error") {
+          preflightError = evt.error;
+          break;
+        }
+        // 'object' / 'finish' events carry no bytes for the text stream;
+        // skip and keep peeking.
       }
     } catch (e) {
+      preflightError = e;
+    }
+
+    if (preflightError !== null) {
+      try {
+        fullReader.releaseLock();
+      } catch {
+        /* ignore */
+      }
       await releaseOnFailure();
-      const message = e instanceof Error ? e.message : "Provider error";
+      const message =
+        preflightError instanceof Error
+          ? preflightError.message
+          : String(preflightError);
       console.error(
         JSON.stringify({
           tag: "summary-stream.preflight",
@@ -382,31 +406,34 @@ export async function POST(
       return jsonError(502, "provider_error", message, { model: analysisModel });
     }
 
-    // Build a fresh ReadableStream that re-emits the peeked first chunk
-    // followed by the rest of the partial-object stream as JSON-text. The
-    // client's useObject reads accumulating JSON via parsePartialJson so
-    // the format must mirror what AI SDK's toTextStreamResponse would
-    // have emitted (the latest partial JSON, repeatedly).
     const encoder = new TextEncoder();
     const passthrough = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
-          if (firstChunk !== undefined) {
-            controller.enqueue(encoder.encode(JSON.stringify(firstChunk)));
+          for (const delta of bufferedDeltas) {
+            if (delta) controller.enqueue(encoder.encode(delta));
           }
-          const reader = result.partialObjectStream.getReader();
           while (true) {
-            const { done, value } = await reader.read();
+            const { done, value } = await fullReader.read();
             if (done) break;
-            if (value !== undefined) {
-              controller.enqueue(encoder.encode(JSON.stringify(value)));
+            if (!value) continue;
+            if (value.type === "text-delta") {
+              if (value.textDelta) {
+                controller.enqueue(encoder.encode(value.textDelta));
+              }
+            } else if (value.type === "error") {
+              // onError on streamObject already logged + released.
+              break;
             }
+            // 'object' / 'finish' events: no bytes for text stream.
           }
-          reader.releaseLock();
+          try {
+            fullReader.releaseLock();
+          } catch {
+            /* already released */
+          }
           controller.close();
         } catch (err) {
-          // onError already logged + released; just terminate cleanly so
-          // the client's useObject sees end-of-stream.
           console.error(
             JSON.stringify({
               tag: "summary-stream.passthrough",
