@@ -8,7 +8,7 @@ import { CardMeta } from "@/components/analysis/CardMeta";
 import { ReadMoreProse } from "@/components/analysis/ReadMoreProse";
 import { AnalysisProgress } from "@/components/ui/AnalysisProgress";
 import { EmptyState } from "@/components/ui/EmptyState";
-import type { PaperSummary } from "@/lib/server/schemas";
+import type { PaperSummary } from "@/lib/api";
 import {
   clearProgressStart,
   hasActiveRequest,
