@@ -46,6 +46,22 @@ function describeError(error: unknown): string {
   return message || "Summary generation failed. Try again.";
 }
 
+/**
+ * Detect "the backend doesn't have this endpoint" so we can fall back to
+ * the legacy `/summary` route. Railway redeploys lag behind frontend
+ * pushes; we never want a stale deploy to leave users staring at
+ * "Method Not Allowed" forever when /summary is sitting right there.
+ */
+function isMethodNotAllowed(err: unknown): boolean {
+  if (!err) return false;
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    msg.includes("Method Not Allowed") ||
+    msg.includes("405") ||
+    msg.includes("Backend rejected the request method")
+  );
+}
+
 function dropNulls<T extends Record<string, unknown>>(value: Partial<T>): Partial<T> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(value)) {
@@ -97,12 +113,41 @@ export function useSummaryStream(paperId: string) {
       markRequestStart(pid, "summary");
       activeSummaryStreamStoppers.set(pid, () => controller.abort());
 
+      const runLegacyFallback = async () => {
+        const full = await api.getSummary(pid);
+        if (controller.signal.aborted) return;
+        if (!hasSummaryOverview(full) || !hasSummaryDeepBody(full)) {
+          throw new Error("Summary returned empty. Try again.");
+        }
+        mergeIntoPaperSlot(pid, {
+          ...(dropNulls(full as Record<string, unknown>) as Partial<PaperSummary>),
+          model: full.model ?? analysisModel,
+          created_at: Date.now(),
+        });
+        updateCachedAnalysis(pid, {
+          summary: useStore.getState().summaryByPaper[pid] ?? (full as PaperSummary),
+          summary_lite: full as PaperSummary,
+          summary_deep: full as PaperSummary,
+        });
+      };
+
       try {
         if (phase === "full") {
-          const lite = await api.getSummaryLite(pid, {
-            signal: controller.signal,
-            model: fastModel,
-          });
+          let lite: PaperSummary;
+          try {
+            lite = await api.getSummaryLite(pid, {
+              signal: controller.signal,
+              model: fastModel,
+            });
+          } catch (err) {
+            if (isMethodNotAllowed(err)) {
+              await runLegacyFallback();
+              setSummaryError(pid, null);
+              autoAnalyzedPapers.add(`${pid}:summary`);
+              return;
+            }
+            throw err;
+          }
           if (controller.signal.aborted) return;
           if (!hasSummaryOverview(lite)) {
             throw new Error("Summary preview returned empty. Try again.");
@@ -114,10 +159,21 @@ export function useSummaryStream(paperId: string) {
           });
         }
 
-        const deep = await api.getSummaryDeep(pid, {
-          signal: controller.signal,
-          model: analysisModel,
-        });
+        let deep: PaperSummary;
+        try {
+          deep = await api.getSummaryDeep(pid, {
+            signal: controller.signal,
+            model: analysisModel,
+          });
+        } catch (err) {
+          if (isMethodNotAllowed(err)) {
+            await runLegacyFallback();
+            setSummaryError(pid, null);
+            autoAnalyzedPapers.add(`${pid}:summary`);
+            return;
+          }
+          throw err;
+        }
         if (controller.signal.aborted) return;
         if (!hasSummaryDeepBody(deep)) {
           throw new Error("Summary deep section returned empty. Try again.");

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { api, type FigureInfo, type FigureAnalysis, type ParsedPaper } from "@/lib/api";
 import {
   analysisFiguresFromPaper,
@@ -160,16 +161,33 @@ function AuthImage({ src, alt, className }: { src: string; alt: string; classNam
   return <img src={blobUrl} alt={alt} className={className} />;
 }
 
-function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+function Lightbox({ src, alt, caption, onClose }: { src: string; alt: string; caption?: string; onClose: () => void }) {
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
-  return (
+  // Lock background scroll while the modal is open so users can't scroll
+  // the analysis pane behind it.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  // The analysis pane uses `transform` for layout in places, which would
+  // contain a `position: fixed` modal. Rendering through a portal at
+  // `document.body` keeps the lightbox truly full-screen regardless of
+  // how the panel above lays things out.
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div
-      className="fixed inset-0 z-[100] bg-foreground/85 backdrop-blur-sm flex items-center justify-center p-8 animate-fade-in"
+      className="fixed inset-0 z-[2147483600] flex items-center justify-center bg-black/85 p-6 backdrop-blur-sm motion-safe:animate-fade-in"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -177,21 +195,30 @@ function Lightbox({ src, alt, onClose }: { src: string; alt: string; onClose: ()
     >
       <button
         onClick={onClose}
-        className="absolute top-4 right-4 text-white/70 hover:text-white transition-colors z-10"
+        className="absolute top-4 right-4 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white/85 transition-colors hover:bg-white/20 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
         aria-label="Close lightbox"
       >
-        <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden>
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
         </svg>
       </button>
-      <div onClick={(e) => e.stopPropagation()}>
+      <div
+        className="flex max-h-full max-w-6xl flex-col items-center gap-3"
+        onClick={(e) => e.stopPropagation()}
+      >
         <AuthImage
           src={src}
           alt={alt}
-          className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+          className="max-h-[82vh] max-w-full rounded-lg object-contain shadow-2xl"
         />
+        {caption && (
+          <p className="max-w-3xl text-center text-[var(--text-sm)] italic leading-relaxed text-white/85">
+            {caption}
+          </p>
+        )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -511,6 +538,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           <Lightbox
             src={figureSrc(lightboxFig.id)}
             alt={lightboxFig.caption || lightboxFig.id}
+            caption={lightboxFig.caption}
             onClose={() => setLightboxFig(null)}
           />
         )}

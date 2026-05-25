@@ -2303,10 +2303,30 @@ Return JSON:
               "Do not wrap it in markdown fences. Do not include any prose "
               "outside the JSON. Every required field MUST be present and non-empty."
         )
-        raw = await provider.complete_with_image(
+        raw_retry = await provider.complete_with_image(
             system, retry_text, image_b64, max_tokens=4000,
         )
-        parsed = _safe_parse_json(raw)
+        parsed_retry = _safe_parse_json(raw_retry)
+        if (
+            (parsed_retry or {}).get("description")
+            or (parsed_retry or {}).get("answer")
+            or (parsed_retry or {}).get("takeaway")
+        ):
+            parsed = parsed_retry
+        else:
+            # Both attempts failed structured-output. Salvage whatever
+            # prose the model emitted so the user still sees a useful
+            # description rather than "no content". This matches how
+            # selection / explain handle Mistral fallbacks: prose-as-
+            # description, with a flag so the renderer can label it.
+            fallback_text = (raw_retry or raw or "").strip()
+            if fallback_text:
+                parsed = {
+                    "description": fallback_text[:4000],
+                    "key_observations": [],
+                    "relation_to_paper": "",
+                    "answer": fallback_text[:4000] if question.strip() else "",
+                }
     return parsed
 
 
