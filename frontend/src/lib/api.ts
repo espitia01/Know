@@ -131,6 +131,13 @@ async function request<T>(
         const parsed = parseDetail(body?.detail);
         message = parsed.message;
         structured = parsed.structured;
+        if (
+          message === "Method Not Allowed" ||
+          (typeof body?.detail === "string" && body.detail === "Method Not Allowed")
+        ) {
+          message =
+            "Backend rejected the request method. Confirm NEXT_PUBLIC_API_URL is your Railway URL (not the Vercel app) and redeploy the backend.";
+        }
       } catch {
         // Non-JSON response; fall through with default message.
       }
@@ -726,7 +733,11 @@ export const api = {
     }),
 
   analyze: (id: string) =>
-    request<PreReadingAnalysis>(`/api/papers/${id}/analyze`, { method: "POST" }),
+    request<PreReadingAnalysis>(`/api/papers/${id}/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }),
 
   explain: (id: string, term: string, context: string) =>
     request<ExplainResponse>(`/api/papers/${id}/explain`, {
@@ -738,6 +749,8 @@ export const api = {
   getAssumptions: (id: string) =>
     request<{ assumptions: Assumption[] }>(`/api/papers/${id}/assumptions`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
     }),
 
   getSummary: (id: string) =>

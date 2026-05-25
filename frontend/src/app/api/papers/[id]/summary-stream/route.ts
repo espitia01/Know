@@ -217,6 +217,7 @@ export async function POST(
       return jsonError(502, "prompt_build_failed", message, { model: analysisModel });
     }
 
+    let providerFailed: unknown = null;
     let result: ReturnType<typeof streamObject>;
     try {
       result = streamObject({
@@ -301,6 +302,7 @@ export async function POST(
           }
         },
         onError: async ({ error }) => {
+          providerFailed = error;
           try {
             console.error(
               JSON.stringify({
@@ -330,21 +332,48 @@ export async function POST(
       return jsonError(502, "provider_error", message, { model: analysisModel });
     }
 
-    const response = await buildStreamObjectResponse(result, {
-      model: analysisModel,
-      releaseOnFailure,
-      logTag: "summary-stream",
-      logContext: { paperId, userId: user.userId },
-    });
-    if (isStreamErrorPayload(response)) {
-      return jsonError(
-        response.status,
-        response.body.detail.code,
-        response.body.detail.message,
-        { model: response.body.detail.model },
-      );
+    // Let lazy provider failures enqueue before we peek the stream.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (providerFailed) {
+      const message =
+        providerFailed instanceof Error
+          ? providerFailed.message
+          : String(providerFailed);
+      return jsonError(502, "provider_error", message, { model: analysisModel });
     }
-    return response;
+
+    try {
+      const response = await buildStreamObjectResponse(result, {
+        model: analysisModel,
+        releaseOnFailure,
+        logTag: "summary-stream",
+        logContext: { paperId, userId: user.userId },
+      });
+      if (isStreamErrorPayload(response)) {
+        return jsonError(
+          response.status,
+          response.body.detail.code,
+          response.body.detail.message,
+          { model: response.body.detail.model },
+        );
+      }
+      return response;
+    } catch (streamErr) {
+      await releaseOnFailure();
+      console.error(
+        JSON.stringify({
+          tag: "summary-stream.stream_setup",
+          paperId,
+          userId: user.userId,
+          model: analysisModel,
+          error:
+            streamErr instanceof Error ? streamErr.message : String(streamErr),
+        }),
+      );
+      const message =
+        streamErr instanceof Error ? streamErr.message : "Stream setup failed";
+      return jsonError(502, "stream_setup_failed", message, { model: analysisModel });
+    }
   } catch (e) {
     await releaseOnFailure();
     console.error(

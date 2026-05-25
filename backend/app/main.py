@@ -91,7 +91,14 @@ async def limit_json_body(request: Request, call_next):
         if len(body) > MAX_JSON_BODY:
             from fastapi.responses import JSONResponse
             return JSONResponse(status_code=413, content={"detail": "Request body too large"})
-    return await call_next(request)
+    response = await call_next(request)
+    if response.status_code == 405:
+        _main_logger.warning(
+            "405 Method Not Allowed: %s %s (check client uses POST, not GET)",
+            request.method,
+            request.url.path,
+        )
+    return response
 
 
 @app.exception_handler(Exception)
