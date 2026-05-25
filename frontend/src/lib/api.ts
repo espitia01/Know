@@ -787,17 +787,26 @@ export const api = {
       signal: options?.signal,
     }),
 
-  getSummaryStream: async (id: string, signal?: AbortSignal) => {
-    const headers = await authHeaders();
-    return fetch(`${API_BASE}/api/papers/${id}/summary-stream`, {
+  /** Primary summary path — Railway batch (lite + deep in one call when phase=full). */
+  generateSummary: (
+    id: string,
+    options?: {
+      signal?: AbortSignal;
+      phase?: "full" | "lite" | "deep";
+      fastModel?: string;
+      analysisModel?: string;
+    },
+  ) =>
+    request<PaperSummary>(`/api/papers/${id}/summary-generate`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...headers,
-      },
-      signal,
-    });
-  },
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phase: options?.phase ?? "full",
+        ...(options?.fastModel ? { fast_model: options.fastModel } : {}),
+        ...(options?.analysisModel ? { analysis_model: options.analysisModel } : {}),
+      }),
+      signal: options?.signal,
+    }),
 
   analyzeFigure: (id: string, figureId: string, question: string = "") =>
     request<FigureAnalysis>(`/api/papers/${id}/figure-qa`, {

@@ -48,6 +48,7 @@ from ..services.llm import (
     summarize_paper,
     summarize_paper_lite,
     summarize_paper_deep,
+    _coerce_markdown_field,
     get_fast_provider,
     get_provider,
     _coerce_assumptions,
@@ -710,6 +711,86 @@ async def summary_lite(paper_id: str, body: dict = Body(default={}), user_id: st
         release_usage(token)
         logger.exception("summary_lite failed for %s", paper_id)
         raise HTTPException(status_code=500, detail="Summary preview failed. Please try again.")
+
+
+@router.post("/{paper_id}/summary-generate")
+async def summary_generate(
+    paper_id: str, body: dict = Body(default={}), user_id: str = Depends(require_auth),
+):
+    """Run summary on Railway: lite preview, deep body, or both in one request."""
+    check_feature_access(user_id, "summary")
+    _validate_id(paper_id, "paper_id")
+    _verify_paper_owner(paper_id, user_id)
+    paper = get_paper(paper_id, user_id=user_id)
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    phase = (body.get("phase") or "full").strip().lower()
+    if phase not in ("full", "lite", "deep"):
+        phase = "full"
+
+    fast_model = resolve_fast_model(user_id)
+    analysis_model = resolve_analysis_model(user_id)
+    if isinstance(body.get("fast_model"), str) and body["fast_model"].strip():
+        fast_model = enforce_model(
+            user_id, canonicalize_model(body["fast_model"].strip()) or body["fast_model"].strip()
+        )
+    if isinstance(body.get("analysis_model"), str) and body["analysis_model"].strip():
+        analysis_model = enforce_model(
+            user_id,
+            canonicalize_model(body["analysis_model"].strip()) or body["analysis_model"].strip(),
+        )
+
+    token = reserve_usage(
+        user_id, paper_id, "summary", model=analysis_model,
+        count=get_usage_multiplier(user_id),
+    )
+    merged: dict = {}
+    try:
+        text = paper_prompt_text(paper)
+        if phase in ("full", "lite"):
+            lite = await summarize_paper_lite(text, model_override=fast_model, user_id=user_id)
+            if not lite.get("overview"):
+                release_usage(token)
+                raise HTTPException(status_code=502, detail="Summary preview returned empty.")
+            merged.update(lite)
+            try:
+                mutate_paper(
+                    paper_id, user_id,
+                    lambda p: p.cached_analysis.__setitem__("summary_lite", lite),
+                )
+            except Exception:
+                logger.exception("Failed to persist summary_lite for %s", paper_id)
+        if phase in ("full", "deep"):
+            deep = await summarize_paper_deep(
+                text, model_override=analysis_model, user_id=user_id,
+            )
+            if not _coerce_markdown_field(deep.get("methodology")).strip():
+                release_usage(token)
+                raise HTTPException(
+                    status_code=502,
+                    detail="Summary deep section returned empty methodology.",
+                )
+            merged.update(deep)
+            merged["model"] = deep.get("model") or analysis_model
+            try:
+                def _persist_deep(p):
+                    p.cached_analysis["summary_deep"] = deep
+                    p.cached_analysis["summary"] = {**(p.cached_analysis.get("summary") or {}), **merged}
+                mutate_paper(paper_id, user_id, _persist_deep)
+            except Exception:
+                logger.exception("Failed to persist summary for %s", paper_id)
+        return merged
+    except HTTPException:
+        release_usage(token)
+        raise
+    except ValueError as exc:
+        release_usage(token)
+        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception:
+        release_usage(token)
+        logger.exception("summary_generate failed for %s", paper_id)
+        raise HTTPException(status_code=500, detail="Summary generation failed. Please try again.")
 
 
 @router.post("/{paper_id}/summary-deep")

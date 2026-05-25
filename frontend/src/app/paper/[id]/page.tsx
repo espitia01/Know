@@ -1201,20 +1201,19 @@ function PaperContent() {
     }
 
     const liveSummary = useStore.getState().summaryByPaper[pid] ?? null;
-    const hasSummary = !!(
-      cache.summary ||
-      cache.summary_lite ||
-      cache.summary_deep ||
-      sessionCache.summary ||
-      sessionCache.summary_lite ||
-      sessionCache.summary_deep ||
-      liveSummary
-    );
+    const mergedSummary = {
+      ...(cache.summary ?? sessionCache.summary ?? {}),
+      ...(cache.summary_deep ?? sessionCache.summary_deep ?? {}),
+      ...(cache.summary_lite ?? sessionCache.summary_lite ?? {}),
+      ...(liveSummary ?? {}),
+    } as import("@/lib/api").PaperSummary;
+    const summaryComplete =
+      typeof mergedSummary.methodology === "string" &&
+      mergedSummary.methodology.trim().length > 0;
     if (
-      !hasSummary &&
+      !summaryComplete &&
       canAccess(tierUser?.tier || "free", "summary") &&
-      !hasActiveRequest(pid, "summary") &&
-      !autoAnalyzedPapers.has(`${pid}:summary`)
+      !hasActiveRequest(pid, "summary")
     ) {
       if (summaryKickoffForRef.current !== pid) {
         summaryKickoffForRef.current = pid;

@@ -54,7 +54,7 @@ export function normalizeSelectionResult(
     : undefined;
 
   let explanation = coerceMarkdownField(
-    raw.explanation ?? raw.elaboration ?? raw.answer,
+    raw.explanation ?? raw.elaboration ?? raw.answer ?? (raw as { body?: string }).body,
   );
 
   const action = coerceMarkdownField(raw.action) || fallback?.action || "explain";

@@ -825,6 +825,8 @@ class MistralProvider(LLMProvider):
             ],
             "stream": False,
         }
+        if "ONLY valid JSON" in system or "Return ONLY valid JSON" in system:
+            body["response_format"] = {"type": "json_object"}
         response = await self.client.post(MISTRAL_API_URL, headers=self._headers(), json=body)
         _raise_for_mistral(response, model=self.model)
         data = response.json()
@@ -1276,18 +1278,40 @@ Return JSON:
             raw = await provider.complete(system, prompt, max_tokens=3000)
     else:
         raw = await provider.complete(system, prompt, max_tokens=3000)
-    result = _safe_parse_json(raw)
-    # Explain and legacy assumptions payloads share one shape.
-    if action == "explain" or action == "assumptions":
-        result["action"] = "explain"
-    else:
-        result["action"] = action
+    result = _parse_selection_raw(raw, action)
     result["selected_text"] = selected_text
     result["model"] = provider.model
-    result = _normalize_selection_result(result)
     if not _selection_has_content(result):
         raise ValueError("Selection returned empty payload")
     return result
+
+
+def _parse_selection_raw(raw: str, action: str) -> dict:
+    """Parse batch selection JSON; accept prose fallback after vision calls."""
+    parsed: dict = {}
+    if raw and raw.strip().startswith("{"):
+        parsed = _safe_parse_json(raw)
+    if not isinstance(parsed, dict):
+        parsed = {}
+    if parsed.get("body") and not parsed.get("explanation"):
+        parsed["explanation"] = parsed["body"]
+    if action == "explain" or action == "assumptions":
+        parsed["action"] = "explain"
+    else:
+        parsed["action"] = action
+    out = _normalize_selection_result(parsed)
+    if _selection_has_content(out):
+        return out
+    text = _coerce_markdown_field(raw).strip()
+    if text:
+        return _normalize_selection_result(
+            {
+                "action": action if action != "assumptions" else "explain",
+                "explanation": text,
+                "steps": [],
+            }
+        )
+    return out
 
 
 def _sanitize_user_text(text: str, *, max_chars: int = 10000) -> str:

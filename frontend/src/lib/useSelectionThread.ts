@@ -1,8 +1,7 @@
 "use client";
 
 /**
- * Selection explain / derive / follow-up — Python batch on Railway.
- * Vercel `selection-stream` + `streamObject` OOMs on production (~1.8 GB heap).
+ * Selection explain / derive / follow-up — Railway batch API only.
  */
 
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -89,7 +88,8 @@ export function useSelectionThread(paperId: string) {
   const start = useCallback(
     (args: StartArgs) => {
       const trimmed = args.selectedText.trim();
-      if (!trimmed) return;
+      if (!trimmed && !args.imageBase64) return;
+      const textForApi = trimmed || "Equation selected from PDF (see attached image).";
 
       inflightRef.current?.abort();
       const controller = new AbortController();
@@ -99,7 +99,7 @@ export function useSelectionThread(paperId: string) {
       const started: StartedState = {
         clientKey,
         action: args.action,
-        selectedText: trimmed,
+        selectedText: textForApi,
         question: args.question,
         model: args.model ?? fastModel,
         regions: args.regions,
@@ -124,7 +124,7 @@ export function useSelectionThread(paperId: string) {
 
       void (async () => {
         try {
-          const raw = await api.analyzeSelection(paperId, trimmed, args.action, {
+          const raw = await api.analyzeSelection(paperId, textForApi, args.action, {
             question: args.question,
             signal: controller.signal,
             model: started.model,

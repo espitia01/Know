@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { parsePartialJson } from "ai";
 import { api, type FigureInfo, type FigureAnalysis, type ParsedPaper } from "@/lib/api";
 import {
   analysisFiguresFromPaper,
@@ -358,55 +357,6 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
       setLoading(true);
 
       try {
-        // Stage 3: hit the migrated Next.js + AI SDK route on the same
-        // origin. The response body is a streaming JSON document
-        // (incremental text output of `streamObject(FigureAnalysis)`).
-        // We parse the partial JSON on each frame and pull `answer` or
-        // `description` for the streaming assistant message.
-        const streamFigure = async (attempt: number): Promise<Response> => {
-          const res = await fetch(`/api/papers/${paperId}/figure-qa-stream`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              figure_id: figId,
-              question: q,
-              model: resolvedModel,
-            }),
-            signal: controller.signal,
-          });
-          if (controller.signal.aborted) return res;
-          if (!res.ok && res.status === 404 && attempt === 0) {
-            await new Promise((r) => setTimeout(r, 750));
-            return streamFigure(1);
-          }
-          return res;
-        };
-
-        const res = await streamFigure(0);
-        if (controller.signal.aborted) return;
-        const headerModel = res.headers.get("X-Know-Model");
-        if (headerModel) setStreamModel(headerModel);
-
-        if (!res.ok) {
-          let detailMessage = `HTTP ${res.status}`;
-          try {
-            const body = await res.json();
-            if (body?.detail?.message) detailMessage = body.detail.message;
-          } catch { /* not JSON */ }
-          if (detailMessage === "Figure 404" || detailMessage.includes("404")) {
-            detailMessage = "Figure image is not available yet. Wait a moment and try again.";
-          }
-          throw new Error(detailMessage);
-        }
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error("No stream");
-
-        const decoder = new TextDecoder();
-        let jsonAccum = "";
-        let lastDisplay = "";
-        let chunkRaf: number | null = null;
-
-        // Add a streaming assistant message that we'll update in place.
         setConversations((prev) => ({
           ...prev,
           [figId]: [
@@ -415,87 +365,33 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
           ],
         }));
 
-        const flushDisplay = () => {
-          chunkRaf = null;
-          const current = lastDisplay;
-          setConversations((prev) => {
-            const msgs = [...(prev[figId] || [])];
-            const lastIdx = msgs.length - 1;
-            if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
-              msgs[lastIdx] = { ...msgs[lastIdx], text: current };
-            }
-            return { ...prev, [figId]: msgs };
-          });
-        };
+        const result = await api.analyzeFigure(paperId, figId, q);
+        if (controller.signal.aborted) return;
 
-        const scheduleDisplay = () => {
-          if (typeof window === "undefined") { flushDisplay(); return; }
-          if (chunkRaf == null) {
-            chunkRaf = window.requestAnimationFrame(flushDisplay);
-          }
-        };
-
-        // Stick to one narrative field for the duration of the stream
-        // so we don't flicker between a long description and a short
-        // answer mid-render. With a question, prefer `answer`; without
-        // one, prefer `description`. Whichever field we lock onto stays
-        // the source until the stream ends.
-        const primaryField: "answer" | "description" = q ? "answer" : "description";
-        while (true) {
-          if (controller.signal.aborted) { await reader.cancel(); break; }
-          const { done, value } = await reader.read();
-          if (done) break;
-          jsonAccum += decoder.decode(value, { stream: true });
-          const partial = await parsePartialJson(jsonAccum);
-          const obj = (partial.value as Partial<FigureAnalysis> | undefined) ?? null;
-          if (obj) {
-            // Prefer the locked field; fall back to whichever field the
-            // model actually populated first if the primary is still empty.
-            const fallback =
-              primaryField === "answer" ? obj.description : obj.answer;
-            const next = ((obj[primaryField] ?? fallback) ?? "") as string;
-            if (next && next !== lastDisplay) {
-              lastDisplay = next;
-              scheduleDisplay();
-            }
-          }
-        }
-
-        if (chunkRaf != null && typeof window !== "undefined") {
-          window.cancelAnimationFrame(chunkRaf);
-          chunkRaf = null;
-        }
-
-        // Final parse — same logic, but commit a non-streaming row and
-        // hydrate the rest of the structured fields into the local
-        // cache so the panel's history row matches what the server
-        // persisted in cached_analysis.figure_analyses.
-        const finalParsed = await parsePartialJson(jsonAccum);
-        const finalObj = (finalParsed.value as Partial<FigureAnalysis> | undefined) ?? {};
-        // Final commit prefers the same field we streamed under so we
-        // don't swap to a shorter sibling once the stream closes.
-        const finalText = ((q
-          ? (finalObj.answer ?? finalObj.description)
-          : (finalObj.description ?? finalObj.answer)) ?? lastDisplay ?? "") as string;
-        if (!finalText.trim()) {
+        const finalText = (
+          q ? (result.answer ?? result.description) : (result.description ?? result.answer)
+        )?.trim();
+        if (!finalText) {
           throw new Error(
             "The model didn't return a complete figure analysis. Please try again.",
           );
         }
+
         const cacheEntry: FigureAnalysis = {
           figure_id: figId,
           question: q,
-          description: (finalObj.description ?? finalText) as string,
-          key_observations: (finalObj.key_observations as string[] | undefined) ?? [],
-          relation_to_paper: (finalObj.relation_to_paper as string | undefined) ?? "",
-          methodology_shown: finalObj.methodology_shown as string | undefined,
-          takeaway: finalObj.takeaway as string | undefined,
-          answer: finalObj.answer as string | undefined,
-          model: headerModel ?? resolvedModel,
+          description: result.description ?? finalText,
+          key_observations: result.key_observations ?? [],
+          relation_to_paper: result.relation_to_paper ?? "",
+          methodology_shown: result.methodology_shown,
+          takeaway: result.takeaway,
+          answer: result.answer,
+          model: result.model ?? resolvedModel,
           created_at: Date.now(),
         };
         appendFigureAnalysisToCaches(paperId, cacheEntry);
         setFigureModelOverride(null);
+        setStreamModel(cacheEntry.model ?? resolvedModel);
         setConversations((prev) => {
           const msgs = [...(prev[figId] || [])];
           const lastIdx = msgs.length - 1;
@@ -504,7 +400,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
               role: "assistant",
               text: finalText,
               streaming: false,
-              model: headerModel ?? resolvedModel,
+              model: cacheEntry.model ?? resolvedModel,
             };
           }
           return { ...prev, [figId]: msgs };

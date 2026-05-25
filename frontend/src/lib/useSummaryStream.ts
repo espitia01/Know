@@ -1,12 +1,17 @@
 "use client";
 
 /**
- * Two-phase summary — both phases on Railway (batch JSON).
- * Vercel Hobby's 60s cap prevented the deep stream from finishing.
+ * Summary runs entirely on the Railway API (`/summary-generate`).
+ * No Vercel AI SDK / streamObject — avoids Hobby 60s limits and OOM.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type PaperSummary } from "@/lib/api";
+import {
+  hasSummaryDeepBody,
+  hasSummaryOverview,
+  summaryIsComplete,
+} from "@/lib/summaryState";
 import { useStore } from "@/lib/store";
 import { useUserSettings } from "@/lib/UserSettingsContext";
 import {
@@ -23,7 +28,7 @@ function describeError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   try {
     const parsed = JSON.parse(message) as {
-      detail?: { code?: string; message?: string; model?: string };
+      detail?: { code?: string; message?: string };
     };
     if (parsed.detail?.message) {
       const code = parsed.detail.code ? `[${parsed.detail.code}] ` : "";
@@ -33,16 +38,6 @@ function describeError(error: unknown): string {
     /* not JSON */
   }
   return message || "Summary generation failed. Try again.";
-}
-
-function hasOverview(value: { overview?: string | null } | null | undefined): boolean {
-  return typeof value?.overview === "string" && value.overview.trim().length > 0;
-}
-
-function hasDeepBody(value: { methodology?: string | null } | null | undefined): boolean {
-  return (
-    typeof value?.methodology === "string" && value.methodology.trim().length > 0
-  );
 }
 
 function dropNulls<T extends Record<string, unknown>>(value: Partial<T>): Partial<T> {
@@ -70,6 +65,7 @@ export function useSummaryStream(paperId: string) {
   const updateCachedAnalysis = useStore((s) => s.updateCachedAnalysis);
 
   const abortRef = useRef<AbortController | null>(null);
+  const autoRanRef = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const mergeIntoPaperSlot = useCallback(
@@ -84,50 +80,8 @@ export function useSummaryStream(paperId: string) {
     [setSummaryForPaper],
   );
 
-  const runDeep = useCallback(
-    async (pid: string, signal: AbortSignal) => {
-      const deep = await api.getSummaryDeep(pid, {
-        signal,
-        model: analysisModel,
-      });
-      if (!hasDeepBody(deep)) {
-        throw new Error("Summary deep section returned empty. Try again.");
-      }
-      const body = dropNulls(deep as Record<string, unknown>) as Partial<PaperSummary>;
-      mergeIntoPaperSlot(pid, {
-        ...body,
-        model: deep.model ?? analysisModel,
-      });
-      const merged = useStore.getState().summaryByPaper[pid];
-      updateCachedAnalysis(pid, {
-        summary_deep: { ...body, model: deep.model ?? analysisModel },
-        summary: merged ?? { ...body, model: deep.model ?? analysisModel },
-      });
-    },
-    [analysisModel, mergeIntoPaperSlot, updateCachedAnalysis],
-  );
-
-  const runLite = useCallback(
-    async (pid: string, signal: AbortSignal) => {
-      const lite = await api.getSummaryLite(pid, {
-        signal,
-        model: fastModel,
-      });
-      if (!hasOverview(lite)) {
-        throw new Error("Summary preview returned empty. Try again.");
-      }
-      mergeIntoPaperSlot(pid, {
-        ...(dropNulls(lite as Record<string, unknown>) as Partial<PaperSummary>),
-        model: lite.model ?? fastModel,
-        created_at: Date.now(),
-      });
-      updateCachedAnalysis(pid, { summary_lite: lite });
-    },
-    [fastModel, mergeIntoPaperSlot, updateCachedAnalysis],
-  );
-
-  const runPipeline = useCallback(
-    async (pid: string, liteOnly: boolean) => {
+  const runGenerate = useCallback(
+    async (pid: string, phase: "full" | "deep") => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -138,19 +92,38 @@ export function useSummaryStream(paperId: string) {
       activeSummaryStreamStoppers.set(pid, () => controller.abort());
 
       try {
-        if (!liteOnly) {
-          await runLite(pid, controller.signal);
+        const merged = await api.generateSummary(pid, {
+          signal: controller.signal,
+          phase,
+          fastModel,
+          analysisModel,
+        });
+        if (controller.signal.aborted) return;
+
+        if (phase === "full" && !hasSummaryOverview(merged)) {
+          throw new Error("Summary preview returned empty. Try again.");
         }
-        if (controller.signal.aborted) return;
-        await runDeep(pid, controller.signal);
-        if (controller.signal.aborted) return;
+        if (!hasSummaryDeepBody(merged)) {
+          throw new Error("Summary deep section returned empty. Try again.");
+        }
+
+        mergeIntoPaperSlot(pid, {
+          ...(dropNulls(merged as Record<string, unknown>) as Partial<PaperSummary>),
+          model: merged.model ?? analysisModel,
+          created_at: Date.now(),
+        });
+        updateCachedAnalysis(pid, {
+          summary: useStore.getState().summaryByPaper[pid] ?? merged,
+          summary_lite: phase === "full" ? merged : undefined,
+          summary_deep: merged,
+        });
         setSummaryError(pid, null);
         autoAnalyzedPapers.add(`${pid}:summary`);
       } catch (e) {
         if (controller.signal.aborted) return;
         const existing = useStore.getState().summaryByPaper[pid];
         const msg = describeError(e);
-        if (hasOverview(existing) && !hasDeepBody(existing)) {
+        if (hasSummaryOverview(existing) && !hasSummaryDeepBody(existing)) {
           setSummaryError(pid, `Overview loaded, but the deep dive failed: ${msg}`);
         } else {
           setSummaryError(pid, msg);
@@ -167,10 +140,12 @@ export function useSummaryStream(paperId: string) {
       }
     },
     [
-      runDeep,
-      runLite,
+      analysisModel,
+      fastModel,
+      mergeIntoPaperSlot,
       setSummaryError,
       setSummaryLoadingForPaper,
+      updateCachedAnalysis,
     ],
   );
 
@@ -179,18 +154,24 @@ export function useSummaryStream(paperId: string) {
     const pid = paperId;
     const existing = useStore.getState().summaryByPaper[pid] ?? null;
 
-    if (hasOverview(existing) && hasDeepBody(existing)) {
-      return;
-    }
-    if (hasOverview(existing) && !hasDeepBody(existing)) {
-      clearProgressStart(pid, "summary");
-      void runPipeline(pid, true);
+    if (summaryIsComplete(existing)) {
       return;
     }
 
+    const phase = hasSummaryOverview(existing) ? "deep" : "full";
     clearProgressStart(pid, "summary");
-    void runPipeline(pid, false);
-  }, [paperId, isLoading, runPipeline]);
+    void runGenerate(pid, phase);
+  }, [paperId, isLoading, runGenerate]);
+
+  // Auto-run deep when cache hydrated with lite only (fixes manual "Retry" button).
+  useEffect(() => {
+    if (autoRanRef.current || isLoading) return;
+    const existing = useStore.getState().summaryByPaper[paperId] ?? null;
+    if (hasSummaryOverview(existing) && !hasSummaryDeepBody(existing)) {
+      autoRanRef.current = true;
+      void runGenerate(paperId, "deep");
+    }
+  }, [paperId, isLoading, runGenerate]);
 
   useEffect(() => {
     summaryStreamStarters.set(paperId, start);
