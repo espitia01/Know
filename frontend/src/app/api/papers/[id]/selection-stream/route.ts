@@ -335,7 +335,7 @@ export async function POST(
       return jsonError(502, "provider_error", message, { model: fastModel });
     }
 
-    const response = await buildStreamObjectResponse<SelectionResult>(result, {
+    const response = await buildStreamObjectResponse(result, {
       model: fastModel,
       releaseOnFailure,
       logTag: "selection-stream",

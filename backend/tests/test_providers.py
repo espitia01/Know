@@ -95,6 +95,7 @@ def test_openai_complete_uses_responses_api_for_gpt5():
         assert body["instructions"] == "sys"
         assert body["input"] == "user"
         assert body["max_output_tokens"] == 512
+        assert body["text"]["format"]["type"] == "json_object"
 
     asyncio.run(run())
 

@@ -330,7 +330,7 @@ export async function POST(
       return jsonError(502, "provider_error", message, { model: analysisModel });
     }
 
-    const response = await buildStreamObjectResponse<PaperSummaryDeep>(result, {
+    const response = await buildStreamObjectResponse(result, {
       model: analysisModel,
       releaseOnFailure,
       logTag: "summary-stream",

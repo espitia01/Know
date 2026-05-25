@@ -534,6 +534,9 @@ class OpenAIProvider(LLMProvider):
             "input": user,
             "max_output_tokens": int(max_tokens),
             "stream": False,
+            # Batch routes (analyze, assumptions) require parseable JSON;
+            # without json_object, GPT-5 via Responses often returns prose.
+            "text": {"format": {"type": "json_object"}},
         }
         response = await self.client.post(
             OPENAI_RESPONSES_URL, headers=self._headers(), json=body
