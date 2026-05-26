@@ -130,9 +130,36 @@ function balanceInlineDollars(line: string): string {
   return line;
 }
 
+/**
+ * Structured JSON turns `\begin` into backspace+"egin", `\text` into tab+"ext",
+ * `\frac` into form-feed+"rac", `\right` into CR+"ight". Restore LaTeX commands.
+ */
+export function repairJsonEscapedLatex(input: string): string {
+  if (!input) return input;
+  let s = input;
+  s = s.replace(/\x08egin/g, "\\begin");
+  s = s.replace(/\x09ext/g, "\\text");
+  s = s.replace(/\x0frac/g, "\\frac");
+  s = s.replace(/\x0crac/g, "\\frac");
+  s = s.replace(/\x0dight/g, "\\right");
+  s = s.replace(/(?<![\\a-zA-Z])egin\{/g, "\\begin{");
+  s = s.replace(/(?<![a-zA-Z])ext\{/g, "\\text{");
+  s = s.replace(/oldsymbol/g, "\\boldsymbol");
+  s = s.replace(/(?<![a-z])rac\{/g, "\\frac{");
+  s = s.replace(/ight\./g, "\\right.");
+  s = s.replace(/igg\(/g, "\\bigg(");
+  s = s.replace(/oftmax/g, "\\softmax");
+  s = s.replace(/(?<![a-z])qrt\{/g, "\\sqrt{");
+  // Corrupted aligned row breaks: ") \ text{" → ") \\ \text{"
+  s = s.replace(/\)\s+\\\s+(?=text\{)/g, ") \\\\ \\");
+  s = s.replace(/(\s)\\(\s+)(?=text\{|oldsymbol|begin\{)/g, "$1\\\\$2");
+  s = s.replace(/(\\right\.)(\s*\\right\.)+/g, "$1");
+  return s;
+}
+
 export function sanitizeStreamdownMath(input: string): string {
   if (!input) return input;
-  let out = input;
+  let out = repairJsonEscapedLatex(input);
   out = out.replace(/\${3,}/g, "$$$$");
   out = out.replace(/\\\[/g, "\n$$\n").replace(/\\\]/g, "\n$$\n");
   out = out.replace(/\\\(/g, "$").replace(/\\\)/g, "$");

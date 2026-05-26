@@ -1157,10 +1157,31 @@ def _repair_comma_display_close(s: str) -> str:
     )
 
 
+def _repair_json_escaped_latex(s: str) -> str:
+    """Restore LaTeX backslashes consumed by JSON \\b, \\t, \\f, \\r escapes."""
+    if not s:
+        return s
+    s = s.replace("\x08egin", "\\begin")
+    s = s.replace("\x09ext", "\\text")
+    s = s.replace("\x0frac", "\\frac")
+    s = s.replace("\x0crac", "\\frac")
+    s = s.replace("\x0dight", "\\right")
+    s = re.sub(r"(?<![\\a-zA-Z])egin\{", r"\\begin{", s)
+    s = re.sub(r"(?<![a-zA-Z])ext\{", r"\\text{", s)
+    s = s.replace("oldsymbol", "\\boldsymbol")
+    s = re.sub(r"(?<![a-z])rac\{", r"\\frac{", s)
+    s = s.replace("ight.", "\\right.")
+    s = s.replace("igg(", "\\bigg(")
+    s = s.replace("oftmax", "\\softmax")
+    s = re.sub(r"\)\s+\\\s+(?=text\{)", r") \\\\ \\", s)
+    s = re.sub(r"(\\right\.)(?:\s*\\right\.)+", r"\1", s)
+    return s
+
+
 def _normalize_latex_delimiters(obj):
     """Convert \\( \\) to $ and \\[ \\] to $$ in all string values for remark-math compatibility."""
     if isinstance(obj, str):
-        s = obj
+        s = _repair_json_escaped_latex(obj)
         s = _repair_orphan_period_display_close(s)
         s = _repair_orphan_display_close(s)
         s = _repair_comma_display_close(s)

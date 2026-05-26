@@ -1,3 +1,5 @@
+import { repairJsonEscapedLatex } from "@/lib/streamdownMath";
+
 /** Strip a trailing partial $...$ / $$...$$ span so KaTeX never sees dangling delimiters. */
 function stripPartialMathTail(s: string): string {
   const lastDollar = s.lastIndexOf("$");
@@ -96,7 +98,7 @@ export function firstSentence(input: string | null | undefined, maxLen = 240): s
 
 /** Wrap bare LaTeX in $$...$$ for Streamdown/KaTeX (summary key_equations). */
 export function ensureDisplayMath(raw: string | undefined): string {
-  const s = (raw ?? "").trim();
+  let s = repairJsonEscapedLatex((raw ?? "").trim());
   if (!s) return "";
   if (/^\${1,2}[\s\S]+\${1,2}$/.test(s) || s.startsWith("$$")) return s;
   const cleaned = s.replace(/^\s*(?:\(\s*\d+\s*\)|\d+\.|Eq\.?\s*\d+:?)\s*/i, "").trim();

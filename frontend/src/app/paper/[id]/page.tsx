@@ -112,7 +112,15 @@ function mergeCachedAnalysis(current: ParsedPaper, previous?: ParsedPaper): Pars
   // Per F-HYDRATION: a background Supabase rebuild can be slimmer than the
   // session cache. Preserve already-populated artifacts instead of flipping
   // the pane back to empty states on paper switch/refetch.
-  for (const key of ["pre_reading", "summary", "selections", "qa_sessions", "figure_analyses"] as const) {
+  for (const key of [
+    "pre_reading",
+    "summary",
+    "selections",
+    "qa_sessions",
+    "figure_analyses",
+    "table_analyses",
+    "code_analyses",
+  ] as const) {
     const incomingValue = incoming[key];
     const priorValue = prior[key];
     const incomingEmpty = Array.isArray(incomingValue)

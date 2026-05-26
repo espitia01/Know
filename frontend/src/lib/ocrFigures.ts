@@ -6,6 +6,9 @@ export function analysisFiguresFromPaper(paper: ParsedPaper | null | undefined):
   const images = (paper.ocr_images ?? []) as OcrImage[];
   const composites = images.filter((img) => img.kind === "figure");
   let source = composites.length > 0 ? composites : images.filter((img) => img.kind !== "panel");
+  if (!source.length && paper.figures?.length) {
+    return paper.figures;
+  }
   if (!source.length) source = images;
   return source.map((img, idx) => ({
     id: img.id,

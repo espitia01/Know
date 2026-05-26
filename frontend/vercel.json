@@ -7,11 +7,15 @@
     "app/api/papers/[id]/summary-lite-stream/route.ts": { "maxDuration": 120, "memory": 2048 },
     "app/api/papers/[id]/summary-stream/route.ts": { "maxDuration": 300, "memory": 2048 },
     "app/api/papers/[id]/figure-qa-stream/route.ts": { "maxDuration": 300, "memory": 2048 },
+    "app/api/papers/[id]/table-qa-stream/route.ts": { "maxDuration": 300, "memory": 2048 },
+    "app/api/papers/[id]/code-analyze-stream/route.ts": { "maxDuration": 300, "memory": 2048 },
     "app/api/papers/[id]/qa/route.ts": { "maxDuration": 300, "memory": 2048 },
     "src/app/api/papers/[id]/selection-stream/route.ts": { "maxDuration": 300, "memory": 2048 },
     "src/app/api/papers/[id]/summary-lite-stream/route.ts": { "maxDuration": 120, "memory": 2048 },
     "src/app/api/papers/[id]/summary-stream/route.ts": { "maxDuration": 300, "memory": 2048 },
     "src/app/api/papers/[id]/figure-qa-stream/route.ts": { "maxDuration": 300, "memory": 2048 },
+    "src/app/api/papers/[id]/table-qa-stream/route.ts": { "maxDuration": 300, "memory": 2048 },
+    "src/app/api/papers/[id]/code-analyze-stream/route.ts": { "maxDuration": 300, "memory": 2048 },
     "src/app/api/papers/[id]/qa/route.ts": { "maxDuration": 300, "memory": 2048 }
   },
   "crons": [

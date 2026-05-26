@@ -48,6 +48,8 @@ type StreamingMarkdownProps = {
    */
   size?: "sm" | "md" | "tight";
   className?: string;
+  /** Enable Streamdown copy controls on fenced code blocks. */
+  copyableCode?: boolean;
 };
 
 const SIZE_CLASS: Record<NonNullable<StreamingMarkdownProps["size"]>, string> = {
@@ -65,6 +67,7 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({
   streaming = false,
   size = "sm",
   className,
+  copyableCode = false,
 }: StreamingMarkdownProps) {
   const raw = typeof children === "string" ? children : "";
   const text = useMemo(() => sanitizeStreamdownMath(raw), [raw]);
@@ -78,7 +81,7 @@ export const StreamingMarkdown = memo(function StreamingMarkdown({
         isAnimating={streaming}
         // Disable copy/download chrome by default — analysis panels
         // already render in cards with their own affordances.
-        controls={false}
+        controls={copyableCode}
       >
         {text}
       </Streamdown>

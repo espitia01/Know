@@ -312,3 +312,40 @@ export const FigureAnalysisSchema = z.object({
 });
 
 export type FigureAnalysis = z.infer<typeof FigureAnalysisSchema>;
+
+export const TableAnalysisSchema = z.object({
+  answer: z
+    .string()
+    .describe(
+      "Markdown answer about the table — cite rows/columns, trends, and how it supports the paper.",
+    ),
+  summary: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("Optional one-paragraph markdown summary of what the table shows."),
+});
+
+export type TableAnalysis = z.infer<typeof TableAnalysisSchema>;
+
+export const CodeAnalysisSchema = z.object({
+  algorithm_explanation: z
+    .string()
+    .describe(
+      "Markdown explanation of the algorithm or procedure — steps, inputs/outputs, complexity when known.",
+    ),
+  implementation: z
+    .string()
+    .describe(
+      "Runnable or pseudocode implementation in a fenced markdown code block with a language tag. Prefer faithful code when the paper is specific; otherwise clear pseudocode.",
+    ),
+  sketch_note: z
+    .string()
+    .nullable()
+    .default(null)
+    .describe(
+      "When a full implementation is impractical, markdown noting gaps and a high-level sketch instead.",
+    ),
+});
+
+export type CodeAnalysis = z.infer<typeof CodeAnalysisSchema>;

@@ -19,6 +19,10 @@ import { AssumptionsPanel } from "../sidebar/AssumptionsPanel";
 import { NotesHost } from "../sidebar/NotesHost";
 import { SummaryPanel } from "../sidebar/SummaryPanel";
 import { FiguresPanel } from "../sidebar/FiguresPanel";
+import { TablesPanel } from "../sidebar/TablesPanel";
+import { CodePanel } from "../sidebar/CodePanel";
+import { analysisFiguresFromPaper } from "@/lib/ocrFigures";
+import { tablesFromPaper, codeBlocksFromPaper } from "@/lib/ocrArtifacts";
 import { CrossPaperPanel } from "../sidebar/CrossPaperPanel";
 import { ExportModal } from "../export/ExportModal";
 import { ExportStatusBar } from "../export/ExportStatusBar";
@@ -116,9 +120,19 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
     (tab: string) => {
       if (tab === "compare" && !showCrossPaperTab) return;
       if (tab === "selection" && !showSelectionTab) return;
+      if (tab === "figures" && !showFiguresTab) return;
+      if (tab === "tables" && !showTablesTab) return;
+      if (tab === "code" && !showCodeTab) return;
       setActiveTab(tab);
     },
-    [showCrossPaperTab, showSelectionTab, setActiveTab],
+    [
+      showCrossPaperTab,
+      showSelectionTab,
+      showFiguresTab,
+      showTablesTab,
+      showCodeTab,
+      setActiveTab,
+    ],
   );
 
   useEffect(() => {
@@ -126,8 +140,22 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
       setActiveTab("summary");
     } else if (activeTab === "selection" && !showSelectionTab) {
       setActiveTab("summary");
+    } else if (activeTab === "figures" && !showFiguresTab) {
+      setActiveTab("summary");
+    } else if (activeTab === "tables" && !showTablesTab) {
+      setActiveTab("summary");
+    } else if (activeTab === "code" && !showCodeTab) {
+      setActiveTab("summary");
     }
-  }, [activeTab, showCrossPaperTab, showSelectionTab, setActiveTab]);
+  }, [
+    activeTab,
+    showCrossPaperTab,
+    showSelectionTab,
+    showFiguresTab,
+    showTablesTab,
+    showCodeTab,
+    setActiveTab,
+  ]);
 
   useEffect(() => {
     // Per audit §4.1/§6.3: inactive Radix tabs stay mounted by default,
@@ -283,8 +311,14 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
           {mountedTabs.has("qa") && (
             <TabsContent value="qa" className="mt-0"><QAPanel paperId={paperId} /></TabsContent>
           )}
-          {mountedTabs.has("figures") && (
+          {showFiguresTab && mountedTabs.has("figures") && (
             <TabsContent value="figures" className="mt-0"><FiguresPanel paperId={paperId} /></TabsContent>
+          )}
+          {showTablesTab && mountedTabs.has("tables") && (
+            <TabsContent value="tables" className="mt-0"><TablesPanel paperId={paperId} /></TabsContent>
+          )}
+          {showCodeTab && mountedTabs.has("code") && (
+            <TabsContent value="code" className="mt-0"><CodePanel paperId={paperId} /></TabsContent>
           )}
           {mountedTabs.has("notes") && (
             <TabsContent value="notes" className="mt-0"><NotesHost paperId={paperId} /></TabsContent>

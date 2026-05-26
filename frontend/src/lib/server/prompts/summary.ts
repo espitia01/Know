@@ -55,7 +55,7 @@ export function buildSummaryLitePrompt(args: {
     `- "overview": 3–5 sentence high-level overview of what the paper does and why it matters.`,
     `- "tl_dr": one-sentence takeaway with the single most important result. Math-aware ($...$ allowed).`,
     `- "key_contributions": array of 3–5 strings, each 1–2 sentences. Order by importance.`,
-    `- "key_equations": optional array of up to 3 items {"equation": LaTeX wrapped in $$...$$ on its own line, "meaning": one-paragraph markdown}. NEVER emit bare LaTeX — always wrap the equation field in $$...$$.`,
+    `- "key_equations": optional array of up to 3 items {"equation": LaTeX wrapped in $$...$$ on its own line, "meaning": one-paragraph markdown}. NEVER emit bare LaTeX — always wrap the equation field in $$...$$. In JSON strings escape every backslash twice (e.g. \\\\begin{aligned}, \\\\text{}, \\\\frac{}{}).`,
     `Be precise and concrete. No filler. This pass MUST be short so the reader sees content quickly.`,
     depthBlock,
   ].join("\n\n");

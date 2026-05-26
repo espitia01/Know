@@ -21,6 +21,10 @@ export const FEATURE_TOOLTIPS: Record<string, string> = {
     "Click any figure for AI-powered visual analysis with follow-up questions in a conversational flow",
   "Figures":
     "Click any figure for AI-powered visual analysis with follow-up questions in a conversational flow",
+  "Tables":
+    "Explore OCR-detected tables, analyze trends, and ask follow-up questions grounded in the data",
+  "Code":
+    "Review algorithms from the paper with explanations, implementations, and copyable code blocks",
   "Smart Notes":
     "Highlight any passage to save notes, get explanations, or derive equations step by step",
   "Notes":

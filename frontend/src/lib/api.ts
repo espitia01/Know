@@ -294,6 +294,8 @@ export interface ParsedPaper {
     /** PROMPT_7: detailed body (methodology, results, discussion, limitations, future work, figures). */
     summary_deep?: PaperSummary;
     figure_analyses?: FigureAnalysis[];
+    table_analyses?: TableAnalysis[];
+    code_analyses?: CodeAnalysis[];
     skipped_steps?: Record<string, unknown>[];
     assumptions_cooldown_until?: number;
   };
@@ -547,6 +549,27 @@ export interface FigureAnalysis {
   methodology_shown?: string;
   relation_to_paper: string;
   takeaway?: string;
+  model?: string;
+  created_at?: number;
+}
+
+export interface TableAnalysis {
+  table_id: string;
+  table_label?: string;
+  question?: string;
+  answer: string;
+  summary?: string | null;
+  model?: string;
+  created_at?: number;
+}
+
+export interface CodeAnalysis {
+  block_id: string;
+  language?: string;
+  question?: string;
+  algorithm_explanation: string;
+  implementation: string;
+  sketch_note?: string | null;
   model?: string;
   created_at?: number;
 }
@@ -873,6 +896,64 @@ export const api = {
     const body: Record<string, unknown> = { figure_id: figureId, question };
     if (options?.model) body.model = options.model;
     return fetch(`${API_BASE}/api/papers/${id}/figure-qa-stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        ...headers,
+      },
+      body: JSON.stringify(body),
+      signal: options?.signal,
+    });
+  },
+
+  analyzeTableStream: async (
+    id: string,
+    tableId: string,
+    tableMarkdown: string,
+    tableLabel: string,
+    question: string = "",
+    options?: { signal?: AbortSignal; model?: string },
+  ) => {
+    const headers = await authHeaders();
+    const body: Record<string, unknown> = {
+      table_id: tableId,
+      table_markdown: tableMarkdown,
+      table_label: tableLabel,
+      question,
+    };
+    if (options?.model) body.model = options.model;
+    return fetch(`/api/papers/${id}/table-qa-stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        ...headers,
+      },
+      body: JSON.stringify(body),
+      signal: options?.signal,
+    });
+  },
+
+  analyzeCodeStream: async (
+    id: string,
+    blockId: string,
+    code: string,
+    language: string,
+    contextLine: string,
+    question: string = "",
+    options?: { signal?: AbortSignal; model?: string },
+  ) => {
+    const headers = await authHeaders();
+    const body: Record<string, unknown> = {
+      block_id: blockId,
+      code,
+      language,
+      context_line: contextLine,
+      question,
+    };
+    if (options?.model) body.model = options.model;
+    return fetch(`/api/papers/${id}/code-analyze-stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
