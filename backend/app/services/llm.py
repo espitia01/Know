@@ -1003,9 +1003,14 @@ def _sanitize_qa_source_hits(hits: list[dict] | None) -> list[dict]:
 
 def _coerce_qa_item(raw: dict, fallback_question: str | None = None) -> dict | None:
     q = _coerce_markdown_field(raw.get("question") or fallback_question or "").strip()
-    a = _coerce_markdown_field(
+    a = _coerce_qa_answer(
         raw.get("answer") or raw.get("body") or raw.get("text") or raw.get("content") or ""
     ).strip()
+    for extra_key in ("basis", "grounding", "rationale"):
+        extra = _coerce_qa_answer(raw.get(extra_key)).strip()
+        if extra and extra not in a:
+            label = _humanize_field_label(extra_key)
+            a = f"{a}\n\n**{label}:** {extra}" if a else f"**{label}:** {extra}"
     if not q and not a:
         return None
     item: dict = {
@@ -1843,6 +1848,56 @@ Return JSON:
     return _safe_parse_json(raw)
 
 
+def _humanize_field_label(key: str) -> str:
+    return " ".join(part.capitalize() for part in str(key).replace("_", " ").split())
+
+
+def _structured_to_markdown(value: object) -> str:
+    """Turn nested LLM JSON (dict/list) into readable markdown prose."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    if isinstance(value, list):
+        lines: list[str] = []
+        for item in value:
+            chunk = _structured_to_markdown(item)
+            if not chunk:
+                continue
+            if "\n" in chunk:
+                lines.append(chunk)
+            elif chunk.lstrip().startswith(("-", "*")) or re.match(r"^\d+\.", chunk.lstrip()):
+                lines.append(chunk)
+            else:
+                lines.append(f"- {chunk}")
+        return "\n".join(lines).strip()
+    if isinstance(value, dict):
+        for key in ("text", "content", "markdown", "body", "explanation", "answer"):
+            if key in value:
+                inner = _structured_to_markdown(value[key])
+                if inner:
+                    return inner
+        parts: list[str] = []
+        for key, nested in value.items():
+            chunk = _structured_to_markdown(nested)
+            if not chunk:
+                continue
+            label = _humanize_field_label(key)
+            if isinstance(nested, str):
+                parts.append(f"**{label}:** {chunk}")
+            else:
+                parts.append(f"**{label}**\n\n{chunk}")
+        return "\n\n".join(parts).strip()
+    return str(value).strip()
+
+
+def _coerce_qa_answer(value: object) -> str:
+    """Coerce Q&A answer fields to markdown, including nested JSON objects."""
+    return _structured_to_markdown(value)
+
+
 def _coerce_markdown_field(value: object) -> str:
     """Coerce LLM JSON fields to plain strings (Mistral sometimes nests prose)."""
     if value is None:
@@ -2120,7 +2175,8 @@ async def answer_questions(
         "If the PDF does not address the topic—or does so only indirectly—say so briefly, then answer using reliable "
         "general knowledge clearly labeled as such, and propose concrete Google Scholar-style search phrases or keywords "
         "the reader could try next. Do not refuse solely because wording is absent from the excerpts. "
-        "Return ONLY valid JSON.\n\n" + LATEX_FORMAT_INSTRUCTIONS
+        "Return ONLY valid JSON. Each answer must be a single markdown string — never a nested JSON object.\n\n"
+        + LATEX_FORMAT_INSTRUCTIONS
     )
 
     q_list = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
@@ -2140,7 +2196,7 @@ Return JSON:
   "items": [
     {{
       "question": "the original question",
-      "answer": "paper-grounded summary when relevant; labeled general background when useful; Scholar-style queries if more sources help; LaTeX for math (e.g., $E = mc^2$)"
+      "answer": "markdown string only — never a nested object; paper-grounded summary when relevant; labeled general background when useful; Scholar-style queries if more sources help; LaTeX for math (e.g., $E = mc^2$)"
     }}
   ]
 }}"""

@@ -101,3 +101,29 @@ def test_parse_qa_payload_raises_on_empty():
         llm._parse_qa_payload('{"items": []}', ["What is this?"])
     with pytest.raises(ValueError, match="empty payload"):
         llm._parse_qa_payload("{}", ["What is this?"])
+
+
+def test_parse_qa_payload_flattens_nested_answer_object():
+    raw = """{
+      "items": [{
+        "question": "What is the main contribution?",
+        "answer": {
+          "contribution": "The paper evaluates AI-assisted grading workflows.",
+          "key_findings": [
+            "- OCR conversion is the main challenge.",
+            "- Fine-grained rubrics increase error rates."
+          ],
+          "practical_recommendations": "Use part-level grading when possible."
+        },
+        "basis": "Grounded in the abstract and results sections."
+      }]
+    }"""
+    result = llm._parse_qa_payload(raw, ["What is the main contribution?"])
+    answer = result["items"][0]["answer"]
+    assert "AI-assisted grading workflows" in answer
+    assert "OCR conversion" in answer
+    assert "Fine-grained rubrics" in answer
+    assert "part-level grading" in answer
+    assert "abstract and results" in answer
+    assert answer.strip().startswith("**Contribution:**")
+    assert "{" not in answer
