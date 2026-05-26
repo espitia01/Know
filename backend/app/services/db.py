@@ -27,16 +27,18 @@ def _clear_list_papers_cache(user_id: str | None = None) -> None:
 
 
 def _create_client():
+    from httpx import Timeout
     from supabase import create_client
-    from supabase.lib.client_options import ClientOptions
+    from supabase.lib.client_options import SyncClientOptions
 
-    # Bound hung PostgREST calls so one slow DB round-trip cannot block the
-    # worker for minutes (reading-state, list papers, auth bootstrap).
+    # supabase-py 2.28+ requires SyncClientOptions (not bare ClientOptions).
+    # Passing the wrong type crashes with AttributeError: 'storage' on every
+    # first DB access and surfaces as HTTP 500 on all authenticated routes.
     return create_client(
         settings.supabase_url,
         settings.supabase_key,
-        options=ClientOptions(
-            postgrest_client_timeout=30,
+        options=SyncClientOptions(
+            postgrest_client_timeout=Timeout(30.0, connect=10.0),
             storage_client_timeout=30,
         ),
     )
@@ -52,8 +54,12 @@ def get_db():
         return None
     client = getattr(_thread_local, "supabase_client", None)
     if client is None:
-        client = _create_client()
-        _thread_local.supabase_client = client
+        try:
+            client = _create_client()
+            _thread_local.supabase_client = client
+        except Exception:
+            logger.exception("Supabase client initialization failed")
+            return None
     return client
 
 
