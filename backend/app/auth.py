@@ -34,9 +34,54 @@ def _get_jwks_client() -> PyJWKClient | None:
     if _jwks_client is not None:
         return _jwks_client
     if settings.clerk_jwks_url:
-        _jwks_client = PyJWKClient(settings.clerk_jwks_url)
+        _jwks_client = PyJWKClient(
+            settings.clerk_jwks_url,
+            cache_keys=True,
+            cache_jwk_set=True,
+            lifespan=3600,
+            timeout=30,
+        )
         return _jwks_client
     return None
+
+
+def _fetch_signing_key(token: str):
+    """Resolve the Clerk signing key for ``token`` (sync, guarded)."""
+    jwks = _get_jwks_client()
+    if not jwks:
+        return None
+    with _jwks_lock:
+        return jwks.get_signing_key_from_jwt(token)
+
+
+def warm_jwks_cache() -> bool:
+    """Prefetch Clerk JWKS at startup. Returns True when reachable."""
+    jwks = _get_jwks_client()
+    if not jwks:
+        logger.critical("KNOW_CLERK_JWKS_URL unset — auth will fail closed")
+        return False
+    try:
+        with _jwks_lock:
+            jwks.get_jwk_set()
+        logger.info("Clerk JWKS cache warmed from %s", settings.clerk_jwks_url)
+        return True
+    except PyJWKClientError as e:
+        logger.error("Clerk JWKS warmup failed for %s: %s", settings.clerk_jwks_url, e)
+        return False
+    except Exception:
+        logger.exception("Clerk JWKS warmup failed for %s", settings.clerk_jwks_url)
+        return False
+
+
+def jwks_status() -> tuple[bool, str]:
+    """Return (ok, detail) for health checks."""
+    if not settings.clerk_jwks_url:
+        return False, "KNOW_CLERK_JWKS_URL not set"
+    try:
+        warm_jwks_cache()
+        return True, "ok"
+    except Exception as e:
+        return False, str(e)
 
 
 async def require_auth(
@@ -83,16 +128,21 @@ async def require_auth(
         )
 
     try:
-        try:
-            def _fetch_signing_key():
-                with _jwks_lock:
-                    return jwks.get_signing_key_from_jwt(token)
-
-            signing_key = await asyncio.to_thread(_fetch_signing_key)
-        except PyJWKClientError as e:
-            # Includes network failures fetching the JWKS set and "kid not
-            # found" races during key rotation. Client can't fix either.
-            logger.warning("JWKS signing key fetch failed: %s", e)
+        signing_key = None
+        last_jwks_error: PyJWKClientError | None = None
+        for attempt in range(2):
+            try:
+                # Keep JWKS on the event-loop thread — PyJWKClient reuses a
+                # urllib3 pool that misbehaves when called from thread workers.
+                signing_key = _fetch_signing_key(token)
+                break
+            except PyJWKClientError as e:
+                last_jwks_error = e
+                if attempt == 0:
+                    await asyncio.sleep(0.25)
+                    continue
+        if signing_key is None:
+            logger.warning("JWKS signing key fetch failed: %s", last_jwks_error)
             raise HTTPException(
                 status_code=503, detail="Authentication service unavailable",
             )
@@ -118,7 +168,14 @@ async def require_auth(
         if not user_id:
             raise HTTPException(status_code=401, detail="Token missing user identity")
         from .services.db import get_or_create_user
-        await asyncio.to_thread(get_or_create_user, user_id, payload.get("email", ""))
+
+        email = payload.get("email") or ""
+        try:
+            await asyncio.to_thread(get_or_create_user, user_id, email)
+        except Exception as e:
+            # JWT is already verified — don't fail the whole request when
+            # Supabase is slow; /api/user/me will retry user bootstrap.
+            logger.warning("get_or_create_user failed for %s: %s", user_id, e)
         return user_id
     except HTTPException:
         raise

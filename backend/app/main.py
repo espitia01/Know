@@ -10,7 +10,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, Response
 
 from .config import settings
-from .auth import require_auth
+from .auth import require_auth, warm_jwks_cache
 from .trial import (
     TRIAL_LLM_RATE_LIMIT,
     TRIAL_WINDOW,
@@ -62,6 +62,8 @@ async def _trial_cleanup_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await asyncio.to_thread(warm_jwks_cache)
+
     # The in-process cleanup loop is the legacy path; Vercel Cron at
     # /api/cron/cleanup-trial owns the schedule once configured. Set
     # KNOW_DISABLE_INTERNAL_CRON_FALLBACK=1 on Railway after the cron
@@ -149,6 +151,17 @@ app.add_middleware(
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/health/auth")
+async def health_auth():
+    from fastapi.responses import JSONResponse
+    from .auth import jwks_status
+
+    ok, detail = await asyncio.to_thread(jwks_status)
+    if not ok:
+        return JSONResponse(status_code=503, content={"status": "error", "detail": detail})
+    return {"status": "ok", "detail": detail}
 
 
 @app.get("/api/user/me")
