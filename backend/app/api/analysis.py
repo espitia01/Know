@@ -45,7 +45,6 @@ from ..services.llm import (
     extract_assumptions,
     find_skipped_steps,
     generate_derivation_exercise,
-    summarize_paper,
     summarize_paper_lite,
     summarize_paper_deep,
     _coerce_markdown_field,

@@ -2553,6 +2553,9 @@ Do not invent figures, tables, or equations. Paper excerpt:
     parsed = _normalize_summary_optional_lists(parsed, include_figures=True)
     parsed["model"] = model_slug
     return parsed
+
+
+async def summarize_paper(paper_text: str, model_override: str | None = None, user_id: str | None = None) -> dict:
     """Generate an extremely detailed, structured summary of the paper."""
     if model_override:
         if user_id:
