@@ -100,21 +100,24 @@ function parseDetail(
   return { message: "Request failed", structured: null };
 }
 
+type ApiRequestInit = RequestInit & { timeoutMs?: number };
+
 async function request<T>(
   path: string,
-  options?: RequestInit,
+  options?: ApiRequestInit,
   retryCount = 0
 ): Promise<T> {
+  const { timeoutMs = 180_000, ...fetchOptions } = options ?? {};
   const headers = await authHeaders();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 180_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${API_BASE}${path}`, {
-      ...options,
-      signal: controller.signal,
+      ...fetchOptions,
+      signal: fetchOptions.signal ?? controller.signal,
       headers: {
         ...headers,
-        ...options?.headers,
+        ...fetchOptions.headers,
       },
     });
     if (res.status === 401 && retryCount === 0 && _getToken) {
@@ -225,13 +228,13 @@ async function request<T>(
 
 const _inflightGetRequests = new Map<string, Promise<unknown>>();
 
-function getRequest<T>(path: string): Promise<T> {
+function getRequest<T>(path: string, timeoutMs = 180_000): Promise<T> {
   const existing = _inflightGetRequests.get(path) as Promise<T> | undefined;
   if (existing) return existing;
   // Per audit §8.3: rapid paper/session switches can request the same GET
   // multiple times before the first response lands. Share one promise for
   // idempotent reads and drop it as soon as it settles.
-  const p = request<T>(path).finally(() => {
+  const p = request<T>(path, { timeoutMs }).finally(() => {
     _inflightGetRequests.delete(path);
   });
   _inflightGetRequests.set(path, p);
@@ -619,7 +622,7 @@ export const api = {
     return res.json();
   },
 
-  listPapers: () => getRequest<PaperListEntry[]>("/api/papers/"),
+  listPapers: () => getRequest<PaperListEntry[]>("/api/papers/", 60_000),
 
   getPaper: (id: string) => getRequest<ParsedPaper>(`/api/papers/${id}`),
 
@@ -1060,7 +1063,9 @@ export const api = {
   getReadingState: (id: string) =>
     // First visit returns 404; persistent infra glitch returns 5xx. Either way
     // we just want defaults — restore is best-effort, never a hard failure.
-    getRequest<ReadingStateRow | null>(`/api/papers/${id}/reading-state`).catch(() => null),
+    request<ReadingStateRow | null>(`/api/papers/${id}/reading-state`, {
+      timeoutMs: 15_000,
+    }).catch(() => null),
 
   putReadingState: (
     id: string,
@@ -1070,6 +1075,7 @@ export const api = {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      timeoutMs: 10_000,
     }),
 
   requestExport: (

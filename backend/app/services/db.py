@@ -28,10 +28,20 @@ def _clear_list_papers_cache(user_id: str | None = None) -> None:
 @lru_cache(maxsize=1)
 def _get_client():
     from supabase import create_client
+    from supabase.lib.client_options import ClientOptions
 
     if not settings.supabase_url or not settings.supabase_key:
         return None
-    return create_client(settings.supabase_url, settings.supabase_key)
+    # Bound hung PostgREST calls so one slow DB round-trip cannot block the
+    # worker for minutes (reading-state, list papers, auth bootstrap).
+    return create_client(
+        settings.supabase_url,
+        settings.supabase_key,
+        options=ClientOptions(
+            postgrest_client_timeout=30,
+            storage_client_timeout=30,
+        ),
+    )
 
 
 def get_db():

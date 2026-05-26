@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import jwt
@@ -81,7 +82,7 @@ async def require_auth(
 
     try:
         try:
-            signing_key = jwks.get_signing_key_from_jwt(token)
+            signing_key = await asyncio.to_thread(jwks.get_signing_key_from_jwt, token)
         except PyJWKClientError as e:
             # Includes network failures fetching the JWKS set and "kid not
             # found" races during key rotation. Client can't fix either.
@@ -111,7 +112,7 @@ async def require_auth(
         if not user_id:
             raise HTTPException(status_code=401, detail="Token missing user identity")
         from .services.db import get_or_create_user
-        get_or_create_user(user_id, email=payload.get("email", ""))
+        await asyncio.to_thread(get_or_create_user, user_id, payload.get("email", ""))
         return user_id
     except HTTPException:
         raise

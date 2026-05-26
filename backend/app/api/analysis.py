@@ -80,6 +80,7 @@ from ..services.reference_extract import extract_references_section
 from ..services.db import append_selection as append_selection_db
 from ..services.db import append_qa_session as append_qa_session_db
 from ..auth import require_auth
+from ..async_io import run_sync
 from ..gating import (
     check_feature_access,
     reserve_usage,
@@ -106,15 +107,16 @@ def _is_usable_pre_reading(payload: dict) -> bool:
 
 @router.post("/{paper_id}/analyze", response_model=PreReadingAnalysis)
 async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
-    check_feature_access(user_id, "prepare")
+    await run_sync(check_feature_access, user_id, "prepare")
     _validate_id(paper_id, "paper_id")
-    _verify_paper_owner(paper_id, user_id)
-    paper = get_paper(paper_id, user_id=user_id)
+    await run_sync(_verify_paper_owner, paper_id, user_id)
+    paper = await run_sync(get_paper, paper_id, user_id=user_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
-    token = reserve_usage(
-        user_id, paper_id, "api_call", model=resolve_analysis_model(user_id)
+    token = await run_sync(
+        reserve_usage,
+        user_id, paper_id, "api_call", model=resolve_analysis_model(user_id),
     )
     analysis_payload = None
     try:
@@ -161,7 +163,7 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
         analysis_payload = analysis.model_dump()
         return analysis
     except ValueError as exc:
-        release_usage(token)
+        await run_sync(release_usage, token)
         logger.warning("Analysis 503 for paper %s: %s", paper_id, exc)
         raise HTTPException(
             status_code=503,
@@ -175,10 +177,10 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
             },
         )
     except HTTPException:
-        release_usage(token)
+        await run_sync(release_usage, token)
         raise
     except Exception:
-        release_usage(token)
+        await run_sync(release_usage, token)
         logger.exception("Analysis failed for paper %s", paper_id)
         raise HTTPException(status_code=500, detail="Analysis failed. Please try again.")
     finally:
@@ -186,7 +188,8 @@ async def analyze(paper_id: str, user_id: str = Depends(require_auth)):
             try:
                 # Per F-HYDRATION: persist paid-for output even if a
                 # post-LLM response path later fails.
-                mutate_paper(
+                await run_sync(
+                    mutate_paper,
                     paper_id,
                     user_id,
                     lambda p: p.cached_analysis.__setitem__("pre_reading", analysis_payload),
@@ -662,24 +665,26 @@ async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)
 @router.post("/{paper_id}/summary-lite")
 async def summary_lite(paper_id: str, body: dict = Body(default={}), user_id: str = Depends(require_auth)):
     """Fast summary preview — runs on Railway to avoid Vercel's 60s Hobby cap."""
-    check_feature_access(user_id, "summary")
+    await run_sync(check_feature_access, user_id, "summary")
     _validate_id(paper_id, "paper_id")
-    _verify_paper_owner(paper_id, user_id)
-    paper = get_paper(paper_id, user_id=user_id)
+    await run_sync(_verify_paper_owner, paper_id, user_id)
+    paper = await run_sync(get_paper, paper_id, user_id=user_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
 
     requested_model = body.get("model") if isinstance(body, dict) else None
     if isinstance(requested_model, str) and requested_model.strip():
-        model_used = enforce_model(
-            user_id, canonicalize_model(requested_model.strip()) or requested_model.strip()
+        model_used = await run_sync(
+            enforce_model,
+            user_id, canonicalize_model(requested_model.strip()) or requested_model.strip(),
         )
     else:
-        model_used = resolve_fast_model(user_id)
+        model_used = await run_sync(resolve_fast_model, user_id)
 
-    token = reserve_usage(
+    token = await run_sync(
+        reserve_usage,
         user_id, paper_id, "summary", model=model_used,
-        count=get_usage_multiplier(user_id),
+        count=await run_sync(get_usage_multiplier, user_id),
     )
     try:
         result = await summarize_paper_lite(
@@ -688,13 +693,14 @@ async def summary_lite(paper_id: str, body: dict = Body(default={}), user_id: st
             user_id=user_id,
         )
         if not result.get("overview"):
-            release_usage(token)
+            await run_sync(release_usage, token)
             raise HTTPException(
                 status_code=502,
                 detail="Summary preview returned empty. Please retry.",
             )
         try:
-            mutate_paper(
+            await run_sync(
+                mutate_paper,
                 paper_id,
                 user_id,
                 lambda p: p.cached_analysis.__setitem__("summary_lite", result),
@@ -703,14 +709,14 @@ async def summary_lite(paper_id: str, body: dict = Body(default={}), user_id: st
             logger.exception("Failed to persist summary_lite for %s", paper_id)
         return result
     except HTTPException:
-        release_usage(token)
+        await run_sync(release_usage, token)
         raise
     except ValueError as exc:
-        release_usage(token)
+        await run_sync(release_usage, token)
         logger.warning("summary_lite failed for %s: %s", paper_id, exc)
         raise HTTPException(status_code=502, detail=str(exc))
     except Exception:
-        release_usage(token)
+        await run_sync(release_usage, token)
         logger.exception("summary_lite failed for %s", paper_id)
         raise HTTPException(status_code=500, detail="Summary preview failed. Please try again.")
 

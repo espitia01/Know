@@ -27,15 +27,21 @@ export function useReadingState(paperId: string | null | undefined): {
   const pendingRef = useRef<Patch | null>(null);
   const lastSentRef = useRef<Patch>({});
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushInFlightRef = useRef(false);
   const paperIdRef = useRef<string | null>(paperId ?? null);
   paperIdRef.current = paperId ?? null;
 
+  const queueFlushRef = useRef<() => void>(() => {});
+
   const flush = useCallback(async () => {
     timerRef.current = null;
+    if (flushInFlightRef.current) return;
+
     const pid = paperIdRef.current;
     const pending = pendingRef.current;
     pendingRef.current = null;
     if (!pid || !pending) return;
+
     // Drop fields that match the most recent confirmed write so we don't
     // bounce the API on a slow steady-state scroll.
     const merged: Patch = {};
@@ -45,7 +51,12 @@ export function useReadingState(paperId: string | null | undefined): {
       if (lastSentRef.current[key] === next) continue;
       merged[key] = next as never;
     }
-    if (Object.keys(merged).length === 0) return;
+    if (Object.keys(merged).length === 0) {
+      if (pendingRef.current) queueFlushRef.current();
+      return;
+    }
+
+    flushInFlightRef.current = true;
     try {
       const row = await api.putReadingState(pid, merged);
       lastSentRef.current = { ...lastSentRef.current, ...merged };
@@ -56,14 +67,21 @@ export function useReadingState(paperId: string | null | undefined): {
       });
     } catch {
       // Best-effort; reading state restores defaults on next paper open.
+    } finally {
+      flushInFlightRef.current = false;
+      if (pendingRef.current) queueFlushRef.current();
     }
   }, []);
 
+  queueFlushRef.current = () => {
+    if (timerRef.current || flushInFlightRef.current) return;
+    timerRef.current = setTimeout(() => void flush(), DEBOUNCE_MS);
+  };
+
   const saveProgress = useCallback((patch: Patch) => {
     pendingRef.current = { ...(pendingRef.current ?? {}), ...patch };
-    if (timerRef.current) return;
-    timerRef.current = setTimeout(() => void flush(), DEBOUNCE_MS);
-  }, [flush]);
+    queueFlushRef.current();
+  }, []);
 
   useEffect(() => {
     const onUnload = () => {

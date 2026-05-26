@@ -11,6 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, Depends,
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from ..config import settings
+from ..async_io import run_sync
 from ..models.schemas import ParsedPaper, FigureInfo
 from ..services.pdf_parser import (
     append_capped,
@@ -163,6 +164,11 @@ def _verify_paper_owner(paper_id: str, user_id: str) -> None:
         raise HTTPException(status_code=404, detail="Paper not found")
 
 
+async def _verify_paper_owner_async(paper_id: str, user_id: str) -> None:
+    """Non-blocking wrapper for hot paths (list, reading-state)."""
+    await run_sync(_verify_paper_owner, paper_id, user_id)
+
+
 @router.post("/upload", response_model=ParsedPaper)
 async def upload_paper(
     request: Request,
@@ -268,7 +274,7 @@ async def upload_paper(
 @router.get("/", response_model=list[dict])
 async def get_papers(user_id: str = Depends(require_auth)):
     try:
-        return list_papers(user_id=user_id)
+        return await run_sync(list_papers, user_id=user_id)
     except ValueError:
         raise HTTPException(status_code=503, detail="Database unavailable")
 
@@ -931,13 +937,13 @@ async def update_paper_highlight(
 @router.get("/{paper_id}/reading-state")
 async def get_paper_reading_state(paper_id: str, user_id: str = Depends(require_auth)):
     _validate_id(paper_id, "paper_id")
-    _verify_paper_owner(paper_id, user_id)
+    await _verify_paper_owner_async(paper_id, user_id)
     from ..services.db import get_reading_state
 
     # "No saved progress yet" is a valid steady state — return null instead
     # of 404 so the frontend doesn't paint a console error on every first
     # paper open.
-    return get_reading_state(user_id, paper_id)
+    return await run_sync(get_reading_state, user_id, paper_id)
 
 
 @router.put("/{paper_id}/reading-state")
@@ -945,7 +951,7 @@ async def put_paper_reading_state(
     paper_id: str, body: dict, user_id: str = Depends(require_auth),
 ):
     _validate_id(paper_id, "paper_id")
-    _verify_paper_owner(paper_id, user_id)
+    await _verify_paper_owner_async(paper_id, user_id)
     from ..services.db import ALLOWED_READING_TABS, upsert_reading_state
 
     last_page_raw = body.get("last_page", 1)
@@ -967,9 +973,13 @@ async def put_paper_reading_state(
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="scroll_pct must be a float")
 
-    row = upsert_reading_state(
-        user_id, paper_id,
-        last_page=last_page, last_tab=last_tab, scroll_pct=scroll_pct,
+    row = await run_sync(
+        upsert_reading_state,
+        user_id,
+        paper_id,
+        last_page=last_page,
+        last_tab=last_tab,
+        scroll_pct=scroll_pct,
     )
     if not row:
         raise HTTPException(status_code=500, detail="Failed to save reading state")
