@@ -272,6 +272,8 @@ export interface ParsedPaper {
   title: string;
   authors: string[];
   raw_text: string;
+  /** Mistral OCR markdown — omitted from list/get payloads; load via getPaperMarkdown or markdownByPaper. */
+  markdown?: string;
   ocr_status?: string;
   ocr_model?: string;
   ocr_images?: OcrImage[];

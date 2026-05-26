@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUserSettings } from "@/lib/UserSettingsContext";
 import { useReadingState } from "@/hooks/useReadingState";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -22,7 +22,8 @@ import { FiguresPanel } from "../sidebar/FiguresPanel";
 import { TablesPanel } from "../sidebar/TablesPanel";
 import { CodePanel } from "../sidebar/CodePanel";
 import { analysisFiguresFromPaper } from "@/lib/ocrFigures";
-import { tablesFromPaper, codeBlocksFromPaper } from "@/lib/ocrArtifacts";
+import { tablesFromPaper, codeBlocksFromPaper, paperWithOcrMarkdown } from "@/lib/ocrArtifacts";
+import { usePaperOcrMarkdown } from "@/hooks/usePaperOcrMarkdown";
 import { CrossPaperPanel } from "../sidebar/CrossPaperPanel";
 import { ExportModal } from "../export/ExportModal";
 import { ExportStatusBar } from "../export/ExportStatusBar";
@@ -102,12 +103,31 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
   // streaming.
   const showSelectionTab =
     selectionLoading || selectionResult !== null || selectionHistory.length > 0;
+
+  const cachedForPanel = useStore(useCallback((s) => s.papersById[paperId], [paperId]));
+  const panelPaper = useStore((s) => s.paper);
+  const effectivePaper = panelPaper?.id === paperId ? panelPaper : cachedForPanel;
+  const ocrMarkdown = usePaperOcrMarkdown(paperId);
+  const paperForArtifacts = useMemo(
+    () => paperWithOcrMarkdown(effectivePaper, ocrMarkdown),
+    [effectivePaper, ocrMarkdown],
+  );
+  const showFiguresTab = analysisFiguresFromPaper(effectivePaper).length > 0;
+  const showTablesTab = tablesFromPaper(paperForArtifacts).length > 0;
+  const showCodeTab = codeBlocksFromPaper(paperForArtifacts).length > 0;
+
   const effectiveTab =
     activeTab === "compare" && !showCrossPaperTab
       ? "summary"
       : activeTab === "selection" && !showSelectionTab
         ? "summary"
-        : activeTab;
+        : activeTab === "figures" && !showFiguresTab
+          ? "summary"
+          : activeTab === "tables" && !showTablesTab
+            ? "summary"
+            : activeTab === "code" && !showCodeTab
+              ? "summary"
+              : activeTab;
   /** Mount core analysis tabs immediately so Prepare/Summary pipelines start without visiting each tab first. */
   const [mountedTabs, setMountedTabs] = useState<Set<string>>(() => {
     const next = new Set<string>([effectiveTab]);
@@ -222,7 +242,15 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
               { value: "preread", feature: "prepare", label: "Prepare" },
               { value: "assume", feature: "assumptions", label: "Assumptions" },
               { value: "qa", feature: "qa", label: "Q&A" },
-              { value: "figures", feature: "figures", label: "Figures" },
+              ...(showFiguresTab
+                ? [{ value: "figures" as const, feature: "figures" as const, label: "Figures" }]
+                : []),
+              ...(showTablesTab
+                ? [{ value: "tables" as const, feature: "figures" as const, label: "Tables" }]
+                : []),
+              ...(showCodeTab
+                ? [{ value: "code" as const, feature: "figures" as const, label: "Code" }]
+                : []),
               { value: "notes", feature: "notes", label: "Notes" },
               { value: "sources", feature: "prepare", label: "Related" },
             ] as const).map((tab) => {

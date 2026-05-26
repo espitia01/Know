@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type ParsedPaper, type TableAnalysis } from "@/lib/api";
 import { consumeSelectionSse } from "@/lib/selectionSse";
-import { tablesFromPaper, type OcrTable } from "@/lib/ocrArtifacts";
+import { tablesFromPaper, paperWithOcrMarkdown, type OcrTable } from "@/lib/ocrArtifacts";
+import { usePaperOcrMarkdown } from "@/hooks/usePaperOcrMarkdown";
 import { formatTableAnalysisText } from "@/lib/artifactAnalysis";
 import { useStore } from "@/lib/store";
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
@@ -65,8 +66,13 @@ export function TablesPanel({ paperId }: TablesPanelProps) {
   const paper = useStore((s) => s.paper);
   const cachedForPanel = useStore(useCallback((s) => s.papersById[paperId], [paperId]));
   const effectivePaper = paper?.id === paperId ? paper : cachedForPanel;
+  const ocrMarkdown = usePaperOcrMarkdown(paperId);
+  const paperForArtifacts = useMemo(
+    () => paperWithOcrMarkdown(effectivePaper, ocrMarkdown),
+    [effectivePaper, ocrMarkdown],
+  );
 
-  const tables = useMemo(() => tablesFromPaper(effectivePaper), [effectivePaper]);
+  const tables = useMemo(() => tablesFromPaper(paperForArtifacts), [paperForArtifacts]);
   const [selected, setSelected] = useState<OcrTable | null>(null);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
@@ -202,7 +208,10 @@ export function TablesPanel({ paperId }: TablesPanelProps) {
         >
           ← All tables
         </button>
-        <CardMeta title={selected.label} extra={<span className="text-muted-foreground/75">Table</span>} />
+        <h3 className="font-display text-[var(--text-sm)] font-medium tracking-[-0.02em] text-foreground/90">
+          {selected.label}
+        </h3>
+        <CardMeta extra={<span className="text-muted-foreground/75">Table</span>} />
         <div className="rounded-lg border border-border/50 bg-card/30 px-3 py-2.5 overflow-x-auto">
           <StreamingMarkdown copyableCode>{selected.markdown}</StreamingMarkdown>
         </div>

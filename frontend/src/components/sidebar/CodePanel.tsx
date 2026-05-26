@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type CodeAnalysis, type ParsedPaper } from "@/lib/api";
 import { consumeSelectionSse } from "@/lib/selectionSse";
-import { codeBlocksFromPaper, type OcrCodeBlock } from "@/lib/ocrArtifacts";
+import { codeBlocksFromPaper, paperWithOcrMarkdown, type OcrCodeBlock } from "@/lib/ocrArtifacts";
+import { usePaperOcrMarkdown } from "@/hooks/usePaperOcrMarkdown";
 import { formatCodeAnalysisText } from "@/lib/artifactAnalysis";
 import { useStore } from "@/lib/store";
 import { StreamingMarkdown } from "@/components/analysis/StreamingMarkdown";
@@ -69,8 +70,13 @@ export function CodePanel({ paperId }: CodePanelProps) {
   const paper = useStore((s) => s.paper);
   const cachedForPanel = useStore(useCallback((s) => s.papersById[paperId], [paperId]));
   const effectivePaper = paper?.id === paperId ? paper : cachedForPanel;
+  const ocrMarkdown = usePaperOcrMarkdown(paperId);
+  const paperForArtifacts = useMemo(
+    () => paperWithOcrMarkdown(effectivePaper, ocrMarkdown),
+    [effectivePaper, ocrMarkdown],
+  );
 
-  const blocks = useMemo(() => codeBlocksFromPaper(effectivePaper), [effectivePaper]);
+  const blocks = useMemo(() => codeBlocksFromPaper(paperForArtifacts), [paperForArtifacts]);
   const [selected, setSelected] = useState<OcrCodeBlock | null>(null);
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
@@ -214,9 +220,15 @@ export function CodePanel({ paperId }: CodePanelProps) {
         >
           ← All code blocks
         </button>
+        <h3 className="font-display text-[var(--text-sm)] font-medium tracking-[-0.02em] text-foreground/90">
+          {selected.context || `Code block (${selected.language})`}
+        </h3>
         <CardMeta
-          title={selected.context || `Code block (${selected.language})`}
-          extra={<span className="text-muted-foreground/75 font-mono text-[var(--text-xs)]">{selected.language}</span>}
+          extra={
+            <span className="text-muted-foreground/75 font-mono text-[var(--text-xs)]">
+              {selected.language}
+            </span>
+          }
         />
         <div className="rounded-lg border border-border/50 bg-card/30 px-3 py-2.5 overflow-x-auto">
           <StreamingMarkdown copyableCode>{sourceMarkdown(selected)}</StreamingMarkdown>

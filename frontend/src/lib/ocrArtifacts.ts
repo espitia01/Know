@@ -30,6 +30,15 @@ function paperMarkdown(paper: ParsedPaper | null | undefined): string {
   return (paper.markdown || "").trim() || (paper.raw_text || "").trim();
 }
 
+/** Attach OCR markdown loaded outside the ParsedPaper payload (excluded from getPaper). */
+export function paperWithOcrMarkdown(
+  paper: ParsedPaper | null | undefined,
+  markdown: string,
+): ParsedPaper | null | undefined {
+  if (!paper || !markdown.trim()) return paper;
+  return { ...paper, markdown: markdown.trim() };
+}
+
 export function tablesFromPaper(paper: ParsedPaper | null | undefined): OcrTable[] {
   const md = paperMarkdown(paper);
   if (!md) return [];

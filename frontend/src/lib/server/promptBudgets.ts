@@ -10,6 +10,8 @@ export const STD_BUDGETS = {
   summary: { context: 6000 },
   selection: { context: 4500, selection: 3000 },
   figure: { context: 6000 },
+  /** Table/code analyze streams (same cap as batch Q&A on Python). */
+  qa: { context: 6000 },
 } as const;
 
 export function scaleBudget<T extends Record<string, number>>(
