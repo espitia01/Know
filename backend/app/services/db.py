@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections import OrderedDict
-from functools import lru_cache
 from typing import Any
 
 from ..config import settings
 
 logger = logging.getLogger(__name__)
+_thread_local = threading.local()
 _list_papers_cache: "OrderedDict[tuple[str, int, int], tuple[float, list[dict]]]" = OrderedDict()
 _LIST_PAPERS_TTL_SECONDS = 30.0
 _LIST_PAPERS_CACHE_MAX = 256
@@ -25,13 +26,10 @@ def _clear_list_papers_cache(user_id: str | None = None) -> None:
             _list_papers_cache.pop(key, None)
 
 
-@lru_cache(maxsize=1)
-def _get_client():
+def _create_client():
     from supabase import create_client
     from supabase.lib.client_options import ClientOptions
 
-    if not settings.supabase_url or not settings.supabase_key:
-        return None
     # Bound hung PostgREST calls so one slow DB round-trip cannot block the
     # worker for minutes (reading-state, list papers, auth bootstrap).
     return create_client(
@@ -45,8 +43,18 @@ def _get_client():
 
 
 def get_db():
-    """Return the Supabase client (or None when not configured)."""
-    return _get_client()
+    """Return a thread-local Supabase client (or None when not configured).
+
+    ``asyncio.to_thread`` runs DB helpers on a pool of threads; httpx clients
+    are not safe to share across threads, so each thread gets its own client.
+    """
+    if not settings.supabase_url or not settings.supabase_key:
+        return None
+    client = getattr(_thread_local, "supabase_client", None)
+    if client is None:
+        client = _create_client()
+        _thread_local.supabase_client = client
+    return client
 
 
 def _safe_single(query) -> dict | None:

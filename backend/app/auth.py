@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 import jwt
 from jwt import PyJWKClient
 from jwt.exceptions import PyJWKClientError
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 bearer_scheme = HTTPBearer(auto_error=False)
 
 _jwks_client: PyJWKClient | None = None
+_jwks_lock = threading.Lock()
 
 
 def _is_production() -> bool:
@@ -82,7 +84,11 @@ async def require_auth(
 
     try:
         try:
-            signing_key = await asyncio.to_thread(jwks.get_signing_key_from_jwt, token)
+            def _fetch_signing_key():
+                with _jwks_lock:
+                    return jwks.get_signing_key_from_jwt(token)
+
+            signing_key = await asyncio.to_thread(_fetch_signing_key)
         except PyJWKClientError as e:
             # Includes network failures fetching the JWKS set and "kid not
             # found" races during key rotation. Client can't fix either.
