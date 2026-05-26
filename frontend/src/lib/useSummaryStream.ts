@@ -29,6 +29,7 @@ import {
   markRequestStart,
   markSummaryAttemptFailed,
   clearProgressStart,
+  hasActiveRequest,
 } from "@/lib/analysisState";
 
 function describeError(error: unknown): string {
@@ -100,11 +101,9 @@ function summaryPatchEqual(
 }
 
 export function useSummaryStream(paperId: string) {
-  const { analysisModel, fastModel } = useUserSettings();
+  const { analysisModel, loaded: settingsLoaded } = useUserSettings();
   const analysisModelRef = useRef(analysisModel);
-  const fastModelRef = useRef(fastModel);
   analysisModelRef.current = analysisModel;
-  fastModelRef.current = fastModel;
 
   const setSummaryForPaper = useStore((s) => s.setSummaryForPaper);
   const setSummaryError = useStore((s) => s.setSummaryError);
@@ -161,7 +160,7 @@ export function useSummaryStream(paperId: string) {
   );
 
   const runGenerate = useCallback(
-    async (pid: string, phase: "full" | "deep") => {
+    async (pid: string, phase: "full" | "deep", force = false) => {
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -172,16 +171,25 @@ export function useSummaryStream(paperId: string) {
       markRequestStart(pid, "summary");
       activeSummaryStreamStoppers.set(pid, () => controller.abort());
 
-      const fast = fastModelRef.current;
       const analysis = analysisModelRef.current;
 
       try {
+        if (force && phase === "full") {
+          setSummaryForPaper(pid, null);
+          updateCachedAnalysis(pid, {
+            summary: null,
+            summary_lite: null,
+            summary_deep: null,
+          });
+          autoAnalyzedPapers.delete(`${pid}:summary`);
+        }
+
         if (phase === "full") {
           let lite: PaperSummary;
           try {
             lite = await api.getSummaryLite(pid, {
               signal: controller.signal,
-              model: fast,
+              model: analysis,
             });
           } catch (err) {
             if (isUnavailableEndpoint(err)) {
@@ -196,7 +204,10 @@ export function useSummaryStream(paperId: string) {
           if (!hasSummaryOverview(lite)) {
             throw new Error("Summary preview returned empty. Try again.");
           }
-          mergeIntoPaperSlot(pid, dropNulls(lite as Record<string, unknown>));
+          mergeIntoPaperSlot(pid, {
+            ...(dropNulls(lite as Record<string, unknown>) as Partial<PaperSummary>),
+            model: lite.model ?? analysis,
+          });
           updateCachedAnalysis(pid, {
             summary: useStore.getState().summaryByPaper[pid] ?? (lite as PaperSummary),
             summary_lite: lite as PaperSummary,
@@ -227,6 +238,10 @@ export function useSummaryStream(paperId: string) {
           ...(dropNulls(deep as Record<string, unknown>) as Partial<PaperSummary>),
           model: deep.model ?? analysis,
           created_at: Date.now(),
+          key_equations: Array.isArray(deep.key_equations) ? deep.key_equations : [],
+          key_figures_and_tables: Array.isArray(deep.key_figures_and_tables)
+            ? deep.key_figures_and_tables
+            : [],
         });
         updateCachedAnalysis(pid, {
           summary: useStore.getState().summaryByPaper[pid] ?? (deep as PaperSummary),
@@ -262,24 +277,31 @@ export function useSummaryStream(paperId: string) {
       mergeIntoPaperSlot,
       runLegacyFallback,
       setSummaryError,
+      setSummaryForPaper,
       setSummaryLoadingForPaper,
       updateCachedAnalysis,
     ],
   );
 
-  const start = useCallback(() => {
-    if (isLoading) return;
-    const pid = paperId;
-    const existing = useStore.getState().summaryByPaper[pid] ?? null;
+  const start = useCallback(
+    (opts?: { force?: boolean }) => {
+      if (!settingsLoaded) return;
+      const force = opts?.force === true;
+      if (!force && (isLoading || hasActiveRequest(paperId, "summary"))) return;
+      const pid = paperId;
+      const existing = useStore.getState().summaryByPaper[pid] ?? null;
 
-    if (summaryIsComplete(existing)) {
-      return;
-    }
+      if (summaryIsComplete(existing) && !force) {
+        return;
+      }
 
-    const phase = hasSummaryOverview(existing) ? "deep" : "full";
-    clearProgressStart(pid, "summary");
-    void runGenerate(pid, phase);
-  }, [paperId, isLoading, runGenerate]);
+      const phase =
+        force || !hasSummaryOverview(existing) ? "full" : "deep";
+      clearProgressStart(pid, "summary");
+      void runGenerate(pid, phase, force);
+    },
+    [paperId, isLoading, runGenerate, settingsLoaded],
+  );
 
   useEffect(() => {
     summaryStreamStarters.set(paperId, start);

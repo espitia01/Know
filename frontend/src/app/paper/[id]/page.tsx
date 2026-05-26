@@ -59,6 +59,7 @@ import {
   summaryCooldownActive,
 } from "@/lib/analysisState";
 import { useSummaryStream, kickoffSummaryStream } from "@/lib/useSummaryStream";
+import { useUserSettings } from "@/lib/UserSettingsContext";
 import { useUserTier, canAccess } from "@/lib/UserTierContext";
 import { recordPaperOpened } from "@/lib/recentPapers";
 import { isPreReadingPopulated } from "@/lib/preReading";
@@ -550,6 +551,7 @@ function PaperContent() {
   const params = useParams();
   const router = useRouter();
   const { user: tierUser, loading: tierLoading } = useUserTier();
+  const { loaded: settingsLoaded } = useUserSettings();
   // Don't treat "tier is loading" as free — that hid Scholar/Researcher
   // affordances during every background `refresh()` (e.g. returning from
   // another browser tab). Unknown signed-in tier before first fetch: still no
@@ -1098,7 +1100,7 @@ function PaperContent() {
   }, [loadedPaperId, activePaperId, cacheHydrateSig, hydrateFromCachedAnalysis]);
 
   useEffect(() => {
-    if (!loadedPaperId || loadedPaperId !== activePaperId || tierLoading) return;
+    if (!loadedPaperId || loadedPaperId !== activePaperId || tierLoading || !settingsLoaded) return;
 
     const pid = activePaperId;
     const livePaper = useStore.getState().paper;
@@ -1238,6 +1240,7 @@ function PaperContent() {
     activePaperId,
     cacheHydrateSig,
     tierLoading,
+    settingsLoaded,
     tierUser?.tier,
     setPreReadingForPaper,
     setPreReadingLoadingForPaper,

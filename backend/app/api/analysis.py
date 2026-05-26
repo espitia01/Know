@@ -679,7 +679,7 @@ async def summary_lite(paper_id: str, body: dict = Body(default={}), user_id: st
             user_id, canonicalize_model(requested_model.strip()) or requested_model.strip(),
         )
     else:
-        model_used = await run_sync(resolve_fast_model, user_id)
+        model_used = await run_sync(resolve_analysis_model, user_id)
 
     token = await run_sync(
         reserve_usage,
@@ -757,7 +757,7 @@ async def summary_generate(
     try:
         text = paper_prompt_text(paper)
         if phase in ("full", "lite"):
-            lite = await summarize_paper_lite(text, model_override=fast_model, user_id=user_id)
+            lite = await summarize_paper_lite(text, model_override=analysis_model, user_id=user_id)
             if not lite.get("overview"):
                 release_usage(token)
                 raise HTTPException(status_code=502, detail="Summary preview returned empty.")
@@ -870,7 +870,7 @@ async def summary(paper_id: str, user_id: str = Depends(require_auth)):
     merged: dict = {}
     text = paper_prompt_text(paper)
     try:
-        lite = await summarize_paper_lite(text, model_override=fast_model, user_id=user_id)
+        lite = await summarize_paper_lite(text, model_override=analysis_model, user_id=user_id)
         if not lite.get("overview"):
             release_usage(token)
             raise HTTPException(status_code=502, detail="Summary preview returned empty.")

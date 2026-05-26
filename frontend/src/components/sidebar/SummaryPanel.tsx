@@ -20,6 +20,14 @@ import {
   hasSummaryDeepBody,
   summaryIsComplete,
 } from "@/lib/summaryState";
+import {
+  paperHasFiguresOrTables,
+  paperLikelyHasEquations,
+  summaryKeyEquations,
+  summaryKeyFiguresAndTables,
+} from "@/lib/summarySections";
+import { useUserSettings } from "@/lib/UserSettingsContext";
+import { modelsMatch } from "@/lib/modelLabels";
 interface SummaryPanelProps {
   paperId: string;
 }
@@ -35,6 +43,10 @@ function hasSummaryBody(value: Partial<PaperSummary> | null | undefined): boolea
 }
 
 export function SummaryPanel({ paperId }: SummaryPanelProps) {
+  const { analysisModel } = useUserSettings();
+  const paperMeta = useStore((s) =>
+    s.paper?.id === paperId ? s.paper : s.papersById[paperId] ?? null,
+  );
   // Per-paper slot is the single source of truth — `useSummary` merges
   // lite + deep + cached payloads into this slot. Switching tabs never
   // wipes it; late writes for paper A cannot bleed into paper B.
@@ -85,18 +97,21 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   const summary = isComplete ? summaryRaw : null;
   const isLoading = isGenerating && !isComplete;
 
-  const runSummaryStream = useCallback(() => {
-    if (hasActiveRequest(paperId, "summary")) return;
-    setManualError(null);
-    summaryAutoRetryCooldownUntil.delete(paperId);
-    clearProgressStart(paperId, "summary");
-    const start = summaryStreamStarters.get(paperId);
-    if (!start) {
-      setManualError("Summary is still initializing. Try again in a moment.");
-      return;
-    }
-    start();
-  }, [paperId]);
+  const runSummaryStream = useCallback(
+    (opts?: { force?: boolean }) => {
+      if (hasActiveRequest(paperId, "summary")) return;
+      setManualError(null);
+      summaryAutoRetryCooldownUntil.delete(paperId);
+      clearProgressStart(paperId, "summary");
+      const start = summaryStreamStarters.get(paperId);
+      if (!start) {
+        setManualError("Summary is still initializing. Try again in a moment.");
+        return;
+      }
+      start(opts);
+    },
+    [paperId],
+  );
 
   if (isLoading) {
     return (
@@ -127,7 +142,7 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
         cta={{
           label: errMsg || liteOnly ? "Retry" : "Generate Summary",
           onClick: () => {
-            void runSummaryStream();
+            void runSummaryStream(liteOnly ? undefined : { force: true });
           },
         }}
       />
@@ -135,6 +150,14 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   }
 
   const s = summary!;
+  const keyEquations = summaryKeyEquations(s);
+  const keyFigures = summaryKeyFiguresAndTables(s);
+  const showKeyEquations =
+    keyEquations.length > 0 && paperLikelyHasEquations(paperMeta);
+  const showKeyFigures =
+    keyFigures.length > 0 && paperHasFiguresOrTables(paperMeta);
+  const modelStale =
+    !!s.model && !!analysisModel && !modelsMatch(s.model, analysisModel);
 
   const takeawaySource =
     (s as PaperSummary & { tl_dr?: string }).tl_dr ?? s.overview ?? "";
@@ -148,10 +171,32 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
         <h2 className="font-display text-[var(--text-md)] font-medium tracking-[-0.02em] text-foreground">
           Summary
         </h2>
-        {s.model ? (
-          <CardMeta model={s.model} createdAt={s.created_at} pending={false} />
+        {s.model || analysisModel ? (
+          <CardMeta
+            model={s.model ?? analysisModel}
+            createdAt={s.created_at}
+            pending={!s.model}
+          />
         ) : null}
       </div>
+
+      {modelStale && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-lg)] border border-border/50 bg-muted/[0.06] px-4 py-3">
+          <p className="text-[var(--text-xs)] text-muted-foreground">
+            Generated with a different analysis model. Regenerate to use your current
+            setting.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              void runSummaryStream({ force: true });
+            }}
+            className="shrink-0 rounded-md border border-border/50 bg-card/35 px-3 py-1.5 text-[var(--text-xs)] font-medium text-foreground hover:bg-accent/50 motion-safe:duration-150"
+          >
+            Regenerate
+          </button>
+        </div>
+      )}
 
       {takeaway && (
         <div className="rounded-[var(--radius-lg)] border border-border/50 bg-card/35 px-4 py-3 dark:bg-card/22">
@@ -213,10 +258,10 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
           </ReadMoreProse>
         </AnalysisSection>
       )}
-      {s.key_equations && s.key_equations.length > 0 && (
-        <AnalysisSection title="Key equations" count={s.key_equations.length}>
+      {showKeyEquations && (
+        <AnalysisSection title="Key equations" count={keyEquations.length}>
           <div className="space-y-3">
-            {s.key_equations.map((eq, i) => {
+            {keyEquations.map((eq, i) => {
               if (!eq) return null;
               const terms = (eq as { terms?: { symbol?: string; meaning?: string }[] }).terms;
               return (
@@ -257,10 +302,10 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
           </div>
         </AnalysisSection>
       )}
-      {s.key_figures_and_tables && s.key_figures_and_tables.length > 0 && (
-        <AnalysisSection title="Key figures & tables" count={s.key_figures_and_tables.length}>
+      {showKeyFigures && (
+        <AnalysisSection title="Key figures & tables" count={keyFigures.length}>
           <div className="overflow-hidden rounded-lg border border-border/50 bg-card/35 dark:bg-card/22">
-            {s.key_figures_and_tables.map((fig, i) => {
+            {keyFigures.map((fig, i) => {
               if (!fig) return null;
               return (
                 <div

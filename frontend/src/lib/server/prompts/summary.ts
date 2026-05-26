@@ -55,7 +55,7 @@ export function buildSummaryLitePrompt(args: {
     `- "overview": 3–5 sentence high-level overview of what the paper does and why it matters.`,
     `- "tl_dr": one-sentence takeaway with the single most important result. Math-aware ($...$ allowed).`,
     `- "key_contributions": array of 3–5 strings, each 1–2 sentences. Order by importance.`,
-    `- "key_equations": optional array of up to 3 items {"equation": LaTeX wrapped in $$...$$ on its own line, "meaning": one-paragraph markdown}. NEVER emit bare LaTeX — always wrap the equation field in $$...$$. In JSON strings escape every backslash twice (e.g. \\\\begin{aligned}, \\\\text{}, \\\\frac{}{}).`,
+    `- "key_equations": optional array of up to 3 items {"equation": LaTeX wrapped in $$...$$ on its own line, "meaning": one-paragraph markdown}. NEVER emit bare LaTeX — always wrap the equation field in $$...$$. In JSON strings escape every backslash twice (e.g. \\\\begin{aligned}, \\\\text{}, \\\\frac{}{}). If the paper has no substantive displayed equations, return "key_equations": []. Do not invent equations.`,
     `Be precise and concrete. No filler. This pass MUST be short so the reader sees content quickly.`,
     depthBlock,
   ].join("\n\n");
@@ -88,8 +88,8 @@ export function buildSummaryDeepPrompt(args: {
     `- "discussion": 1–2 paragraph markdown — what the results mean, how they compare to prior work, what they imply.`,
     `- "limitations": array of short markdown strings with caveats the authors mention OR that are evident.`,
     `- "future_work": 2–3 sentences on what follow-up research this enables or suggests.`,
-    `- "key_equations": optional array of up to 4 items {"equation", "meaning", "terms"}. "equation" MUST be wrapped in $$...$$ on its own line. "meaning" is a markdown paragraph. "terms" is an array of {"symbol", "meaning"} entries covering EVERY variable and constant in the equation (e.g. for $V(R, z) \\approx \\mathrm{sgn}(z)\\, P(R) / (2\\epsilon_0)$, list $V$, $R$, $z$, $\\mathrm{sgn}$, $P(R)$, and $\\epsilon_0$). Be thorough — readers rely on this glossary.`,
-    `- "key_figures_and_tables": array of {"id", "description"}. Pick the most informative figures/tables; use the author's labels (e.g. "Fig. 1").`,
+    `- "key_equations": optional array of up to 4 items {"equation", "meaning", "terms"}. "equation" MUST be wrapped in $$...$$ on its own line. "meaning" is a markdown paragraph. "terms" is an array of {"symbol", "meaning"} entries covering EVERY variable and constant in the equation (e.g. for $V(R, z) \\approx \\mathrm{sgn}(z)\\, P(R) / (2\\epsilon_0)$, list $V$, $R$, $z$, $\\mathrm{sgn}$, $P(R)$, and $\\epsilon_0$). Be thorough — readers rely on this glossary. If the paper has no substantive displayed equations, return "key_equations": [].`,
+    `- "key_figures_and_tables": array of {"id", "description"}. Pick the most informative figures/tables; use the author's labels (e.g. "Fig. 1"). If the paper has no numbered figures or tables, return "key_figures_and_tables": []. Do not invent them.`,
     depthBlock,
   ].join("\n\n");
 
@@ -118,8 +118,8 @@ export function buildSummaryDeepBodyPrompt(args: {
     `- "discussion": 1–2 paragraph markdown — what the results mean, how they compare to prior work.`,
     `- "limitations": array of short markdown strings with caveats the authors mention OR that are evident.`,
     `- "future_work": 2–3 sentences on follow-up research this enables.`,
-    `- "key_equations": optional array of up to 3 items {"equation", "meaning", "terms"}. "equation" MUST use $$...$$ on its own line.`,
-    `- "key_figures_and_tables": array of up to 4 items {"id", "description"}.`,
+    `- "key_equations": optional array of up to 3 items {"equation", "meaning", "terms"}. "equation" MUST use $$...$$ on its own line. If the paper has no substantive displayed equations, return "key_equations": [].`,
+    `- "key_figures_and_tables": array of up to 4 items {"id", "description"}. If the paper has no numbered figures or tables, return "key_figures_and_tables": [].`,
     depthBlock,
   ].join("\n\n");
 

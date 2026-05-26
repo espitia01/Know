@@ -70,7 +70,7 @@ function SettingsContent() {
   const router = useRouter();
   const { signOut } = useClerk();
   const { user: tierUser, refresh: refreshTier } = useUserTier();
-  const { refresh: refreshUserSettings } = useUserSettings();
+  const { refresh: refreshUserSettings, updateOptimistically } = useUserSettings();
   const [models, setModels] = useState<string[]>([]);
   const [analysisModel, setAnalysisModel] = useState("");
   const [fastModel, setFastModel] = useState("");
@@ -161,6 +161,10 @@ function SettingsContent() {
       setAnalysisModel(result.analysis_model);
       setFastModel(result.fast_model);
       setDeepAnalysis(!!result.deep_analysis_enabled);
+      updateOptimistically({
+        analysisModel: result.analysis_model,
+        fastModel: result.fast_model,
+      });
       await refreshUserSettings();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);

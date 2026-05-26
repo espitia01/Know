@@ -929,6 +929,75 @@ def get_fast_provider(user_id: str | None = None) -> LLMProvider:
     return _make_provider(model)
 
 
+def _prompt_depth_suffix(model: str) -> str:
+    slug = (model or "").lower()
+    if "opus" in slug or "gpt-5.4" in slug or "mistral-large" in slug:
+        return (
+            "Be thorough. When the answer benefits from depth, include worked steps, "
+            "edge cases, and cite which paragraph each claim came from."
+        )
+    if "sonnet" in slug or slug == "gpt-5" or "mistral-medium" in slug:
+        return "Write with clear structure and adequate detail for an expert reader."
+    return "Be terse and direct. Avoid restating context."
+
+
+def _scaled_max_tokens(model: str, base: int) -> int:
+    slug = (model or "").lower()
+    if "opus" in slug or "gpt-5.4" in slug or "mistral-large" in slug:
+        return min(int(base * 1.6), 12000)
+    if "sonnet" in slug or slug == "gpt-5" or "mistral-medium" in slug:
+        return min(int(base * 1.25), 9000)
+    return base
+
+
+_SUMMARY_PLACEHOLDER_RE = re.compile(
+    r"^(n/a|none|not applicable|no figures?|no tables?|not available)$",
+    re.I,
+)
+
+
+def _normalize_summary_optional_lists(parsed: dict, *, include_figures: bool = True) -> dict:
+    """Drop empty / placeholder optional summary rows; default missing keys to []."""
+    eqs = parsed.get("key_equations")
+    if isinstance(eqs, list):
+        cleaned: list[dict] = []
+        for item in eqs:
+            if not isinstance(item, dict):
+                continue
+            equation = _coerce_markdown_field(item.get("equation")).strip()
+            meaning = _coerce_markdown_field(item.get("meaning")).strip()
+            if not equation and not meaning:
+                continue
+            if _SUMMARY_PLACEHOLDER_RE.match(equation) or _SUMMARY_PLACEHOLDER_RE.match(meaning):
+                continue
+            cleaned.append(item)
+        parsed["key_equations"] = cleaned
+    else:
+        parsed["key_equations"] = []
+
+    if include_figures:
+        figs = parsed.get("key_figures_and_tables")
+        if isinstance(figs, list):
+            cleaned_f: list[dict] = []
+            for item in figs:
+                if not isinstance(item, dict):
+                    continue
+                fid = str(item.get("id") or "").strip()
+                desc = _coerce_markdown_field(item.get("description")).strip()
+                if not fid and not desc:
+                    continue
+                if fid and _SUMMARY_PLACEHOLDER_RE.match(fid):
+                    continue
+                if not fid and desc and _SUMMARY_PLACEHOLDER_RE.match(desc):
+                    continue
+                cleaned_f.append(item)
+            parsed["key_figures_and_tables"] = cleaned_f
+        else:
+            parsed["key_figures_and_tables"] = []
+
+    return parsed
+
+
 def _extract_json(text: str) -> str:
     """Extract JSON from LLM response that may contain markdown code fences."""
     match = re.search(r"```(?:json)?\s*\n?([\s\S]*?)\n?```", text)
@@ -1737,6 +1806,7 @@ async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
     """Run pre-reading analysis on paper content."""
     provider = get_provider(user_id)
     model_slug = getattr(provider, "model", "unknown")
+    depth = _prompt_depth_suffix(model_slug)
     paper_text_full = _sanitize_user_text(paper_text, max_chars=200_000)
     paper_text = build_prepare_excerpt(paper_text_full, max_chars=12000)
 
@@ -1747,6 +1817,7 @@ async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
         "You are an expert science educator. Analyze the given academic paper and extract structured information "
         "to help a student prepare before reading. Return ONLY valid JSON with no other text.\n\n"
         + LATEX_FORMAT_INSTRUCTIONS
+        + f"\n\n{depth}"
     )
 
     user = _build_prepare_user_prompt(paper_text, bib_for_prompt, simplified=False)
@@ -1759,7 +1830,7 @@ async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
             cache_user_prefix=user_prompt,
         )
 
-    raw = await _run(user, 10000)
+    raw = await _run(user, _scaled_max_tokens(model_slug, 10000))
     result = _safe_parse_json(raw)
     if _is_usable_prepare_payload(result):
         return result
@@ -1776,7 +1847,7 @@ async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
         len(raw),
     )
     retry_user = _build_prepare_user_prompt(paper_text, "", simplified=True)
-    raw_retry = await _run(retry_user, 6000)
+    raw_retry = await _run(retry_user, _scaled_max_tokens(model_slug, 6000))
     result = _safe_parse_json(raw_retry)
     if _is_usable_prepare_payload(result):
         return result
@@ -2064,12 +2135,15 @@ def _coerce_assumptions(raw_items: object) -> list[dict]:
 async def extract_assumptions(paper_text: str, user_id: str | None = None) -> dict:
     """Extract explicit and implicit assumptions."""
     provider = get_provider(user_id)
+    model_slug = getattr(provider, "model", settings.analysis_model)
+    depth = _prompt_depth_suffix(model_slug)
     paper_text = _sanitize_user_text(paper_text, max_chars=get_budgets("assumptions", user_id)["context"])
 
     system = (
         "You are an expert science educator. Identify all assumptions in the paper, both those explicitly "
         "stated and those implied. Return ONLY valid JSON with no markdown fences.\n\n"
         + LATEX_FORMAT_INSTRUCTIONS
+        + f"\n\n{depth}"
     )
 
     paper_block = f"Paper content:\n{paper_text[:6000]}"
@@ -2091,7 +2165,7 @@ Include at least 3 assumptions when the paper has substantive claims."""
     raw = await provider.complete(
         system,
         task,
-        max_tokens=8192,
+        max_tokens=_scaled_max_tokens(model_slug, 8192),
         cache_user_prefix=paper_block,
     )
     items = _coerce_assumptions(_safe_parse_json(raw).get("assumptions"))
@@ -2108,7 +2182,7 @@ Include at least 3 assumptions when the paper has substantive claims."""
     raw_retry = await provider.complete(
         system,
         retry_task,
-        max_tokens=8192,
+        max_tokens=_scaled_max_tokens(model_slug, 8192),
         cache_user_prefix=paper_block,
     )
     items = _coerce_assumptions(_safe_parse_json(raw_retry).get("assumptions"))
@@ -2377,14 +2451,17 @@ async def summarize_paper_lite(
             model_override = enforce_model(user_id, model_override)
         provider = _make_provider(model_override)
     else:
-        provider = get_fast_provider(user_id)
+        provider = get_provider(user_id)
 
     cap = min(get_budgets("summary", user_id)["context"], 6000)
     paper_text = _sanitize_user_text(paper_text, max_chars=cap)
+    model_slug = getattr(provider, "model", model_override or settings.analysis_model)
+    depth = _prompt_depth_suffix(model_slug)
 
     system = (
         "You are an expert science editor. Return ONLY valid JSON with no markdown fences.\n\n"
         + LATEX_FORMAT_INSTRUCTIONS
+        + f"\n\n{depth}"
     )
     user = f"""Summarize this paper's first impression in JSON only:
 {{
@@ -2394,10 +2471,10 @@ async def summarize_paper_lite(
   "key_equations": [{{"equation": "$$...$$", "meaning": "one paragraph"}}]
 }}
 
-Keep the response compact. At most 3 key_equations. Paper excerpt:
+Keep the response compact. At most 3 key_equations. If the paper has no substantive displayed equations, return "key_equations": []. Do not invent equations. Paper excerpt:
 {paper_text[:cap]}"""
 
-    raw = await provider.complete(system, user, max_tokens=2000)
+    raw = await provider.complete(system, user, max_tokens=_scaled_max_tokens(model_slug, 2000))
     parsed = _safe_parse_json(raw)
     overview = _coerce_markdown_field(parsed.get("overview")).strip()
     if not overview:
@@ -2411,7 +2488,8 @@ Keep the response compact. At most 3 key_equations. Paper excerpt:
             for x in parsed["key_contributions"]
             if _coerce_markdown_field(x).strip()
         ]
-    parsed["model"] = provider.model
+    parsed = _normalize_summary_optional_lists(parsed, include_figures=False)
+    parsed["model"] = model_slug
     return parsed
 
 
@@ -2431,10 +2509,13 @@ async def summarize_paper_deep(
 
     cap = min(get_budgets("summary", user_id)["context"], 6000)
     paper_text = _sanitize_user_text(paper_text, max_chars=cap)
+    model_slug = getattr(provider, "model", model_override or settings.analysis_model)
+    depth = _prompt_depth_suffix(model_slug)
 
     system = (
         "You are an expert science editor. Return ONLY valid JSON with no markdown fences.\n\n"
         + LATEX_FORMAT_INSTRUCTIONS
+        + f"\n\n{depth}"
     )
     user = f"""Write the detailed body of an academic paper summary in JSON only:
 {{
@@ -2444,13 +2525,17 @@ async def summarize_paper_deep(
   "discussion": "1-2 paragraphs",
   "limitations": ["short bullets"],
   "future_work": "2-3 sentences",
+  "key_equations": [{{"equation": "$$...$$", "meaning": "...", "terms": [{{"symbol": "...", "meaning": "..."}}]}}],
   "key_figures_and_tables": [{{"id": "Fig. 1", "description": "..."}}]
 }}
 
-Always include non-empty methodology, main_results, and discussion. Paper excerpt:
+Always include non-empty methodology, main_results, and discussion.
+If the paper has no numbered figures or tables, return "key_figures_and_tables": [].
+If there are no substantive displayed equations, return "key_equations": [].
+Do not invent figures, tables, or equations. Paper excerpt:
 {paper_text[:cap]}"""
 
-    raw = await provider.complete(system, user, max_tokens=3500)
+    raw = await provider.complete(system, user, max_tokens=_scaled_max_tokens(model_slug, 3500))
     parsed = _safe_parse_json(raw)
     for key in ("motivation", "methodology", "main_results", "discussion", "future_work"):
         if key in parsed:
@@ -2465,11 +2550,9 @@ Always include non-empty methodology, main_results, and discussion. Paper excerp
     if not methodology:
         raise ValueError("Deep summary returned empty methodology")
     parsed["methodology"] = methodology
-    parsed["model"] = provider.model
+    parsed = _normalize_summary_optional_lists(parsed, include_figures=True)
+    parsed["model"] = model_slug
     return parsed
-
-
-async def summarize_paper(paper_text: str, model_override: str | None = None, user_id: str | None = None) -> dict:
     """Generate an extremely detailed, structured summary of the paper."""
     if model_override:
         if user_id:

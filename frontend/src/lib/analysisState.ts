@@ -16,7 +16,7 @@ export const activeRequests = new Map<string, Set<AnalysisKind>>();
 /** In-flight summary stream stop handlers (from `useSummaryStream`). */
 export const activeSummaryStreamStoppers = new Map<string, () => void>();
 /** Registered `start()` from the page-level `useSummaryStream` hook. */
-export const summaryStreamStarters = new Map<string, () => void>();
+export const summaryStreamStarters = new Map<string, (opts?: { force?: boolean }) => void>();
 
 function requestSet(paperId: string): Set<AnalysisKind> {
   let s = activeRequests.get(paperId);

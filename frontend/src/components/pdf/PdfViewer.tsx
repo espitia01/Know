@@ -807,17 +807,21 @@ export function PdfViewer({
   const drawRegionHighlightsForPage = useCallback(
     (pageEl: HTMLElement, pageNum: number, regions: PdfRegionHighlight[]) => {
       const forPage = regions.filter((r) => r.pageNum === pageNum);
-      pageEl.querySelectorAll(".know-region-overlay").forEach((n) => n.remove());
-      if (forPage.length === 0) return;
+      if (forPage.length === 0) {
+        pageEl.querySelectorAll(".know-region-overlay").forEach((n) => n.remove());
+        return;
+      }
 
       const { parent, metrics } = getHighlightOverlayAnchor(pageEl);
+      if (metrics.pw <= 0 || metrics.ph <= 0) return;
+
+      pageEl.querySelectorAll(".know-region-overlay").forEach((n) => n.remove());
       const parentStyle = getComputedStyle(parent);
       if (parentStyle.position === "static") parent.style.position = "relative";
 
       const overlay = document.createElement("div");
       overlay.className = "know-region-overlay";
       overlay.setAttribute("aria-hidden", "true");
-      if (metrics.pw <= 0 || metrics.ph <= 0) return;
       const boxes = pctRegionsToLocalBoxes(forPage, metrics);
       for (let i = 0; i < boxes.length; i += 1) {
         const r = forPage[i]!;
@@ -887,13 +891,8 @@ export function PdfViewer({
 
     // Never strip overlays until we can repaint — pdf.js briefly empties the
     // text layer during zoom / virtualized remounts; stripping first made
-    // explain/derive underlines flash away and often not return.
-    if (mode === "selection" && !textLayerReady && !canRegionPaint) return;
-    if (mode === "highlight" && !textLayer && !canRegionPaint) {
-      parent.querySelectorAll(overlaySelector).forEach((n) => n.remove());
-      if (interactive) peekHost.__knowHighlights = [];
-      return;
-    }
+    // explain/derive underlines and saved highlights flash away.
+    if (!textLayerReady && !canRegionPaint) return;
 
     const pageStyle = getComputedStyle(pageEl);
     if (pageStyle.position === "static") pageEl.style.position = "relative";

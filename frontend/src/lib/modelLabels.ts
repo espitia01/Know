@@ -31,6 +31,32 @@ export function modelLabel(slug?: string | null): {
   );
 }
 
+/** Keep in sync with `MODEL_ALIASES` in `backend/app/gating.py`. */
+const MODEL_ALIASES: Record<string, string> = {
+  "claude-opus-4": "claude-opus-4-7",
+  "claude-sonnet-4-5": "claude-sonnet-4-6",
+  "claude-haiku-4": "claude-haiku-4-5",
+  "gpt-4.1": "gpt-5",
+  "gpt-4.1-mini": "gpt-5-mini",
+  "mistral-large": "mistral-large-latest",
+  "mistral-medium": "mistral-medium-latest",
+  "mistral-small": "mistral-small-latest",
+  "mistral-tiny": "mistral-small-latest",
+};
+
+export function normalizeModelSlug(slug?: string | null): string {
+  if (!slug) return "";
+  const trimmed = slug.trim();
+  return MODEL_ALIASES[trimmed] ?? trimmed;
+}
+
+export function modelsMatch(a?: string | null, b?: string | null): boolean {
+  const left = normalizeModelSlug(a);
+  const right = normalizeModelSlug(b);
+  if (!left || !right) return false;
+  return left === right;
+}
+
 export function promptDepthForModel(slug: string): "concise" | "standard" | "deep" {
   if (
     slug.includes("opus") ||
