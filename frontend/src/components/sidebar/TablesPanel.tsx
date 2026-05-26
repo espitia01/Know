@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type ParsedPaper, type TableAnalysis } from "@/lib/api";
 import { consumeSelectionSse } from "@/lib/selectionSse";
-import { tablesFromPaper, paperWithOcrMarkdown, type OcrTable } from "@/lib/ocrArtifacts";
+import {
+  tablesFromPaper,
+  paperWithOcrMarkdown,
+  tableBodyMarkdown,
+  type OcrTable,
+} from "@/lib/ocrArtifacts";
 import { usePaperOcrMarkdown } from "@/hooks/usePaperOcrMarkdown";
 import { formatTableAnalysisText } from "@/lib/artifactAnalysis";
 import { useStore } from "@/lib/store";
@@ -59,6 +64,16 @@ function appendTableAnalysis(paperId: string, entry: TableAnalysis) {
     const n = bump(s.paper);
     if (n) s.setPaper(n);
   }
+}
+
+function TablePreview({ markdown }: { markdown: string }) {
+  const body = tableBodyMarkdown(markdown);
+  if (!body) return null;
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border/40 bg-muted/[0.08] px-2 py-2">
+      <StreamingMarkdown copyableCode>{body}</StreamingMarkdown>
+    </div>
+  );
 }
 
 export function TablesPanel({ paperId }: TablesPanelProps) {
@@ -199,107 +214,183 @@ export function TablesPanel({ paperId }: TablesPanelProps) {
 
   if (selected) {
     const chat = conversations[selected.id] || [];
+    const cached = effectivePaper?.cached_analysis?.table_analyses?.find(
+      (a) => a.table_id === selected.id,
+    );
     return (
-      <div className="flex min-h-0 flex-col gap-4">
-        <button
-          type="button"
-          onClick={() => setSelected(null)}
-          className="text-[var(--text-xs)] font-medium text-muted-foreground/90 hover:text-foreground w-fit"
-        >
-          ← All tables
-        </button>
-        <h3 className="font-display text-[var(--text-sm)] font-medium tracking-[-0.02em] text-foreground/90">
-          {selected.label}
-        </h3>
-        <CardMeta extra={<span className="text-muted-foreground/75">Table</span>} />
-        <div className="rounded-lg border border-border/50 bg-card/30 px-3 py-2.5 overflow-x-auto">
-          <StreamingMarkdown copyableCode>{selected.markdown}</StreamingMarkdown>
+      <div className="flex min-h-0 flex-col h-full">
+        <div className="flex items-center gap-2 pb-3 border-b border-border/50 shrink-0">
+          <button
+            type="button"
+            onClick={() => setSelected(null)}
+            className="text-[var(--text-sm)] text-muted-foreground hover:text-foreground transition-colors font-medium"
+          >
+            &larr; All Tables
+          </button>
         </div>
-        {chat.map((msg, i) =>
-          msg.role === "user" ? (
-            <div key={i} className="flex justify-end">
-              <div className="bg-foreground text-background rounded-xl rounded-br-sm px-3 py-2 max-w-[85%]">
-                <p className="text-[var(--text-sm)]">{msg.text}</p>
+
+        <div className="flex-1 overflow-y-auto min-h-0 py-3 space-y-3">
+          <h3 className="font-display text-[var(--text-sm)] font-medium tracking-[-0.02em] text-foreground/90">
+            {selected.label}
+          </h3>
+          {selected.caption ? (
+            <p className="text-[var(--text-xs)] text-muted-foreground/75 italic leading-relaxed">
+              {selected.caption}
+            </p>
+          ) : null}
+          <CardMeta
+            model={cached?.model ?? fastModel}
+            pending={loading}
+            createdAt={cached?.created_at}
+            extra={<span className="text-muted-foreground/75">Table</span>}
+          />
+          <TablePreview markdown={selected.markdown} />
+
+          {chat.length === 0 && !loading && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 text-[var(--text-xs)] text-muted-foreground/85">
+                <span>Model</span>
+                <ModelOverridePill
+                  model={modelOverride ?? fastModel}
+                  allowed={allowedModels}
+                  onChange={setModelOverride}
+                />
               </div>
+              <button
+                type="button"
+                onClick={() => void runAnalyze(selected)}
+                className="btn-primary-glass w-full rounded-lg px-4 py-2 text-[var(--text-sm)] font-medium text-background transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              >
+                Analyze This Table
+              </button>
             </div>
-          ) : (
-            <div key={i} className="rounded-lg border border-border/60 bg-card/30 px-3 py-2.5">
-              {msg.streaming && !msg.text ? <AnalysisProgress kind="search" /> : null}
-              {msg.text ? (
-                <StreamingMarkdown streaming={msg.streaming} copyableCode>
-                  {msg.text}
-                </StreamingMarkdown>
-              ) : null}
-              {msg.model ? (
-                <div className="mt-2 flex justify-end">
-                  <ModelPill slug={msg.model} pending={msg.streaming} />
+          )}
+
+          {chat.map((msg, i) =>
+            msg.role === "user" ? (
+              <div key={i} className="flex justify-end">
+                <div className="bg-foreground text-background rounded-xl rounded-br-sm px-3 py-2 max-w-[85%]">
+                  <p className="text-[var(--text-sm)]">{msg.text}</p>
                 </div>
-              ) : null}
-            </div>
-          ),
-        )}
-        <div ref={chatEndRef} />
-        <div className="flex gap-2 border-t border-border/50 pt-2">
-          <ModelOverridePill model={modelOverride ?? fastModel} allowed={allowedModels} onChange={setModelOverride} />
-          <input
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
+              </div>
+            ) : (
+              <div key={i} className="rounded-lg border border-border/60 bg-card/30 px-3 py-2.5">
+                {msg.streaming && !msg.text ? <AnalysisProgress kind="search" /> : null}
+                {msg.text ? (
+                  <StreamingMarkdown streaming={msg.streaming} copyableCode>
+                    {msg.text}
+                  </StreamingMarkdown>
+                ) : null}
+                {msg.model ? (
+                  <div className="mt-2 flex justify-end">
+                    <ModelPill slug={msg.model} pending={msg.streaming} />
+                  </div>
+                ) : null}
+              </div>
+            ),
+          )}
+          <div ref={chatEndRef} />
+        </div>
+
+        <div className="shrink-0 pt-2 border-t border-border/50">
+          <div className="flex gap-2">
+            {allowedModels.length > 0 && (
+              <ModelOverridePill
+                model={modelOverride ?? fastModel}
+                allowed={allowedModels}
+                onChange={setModelOverride}
+              />
+            )}
+            <input
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  const q = question.trim();
+                  if (!q || loading) return;
+                  setQuestion("");
+                  void runAnalyze(selected, q);
+                }
+              }}
+              placeholder="Ask about this table…"
+              disabled={loading}
+              className="know-non-credential-input flex-1 min-h-[2.25rem] rounded-[var(--radius-md)] border border-input bg-muted/30 px-3 py-2 text-[var(--text-sm)]"
+            />
+            <button
+              type="button"
+              disabled={!question.trim() || loading}
+              onClick={() => {
                 const q = question.trim();
-                if (!q || loading) return;
+                if (!q) return;
                 setQuestion("");
                 void runAnalyze(selected, q);
-              }
-            }}
-            placeholder="Ask about this table…"
-            disabled={loading}
-            className="know-non-credential-input flex-1 min-h-[2.25rem] rounded-[var(--radius-md)] border border-input bg-muted/30 px-3 py-2 text-[var(--text-sm)]"
-          />
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => void runAnalyze(selected, question.trim())}
-            className="btn-primary-glass h-9 shrink-0 rounded-lg px-3 text-[var(--text-xs)] font-medium text-background disabled:opacity-40"
-          >
-            Ask
-          </button>
+              }}
+              className="btn-primary-glass h-9 shrink-0 rounded-lg px-3 text-[var(--text-xs)] font-medium text-background disabled:opacity-40"
+            >
+              Ask
+            </button>
+          </div>
         </div>
-        {chat.length === 0 && !loading ? (
-          <button
-            type="button"
-            onClick={() => void runAnalyze(selected)}
-            className="btn-primary-glass w-full rounded-lg px-4 py-2 text-[var(--text-sm)] font-medium text-background"
-          >
-            Analyze This Table
-          </button>
-        ) : null}
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+    <div className="space-y-3">
       {tables.map((t) => {
-        const count = conversations[t.id]?.length ?? 0;
+        const convoCount = conversations[t.id]?.length ?? 0;
         return (
-          <button
+          <article
             key={t.id}
-            type="button"
-            onClick={() => setSelected(t)}
-            className="rounded-xl border border-border/50 bg-card/15 px-3 py-3 text-left hover:border-border-strong hover:shadow-[var(--shadow-sm)]"
+            className="overflow-hidden rounded-xl border border-border/50 bg-card/15 ring-focus transition-[border-color] motion-safe:duration-150 hover:border-border-strong hover:shadow-[var(--shadow-sm)]"
           >
-            <p className="text-[var(--text-sm)] font-medium text-foreground/90">{t.label}</p>
-            <p className="mt-1 line-clamp-2 text-[var(--text-xs)] text-muted-foreground/80 font-mono">
-              {t.markdown.split("\n").find((l) => l.includes("|")) || t.markdown.slice(0, 80)}
-            </p>
-            {count > 0 ? (
-              <span className="mt-2 inline-block text-[var(--text-xs)] text-muted-foreground">
-                {Math.floor(count / 2)} conversation{count > 2 ? "s" : ""}
-              </span>
-            ) : null}
-          </button>
+            <button
+              type="button"
+              onClick={() => setSelected(t)}
+              className="w-full px-3 pt-3 pb-2 text-left"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-display text-[var(--text-sm)] font-medium tracking-[-0.02em] text-foreground/90">
+                  {t.label}
+                </p>
+                {convoCount > 0 ? (
+                  <span className="shrink-0 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-foreground px-1 text-[9px] font-semibold leading-none text-background">
+                    {Math.floor(convoCount / 2)}
+                  </span>
+                ) : null}
+              </div>
+              {t.caption ? (
+                <p className="mt-1 line-clamp-2 text-[var(--text-xs)] text-muted-foreground/80">
+                  {t.caption}
+                </p>
+              ) : null}
+            </button>
+            <div className="px-3 pb-2">
+              <TablePreview markdown={t.markdown} />
+            </div>
+            <div className="flex gap-2 border-t border-border/40 px-3 py-2.5">
+              <button
+                type="button"
+                onClick={() => setSelected(t)}
+                className="flex-1 rounded-lg border border-border/50 px-3 py-1.5 text-[var(--text-xs)] font-medium text-foreground/90 hover:bg-muted/[0.12]"
+              >
+                Open
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelected(t);
+                  void runAnalyze(t);
+                }}
+                className="btn-primary-glass flex-1 rounded-lg px-3 py-1.5 text-[var(--text-xs)] font-medium text-background disabled:opacity-40"
+              >
+                Analyze
+              </button>
+            </div>
+          </article>
         );
       })}
     </div>
