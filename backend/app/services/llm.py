@@ -2148,34 +2148,61 @@ async def answer_questions(
     questions: list[str],
     user_id: str | None = None,
     paper_id: str | None = None,
-) -> list[dict]:
+    paper: "ParsedPaper | None" = None,
+) -> dict:
     """Answer a batch of questions about the paper."""
+    from ..models.schemas import ParsedPaper
+    from .qa_context import build_qa_visual_context
+
     provider = get_provider(user_id)
     budget = get_budgets("qa", user_id)
     ctx_cap = budget["context"]
     questions = [_sanitize_user_text(q, max_chars=2000) for q in questions]
+    query = " ".join(questions)
 
+    if paper is None and paper_id and user_id:
+        try:
+            from .pdf_parser import get_paper
+
+            paper = get_paper(paper_id, user_id=user_id)
+        except Exception:
+            paper = None
+
+    visual_block = ""
+    if isinstance(paper, ParsedPaper):
+        visual_block = build_qa_visual_context(
+            paper, query, max_chars=min(2500, max(800, ctx_cap // 3)),
+        )
+
+    retrieval_cap = max(500, ctx_cap - len(visual_block) - 80) if visual_block else ctx_cap
     context_block = ""
     retrieval_hits: list[dict] = []
     if paper_id:
         try:
             from .retrieval import retrieve_for_paper
             context_block, retrieval_hits = await retrieve_for_paper(
-                [paper_id], " ".join(questions), user_id=user_id or "", max_chars=ctx_cap,
+                [paper_id], query, user_id=user_id or "", max_chars=retrieval_cap,
             )
         except Exception:
             pass
     if not context_block:
-        paper_text = _sanitize_user_text(paper_text, max_chars=ctx_cap)
-        context_block = paper_text[:ctx_cap]
+        paper_text = _sanitize_user_text(paper_text, max_chars=retrieval_cap)
+        context_block = paper_text[:retrieval_cap]
+
+    if visual_block:
+        context_block = (
+            f"## Figures & tables\n{visual_block}\n\n---\n\n## Text excerpts\n{context_block}"
+        )
 
     system = (
         "You are an expert science educator. Answer each question helpfully whether or not every detail appears in "
-        "the manuscript. When relevant, ground claims in this paper's text, methods, or results and indicate that basis. "
-        "If the PDF does not address the topic—or does so only indirectly—say so briefly, then answer using reliable "
-        "general knowledge clearly labeled as such, and propose concrete Google Scholar-style search phrases or keywords "
-        "the reader could try next. Do not refuse solely because wording is absent from the excerpts. "
-        "Return ONLY valid JSON. Each answer must be a single markdown string — never a nested JSON object.\n\n"
+        "the manuscript. When relevant, ground claims in this paper's text, methods, results, figures, or tables "
+        "and indicate that basis. Use the Figures & tables section for questions about plots, diagrams, exhibits, "
+        "or numeric results shown visually. If the PDF does not address the topic—or does so only indirectly—say so "
+        "briefly, then answer using reliable general knowledge clearly labeled as such, and propose concrete Google "
+        "Scholar-style search phrases or keywords the reader could try next. Do not refuse solely because wording is "
+        "absent from the excerpts. Return ONLY valid JSON. Each answer must be a single markdown string — never a "
+        "nested JSON object.\n\n"
         + LATEX_FORMAT_INSTRUCTIONS
     )
 
@@ -2183,12 +2210,12 @@ async def answer_questions(
 
     user = f"""Answer these questions.
 
-Prioritize citing or paraphrasing the paper below when it is on-point. When the paper is insufficient, unclear, or the question asks for background, definitions, comparisons, or context beyond this PDF, complement with general-domain knowledge you can stand behind—and state when you are drawing on that rather than the manuscript. Include suggested search queries when extra retrieval would materially help.
+Prioritize citing or paraphrasing the paper below when it is on-point, including figure/table captions and tabular data when relevant. When the paper is insufficient, unclear, or the question asks for background, definitions, comparisons, or context beyond this PDF, complement with general-domain knowledge you can stand behind—and state when you are drawing on that rather than the manuscript. Include suggested search queries when extra retrieval would materially help.
 
 Questions:
 {q_list}
 
-Paper text (possibly truncated excerpts):
+Paper context (figures/tables plus retrieved excerpts):
 {context_block}
 
 Return JSON:
@@ -2228,7 +2255,8 @@ async def answer_questions_multi(
     questions: list[str],
     user_id: str | None = None,
     paper_ids: list[str] | None = None,
-) -> list[dict]:
+    papers: list | None = None,
+) -> dict:
     """Answer questions using context from multiple papers.
     paper_texts: list of (title, raw_text) tuples.
 
@@ -2237,16 +2265,19 @@ async def answer_questions_multi(
     (and the corresponding Anthropic bill). Each paper gets an equal share
     of the budget, with at least 2k chars each and a floor of 1 paper.
     """
+    from ..models.schemas import ParsedPaper
+    from .qa_context import build_qa_visual_context
+
     provider = get_provider(user_id)
-    budget = get_budgets("qa", user_id)
     questions = [_sanitize_user_text(q, max_chars=2000) for q in questions]
 
     system = (
         "You are an expert science educator. You have access to multiple papers in a reading session. "
-        "Synthesize what the provided PDFs support when relevant. If a question is not fully covered in these texts, "
-        "say so briefly, then answer with well-scoped general knowledge (clearly distinguished) and suggest search "
-        "queries or follow-up reading. Do not refuse solely because a fact is missing from the excerpts. "
-        "Reference specific papers by title when citing them. Return ONLY valid JSON.\n\n"
+        "Synthesize what the provided PDFs support when relevant, including their figures and tables when cited. "
+        "If a question is not fully covered in these texts, say so briefly, then answer with well-scoped general "
+        "knowledge (clearly distinguished) and suggest search queries or follow-up reading. Do not refuse solely "
+        "because a fact is missing from the excerpts. Reference specific papers by title when citing them. "
+        "Return ONLY valid JSON.\n\n"
         + LATEX_FORMAT_INSTRUCTIONS
     )
 
@@ -2259,13 +2290,20 @@ async def answer_questions_multi(
     all_hits: list[dict] = []
     for i, (title, text) in enumerate(paper_texts):
         safe_title = _sanitize_user_text(title or "", max_chars=200)
+        visual_block = ""
+        paper_obj = papers[i] if papers and i < len(papers) else None
+        if isinstance(paper_obj, ParsedPaper):
+            visual_block = build_qa_visual_context(
+                paper_obj, query_text, max_chars=min(1200, max(500, chars_per_paper // 4)),
+            )
+        retrieval_cap = max(500, chars_per_paper - len(visual_block) - 80) if visual_block else chars_per_paper
         safe_text = ""
         pid = (paper_ids[i] if paper_ids and i < len(paper_ids) else None)
         if pid:
             try:
                 from .retrieval import retrieve_for_paper
                 retrieved, hits = await retrieve_for_paper(
-                    [pid], query_text, user_id=user_id or "", max_chars=chars_per_paper,
+                    [pid], query_text, user_id=user_id or "", max_chars=retrieval_cap,
                 )
                 if retrieved:
                     safe_text = retrieved
@@ -2274,7 +2312,9 @@ async def answer_questions_multi(
             except Exception:
                 pass
         if not safe_text:
-            safe_text = _sanitize_user_text(text or "", max_chars=chars_per_paper)
+            safe_text = _sanitize_user_text(text or "", max_chars=retrieval_cap)
+        if visual_block:
+            safe_text = f"Figures & tables:\n{visual_block}\n\n---\n\n{safe_text}"
         papers_context += f"\n--- Paper {i+1}: {safe_title} ---\n{safe_text}\n"
 
     user = f"""Answer these questions. Use synthesis across papers when helpful. When the session materials are silent or incomplete on a point, note the gap, answer with labeled general knowledge where appropriate, and suggest search phrases or papers to look up.

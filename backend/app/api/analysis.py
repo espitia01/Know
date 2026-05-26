@@ -631,7 +631,7 @@ async def qa(paper_id: str, req: QARequest, user_id: str = Depends(require_auth)
     )
     try:
         result = await answer_questions(
-            paper_prompt_text(paper), req.questions, user_id=user_id, paper_id=paper_id,
+            paper_prompt_text(paper), req.questions, user_id=user_id, paper_id=paper_id, paper=paper,
         )
         resp = QAResponse(**result)
         payload = resp.model_dump()
@@ -1025,12 +1025,14 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
         raise HTTPException(status_code=400, detail="paper_ids and questions required")
 
     paper_texts: list[tuple[str, str]] = []
+    papers_loaded = []
     for pid in paper_ids:
         _validate_id(pid, "paper_id")
         _verify_paper_owner(pid, user_id)
         p = get_paper(pid, user_id=user_id)
         if p:
             paper_texts.append((p.title, paper_prompt_text(p)))
+            papers_loaded.append(p)
 
     if not paper_texts:
         raise HTTPException(status_code=404, detail="No valid papers found")
@@ -1053,7 +1055,7 @@ async def multi_paper_qa(body: dict, user_id: str = Depends(require_auth)):
 
     try:
         result = await answer_questions_multi(
-            paper_texts, questions, user_id=user_id, paper_ids=paper_ids,
+            paper_texts, questions, user_id=user_id, paper_ids=paper_ids, papers=papers_loaded,
         )
         payload = result if isinstance(result, dict) and "items" in result else {"items": []}
         resp = QAResponse(**payload)
