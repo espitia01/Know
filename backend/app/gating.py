@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 
 from .services.db import (
     get_user,
-    get_daily_capability_count,
     reserve_daily_api_usage,
     reserve_daily_capability_usage,
     reserve_daily_export_usage,
@@ -526,22 +525,21 @@ def resolve_analysis_model(user_id: str) -> str:
 
 def get_capability_daily_usage(user_id: str) -> list[dict]:
     """Return today's shared capability usage rows for the user."""
+    from .services.db import get_daily_capability_counts
+
     tier = get_user_tier(user_id)
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
     per_capability = limits.get("per_capability_daily") or {}
+    counts = get_daily_capability_counts(user_id)
     out: list[dict] = []
     for capability in CAPABILITY_ORDER:
         if capability not in per_capability:
             continue
         cap = int(per_capability[capability])
-        try:
-            used = get_daily_capability_count(user_id, capability)
-        except Exception:
-            used = 0
         out.append({
             "capability": capability,
             "label": CAPABILITY_LABEL[capability],
-            "used": int(used or 0),
+            "used": int(counts.get(capability) or 0),
             "limit": cap,
         })
     return out

@@ -233,6 +233,12 @@ async function request<T>(
     } catch {
       return {} as T;
     }
+  } catch (e: unknown) {
+    const name = e instanceof Error ? e.name : "";
+    if (name === "AbortError") {
+      throw new Error("Request timed out. Please try again.");
+    }
+    throw e;
   } finally {
     clearTimeout(timeout);
   }
@@ -1160,6 +1166,7 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tier, success_url: successUrl, cancel_url: cancelUrl }),
+      timeoutMs: 30_000,
     }),
 
   createPortalSession: (returnUrl?: string) =>

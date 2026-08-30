@@ -24,9 +24,17 @@ def test_redirect_hosts_include_localhost_and_cors(monkeypatch):
 def test_is_safe_redirect_url_rejects_foreign_hosts():
     hosts = {"localhost:3000", "know.app"}
     assert is_safe_redirect_url("https://know.app/dashboard?upgraded=1", hosts)
+    assert is_safe_redirect_url("https://www.know.app/dashboard?upgraded=1", hosts)
     assert is_safe_redirect_url("http://localhost:3000/#pricing", hosts)
     assert not is_safe_redirect_url("https://evil.example/phish", hosts)
     assert not is_safe_redirect_url("javascript:alert(1)", hosts)
+
+
+def test_redirect_hosts_include_www_twin(monkeypatch):
+    monkeypatch.setenv("KNOW_CORS_ORIGINS", "https://know.app")
+    hosts = redirect_hosts()
+    assert "know.app" in hosts
+    assert "www.know.app" in hosts
 
 
 def test_paid_plan_change_allows_downgrade():

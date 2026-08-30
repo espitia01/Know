@@ -7,6 +7,7 @@ import { UserButton, useAuth } from "@clerk/nextjs";
 import { ArrowRight, Check } from "lucide-react";
 import { FEATURE_TOOLTIPS } from "@/lib/tooltips";
 import { api, ApiError } from "@/lib/api";
+import { startCheckout } from "@/lib/checkout";
 import { FeedbackModal } from "@/components/FeedbackModal";
 import { UpgradeConfirmModal } from "@/components/UpgradeConfirmModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -149,6 +150,7 @@ export default function LandingPage() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState("");
+  const [checkoutErrorTier, setCheckoutErrorTier] = useState<string | null>(null);
   const [upgradeTarget, setUpgradeTarget] = useState<"scholar" | "researcher" | null>(null);
   const [currentTier, setCurrentTier] = useState<string>("free");
 
@@ -159,58 +161,67 @@ export default function LandingPage() {
       .catch(() => {});
   }, [isLoaded, isSignedIn]);
 
+  useEffect(() => {
+    const scrollToPricing = () => {
+      if (window.location.hash !== "#pricing") return;
+      document.getElementById("pricing")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    scrollToPricing();
+    window.addEventListener("hashchange", scrollToPricing);
+    return () => window.removeEventListener("hashchange", scrollToPricing);
+  }, []);
+
   const handleTierClick = async (tierKey: string) => {
     setCheckoutError("");
+    setCheckoutErrorTier(null);
     if (tierKey === "free") {
       window.location.href = isSignedIn ? "/dashboard" : "/sign-up";
       return;
     }
-    if (!isLoaded) return;
+    if (!isLoaded) {
+      setCheckoutError("Still signing you in — try again in a moment.");
+      setCheckoutErrorTier(tierKey);
+      return;
+    }
     if (!isSignedIn) {
       window.location.href = "/sign-up";
       return;
     }
 
-    let meTier = currentTier;
-    try {
-      const me = await api.getCurrentUser();
-      meTier = me.tier || "free";
-      setCurrentTier(meTier);
-    } catch {
-      /* use cached tier */
-    }
-
-    if (meTier === tierKey) {
-      window.location.href = "/dashboard";
-      return;
-    }
-    if ((TIER_ORDER[tierKey] ?? 0) < (TIER_ORDER[meTier] ?? 0)) {
-      try {
-        const { url } = await api.createPortalSession(`${window.location.origin}/settings`);
-        if (url) window.location.href = url;
-      } catch (e: unknown) {
-        setCheckoutError(e instanceof Error ? e.message : "Could not open billing.");
-      }
-      return;
-    }
-    if (meTier !== "free") {
-      setUpgradeTarget(tierKey === "researcher" ? "researcher" : "scholar");
-      return;
-    }
-
     setCheckoutLoading(tierKey);
     try {
-      const { url } = await api.createCheckoutSession(
-        tierKey,
-        `${window.location.origin}/dashboard?upgraded=1`,
-        `${window.location.origin}/#pricing`,
-      );
-      if (url) window.location.href = url;
+      let meTier = currentTier;
+      try {
+        const me = await api.getCurrentUser();
+        meTier = me.tier || "free";
+        setCurrentTier(meTier);
+      } catch {
+        /* use cached tier */
+      }
+
+      if (meTier === tierKey) {
+        window.location.href = "/dashboard";
+        return;
+      }
+      if ((TIER_ORDER[tierKey] ?? 0) < (TIER_ORDER[meTier] ?? 0)) {
+        const { url } = await api.createPortalSession(`${window.location.origin}/settings`);
+        if (!url) throw new Error("Could not open billing.");
+        window.location.href = url;
+        return;
+      }
+      if (meTier !== "free") {
+        setCheckoutLoading(null);
+        setUpgradeTarget(tierKey === "researcher" ? "researcher" : "scholar");
+        return;
+      }
+
+      window.location.href = await startCheckout(tierKey);
     } catch (e: unknown) {
       if (e instanceof ApiError && e.code === "already_subscribed") {
         setUpgradeTarget(tierKey === "researcher" ? "researcher" : "scholar");
       } else {
         setCheckoutError(e instanceof Error ? e.message : "Checkout failed. Try Settings.");
+        setCheckoutErrorTier(tierKey);
       }
       setCheckoutLoading(null);
     }
@@ -421,6 +432,9 @@ export default function LandingPage() {
                         ? `Upgrade to ${t.name}`
                         : t.cta}
                 </button>
+                {checkoutError && checkoutErrorTier === t.tier && (
+                  <p className="mt-2 text-[12px] text-destructive">{checkoutError}</p>
+                )}
                 <ul className="mt-9 space-y-3.5">
                   {t.features.map((feat) => (
                     <li
@@ -443,9 +457,6 @@ export default function LandingPage() {
             </Link>
             .
           </p>
-          {checkoutError && (
-            <p className="mx-auto mt-4 max-w-xl text-center text-[12px] text-destructive">{checkoutError}</p>
-          )}
         </section>
 
         {/* ─── Closing ───────────────────────────────────────────────── */}

@@ -670,27 +670,36 @@ def _ensure_daily_capability_usage_table(client) -> None:
     _daily_capability_bootstrap_done = True
 
 
+def get_daily_capability_counts(user_id: str) -> dict[str, int]:
+    """Today's capability usage in one round-trip."""
+    client = get_db()
+    if not client:
+        return {}
+    from datetime import datetime, timezone
+    today_str = datetime.now(timezone.utc).date().isoformat()
+    _ensure_daily_capability_usage_table(client)
+    try:
+        res = (
+            client.table("daily_capability_usage")
+            .select("capability,count")
+            .eq("user_id", user_id)
+            .eq("date", today_str)
+            .execute()
+        )
+    except Exception:
+        return {}
+    out: dict[str, int] = {}
+    for row in res.data or []:
+        cap = str(row.get("capability") or "")
+        if cap:
+            out[cap] = int(row.get("count") or 0)
+    return out
+
+
 def get_daily_capability_count(user_id: str, capability: str) -> int:
     if not capability:
         return 0
-    client = get_db()
-    if not client:
-        return 0
-
-    from datetime import datetime, timezone
-    today_str = datetime.now(timezone.utc).date().isoformat()
-
-    _ensure_daily_capability_usage_table(client)
-    row = _safe_single(
-        client.table("daily_capability_usage")
-        .select("count")
-        .eq("user_id", user_id)
-        .eq("date", today_str)
-        .eq("capability", capability)
-    )
-    if row is not None:
-        return int(row.get("count") or 0)
-    return 0
+    return int(get_daily_capability_counts(user_id).get(capability) or 0)
 
 
 def reserve_daily_capability_usage(

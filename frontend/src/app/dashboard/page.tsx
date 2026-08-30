@@ -17,6 +17,7 @@ import { FullscreenToggle } from "@/components/FullscreenToggle";
 import { GoogleDriveButton } from "@/components/upload/GoogleDriveButton";
 import { isGoogleDriveConfigured } from "@/lib/googleDrive";
 import { DISCORD_URL } from "@/lib/constants";
+import { goToPricing } from "@/lib/checkout";
 import { PaperLoadingScreen } from "@/components/paper/PaperLoadingScreen";
 import { UploadToast } from "@/components/ui/UploadToast";
 import { markPaperFetched } from "@/lib/papersFreshness";
@@ -209,12 +210,13 @@ function DashboardContent() {
       <main className="flex-1 flex flex-col items-center px-6 pt-[15vh] pb-12 bg-mesh min-h-screen text-foreground">
         <div className="absolute top-5 right-5 flex items-center gap-2.5">
           {tierUser?.tier === "free" && (
-            <Link
-              href="/#pricing"
+            <button
+              type="button"
+              onClick={goToPricing}
               className="text-[12px] font-medium bg-foreground text-background px-3.5 py-1.5 rounded-xl"
             >
               Upgrade
-            </Link>
+            </button>
           )}
           <FullscreenToggle />
           <ThemeToggle />
@@ -289,15 +291,16 @@ function DashboardContent() {
       <UploadToast />
       <div className="absolute top-5 right-5 flex items-center gap-2">
         {tierUser?.tier === "free" && (
-          <Link
-            href="/#pricing"
+          <button
+            type="button"
+            onClick={goToPricing}
             className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-foreground/90 hover:text-foreground px-3 py-1.5 rounded-full border border-border/60 bg-background/80 transition-colors ring-focus"
           >
             <svg className="w-3 h-3 text-foreground/70" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
               <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z" />
             </svg>
             Upgrade
-          </Link>
+          </button>
         )}
         <FullscreenToggle />
         <ThemeToggle />

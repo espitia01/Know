@@ -68,8 +68,16 @@ def redirect_hosts() -> set[str]:
         if not raw:
             return
         parsed = urlparse(raw if "://" in raw else f"https://{raw}")
-        if parsed.netloc:
-            hosts.add(parsed.netloc)
+        host = parsed.netloc
+        if not host:
+            return
+        hosts.add(host)
+        hostname = parsed.hostname or host.split(":")[0]
+        if hostname.startswith("www."):
+            hosts.add(host.replace("www.", "", 1))
+        else:
+            rest = host[len(hostname):]
+            hosts.add(f"www.{hostname}{rest}")
 
     extra = os.environ.get("KNOW_CORS_ORIGINS", "") or getattr(settings, "cors_origins", "") or ""
     for origin in extra.split(","):
@@ -82,8 +90,18 @@ def is_safe_redirect_url(url: str, hosts: set[str] | None = None) -> bool:
     from urllib.parse import urlparse
 
     parsed = urlparse(url or "")
+    if parsed.scheme not in ("http", "https"):
+        return False
     allowed = hosts if hosts is not None else redirect_hosts()
-    return parsed.scheme in ("http", "https") and parsed.netloc in allowed
+    host = parsed.netloc
+    if host in allowed:
+        return True
+    hostname = parsed.hostname or ""
+    if hostname.startswith("www.") and host.replace("www.", "", 1) in allowed:
+        return True
+    if hostname and f"www.{host}" in allowed:
+        return True
+    return False
 
 
 def _sub_status(sub) -> str:
@@ -250,6 +268,12 @@ async def create_checkout_session(body: dict, user_id: str = Depends(require_aut
     cancel_url = body.get("cancel_url", "http://localhost:3000/#pricing")
 
     if not is_safe_redirect_url(success_url) or not is_safe_redirect_url(cancel_url):
+        logger.warning(
+            "Rejected checkout redirect urls success=%s cancel=%s allowed=%s",
+            success_url,
+            cancel_url,
+            sorted(redirect_hosts()),
+        )
         raise HTTPException(status_code=400, detail="Invalid redirect URL")
 
     session = stripe.checkout.Session.create(

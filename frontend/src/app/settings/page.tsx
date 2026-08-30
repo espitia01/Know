@@ -20,6 +20,7 @@ import { AppearanceSection } from "@/components/AppearanceSection";
 import { ModelPicker } from "@/components/settings/ModelPicker";
 import { PlanUsage, type AccountUsage } from "@/components/settings/PlanUsage";
 import { DISCORD_URL } from "@/lib/constants";
+import { goToPricing, startCheckout } from "@/lib/checkout";
 
 const DEFAULT_MODEL = "mistral-small-latest";
 
@@ -39,7 +40,7 @@ function SettingsContent() {
   const router = useRouter();
   const { signOut } = useClerk();
   const { user: tierUser, refresh: refreshTier } = useUserTier();
-  const { refresh: refreshUserSettings, updateOptimistically } = useUserSettings();
+  const { refresh: refreshUserSettings, updateOptimistically, loaded: settingsLoaded, analysisModel: ctxAnalysis, fastModel: ctxFast, allowedModels, hasAnthropicKey: ctxAnthropic } = useUserSettings();
   const [models, setModels] = useState<string[]>([]);
   const [analysisModel, setAnalysisModel] = useState("");
   const [fastModel, setFastModel] = useState("");
@@ -69,21 +70,29 @@ function SettingsContent() {
 
   const tier = tierUser?.tier || "free";
   const usageRefreshKey = useStore((s) => s.usageRefreshKey);
+  const userId = tierUser?.user_id ?? null;
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setLoadError("");
+    if (!settingsLoaded) return;
+    setHasAnthropicKey(ctxAnthropic);
+    if (ctxAnalysis) setAnalysisModel(ctxAnalysis);
+    if (ctxFast) setFastModel(ctxFast);
+    if (allowedModels.length) {
+      setModels(allowedModels);
+      setLoading(false);
+    }
+  }, [settingsLoaded, ctxAnthropic, ctxAnalysis, ctxFast, allowedModels]);
 
-    const load = async () => {
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    const loadPrefs = async () => {
       try {
-        const [settingsRes, modelsRes, usageRes] = await Promise.all([
+        const [settingsRes, modelsRes] = await Promise.all([
           api.getSettings(),
-          api.getModels(),
-          tierUser ? api.getAccountUsage() : Promise.resolve(null),
+          allowedModels.length ? Promise.resolve({ models: allowedModels }) : api.getModels(),
         ]);
         if (cancelled) return;
-
         setHasAnthropicKey(Boolean(settingsRes.has_anthropic_key));
         setHasOpenaiKey(Boolean(settingsRes.has_openai_key));
         setHasMistralKey(Boolean(settingsRes.has_mistral_key));
@@ -94,19 +103,36 @@ function SettingsContent() {
         setDeepMultiplier(settingsRes.deep_multiplier ?? 2);
         setTierLimits((settingsRes.tier_limits as Record<string, unknown>) ?? null);
         setModels(modelsRes.models);
-        if (usageRes) setUsage(usageRes);
+        setLoadError("");
       } catch {
         if (!cancelled) setLoadError("Failed to load settings.");
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
-
-    void load();
+    void loadPrefs();
     return () => {
       cancelled = true;
     };
-  }, [tierUser, tier, usageRefreshKey]);
+    // Prefs are per user. Don't refetch when the tier object identity changes
+    // (tab focus), which previously flashed the models skeleton.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- userId is the load key
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    api.getAccountUsage()
+      .then((usageRes) => {
+        if (!cancelled) setUsage(usageRes);
+      })
+      .catch(() => {
+        /* usage is optional chrome */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, usageRefreshKey]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -185,12 +211,28 @@ function SettingsContent() {
                 </p>
               </div>
               {tier === "free" && (
-                <button
-                  onClick={() => router.push("/#pricing")}
-                  className="shrink-0 rounded-lg bg-foreground px-3 py-1.5 text-[12px] font-medium text-background motion-safe:duration-150 hover:opacity-90"
-                >
-                  Upgrade
-                </button>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <button
+                    type="button"
+                    disabled={billingLoading}
+                    onClick={async () => {
+                      setBillingError("");
+                      setBillingLoading(true);
+                      try {
+                        window.location.href = await startCheckout("scholar");
+                      } catch (e: unknown) {
+                        setBillingError(e instanceof Error ? e.message : "Checkout failed.");
+                        setBillingLoading(false);
+                      }
+                    }}
+                    className="shrink-0 rounded-lg bg-foreground px-3 py-1.5 text-[12px] font-medium text-background motion-safe:duration-150 hover:opacity-90 disabled:opacity-50"
+                  >
+                    {billingLoading ? "Redirecting…" : "Upgrade"}
+                  </button>
+                  {billingError && (
+                    <p className="max-w-[12rem] text-right text-[11px] text-destructive">{billingError}</p>
+                  )}
+                </div>
               )}
               {tier === "scholar" && (
                 <button
@@ -297,7 +339,8 @@ function SettingsContent() {
 
             {tier !== "researcher" && !tierUser?.has_billing && (
               <button
-                onClick={() => router.push("/#pricing")}
+                type="button"
+                onClick={goToPricing}
                 className="text-[12px] font-medium text-muted-foreground hover:text-foreground motion-safe:duration-150"
               >
                 Compare plans →
