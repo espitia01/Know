@@ -9,9 +9,11 @@ import type { ParsedPaper } from "@/lib/api";
 const basePaper = (markdown: string): ParsedPaper => ({
   id: "p1",
   title: "Test",
+  authors: [],
   raw_text: "",
   markdown,
   figures: [],
+  has_si: false,
   folder: "",
   tags: [],
   notes: [],
