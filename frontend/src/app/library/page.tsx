@@ -384,7 +384,7 @@ function LibraryContent() {
     <>
     <main className="flex-1 flex flex-col h-screen overflow-hidden bg-mesh text-foreground">
       {/* Header */}
-      <header className="shrink-0 flex items-center gap-3 px-5 h-[52px] border-b border-border glass-nav z-30 relative">
+      <header className="relative z-30 flex h-[52px] shrink-0 items-center gap-3 border-b border-border/50 bg-background/90 px-5 backdrop-blur-md">
         <button
           onClick={() => router.push("/dashboard")}
           className="text-muted-foreground hover:text-foreground transition-colors text-[13px] font-medium ring-focus rounded-md px-1"

@@ -116,6 +116,8 @@ function mergeCachedAnalysis(current: ParsedPaper, previous?: ParsedPaper): Pars
   for (const key of [
     "pre_reading",
     "summary",
+    "summary_lite",
+    "summary_deep",
     "selections",
     "qa_sessions",
     "figure_analyses",
@@ -648,23 +650,45 @@ function PaperContent() {
 
   // Retry OCR for uploads that failed or predated Mistral (pending/failed).
   useEffect(() => {
+    const pid = activePaperId;
     const status = activePaperMeta?.ocr_status;
-    if (!activePaperId || status === "ready" || status === "unsupported") return;
-    if (ocrKickoffRef.current === activePaperId) return;
-    ocrKickoffRef.current = activePaperId;
+    if (!pid || status === "ready" || status === "unsupported") return;
+    if (ocrKickoffRef.current === pid) return;
+    ocrKickoffRef.current = pid;
+    let cancelled = false;
 
-    void api
-      .runPaperOcr(activePaperId)
-      .then(async (res) => {
-        if (res.ocr_status !== "ready") return;
-        const refreshed = await api.getPaper(activePaperId);
-        const merged = mergeCachedAnalysis(refreshed, useStore.getState().papersById[activePaperId]);
-        cachePaper(merged);
-        if (useStore.getState().paper?.id === activePaperId) {
-          setPaper(merged);
+    void (async () => {
+      for (let attempt = 0; attempt < 3 && !cancelled; attempt++) {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, 4000 * attempt));
+          if (cancelled) return;
         }
-      })
-      .catch(() => undefined);
+        try {
+          const res = await api.runPaperOcr(pid);
+          if (cancelled) return;
+          if (res.ocr_status !== "ready") continue;
+          const refreshed = await api.getPaper(pid);
+          const merged = mergeCachedAnalysis(refreshed, useStore.getState().papersById[pid]);
+          cachePaper(merged);
+          if (useStore.getState().paper?.id === pid) {
+            setPaper(merged);
+          }
+          try {
+            const md = await api.getPaperMarkdown(pid);
+            if (!cancelled) useStore.getState().setPaperMarkdown(pid, md);
+          } catch {
+            /* markdown fetch is best-effort after OCR */
+          }
+          return;
+        } catch {
+          /* retry */
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [activePaperId, activePaperMeta?.ocr_status, cachePaper, setPaper]);
   // Stage 2 migration: streaming + history + abort all flow through the
   // `useSelectionThread` hook below. The bare AbortController + SSE
@@ -950,9 +974,10 @@ function PaperContent() {
     const figCount = Array.isArray(c?.figure_analyses) ? c!.figure_analyses!.length : 0;
     let summaryBytes = 0;
     let preReadBytes = 0;
-    if (c?.summary != null && typeof c.summary === "object") {
+    const summaryBlob = c?.summary_deep ?? c?.summary_lite ?? c?.summary;
+    if (summaryBlob != null && typeof summaryBlob === "object") {
       try {
-        summaryBytes = JSON.stringify(c.summary).length;
+        summaryBytes = JSON.stringify(summaryBlob).length;
       } catch {
         summaryBytes = 1;
       }
@@ -973,6 +998,8 @@ function PaperContent() {
       qaItemCount,
       c?.assumptions?.assumptions?.length ?? 0,
       figCount,
+      c?.table_analyses?.length ?? 0,
+      c?.code_analyses?.length ?? 0,
       n?.length ?? 0,
     ].join("|");
   }, [loadedPaperId, activePaperId, loadedPaperCache, loadedPaperNotes]);
@@ -1055,12 +1082,13 @@ function PaperContent() {
         const liveQa = snap.qaResultsByPaper[pid] ?? [];
         // Server cache can lag behind in-session answers — never replace a
         // longer live list with a shorter stale hydrate payload.
-        if (liveQa.length > allItems.length) return;
-        const qaSame =
-          liveQa.length === allItems.length &&
-          liveQa.every((item, i) => item.question === allItems[i]?.question);
-        if (!qaSame) {
-          useStore.getState().setQAResultsForPaper(pid, allItems);
+        if (liveQa.length <= allItems.length) {
+          const qaSame =
+            liveQa.length === allItems.length &&
+            liveQa.every((item, i) => item.question === allItems[i]?.question);
+          if (!qaSame) {
+            useStore.getState().setQAResultsForPaper(pid, allItems);
+          }
         }
       }
 
@@ -1928,7 +1956,7 @@ function PaperContent() {
           reserve its 48px, so we drop it from the tree entirely and rely
           on the floating restore control below to bring it back. */}
       {!chromeHidden && (
-      <header className="relative z-30 flex h-12 shrink-0 items-center gap-2.5 border-b border-border/70 px-4 shadow-sm glass-nav">
+      <header className="relative z-30 flex h-12 shrink-0 items-center gap-2.5 border-b border-border/50 bg-background/90 px-4 backdrop-blur-md">
         <button
           onClick={() => router.push("/dashboard")}
           className="text-muted-foreground/80 hover:text-foreground transition-colors shrink-0 ring-focus rounded-md p-1 -ml-1"

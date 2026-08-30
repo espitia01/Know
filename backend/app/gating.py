@@ -41,10 +41,10 @@ from .services.db import (
 )
 
 ALL_MODELS = [
-    # Anthropic
+    # Anthropic (current Claude API IDs as of Aug 2026)
     "claude-haiku-4-5",
-    "claude-sonnet-4-6",
-    "claude-opus-4-7",
+    "claude-sonnet-5",
+    "claude-opus-5",
     # OpenAI
     "gpt-5-mini",
     "gpt-5",
@@ -60,14 +60,17 @@ ALL_MODELS = [
 # call after an app update doesn't 4xx against the provider. Extend this
 # map when we retire another model ID.
 MODEL_ALIASES = {
-    # Anthropic
-    "claude-opus-4": "claude-opus-4-7",
-    "claude-opus-4-0": "claude-opus-4-7",
-    "claude-opus-4-1": "claude-opus-4-7",
-    "claude-opus-4-5": "claude-opus-4-7",
-    "claude-opus-4-6": "claude-opus-4-7",
-    "claude-sonnet-4-0": "claude-sonnet-4-6",
-    "claude-sonnet-4-5": "claude-sonnet-4-6",
+    # Anthropic — previous 4.x IDs still appear in saved Settings rows
+    "claude-opus-4": "claude-opus-5",
+    "claude-opus-4-0": "claude-opus-5",
+    "claude-opus-4-1": "claude-opus-5",
+    "claude-opus-4-5": "claude-opus-5",
+    "claude-opus-4-6": "claude-opus-5",
+    "claude-opus-4-7": "claude-opus-5",
+    "claude-opus-4-8": "claude-opus-5",
+    "claude-sonnet-4-0": "claude-sonnet-5",
+    "claude-sonnet-4-5": "claude-sonnet-5",
+    "claude-sonnet-4-6": "claude-sonnet-5",
     # OpenAI
     "gpt-4o": "gpt-5-mini",
     "gpt-4o-mini": "gpt-5-mini",
@@ -100,10 +103,10 @@ MODEL_TIER = {
     "claude-haiku-4-5": "fast",
     "gpt-5-mini": "fast",
     "mistral-small-latest": "fast",
-    "claude-sonnet-4-6": "balanced",
+    "claude-sonnet-5": "balanced",
     "gpt-5": "balanced",
     "mistral-medium-latest": "balanced",
-    "claude-opus-4-7": "top",
+    "claude-opus-5": "top",
     "gpt-5.4": "top",
     "mistral-large-latest": "top",
 }
@@ -143,9 +146,9 @@ TIER_LIMITS: dict[str, dict] = {
         "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "export-pdf", "export-pptx"},
         "models": {
             "mistral-small-latest", "claude-haiku-4-5", "gpt-5-mini",
-            "mistral-medium-latest", "claude-sonnet-4-6", "gpt-5",
+            "mistral-medium-latest", "claude-sonnet-5", "gpt-5",
         },
-        "best_model": "claude-sonnet-4-6",
+        "best_model": "claude-sonnet-5",
         "daily_api_calls": 100,
         "export_daily": {"pdf": 5, "pptx": 3, "podcast": 0},
         "per_capability_daily": {"fast": 100, "balanced": 40, "top": 0},
@@ -157,10 +160,10 @@ TIER_LIMITS: dict[str, dict] = {
         "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "multi-qa", "export-pdf", "export-pptx", "export-podcast"},
         "models": {
             "mistral-small-latest", "claude-haiku-4-5", "gpt-5-mini",
-            "mistral-medium-latest", "claude-sonnet-4-6", "gpt-5",
-            "mistral-large-latest", "claude-opus-4-7", "gpt-5.4",
+            "mistral-medium-latest", "claude-sonnet-5", "gpt-5",
+            "mistral-large-latest", "claude-opus-5", "gpt-5.4",
         },
-        "best_model": "claude-opus-4-7",
+        "best_model": "claude-opus-5",
         "daily_api_calls": 300,
         "export_daily": {"pdf": 20, "pptx": 10, "podcast": 3},
         "per_capability_daily": {"fast": 300, "balanced": 150, "top": 30},
@@ -484,8 +487,8 @@ def enforce_model(user_id: str, requested_model: str) -> str:
     """Return the model to actually use. Downgrades if tier doesn't allow it.
 
     We canonicalize first so that settings rows holding a stale alias
-    (e.g. ``claude-opus-4`` after Anthropic retired it in favour of
-    ``claude-opus-4-7``) resolve to the current ID instead of falling
+    (e.g. ``claude-opus-4-7`` after Anthropic moved the flagship to
+    ``claude-opus-5``) resolve to the current ID instead of falling
     all the way through to the tier default.
     """
     requested_model = canonicalize_model(requested_model) or ""

@@ -33,12 +33,13 @@ def test_enforce_model_canonicalizes_aliases():
 @patch("app.gating.get_user_tier", return_value="free")
 def test_tier_gating_defaults_free(_tier):
     assert enforce_model("user-free", "gpt-5") == "mistral-small-latest"
-    assert enforce_model("user-free", "claude-opus-4-7") == "mistral-small-latest"
+    assert enforce_model("user-free", "claude-opus-5") == "mistral-small-latest"
 
 
 @patch("app.gating.get_user_tier", return_value="scholar")
 def test_tier_gating_defaults_scholar(_tier):
-    assert enforce_model("user-scholar", "claude-opus-4-7") == "claude-sonnet-4-6"
+    assert enforce_model("user-scholar", "claude-opus-5") == "claude-sonnet-5"
+    assert enforce_model("user-scholar", "claude-opus-4-7") == "claude-sonnet-5"
 
 
 @patch("app.gating.get_user_tier", return_value="researcher")
@@ -50,8 +51,7 @@ def test_researcher_allowed_models(_tier):
 
 def test_openai_token_fields_gpt5():
     fields = _openai_token_fields("gpt-5-mini", 1000)
-    assert fields["max_completion_tokens"] == 1000
-    assert fields["max_tokens"] == 1000
+    assert fields == {"max_completion_tokens": 1000}
 
 
 def test_openai_token_fields_legacy():

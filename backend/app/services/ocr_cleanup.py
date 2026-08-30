@@ -291,9 +291,13 @@ def drop_orphan_figure_refs(text: str) -> str:
     lines = text.split("\n")
     caption_re = re.compile(r"^(Fig\.?|Figure)\s+\d+[.:]", re.IGNORECASE)
     img_re = re.compile(r"^\s*!\[[^\]]*\]\([^)]+\.png\)\s*$")
+    composite_re = re.compile(r"\(fig-\d+\.png\)")
     out: list[str] = []
     for i, line in enumerate(lines):
         if not img_re.match(line):
+            out.append(line)
+            continue
+        if composite_re.search(line):
             out.append(line)
             continue
         has_caption = False
@@ -319,7 +323,12 @@ def drop_orphan_figure_refs(text: str) -> str:
 
 
 def drop_panel_refs_when_composites_exist(text: str) -> str:
-    """Drop panel refs when composite fig-N.png images exist."""
+    """Drop panel refs when composite fig-N.png images exist on the same page."""
+    if _PAGE_BOUNDARY in text:
+        return _PAGE_BOUNDARY.join(
+            drop_panel_refs_when_composites_exist(part)
+            for part in text.split(_PAGE_BOUNDARY)
+        )
     has_composite = bool(re.search(r"(?:^|[^A-Za-z0-9])fig-\d+\.png", text))
     if not has_composite:
         return text

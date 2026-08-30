@@ -47,15 +47,11 @@ def get_budgets(kind: str, user_id: str | None) -> dict:
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
-# Current Anthropic model aliases as of April 2026. The previous Opus
-# ID (``claude-opus-4``) was never valid on the Messages API — it's a
-# user-facing name. Anthropic's alias is ``claude-opus-4-7`` for the
-# current generation. Leaving the old string in place caused every
-# Opus call to 4xx with "unknown model" and surfaced to the user as
-# "I get errors after switching to opus/sonnet".
+# Current Anthropic API IDs (Aug 2026). Saved Settings may still hold
+# 4.x aliases; ``canonicalize_model`` in gating.py rewrites them.
 HAIKU_MODEL = "claude-haiku-4-5"
-SONNET_MODEL = "claude-sonnet-4-6"
-OPUS_MODEL = "claude-opus-4-7"
+SONNET_MODEL = "claude-sonnet-5"
+OPUS_MODEL = "claude-opus-5"
 
 MAX_IMAGE_DIMENSION = 1024
 
@@ -265,9 +261,9 @@ def _log_chat_usage(provider: str, model: str, usage: dict) -> None:
 
 
 def _openai_token_fields(slug: str, max_tokens: int) -> dict:
-    """GPT-5+ uses max_completion_tokens; older models use max_tokens."""
+    """GPT-5+ Chat Completions uses max_completion_tokens only."""
     if slug.startswith("gpt-5"):
-        return {"max_completion_tokens": max_tokens, "max_tokens": max_tokens}
+        return {"max_completion_tokens": max_tokens}
     return {"max_tokens": max_tokens}
 
 
@@ -887,7 +883,10 @@ def _require_api_key(provider_name: str) -> str:
                 provider_name,
             )
             _warned_missing_keys.add(provider_name)
-        raise ValueError(f"No API key configured. Set {env_name}.")
+        raise LLMProviderError(
+            503,
+            f"No API key configured for {provider_name}. Set {env_name}.",
+        )
     return key
 
 

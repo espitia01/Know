@@ -126,7 +126,7 @@ type PdfMarqueeBox = { startX: number; startY: number; x: number; y: number; w: 
  * open many papers in a session.
  */
 const pdfBlobCache = new Map<string, string>();
-const PDF_BLOB_CACHE_SIZE = 8;
+const PDF_BLOB_CACHE_SIZE = 4;
 // Baseline render scale used as the displayed "100%". The old 1.0 baseline
 // produced text that most readers found uncomfortably small on modern
 // retina displays; 1.4 matches what users were manually zooming to almost
@@ -318,7 +318,7 @@ function usePdfCanvasDeviceRatio() {
       // Platform DPR capped at 3; no arbitrary minimum — compounded with
       // BASELINE_SCALE, a fractional/device-fudged DPR misaligns pdf.js
       // glyph scaleX() vs the painted canvas pixels.
-      setRatio(Math.min(3, raw));
+      setRatio(Math.min(2, raw));
     };
     update();
     window.addEventListener("resize", update);
@@ -529,10 +529,7 @@ export function PdfViewer({
       const list = paperId ? s.selectionHistoryByPaper[paperId] : undefined;
       if (!list?.length) return "";
       return list
-        .map(
-          (h) =>
-            `${selectionKey(h)}:${h.streaming ? 1 : 0}:${(h.explanation ?? "").length}:${(h.final_result ?? "").length}`,
-        )
+        .map((h) => `${selectionKey(h)}:${h.streaming ? 1 : 0}:${h.regions?.length ?? 0}`)
         .join("\x1f");
     }),
   );

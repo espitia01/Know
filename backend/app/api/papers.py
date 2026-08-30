@@ -105,7 +105,7 @@ async def _ocr_upload_fields(
     try:
         ocr = await asyncio.wait_for(
             run_mistral_ocr(content, paper_id, user_id),
-            timeout=180,
+            timeout=300,
         )
         if not ocr.markdown.strip():
             raise RuntimeError("mistral_ocr_empty_markdown")

@@ -333,6 +333,53 @@ interface AppStore {
   dismissExportStatus: (exportId: string) => void;
 }
 
+function omitMapKey<T extends Record<string, unknown>>(map: T, id: string): T {
+  if (!(id in map)) return map;
+  const next = { ...map };
+  delete next[id];
+  return next;
+}
+
+/** Drop every per-paper runtime slice so long sessions don't leak memory. */
+function evictPaperRuntime(s: AppStore, paperId: string): Partial<AppStore> {
+  return {
+    papersById: omitMapKey(s.papersById as Record<string, unknown>, paperId) as AppStore["papersById"],
+    markdownByPaper: omitMapKey(s.markdownByPaper as Record<string, unknown>, paperId) as AppStore["markdownByPaper"],
+    pdfTextLayerEmptyByPaper: omitMapKey(s.pdfTextLayerEmptyByPaper as Record<string, unknown>, paperId) as AppStore["pdfTextLayerEmptyByPaper"],
+    pdfRegionHighlightsByPaper: omitMapKey(s.pdfRegionHighlightsByPaper as Record<string, unknown>, paperId) as AppStore["pdfRegionHighlightsByPaper"],
+    preReadingByPaper: omitMapKey(s.preReadingByPaper as Record<string, unknown>, paperId) as AppStore["preReadingByPaper"],
+    preReadingLoadingByPaper: omitMapKey(s.preReadingLoadingByPaper as Record<string, unknown>, paperId) as AppStore["preReadingLoadingByPaper"],
+    preReadingErrorByPaper: omitMapKey(s.preReadingErrorByPaper as Record<string, unknown>, paperId) as AppStore["preReadingErrorByPaper"],
+    assumptionsByPaper: omitMapKey(s.assumptionsByPaper as Record<string, unknown>, paperId) as AppStore["assumptionsByPaper"],
+    assumptionsLoadingByPaper: omitMapKey(s.assumptionsLoadingByPaper as Record<string, unknown>, paperId) as AppStore["assumptionsLoadingByPaper"],
+    assumptionsErrorByPaper: omitMapKey(s.assumptionsErrorByPaper as Record<string, unknown>, paperId) as AppStore["assumptionsErrorByPaper"],
+    summaryByPaper: omitMapKey(s.summaryByPaper as Record<string, unknown>, paperId) as AppStore["summaryByPaper"],
+    summaryStreamingByPaper: omitMapKey(s.summaryStreamingByPaper as Record<string, unknown>, paperId) as AppStore["summaryStreamingByPaper"],
+    summaryErrorByPaper: omitMapKey(s.summaryErrorByPaper as Record<string, unknown>, paperId) as AppStore["summaryErrorByPaper"],
+    summaryLoadingByPaper: omitMapKey(s.summaryLoadingByPaper as Record<string, unknown>, paperId) as AppStore["summaryLoadingByPaper"],
+    notesByPaper: omitMapKey(s.notesByPaper as Record<string, unknown>, paperId) as AppStore["notesByPaper"],
+    highlightsByPaper: omitMapKey(s.highlightsByPaper as Record<string, unknown>, paperId) as AppStore["highlightsByPaper"],
+    highlightsFetchEpochByPaper: omitMapKey(s.highlightsFetchEpochByPaper as Record<string, unknown>, paperId) as AppStore["highlightsFetchEpochByPaper"],
+    readingStateByPaper: omitMapKey(s.readingStateByPaper as Record<string, unknown>, paperId) as AppStore["readingStateByPaper"],
+    pendingPassageByPaper: omitMapKey(s.pendingPassageByPaper as Record<string, unknown>, paperId) as AppStore["pendingPassageByPaper"],
+    selectionResultByPaper: omitMapKey(s.selectionResultByPaper as Record<string, unknown>, paperId) as AppStore["selectionResultByPaper"],
+    selectionHistoryByPaper: omitMapKey(s.selectionHistoryByPaper as Record<string, unknown>, paperId) as AppStore["selectionHistoryByPaper"],
+    selectionLoadingByPaper: omitMapKey(s.selectionLoadingByPaper as Record<string, unknown>, paperId) as AppStore["selectionLoadingByPaper"],
+    qaResultsByPaper: omitMapKey(s.qaResultsByPaper as Record<string, unknown>, paperId) as AppStore["qaResultsByPaper"],
+    qaLoadingByPaper: omitMapKey(s.qaLoadingByPaper as Record<string, unknown>, paperId) as AppStore["qaLoadingByPaper"],
+    exerciseByPaper: omitMapKey(s.exerciseByPaper as Record<string, unknown>, paperId) as AppStore["exerciseByPaper"],
+    exerciseLoadingByPaper: omitMapKey(s.exerciseLoadingByPaper as Record<string, unknown>, paperId) as AppStore["exerciseLoadingByPaper"],
+    searchResultsByPaper: omitMapKey(s.searchResultsByPaper as Record<string, unknown>, paperId) as AppStore["searchResultsByPaper"],
+    searchLoadingByPaper: omitMapKey(s.searchLoadingByPaper as Record<string, unknown>, paperId) as AppStore["searchLoadingByPaper"],
+    figureReextractInFlight: omitMapKey(s.figureReextractInFlight as Record<string, unknown>, paperId) as AppStore["figureReextractInFlight"],
+    uiPrefs: {
+      ...s.uiPrefs,
+      scrollByPaper: omitMapKey(s.uiPrefs.scrollByPaper, paperId),
+      qaDraftByPaper: omitMapKey(s.uiPrefs.qaDraftByPaper, paperId),
+    },
+  };
+}
+
 export const useStore = create<AppStore>()(
   persist(
     (set, get) => ({
@@ -377,7 +424,9 @@ export const useStore = create<AppStore>()(
           if (keys.length > 8) {
             const activeId = s.paper?.id;
             const evict = keys.find((k) => k !== activeId && k !== p.id);
-            if (evict) delete next[evict];
+            if (evict) {
+              return evictPaperRuntime({ ...s, papersById: next }, evict);
+            }
           }
           return { papersById: next };
         }),
@@ -409,11 +458,7 @@ export const useStore = create<AppStore>()(
           };
         }),
       forgetCachedPaper: (paperId) =>
-        set((s) => {
-          const rest = { ...s.papersById };
-          delete rest[paperId];
-          return { papersById: rest };
-        }),
+        set((s) => evictPaperRuntime(s, paperId)),
       getCachedPaper: (id) => get().papersById[id],
 
       markdownByPaper: {},
@@ -513,19 +558,10 @@ export const useStore = create<AppStore>()(
         return true;
       },
       removeSessionPaper: (id) =>
-        set((s) => {
-          const papersById = { ...s.papersById };
-          const scrollByPaper = { ...s.uiPrefs.scrollByPaper };
-          const qaDraftByPaper = { ...s.uiPrefs.qaDraftByPaper };
-          delete papersById[id];
-          delete scrollByPaper[id];
-          delete qaDraftByPaper[id];
-          return {
-            sessionPapers: s.sessionPapers.filter((sp) => sp.id !== id),
-            papersById,
-            uiPrefs: { ...s.uiPrefs, scrollByPaper, qaDraftByPaper },
-          };
-        }),
+        set((s) => ({
+          ...evictPaperRuntime(s, id),
+          sessionPapers: s.sessionPapers.filter((sp) => sp.id !== id),
+        })),
 
       // Fan out a title change to every place a paper appears in the
       // store so an inline rename in the nav bar updates the session
@@ -666,7 +702,7 @@ export const useStore = create<AppStore>()(
           return {
             pdfRegionHighlightsByPaper: {
               ...s.pdfRegionHighlightsByPaper,
-              [paperId]: [...prev, { ...highlight, id }],
+              [paperId]: [...prev, { ...highlight, id }].slice(-200),
             },
           };
         }),
@@ -683,7 +719,7 @@ export const useStore = create<AppStore>()(
           return {
             pdfRegionHighlightsByPaper: {
               ...s.pdfRegionHighlightsByPaper,
-              [paperId]: [...prev, ...additions],
+              [paperId]: [...prev, ...additions].slice(-200),
             },
           };
         }),
@@ -1117,12 +1153,10 @@ export const useStore = create<AppStore>()(
         crossPaperResults: state.crossPaperResults,
         // TODO(backend): sync region highlights via cached_analysis.region_highlights.
         pdfRegionHighlightsByPaper: state.pdfRegionHighlightsByPaper,
-        // Chrome preferences survive reloads so the reader feels "sticky":
-        // if the user worked in focus mode last session, they return to it
-        // instead of re-picking it every time. Intentionally excludes
-        // `panelVisible` (already persisted elsewhere in this store).
+        // Chrome preferences survive reloads so the reader feels sticky.
         headerHidden: state.headerHidden,
         focusMode: state.focusMode,
+        panelVisible: state.panelVisible,
         analysisFontScale: state.analysisFontScale,
         analysisFontFamily: state.analysisFontFamily,
         uiPrefs: state.uiPrefs,

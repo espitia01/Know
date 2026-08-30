@@ -220,6 +220,59 @@ export async function buildStreamObjectResponse(
   });
 }
 
+/**
+ * Wrap an AI SDK text body as the Know SSE envelope (`chunk` / `done` /
+ * `error`) that `consumeSelectionSse` already understands.
+ */
+export function knowSseFromTextBody(
+  body: ReadableStream<Uint8Array>,
+  extraHeaders: Record<string, string> = {},
+): Response {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let accumulated = "";
+  const sse = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const delta = decoder.decode(value, { stream: true });
+          if (!delta) continue;
+          accumulated += delta;
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: "chunk", text: delta })}\n\n`),
+          );
+        }
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "done", full_text: accumulated })}\n\n`),
+        );
+        controller.close();
+      } catch (e) {
+        const message = e instanceof Error ? e.message : "stream error";
+        try {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ type: "error", message })}\n\n`),
+          );
+          controller.close();
+        } catch {
+          /* already closed */
+        }
+      }
+    },
+  });
+  return new Response(sse, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-store, no-transform",
+      "X-Accel-Buffering": "no",
+      ...extraHeaders,
+    },
+  });
+}
+
 /** Same headers as `buildStreamObjectResponse` for `toTextStreamResponse` fallbacks. */
 export function streamResponseHeaders(model: string): Record<string, string> {
   return {

@@ -101,12 +101,19 @@ export function AnalysisPanel({ paperId, position, onCyclePosition, selectionThr
   // make a fresh selection just to get back into their prior analyses.
   // The tab hides again only when history is empty AND nothing is
   // streaming.
-  const showSelectionTab =
-    selectionLoading || selectionResult !== null || selectionHistory.length > 0;
-
   const cachedForPanel = useStore(useCallback((s) => s.papersById[paperId], [paperId]));
   const panelPaper = useStore((s) => s.paper);
   const effectivePaper = panelPaper?.id === paperId ? panelPaper : cachedForPanel;
+  const cachedSelections =
+    (effectivePaper?.id === paperId
+      ? effectivePaper?.cached_analysis?.selections?.length
+      : 0) ?? 0;
+  const showSelectionTab =
+    selectionLoading ||
+    selectionResult !== null ||
+    selectionHistory.length > 0 ||
+    cachedSelections > 0;
+
   const ocrMarkdown = usePaperOcrMarkdown(paperId);
   const paperForArtifacts = useMemo(
     () => paperWithOcrMarkdown(effectivePaper, ocrMarkdown),

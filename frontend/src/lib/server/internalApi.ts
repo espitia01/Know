@@ -11,6 +11,8 @@
 
 import "server-only";
 
+import { normalizeModelSlug } from "@/lib/modelLabels";
+
 const BASE = process.env.INTERNAL_BACKEND_URL || "";
 const TOKEN = process.env.INTERNAL_BACKEND_TOKEN || "";
 
@@ -208,8 +210,10 @@ export async function resolveStreamModelOverride(
 ): Promise<string> {
   const wanted = typeof body.model === "string" ? body.model.trim() : "";
   if (!wanted) return defaultModel;
+  const canonical = normalizeModelSlug(wanted) || wanted;
   const allowed = await fetchAllowedModels(userId, signal);
-  return allowed.includes(wanted) ? wanted : defaultModel;
+  if (allowed.includes(canonical) || allowed.includes(wanted)) return canonical;
+  return defaultModel;
 }
 
 // ----------------------------------------------------------------
@@ -321,8 +325,8 @@ export async function upsertCachedAnalysis(args: {
         value: args.value,
       }),
     });
-  } catch {
-    /* persistence is best-effort; the user already saw the streamed answer */
+  } catch (err) {
+    console.error("[internalApi] cached-analysis upsert failed", err);
   }
 }
 

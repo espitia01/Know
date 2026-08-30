@@ -59,10 +59,10 @@ export const MODEL_ORDER = [
   "claude-haiku-4-5",
   "gpt-5-mini",
   "mistral-medium-latest",
-  "claude-sonnet-4-6",
+  "claude-sonnet-5",
   "gpt-5",
   "mistral-large-latest",
-  "claude-opus-4-7",
+  "claude-opus-5",
   "gpt-5.4",
 ] as const;
 

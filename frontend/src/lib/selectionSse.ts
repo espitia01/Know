@@ -17,6 +17,7 @@ export async function consumeSelectionSse(
   let accumulated = "";
   let buffer = "";
   let finished = false;
+  let mode: "unknown" | "sse" | "raw" = "unknown";
   /** Coalesce ultra-frequent SSE chunk events → one UI update per frame (avoids main-thread stalls). */
   let chunkRaf: number | null = null;
 
@@ -41,6 +42,24 @@ export async function consumeSelectionSse(
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
+    if (mode === "unknown") {
+      const trimmed = buffer.trimStart();
+      if (!trimmed) continue;
+      mode = trimmed.startsWith("data:") ? "sse" : "raw";
+    }
+    if (mode === "raw") {
+      accumulated += buffer;
+      buffer = "";
+      if (typeof window === "undefined") {
+        emitAccumulatedChunk();
+      } else if (chunkRaf == null) {
+        chunkRaf = window.requestAnimationFrame(() => {
+          chunkRaf = null;
+          emitAccumulatedChunk();
+        });
+      }
+      continue;
+    }
     const lines = buffer.split("\n");
     buffer = lines.pop() || "";
 

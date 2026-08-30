@@ -293,25 +293,26 @@ def group_panels_into_figures(
 def render_composite_from_pdf(
     pdf_bytes: bytes,
     fig: FigureGroup,
+    *,
+    doc: Any | None = None,
 ) -> bytes | None:
     """Clip the source PDF to the union bbox of OCR panels."""
     if not fig.bbox:
         return None
+    owns_doc = doc is None
     try:
         import fitz  # PyMuPDF
 
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if doc is None:
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         if fig.page < 0 or fig.page >= len(doc):
-            doc.close()
             return None
         page = doc[fig.page]
         x0, y0, x1, y1 = fig.bbox
         scale = 72.0 / max(fig.dpi, 1)
         rect = fitz.Rect(x0 * scale, y0 * scale, x1 * scale, y1 * scale)
         pix = page.get_pixmap(clip=rect, dpi=200)
-        data = pix.tobytes("png")
-        doc.close()
-        return data
+        return pix.tobytes("png")
     except Exception:
         logger.warning(
             "Composite figure render failed for %s page %s",
@@ -320,6 +321,12 @@ def render_composite_from_pdf(
             exc_info=True,
         )
         return None
+    finally:
+        if owns_doc and doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
 
 
 def apply_composite_figures(
@@ -341,6 +348,14 @@ def apply_composite_figures(
     composite_manifest: list[OcrImage] = []
     pending_composites: list[tuple[str, bytes]] = []
 
+    shared_doc = None
+    try:
+        import fitz
+
+        shared_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    except Exception:
+        logger.warning("Could not open PDF for composite figures", exc_info=True)
+
     for idx, md in enumerate(page_markdown):
         page_index, dpi = page_meta[idx] if idx < len(page_meta) else (idx, 200)
         rewritten, groups = group_panels_into_figures(
@@ -356,7 +371,7 @@ def apply_composite_figures(
         page_all_rendered = bool(groups)
 
         for group in groups:
-            png = render_composite_from_pdf(pdf_bytes, group)
+            png = render_composite_from_pdf(pdf_bytes, group, doc=shared_doc)
             if not png:
                 page_all_rendered = False
                 logger.warning(
@@ -385,6 +400,12 @@ def apply_composite_figures(
             pending_composites.extend(page_pending)
         else:
             new_pages.append(md)
+
+    if shared_doc is not None:
+        try:
+            shared_doc.close()
+        except Exception:
+            pass
 
     if pending_composites:
         _persist_ocr_images(paper_id, user_id, pending_composites)

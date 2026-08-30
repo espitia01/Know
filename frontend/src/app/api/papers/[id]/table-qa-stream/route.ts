@@ -20,6 +20,7 @@ import { contextBudget } from "@/lib/server/promptBudgets";
 import { TableAnalysisSchema, type TableAnalysis } from "@/lib/server/schemas";
 import { buildTablePrompt } from "@/lib/server/prompts/table";
 import { providerOptionsForSlug } from "@/lib/server/promptCache";
+import { knowSseFromTextBody } from "@/lib/server/streamObjectResponse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -102,6 +103,7 @@ export async function POST(
       model: fastModel,
     });
     usageToken = reserve.token;
+    if (reserve.model) fastModel = reserve.model;
   } catch (e) {
     if (e instanceof InternalApiError) {
       const detail = e.detail as { detail?: Record<string, unknown> } | undefined;
@@ -185,11 +187,16 @@ export async function POST(
     return jsonError(502, "provider_error", message);
   }
 
-  return result.toTextStreamResponse({
+  const textRes = result.toTextStreamResponse({
     headers: {
       "Cache-Control": "no-store, no-transform",
       "X-Accel-Buffering": "no",
       "X-Know-Model": fastModel,
     },
   });
+  if (!textRes.body) {
+    await releaseOnFailure();
+    return jsonError(502, "provider_error", "Model returned an empty stream");
+  }
+  return knowSseFromTextBody(textRes.body, { "X-Know-Model": fastModel });
 }

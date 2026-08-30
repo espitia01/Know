@@ -275,6 +275,17 @@ async def selection_stream(
                 released = True
             yield _sse_event({"type": "error", "message": exc.message})
         except asyncio.CancelledError:
+            if accumulated.strip():
+                try:
+                    _persist_selection_streamed(
+                        paper_id, user_id,
+                        action=action, selected_text=selected_clean,
+                        question=question,
+                        explanation=_normalize_latex_delimiters(accumulated),
+                        model=model_used,
+                    )
+                except Exception:
+                    logger.exception("Failed to persist partial selection for %s", paper_id)
             if not released and not accumulated:
                 release_usage(token)
                 released = True
@@ -740,6 +751,15 @@ async def figure_qa_stream(
                 released = True
             yield _sse_event({"type": "error", "message": exc.message})
         except asyncio.CancelledError:
+            if accumulated.strip():
+                try:
+                    _persist_figure_streamed(
+                        paper_id, user_id,
+                        figure_id=fig_id, question=question,
+                        description=accumulated, model=model_used,
+                    )
+                except Exception:
+                    logger.exception("Failed to persist partial figure analysis for %s", paper_id)
             if not released and not accumulated:
                 release_usage(token)
                 released = True

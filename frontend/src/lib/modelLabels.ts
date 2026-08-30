@@ -7,7 +7,9 @@ export const MODEL_LABEL: Record<
   { short: string; tone: ModelTone; provider: ProviderName }
 > = {
   "claude-haiku-4-5": { short: "Haiku", tone: "blue", provider: "anthropic" },
+  "claude-sonnet-5": { short: "Sonnet", tone: "violet", provider: "anthropic" },
   "claude-sonnet-4-6": { short: "Sonnet", tone: "violet", provider: "anthropic" },
+  "claude-opus-5": { short: "Opus", tone: "amber", provider: "anthropic" },
   "claude-opus-4-7": { short: "Opus", tone: "amber", provider: "anthropic" },
   "gpt-5-mini": { short: "GPT-5 mini", tone: "blue", provider: "openai" },
   "gpt-5": { short: "GPT-5", tone: "violet", provider: "openai" },
@@ -33,8 +35,16 @@ export function modelLabel(slug?: string | null): {
 
 /** Keep in sync with `MODEL_ALIASES` in `backend/app/gating.py`. */
 const MODEL_ALIASES: Record<string, string> = {
-  "claude-opus-4": "claude-opus-4-7",
-  "claude-sonnet-4-5": "claude-sonnet-4-6",
+  "claude-opus-4": "claude-opus-5",
+  "claude-opus-4-0": "claude-opus-5",
+  "claude-opus-4-1": "claude-opus-5",
+  "claude-opus-4-5": "claude-opus-5",
+  "claude-opus-4-6": "claude-opus-5",
+  "claude-opus-4-7": "claude-opus-5",
+  "claude-opus-4-8": "claude-opus-5",
+  "claude-sonnet-4-0": "claude-sonnet-5",
+  "claude-sonnet-4-5": "claude-sonnet-5",
+  "claude-sonnet-4-6": "claude-sonnet-5",
   "claude-haiku-4": "claude-haiku-4-5",
   "gpt-4.1": "gpt-5",
   "gpt-4.1-mini": "gpt-5-mini",

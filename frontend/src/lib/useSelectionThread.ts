@@ -111,8 +111,30 @@ export function useSelectionThread(paperId: string) {
           streaming,
           created_at: streaming ? provisional.created_at : Date.now(),
         };
-        upsertSelectionInHistoryForPaper(paperId, next);
+        // Keep stream tokens out of history so PdfViewer underlines don't
+        // recompute on every SSE chunk. History is written at start + done.
         setSelectionResultForPaper(paperId, next);
+        if (!streaming) {
+          upsertSelectionInHistoryForPaper(paperId, next);
+          const snap = useStore.getState();
+          const cached =
+            snap.papersById[paperId]?.cached_analysis?.selections ??
+            (snap.paper?.id === paperId ? snap.paper.cached_analysis?.selections : undefined) ??
+            [];
+          const entry = {
+            action: next.action,
+            selected_text: next.selected_text,
+            question: next.question,
+            explanation: text,
+            model: next.model,
+            streaming: false,
+            created_at: next.created_at,
+            regions: next.regions,
+          };
+          snap.updateCachedAnalysis(paperId, {
+            selections: [entry, ...(Array.isArray(cached) ? cached : [])].slice(0, 50),
+          });
+        }
       };
 
       void (async () => {
@@ -153,7 +175,17 @@ export function useSelectionThread(paperId: string) {
               },
             },
           );
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted) {
+            const current = useStore.getState().selectionResultByPaper[paperId];
+            if (current?.streaming && current.clientKey === clientKey) {
+              const stopped = { ...current, streaming: false };
+              setSelectionResultForPaper(paperId, stopped);
+              if (stopped.explanation?.trim()) {
+                upsertSelectionInHistoryForPaper(paperId, stopped);
+              }
+            }
+            return;
+          }
           if (streamError) throw new Error(streamError);
           if (!finalText.trim()) {
             throw new Error("The model didn't return a complete answer. Please try again.");
@@ -161,7 +193,17 @@ export function useSelectionThread(paperId: string) {
           updateExplanation(finalText, false);
           bumpUsageRefresh();
         } catch (e) {
-          if (controller.signal.aborted) return;
+          if (controller.signal.aborted) {
+            const current = useStore.getState().selectionResultByPaper[paperId];
+            if (current?.streaming && current.clientKey === clientKey) {
+              const stopped = { ...current, streaming: false };
+              setSelectionResultForPaper(paperId, stopped);
+              if (stopped.explanation?.trim()) {
+                upsertSelectionInHistoryForPaper(paperId, stopped);
+              }
+            }
+            return;
+          }
           const message = e instanceof Error ? e.message : "Selection failed.";
           const errResult: SelectionAnalysisResult = {
             ...provisional,

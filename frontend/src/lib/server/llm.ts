@@ -18,10 +18,10 @@ import { openai } from "@ai-sdk/openai";
 import { mistral } from "@ai-sdk/mistral";
 import { gateway } from "@ai-sdk/gateway";
 import type { LanguageModel } from "ai";
+import { normalizeModelSlug } from "@/lib/modelLabels";
+import { providerForSlug, toGatewayModelId } from "@/lib/modelGateway";
 
 export type ModelRole = "analysis" | "fast" | "vision";
-
-type ProviderName = "anthropic" | "openai" | "mistral";
 
 /**
  * Default slugs — Mistral Small for analysis and fast roles. Override per
@@ -56,29 +56,16 @@ function preferGateway(): boolean {
   return false;
 }
 
-export function providerForSlug(slug: string): ProviderName {
-  if (slug.startsWith("claude-")) return "anthropic";
-  if (slug.startsWith("gpt-")) return "openai";
-  if (
-    slug.startsWith("mistral-") ||
-    slug.startsWith("ministral-") ||
-    slug.startsWith("magistral-") ||
-    slug.startsWith("pixtral-")
-  ) {
-    return "mistral";
-  }
-  return "anthropic";
-}
-
 /** Build a language model from a provider slug (Settings or env default). */
 export function getModelFromSlug(slug: string): LanguageModel {
-  const p = providerForSlug(slug);
+  const canonical = normalizeModelSlug(slug) || slug;
+  const p = providerForSlug(canonical);
   if (preferGateway()) {
-    return gateway(`${p}/${slug}`);
+    return gateway(toGatewayModelId(canonical));
   }
-  if (p === "openai") return openai(slug);
-  if (p === "mistral") return mistral(slug);
-  return anthropic(slug);
+  if (p === "openai") return openai(canonical);
+  if (p === "mistral") return mistral(canonical);
+  return anthropic(canonical);
 }
 
 export function getModel(role: ModelRole): LanguageModel {
@@ -112,6 +99,7 @@ function isTopTier(slug: string): boolean {
 function isBalanced(slug: string): boolean {
   return (
     slug.includes("sonnet") ||
+    slug === "gpt-5" ||
     slug.includes("gpt-4.1") ||
     slug.includes("mistral-medium")
   );

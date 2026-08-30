@@ -1,5 +1,5 @@
 /** Anthropic prompt caching — ephemeral 5m TTL per AI SDK provider options. */
-import { providerForSlug } from "@/lib/server/llm";
+import { providerForSlug } from "@/lib/modelGateway";
 
 export const ANTHROPIC_CACHE_EPHEMERAL = {
   anthropic: {
@@ -9,8 +9,12 @@ export const ANTHROPIC_CACHE_EPHEMERAL = {
 
 /** Apply Anthropic prompt caching only for Claude slugs. */
 export function providerOptionsForSlug(slug: string) {
-  if (providerForSlug(slug) === "anthropic") {
-    return ANTHROPIC_CACHE_EPHEMERAL;
+  try {
+    if (providerForSlug(slug) === "anthropic") {
+      return ANTHROPIC_CACHE_EPHEMERAL;
+    }
+  } catch {
+    return undefined;
   }
   return undefined;
 }

@@ -18,6 +18,8 @@ export const dynamic = "force-dynamic";
 const EXPECTED_KEYS = [
   "ANTHROPIC_API_KEY",
   "AI_GATEWAY_API_KEY",
+  "OPENAI_API_KEY",
+  "MISTRAL_API_KEY",
   "INTERNAL_BACKEND_URL",
   "INTERNAL_BACKEND_TOKEN",
   "SUPABASE_URL",

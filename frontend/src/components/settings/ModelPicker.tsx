@@ -6,6 +6,7 @@ import {
   PROVIDER_LABEL,
   type ProviderName,
 } from "@/components/ProviderLogo";
+import { normalizeModelSlug } from "@/lib/modelLabels";
 
 export type ModelInfo = {
   id: string;
@@ -66,31 +67,31 @@ export const MODEL_CATALOG: ModelInfo[] = [
   },
   {
     id: "claude-haiku-4-5",
-    name: "Claude Haiku",
+    name: "Claude Haiku 4.5",
     provider: "anthropic",
     tier: "fast",
     description:
-      "Anthropic's fast, low-cost model. Excellent for selection Q&A and follow-ups; strong writing voice.",
+      "Anthropic's fast model. Excellent for selection Q&A and follow-ups; strong writing voice.",
   },
   {
-    id: "claude-sonnet-4-6",
-    name: "Claude Sonnet",
+    id: "claude-sonnet-5",
+    name: "Claude Sonnet 5",
     provider: "anthropic",
     tier: "balanced",
     description:
-      "Anthropic's balanced model. Reliable for Summary and Assumptions across most paper lengths.",
+      "Anthropic's current balanced model. Reliable for Summary and Assumptions across most paper lengths.",
   },
   {
-    id: "claude-opus-4-7",
-    name: "Claude Opus",
+    id: "claude-opus-5",
+    name: "Claude Opus 5",
     provider: "anthropic",
     tier: "top",
     description:
-      "Anthropic's deepest analysis model. Reserve for hard derivations and dense theory papers.",
+      "Anthropic's deepest current analysis model. Reserve for hard derivations and dense theory papers.",
   },
 ];
 
-const CAPABILITY_ORDER: ModelInfo["tier"][] = ["fast", "balanced", "top"];
+const PROVIDER_ORDER: ProviderName[] = ["mistral", "openai", "anthropic"];
 
 const CAPABILITY_LABEL: Record<ModelInfo["tier"], string> = {
   fast: "Fast",
@@ -111,9 +112,9 @@ function providerConfigured(provider: ProviderName, keys: ProviderKeys): boolean
 }
 
 function providerKeyHint(provider: ProviderName): string {
-  if (provider === "openai") return "KNOW_OPENAI_API_KEY";
-  if (provider === "mistral") return "KNOW_MISTRAL_API_KEY";
-  return "KNOW_ANTHROPIC_API_KEY";
+  if (provider === "openai") return "OPENAI_API_KEY (Vercel) or KNOW_OPENAI_API_KEY (Railway)";
+  if (provider === "mistral") return "MISTRAL_API_KEY (Vercel) or KNOW_MISTRAL_API_KEY (Railway)";
+  return "ANTHROPIC_API_KEY (Vercel) or KNOW_ANTHROPIC_API_KEY (Railway)";
 }
 
 function tierAllows(modelId: string, allowedIds: string[]): boolean {
@@ -157,13 +158,14 @@ export function ModelPicker({
         role="radiogroup"
         aria-label={label}
       >
-        {CAPABILITY_ORDER.map((capTier) => {
-          const models = MODEL_CATALOG.filter((m) => m.tier === capTier);
+        {PROVIDER_ORDER.map((provider) => {
+          const models = MODEL_CATALOG.filter((m) => m.provider === provider);
           if (models.length === 0) return null;
           return (
-            <div key={capTier} className="space-y-1.5">
-              <p className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                {CAPABILITY_LABEL[capTier]}
+            <div key={provider} className="space-y-1.5">
+              <p className="flex items-center gap-1.5 px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                <ProviderLogo provider={provider} size={12} tone="none" />
+                {PROVIDER_LABEL[provider]}
               </p>
               <div className="space-y-1">
                 {models.map((m) => {
@@ -171,10 +173,10 @@ export function ModelPicker({
                   const allowed = tierAllows(m.id, allowedIds);
                   const disabled = !configured || !allowed;
                   const planBadge = !allowed ? requiredPlanBadge(m) : null;
-                  const isSelected = selected === m.id;
+                  const isSelected = normalizeModelSlug(selected) === m.id;
                   const title = disabled
                     ? !configured
-                      ? `Server is not configured for ${PROVIDER_LABEL[m.provider]} yet — ask your admin to set ${providerKeyHint(m.provider)}`
+                      ? `Server is not configured for ${PROVIDER_LABEL[m.provider]} yet — set ${providerKeyHint(m.provider)}, or enable AI Gateway.`
                       : `Available on the ${planBadge} plan.`
                     : undefined;
 
@@ -191,24 +193,26 @@ export function ModelPicker({
                       onClick={() => {
                         if (!disabled) onChange(m.id);
                       }}
-                      className={`flex w-full items-start gap-3 rounded-xl px-3 py-2.5 text-left transition-all duration-200 ${
+                      className={`flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left motion-safe:duration-150 ${
                         disabled
-                          ? "cursor-not-allowed opacity-45 glass-subtle"
+                          ? "cursor-not-allowed opacity-45 bg-muted/[0.08]"
                           : "cursor-pointer"
                       } ${
                         !disabled && isSelected
-                          ? "glass-strong shadow-sm"
+                          ? "border border-border/50 bg-card/40"
                           : !disabled
-                            ? "glass-subtle hover:bg-accent"
-                            : ""
+                            ? "border border-transparent hover:bg-accent/50"
+                            : "border border-transparent"
                       }`}
                     >
-                      <ProviderLogo provider={m.provider} size={16} tone="none" />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="text-[13px] font-medium text-foreground">{m.name}</p>
+                          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                            {CAPABILITY_LABEL[m.tier]}
+                          </span>
                           {planBadge && (
-                            <span className="text-[10px] font-medium text-muted-foreground glass-subtle px-1.5 py-0.5 rounded">
+                            <span className="text-[10px] font-medium text-muted-foreground bg-muted/40 px-1.5 py-0.5 rounded">
                               {planBadge}
                             </span>
                           )}

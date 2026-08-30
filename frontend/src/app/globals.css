@@ -1492,9 +1492,8 @@ body::before {
 }
 .glass-hover:hover {
   background: rgb(var(--surface-tint) / 0.82);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-sm);
   border-color: rgb(var(--surface-line) / 0.10);
-  transform: translateY(-1px);
 }
 
 /* Primary button — keeps the "confident, dark" feel in both modes.
@@ -1512,9 +1511,8 @@ body::before {
 }
 .btn-primary-glass:hover {
   box-shadow:
-    var(--shadow-md),
+    var(--shadow-sm),
     inset 0 1px 0 rgb(255 255 255 / 0.08);
-  transform: translateY(-0.5px);
   opacity: 0.94;
 }
 .btn-primary-glass:active {
@@ -1615,14 +1613,14 @@ body::before {
   }
 }
 .analysis-panel-tabs [data-slot="tabs-trigger"]::after {
-  left: 50% !important;
+  left: 12% !important;
   right: auto !important;
-  width: 1.1rem !important;
-  max-width: calc(100% - 0.4rem) !important;
-  height: 1px !important;
-  bottom: 0 !important;
-  border-radius: 2px;
-  transform: translateX(-50%) !important;
+  width: 76% !important;
+  max-width: calc(100% - 0.5rem) !important;
+  height: 1.5px !important;
+  bottom: 1px !important;
+  border-radius: 1px;
+  transform: none !important;
   transform-origin: center bottom;
 }
 

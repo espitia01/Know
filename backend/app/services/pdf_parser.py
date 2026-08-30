@@ -34,6 +34,47 @@ MAX_PIXMAP_PIXELS = 6_000_000  # ~4k × 1.5k cap on rendered figure size
 MAX_CACHED_ITEMS = 50
 
 
+def _cached_analysis_richer(local: dict | None, remote: dict | None) -> dict:
+    """Union two cached_analysis blobs, keeping the longer list / fatter object."""
+    left = dict(local or {})
+    right = dict(remote or {})
+    if not left:
+        return right
+    if not right:
+        return left
+    list_keys = (
+        "selections",
+        "qa_sessions",
+        "figure_analyses",
+        "table_analyses",
+        "code_analyses",
+    )
+    object_keys = (
+        "summary",
+        "summary_lite",
+        "summary_deep",
+        "pre_reading",
+        "assumptions",
+    )
+    out = dict(left)
+    for key, value in right.items():
+        current = out.get(key)
+        if current in (None, {}, []):
+            out[key] = value
+            continue
+        if key in list_keys and isinstance(value, list) and isinstance(current, list):
+            if len(value) > len(current):
+                out[key] = value
+        elif key in object_keys and isinstance(value, dict):
+            cur = current if isinstance(current, dict) else {}
+            try:
+                if len(json.dumps(value, default=str)) > len(json.dumps(cur, default=str)):
+                    out[key] = value
+            except TypeError:
+                out[key] = value
+    return out
+
+
 def append_capped(paper_cache: dict, key: str, item, limit: int = MAX_CACHED_ITEMS) -> list:
     """Append ``item`` to ``paper_cache[key]`` and trim to the last ``limit``
     entries. Returns the (now capped) list so callers can continue to use it.
@@ -745,13 +786,17 @@ def _load_paper_locked(paper_id: str, user_id: str | None) -> ParsedPaper | None
     if meta_path.exists():
         data = json.loads(meta_path.read_text())
         paper = ParsedPaper(**data)
-        if user_id and (not paper.cached_analysis or not paper.figures):
+        if user_id:
             from .db import get_paper_meta
             row = get_paper_meta(paper_id, user_id)
             changed = False
-            if row and not paper.cached_analysis and row.get("cached_analysis"):
-                paper.cached_analysis = row.get("cached_analysis") or {}
-                changed = True
+            if row and row.get("cached_analysis"):
+                merged = _cached_analysis_richer(
+                    paper.cached_analysis, row.get("cached_analysis")
+                )
+                if merged != (paper.cached_analysis or {}):
+                    paper.cached_analysis = merged
+                    changed = True
             if row and not paper.figures and row.get("figures"):
                 # Per F-FIGURES: backfill legacy local paper.json files whose
                 # metadata predates the persistent figures column.

@@ -17,7 +17,6 @@ import {
 } from "@/lib/analysisState";
 import { ensureDisplayMath, firstSentence } from "@/lib/text";
 import {
-  hasSummaryDeepBody,
   summaryIsComplete,
 } from "@/lib/summaryState";
 import {
@@ -94,8 +93,9 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
   const isComplete = summaryIsComplete(summaryRaw);
   const isGenerating =
     summaryLoading || hasActiveRequest(paperId, "summary");
-  const summary = isComplete ? summaryRaw : null;
-  const isLoading = isGenerating && !isComplete;
+  const summary = hasSummaryBody(summaryRaw) ? summaryRaw : null;
+  const isLoading = isGenerating && !hasSummaryBody(summaryRaw);
+  const liteOnly = Boolean(summary && !isComplete && !isGenerating);
 
   const runSummaryStream = useCallback(
     (opts?: { force?: boolean }) => {
@@ -128,21 +128,17 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
 
   if (!summary) {
     const errMsg = manualError || storedError;
-    const liteOnly =
-      hasSummaryBody(summaryRaw) && !hasSummaryDeepBody(summaryRaw);
     return (
       <EmptyState
         title={errMsg ? "Failed to generate summary" : "Summary not available yet"}
         body={
           errMsg ||
-          (liteOnly
-            ? "The overview finished but the deep sections did not. Retry to generate methodology, results, and discussion."
-            : "Generate a detailed overview, contributions, methods, results, and limitations. Generation often takes 30–90 seconds once started.")
+          "Generate a detailed overview, contributions, methods, results, and limitations. Generation often takes 30–90 seconds once started."
         }
         cta={{
-          label: errMsg || liteOnly ? "Retry" : "Generate Summary",
+          label: errMsg ? "Retry" : "Generate Summary",
           onClick: () => {
-            void runSummaryStream(liteOnly ? undefined : { force: true });
+            void runSummaryStream({ force: true });
           },
         }}
       />
@@ -194,6 +190,23 @@ export function SummaryPanel({ paperId }: SummaryPanelProps) {
             className="shrink-0 rounded-md border border-border/50 bg-card/35 px-3 py-1.5 text-[var(--text-xs)] font-medium text-foreground hover:bg-accent/50 motion-safe:duration-150"
           >
             Regenerate
+          </button>
+        </div>
+      )}
+
+      {liteOnly && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-lg)] border border-border/50 bg-muted/[0.06] px-4 py-3">
+          <p className="text-[var(--text-xs)] text-muted-foreground">
+            Overview is ready. Generate methodology, results, and discussion.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              void runSummaryStream();
+            }}
+            className="shrink-0 rounded-md border border-border/50 bg-card/35 px-3 py-1.5 text-[var(--text-xs)] font-medium text-foreground hover:bg-accent/50 motion-safe:duration-150"
+          >
+            Continue
           </button>
         </div>
       )}
