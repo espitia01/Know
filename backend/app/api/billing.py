@@ -33,9 +33,14 @@ router = APIRouter(tags=["billing"])
 PRICE_TO_TIER: dict[str, str] = {}
 
 
+TIER_ORDER = {"free": 0, "scholar": 1, "researcher": 2}
+CURRENT_SUB_STATUSES = frozenset({"active", "trialing", "past_due", "unpaid", "paused"})
+
+
 def _init_stripe():
     if settings.stripe_secret_key:
         stripe.api_key = settings.stripe_secret_key
+        stripe.max_network_retries = 3
     if settings.stripe_price_scholar:
         PRICE_TO_TIER[settings.stripe_price_scholar] = "scholar"
     if settings.stripe_price_researcher:
@@ -44,6 +49,165 @@ def _init_stripe():
 
 
 _init_stripe()
+
+
+def redirect_hosts() -> set[str]:
+    """Hosts allowed in Stripe success/cancel/return URLs.
+
+    Checkout used to allow only ``localhost:3000`` plus a manually parsed
+    CORS list. Production deploys that set ``KNOW_NEXTJS_RATELIMIT_URL``
+    but forgot a host in CORS would 400 every checkout with
+    "Invalid redirect URL".
+    """
+    from urllib.parse import urlparse
+
+    hosts = {"localhost:3000", "127.0.0.1:3000"}
+
+    def _add(raw: str) -> None:
+        raw = (raw or "").strip()
+        if not raw:
+            return
+        parsed = urlparse(raw if "://" in raw else f"https://{raw}")
+        if parsed.netloc:
+            hosts.add(parsed.netloc)
+
+    extra = os.environ.get("KNOW_CORS_ORIGINS", "") or getattr(settings, "cors_origins", "") or ""
+    for origin in extra.split(","):
+        _add(origin)
+    _add(getattr(settings, "nextjs_ratelimit_url", "") or "")
+    return hosts
+
+
+def is_safe_redirect_url(url: str, hosts: set[str] | None = None) -> bool:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url or "")
+    allowed = hosts if hosts is not None else redirect_hosts()
+    return parsed.scheme in ("http", "https") and parsed.netloc in allowed
+
+
+def _sub_status(sub) -> str:
+    if isinstance(sub, dict):
+        return str(sub.get("status") or "")
+    return str(getattr(sub, "status", "") or "")
+
+
+def _sub_id(sub) -> str:
+    if isinstance(sub, dict):
+        return str(sub.get("id") or "")
+    return str(getattr(sub, "id", "") or "")
+
+
+def _sub_price_id(sub) -> str:
+    try:
+        items = sub["items"]["data"]
+        if not items:
+            return ""
+        price = items[0]["price"]
+        if isinstance(price, str):
+            return price
+        if isinstance(price, dict):
+            return str(price.get("id") or "")
+        return str(getattr(price, "id", "") or "")
+    except Exception:
+        return ""
+
+
+def _list_current_subscriptions(customer_id: str):
+    """Subscriptions that still bill — not canceled / incomplete_expired."""
+    subs = stripe.Subscription.list(customer=customer_id, limit=20)
+    return [s for s in subs.data if _sub_status(s) in CURRENT_SUB_STATUSES]
+
+
+def _cancel_subscription(sub) -> None:
+    sid = _sub_id(sub)
+    try:
+        stripe.Subscription.cancel(sid, prorate=True, invoice_now=True)
+    except TypeError:
+        stripe.Subscription.delete(sid)
+
+
+def dedupe_customer_subscriptions(customer_id: str, prefer_price_id: str | None = None) -> int:
+    """Keep one live subscription; prorate-cancel the rest.
+
+    This is the server-side fix for the double-checkout bug: a signed-in
+    Scholar who clicked Researcher on the landing page used to get a
+    second Checkout Session on the same customer.
+    """
+    current = _list_current_subscriptions(customer_id)
+    if len(current) <= 1:
+        return 0
+    keep = None
+    if prefer_price_id:
+        keep = next((s for s in current if _sub_price_id(s) == prefer_price_id), None)
+    if keep is None:
+        keep = max(
+            current,
+            key=lambda s: TIER_ORDER.get(PRICE_TO_TIER.get(_sub_price_id(s), "free"), 0),
+        )
+    keep_id = _sub_id(keep)
+    cancelled = 0
+    logger.error(
+        "Customer %s has %d live subscriptions; keeping %s",
+        customer_id,
+        len(current),
+        keep_id,
+    )
+    for s in current:
+        if _sub_id(s) == keep_id:
+            continue
+        try:
+            _cancel_subscription(s)
+            cancelled += 1
+        except stripe.StripeError:
+            logger.exception("Failed to cancel orphan subscription %s", _sub_id(s))
+    return cancelled
+
+
+def _load_current_subscription(customer_id: str):
+    current = _list_current_subscriptions(customer_id)
+    if len(current) > 1:
+        dedupe_customer_subscriptions(customer_id)
+        current = _list_current_subscriptions(customer_id)
+    if not current:
+        raise HTTPException(status_code=400, detail="No active subscription found")
+    return current[0]
+
+
+def _load_active_subscription(customer_id: str):
+    return _load_current_subscription(customer_id)
+
+
+def _invoice_preview(customer_id: str, sub_id: str, item_id: str, new_price_id: str):
+    """Simulate the invoice for a price swap. Stripe renamed this API twice."""
+    modern = dict(
+        customer=customer_id,
+        subscription=sub_id,
+        subscription_details={
+            "items": [{"id": item_id, "price": new_price_id}],
+            "proration_behavior": "create_prorations",
+        },
+    )
+    legacy = dict(
+        customer=customer_id,
+        subscription=sub_id,
+        subscription_items=[{"id": item_id, "price": new_price_id}],
+        subscription_proration_behavior="create_prorations",
+    )
+    errors: list[Exception] = []
+    if hasattr(stripe.Invoice, "create_preview"):
+        for params in (modern, legacy):
+            try:
+                return stripe.Invoice.create_preview(**params)  # type: ignore[attr-defined]
+            except (TypeError, AttributeError, stripe.InvalidRequestError) as exc:
+                errors.append(exc)
+    if hasattr(stripe.Invoice, "upcoming"):
+        try:
+            return stripe.Invoice.upcoming(**legacy)  # type: ignore[attr-defined]
+        except (TypeError, AttributeError, stripe.InvalidRequestError) as exc:
+            errors.append(exc)
+    logger.error("Invoice preview failed after fallbacks: %s", errors[-1] if errors else "no API")
+    raise HTTPException(status_code=502, detail="Could not preview the plan change. Please try again.")
 
 
 @router.post("/api/billing/checkout-session")
@@ -71,27 +235,21 @@ async def create_checkout_session(body: dict, user_id: str = Depends(require_aut
         customer_id = customer.id
         update_user_stripe_customer(user_id, customer_id)
 
+    if customer_id:
+        existing = _list_current_subscriptions(customer_id)
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "already_subscribed",
+                    "message": "You already have an active subscription. Change plans from Settings instead of starting a new checkout.",
+                },
+            )
+
     success_url = body.get("success_url", "http://localhost:3000/dashboard?upgraded=1")
     cancel_url = body.get("cancel_url", "http://localhost:3000/#pricing")
 
-    allowed_hosts = {"localhost:3000"}
-    extra = os.environ.get("KNOW_CORS_ORIGINS", "")
-    if extra:
-        for origin in extra.split(","):
-            origin = origin.strip()
-            if origin:
-                try:
-                    from urllib.parse import urlparse
-                    allowed_hosts.add(urlparse(origin).netloc)
-                except Exception:
-                    pass
-
-    def _is_safe_url(url: str) -> bool:
-        from urllib.parse import urlparse
-        parsed = urlparse(url)
-        return parsed.scheme in ("http", "https") and parsed.netloc in allowed_hosts
-
-    if not _is_safe_url(success_url) or not _is_safe_url(cancel_url):
+    if not is_safe_redirect_url(success_url) or not is_safe_redirect_url(cancel_url):
         raise HTTPException(status_code=400, detail="Invalid redirect URL")
 
     session = stripe.checkout.Session.create(
@@ -100,7 +258,9 @@ async def create_checkout_session(body: dict, user_id: str = Depends(require_aut
         line_items=[{"price": price_id, "quantity": 1}],
         success_url=success_url,
         cancel_url=cancel_url,
+        client_reference_id=user_id,
         metadata={"clerk_user_id": user_id, "tier": tier},
+        subscription_data={"metadata": {"clerk_user_id": user_id, "tier": tier}},
     )
 
     return {"url": session.url, "session_id": session.id}
@@ -119,21 +279,7 @@ async def create_portal_session(body: dict, user_id: str = Depends(require_auth)
         raise HTTPException(status_code=400, detail="No Stripe customer on record. Subscribe first.")
 
     return_url = body.get("return_url", "http://localhost:3000/settings")
-
-    from urllib.parse import urlparse
-    allowed_hosts = {"localhost:3000"}
-    extra = os.environ.get("KNOW_CORS_ORIGINS", "")
-    if extra:
-        for origin in extra.split(","):
-            origin = origin.strip()
-            if origin:
-                try:
-                    allowed_hosts.add(urlparse(origin).netloc)
-                except Exception:
-                    pass
-
-    parsed = urlparse(return_url)
-    if not (parsed.scheme in ("http", "https") and parsed.netloc in allowed_hosts):
+    if not is_safe_redirect_url(return_url):
         raise HTTPException(status_code=400, detail="Invalid redirect URL")
 
     session = stripe.billing_portal.Session.create(
@@ -159,11 +305,7 @@ async def cancel_subscription(body: dict, user_id: str = Depends(require_auth)):
     feedback = (body.get("feedback") or "")[:MAX_CANCEL_FEEDBACK]
 
     try:
-        subs = stripe.Subscription.list(customer=customer_id, status="active", limit=1)
-        if not subs.data:
-            raise HTTPException(status_code=400, detail="No active subscription found")
-
-        sub = subs.data[0]
+        sub = _load_current_subscription(customer_id)
         updated = stripe.Subscription.modify(
             sub.id,
             cancel_at_period_end=True,
@@ -175,7 +317,7 @@ async def cancel_subscription(body: dict, user_id: str = Depends(require_auth)):
 
         period_end = None
         try:
-            period_end = updated.current_period_end
+            period_end = _stripe_period_end(updated)
         except Exception:
             pass
 
@@ -207,11 +349,7 @@ async def resubscribe(user_id: str = Depends(require_auth)):
         raise HTTPException(status_code=400, detail="No active subscription found")
 
     try:
-        subs = stripe.Subscription.list(customer=customer_id, status="active", limit=1)
-        if not subs.data:
-            raise HTTPException(status_code=400, detail="No active subscription found")
-
-        sub = subs.data[0]
+        sub = _load_current_subscription(customer_id)
         stripe.Subscription.modify(sub.id, cancel_at_period_end=False)
 
         logger.info("User %s resubscribed (cleared cancel_at_period_end)", user_id)
@@ -221,9 +359,6 @@ async def resubscribe(user_id: str = Depends(require_auth)):
         raise HTTPException(status_code=502, detail="Failed to resubscribe. Please try again.")
 
 
-TIER_ORDER = {"free": 0, "scholar": 1, "researcher": 2}
-
-
 def _resolve_tier_price(tier: str) -> str | None:
     return {
         "scholar": settings.stripe_price_scholar,
@@ -231,17 +366,9 @@ def _resolve_tier_price(tier: str) -> str | None:
     }.get(tier)
 
 
-def _load_active_subscription(customer_id: str):
-    """Fetch the customer's active subscription or raise HTTPException."""
-    subs = stripe.Subscription.list(customer=customer_id, status="active", limit=1)
-    if not subs.data:
-        raise HTTPException(status_code=400, detail="No active subscription found")
-    return subs.data[0]
-
-
 def _stripe_period_end(sub) -> int | None:
     """Extract current_period_end from either a subscription object or the
-    first subscription item (Stripe moved the field in 2023 API versions)."""
+    first subscription item (Stripe moved the field in later API versions)."""
     try:
         val = getattr(sub, "current_period_end", None)
         if val:
@@ -249,22 +376,53 @@ def _stripe_period_end(sub) -> int | None:
     except Exception:
         pass
     try:
+        if isinstance(sub, dict):
+            val = sub.get("current_period_end")
+            if val:
+                return int(val)
+    except Exception:
+        pass
+    try:
         item = sub["items"]["data"][0]
-        val = getattr(item, "current_period_end", None) or item.get("current_period_end")
+        val = getattr(item, "current_period_end", None)
+        if val is None and isinstance(item, dict):
+            val = item.get("current_period_end")
         return int(val) if val else None
     except Exception:
         return None
 
 
+def _schedule_phase_start(schedule, sub) -> int | None:
+    phase = getattr(schedule, "current_phase", None)
+    start = None
+    if phase is not None:
+        start = getattr(phase, "start_date", None)
+        if start is None and isinstance(phase, dict):
+            start = phase.get("start_date")
+    if start:
+        return int(start)
+    start = getattr(sub, "start_date", None)
+    if start is None and isinstance(sub, dict):
+        start = sub.get("start_date")
+    return int(start) if start else None
+
+
+def _assert_paid_plan_change(current_tier: str, target_tier: str) -> None:
+    if target_tier not in ("scholar", "researcher"):
+        raise HTTPException(status_code=400, detail=f"Unknown tier: {target_tier}")
+    if current_tier == target_tier:
+        raise HTTPException(status_code=400, detail="Already on this plan")
+    if current_tier == "free":
+        raise HTTPException(
+            status_code=400,
+            detail="No active subscription. Please subscribe first.",
+        )
+
+
 @router.post("/api/billing/upgrade-preview")
 async def upgrade_preview(body: dict, user_id: str = Depends(require_auth)):
     """Return the prorated immediate charge and the next-cycle charge for
-    a tier change, so the client can ask the user to choose between
-    "upgrade now" and "upgrade at next renewal".
-
-    The preview does **not** modify the subscription — we call
-    ``Invoice.create_preview`` with the proposed item change and read back
-    ``amount_due``. The next-cycle amount is just the new price.
+    a paid-plan change (upgrade or downgrade).
     """
     if not settings.stripe_secret_key:
         raise HTTPException(status_code=503, detail="Stripe not configured")
@@ -277,72 +435,55 @@ async def upgrade_preview(body: dict, user_id: str = Depends(require_auth)):
     user = get_user(user_id)
     current_tier = (user or {}).get("tier", "free")
     customer_id = (user or {}).get("stripe_customer_id")
-
-    if TIER_ORDER.get(target_tier, 0) <= TIER_ORDER.get(current_tier, 0):
-        raise HTTPException(status_code=400, detail="Already on this tier or higher")
+    _assert_paid_plan_change(current_tier, target_tier)
     if not customer_id:
         raise HTTPException(status_code=400, detail="No active subscription. Please subscribe first.")
 
     try:
-        sub = _load_active_subscription(customer_id)
+        sub = _load_current_subscription(customer_id)
         item_id = sub["items"]["data"][0].id
         current_price_id = sub["items"]["data"][0]["price"]["id"]
-
-        # Ask Stripe to *simulate* the invoice that would be generated if
-        # we swapped to the new price right now. We don't commit the
-        # change — this call is side-effect free. Older Stripe SDKs
-        # expose this as `Invoice.upcoming`; newer ones as
-        # `Invoice.create_preview`. Try both so deploys on either API
-        # version keep working.
-        params = dict(
-            customer=customer_id,
-            subscription=sub.id,
-            subscription_items=[{"id": item_id, "price": new_price_id}],
-            subscription_proration_behavior="create_prorations",
-        )
-        try:
-            preview = stripe.Invoice.create_preview(**params)  # type: ignore[attr-defined]
-        except (AttributeError, stripe.InvalidRequestError):
-            preview = stripe.Invoice.upcoming(**params)  # type: ignore[attr-defined]
+        preview = _invoice_preview(customer_id, sub.id, item_id, new_price_id)
 
         amount_due = int(getattr(preview, "amount_due", 0) or 0)
         currency = (getattr(preview, "currency", "usd") or "usd").lower()
 
-        # Monthly price for the target tier — read from Stripe so we
-        # don't hardcode prices anywhere in the app.
         new_price = stripe.Price.retrieve(new_price_id)
         unit_amount = int(getattr(new_price, "unit_amount", 0) or 0)
 
         period_end = _stripe_period_end(sub)
+        direction = (
+            "upgrade"
+            if TIER_ORDER.get(target_tier, 0) > TIER_ORDER.get(current_tier, 0)
+            else "downgrade"
+        )
 
         return {
             "currency": currency,
-            "immediate_charge_cents": max(0, amount_due),
+            "immediate_charge_cents": amount_due,
             "next_cycle_charge_cents": unit_amount,
             "period_end": period_end,
             "current_tier": current_tier,
             "target_tier": target_tier,
+            "direction": direction,
             "current_price_id": current_price_id,
             "new_price_id": new_price_id,
         }
+    except HTTPException:
+        raise
     except stripe.StripeError as e:
-        logger.error("Upgrade preview failed: %s", e)
-        raise HTTPException(status_code=502, detail="Could not preview the upgrade. Please try again.")
+        logger.error("Plan-change preview failed: %s", e)
+        raise HTTPException(status_code=502, detail="Could not preview the plan change. Please try again.")
 
 
 @router.post("/api/billing/upgrade")
 async def upgrade_subscription(body: dict, user_id: str = Depends(require_auth)):
-    """Apply a tier upgrade.
+    """Apply a paid-plan change (Scholar ↔ Researcher).
 
     ``when`` controls timing:
       - ``"now"`` (default): switch immediately with Stripe proration.
-        The user is charged the prorated difference today and tier flips
-        in the app right away.
-      - ``"next_cycle"``: keep the current price through the end of the
-        existing billing period and swap to the new price at renewal.
-        No charge today, and the app tier does **not** change until the
-        webhook fires on the next renewal. Implemented with a
-        ``SubscriptionSchedule`` so Stripe owns the transition.
+      - ``"next_cycle"``: keep the current price through period end, then
+        swap via a SubscriptionSchedule. The app tier flips on webhook.
     """
     if not settings.stripe_secret_key:
         raise HTTPException(status_code=503, detail="Stripe not configured")
@@ -359,14 +500,12 @@ async def upgrade_subscription(body: dict, user_id: str = Depends(require_auth))
     user = get_user(user_id)
     current_tier = (user or {}).get("tier", "free")
     customer_id = (user or {}).get("stripe_customer_id")
-
-    if TIER_ORDER.get(target_tier, 0) <= TIER_ORDER.get(current_tier, 0):
-        raise HTTPException(status_code=400, detail="Already on this tier or higher")
+    _assert_paid_plan_change(current_tier, target_tier)
     if not customer_id:
         raise HTTPException(status_code=400, detail="No active subscription. Please subscribe first.")
 
     try:
-        sub = _load_active_subscription(customer_id)
+        sub = _load_current_subscription(customer_id)
         item_id = sub["items"]["data"][0].id
         current_price_id = sub["items"]["data"][0]["price"]["id"]
         period_end = _stripe_period_end(sub)
@@ -382,7 +521,7 @@ async def upgrade_subscription(body: dict, user_id: str = Depends(require_auth))
             )
             update_user_tier(user_id, target_tier)
             logger.info(
-                "User %s upgraded from %s to %s (prorated, immediate)",
+                "User %s changed plan %s → %s (prorated, immediate)",
                 user_id, current_tier, target_tier,
             )
             return {
@@ -391,12 +530,6 @@ async def upgrade_subscription(body: dict, user_id: str = Depends(require_auth))
                 "effective_at": "now",
             }
 
-        # when == "next_cycle"
-        # We promote the live subscription into a schedule and append a
-        # second phase that starts at period end with the new price.
-        # Stripe handles the transition without any further action from
-        # us; the `customer.subscription.updated` webhook will fire on
-        # renewal and our handler will flip the user's tier then.
         if not period_end:
             raise HTTPException(
                 status_code=502,
@@ -404,17 +537,19 @@ async def upgrade_subscription(body: dict, user_id: str = Depends(require_auth))
             )
 
         schedule = stripe.SubscriptionSchedule.create(from_subscription=sub.id)
+        start_date = _schedule_phase_start(schedule, sub)
+        if not start_date:
+            raise HTTPException(
+                status_code=502,
+                detail="Could not determine the current billing period start.",
+            )
         stripe.SubscriptionSchedule.modify(
             schedule.id,
             end_behavior="release",
             phases=[
                 {
                     "items": [{"price": current_price_id, "quantity": 1}],
-                    "start_date": (
-                        getattr(schedule, "current_phase", {}).get("start_date")
-                        if hasattr(schedule, "current_phase") and schedule.current_phase
-                        else None
-                    ) or int(getattr(sub, "start_date", 0) or 0) or None,
+                    "start_date": start_date,
                     "end_date": period_end,
                     "proration_behavior": "none",
                 },
@@ -426,7 +561,7 @@ async def upgrade_subscription(body: dict, user_id: str = Depends(require_auth))
         )
 
         logger.info(
-            "User %s scheduled upgrade %s → %s at %s",
+            "User %s scheduled plan change %s → %s at %s",
             user_id, current_tier, target_tier, period_end,
         )
         return {
@@ -438,8 +573,8 @@ async def upgrade_subscription(body: dict, user_id: str = Depends(require_auth))
     except HTTPException:
         raise
     except stripe.StripeError as e:
-        logger.error("Upgrade subscription failed: %s", e)
-        raise HTTPException(status_code=502, detail="Failed to upgrade subscription. Please try again.")
+        logger.error("Plan change failed: %s", e)
+        raise HTTPException(status_code=502, detail="Failed to change subscription. Please try again.")
 
 
 def _to_dict(obj) -> dict:
@@ -548,6 +683,11 @@ def _handle_checkout_completed(session: dict):
         update_user_tier(clerk_user_id, tier)
         if customer_id:
             update_user_stripe_customer(clerk_user_id, customer_id)
+            prefer = _resolve_tier_price(tier)
+            try:
+                dedupe_customer_subscriptions(customer_id, prefer_price_id=prefer)
+            except stripe.StripeError:
+                logger.exception("Dedupe after checkout failed for %s", customer_id)
         logger.info("User %s upgraded to %s", clerk_user_id, tier)
     elif customer_id:
         user = get_user_by_stripe_customer(customer_id)
@@ -576,7 +716,28 @@ def _handle_subscription_change(subscription: dict, event_type: str):
         logger.warning("Subscription change for unknown customer: %s", customer_id)
         return
 
+    try:
+        dedupe_customer_subscriptions(customer_id)
+    except stripe.StripeError:
+        logger.exception("Dedupe on subscription change failed for %s", customer_id)
+
+    remaining = _list_current_subscriptions(customer_id)
+    remaining_tier = None
+    if remaining:
+        keep = max(
+            remaining,
+            key=lambda s: TIER_ORDER.get(PRICE_TO_TIER.get(_sub_price_id(s), "free"), 0),
+        )
+        remaining_tier = PRICE_TO_TIER.get(_sub_price_id(keep))
+
     if event_type == "customer.subscription.deleted":
+        if remaining_tier:
+            update_user_tier(user["user_id"], remaining_tier)
+            logger.info(
+                "User %s kept %s after a subscription was deleted (another is still live)",
+                user["user_id"], remaining_tier,
+            )
+            return
         update_user_tier(user["user_id"], "free")
         logger.info("User %s downgraded to free (subscription deleted)", user["user_id"])
         return
@@ -591,12 +752,20 @@ def _handle_subscription_change(subscription: dict, event_type: str):
         status, price_id, resolved_tier, PRICE_TO_TIER,
     )
 
+    if remaining_tier:
+        # Live subscription is the source of truth — never apply this
+        # event's price if it belongs to an orphan we just cancelled.
+        if remaining_tier != resolved_tier:
+            logger.info(
+                "Subscription event price %s ignored; live sub is %s for user %s",
+                resolved_tier, remaining_tier, user["user_id"],
+            )
+        update_user_tier(user["user_id"], remaining_tier)
+        logger.info("User %s tier set to %s", user["user_id"], remaining_tier)
+        return
+
     if status in ("active", "trialing"):
         if resolved_tier is None:
-            # Unknown price id → this is almost always a misconfigured
-            # Stripe env var on our side, not "this user should be free".
-            # Defaulting to free would silently downgrade a paying customer
-            # on every webhook tick. Keep their current tier and alert.
             logger.error(
                 "Unknown Stripe price %s for user %s — keeping current tier %s "
                 "(fix STRIPE_PRICE_SCHOLAR/STRIPE_PRICE_RESEARCHER env vars)",
@@ -606,19 +775,11 @@ def _handle_subscription_change(subscription: dict, event_type: str):
         update_user_tier(user["user_id"], resolved_tier)
         logger.info("User %s tier set to %s", user["user_id"], resolved_tier)
     elif status in ("unpaid", "past_due", "incomplete"):
-        # Dunning states: Stripe is still retrying the payment. Don't
-        # downgrade yet — doing so would punish users for a transient
-        # failure (expired card, bank outage, manual review, etc.) and they
-        # couldn't use the product while we waited for the retry. The
-        # downgrade happens on `customer.subscription.deleted` once Stripe
-        # gives up, typically 3 retries / ~2 weeks later.
         logger.warning(
             "User %s subscription in %s state — keeping tier until final cancellation",
             user["user_id"], status,
         )
     elif status == "canceled":
-        # Final cancellation via the portal / `subscription.deleted` often
-        # arrives as `status=canceled` on `subscription.updated` too.
         update_user_tier(user["user_id"], "free")
         logger.info("User %s downgraded to free (status=canceled)", user["user_id"])
 

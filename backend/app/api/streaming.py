@@ -54,7 +54,7 @@ from ..services.llm import (
     _resize_image_b64,
     _safe_parse_json,
     _sanitize_user_text,
-    get_budgets,
+    excerpt_paper,
     get_fast_provider,
 )
 from ..services.pdf_parser import (
@@ -111,7 +111,10 @@ def _selection_system_prompt() -> str:
         "Unicode math (σ, π, ∂, ⟂, etc.) — always LaTeX (\\sigma, \\pi, "
         "\\partial, \\perp).\n"
         "- Never split a single equation into character-per-line columns.\n"
-        "- Headings are markdown `##` / `###`; bullets use `-`.\n\n"
+        "- Headings are markdown `##` / `###`; bullets use `-`.\n"
+        "- If the user names a numbered equation, figure, or table, use the "
+        "matching excerpt in Paper context. Only say it is absent if that "
+        "number does not appear in the context at all.\n\n"
         + LATEX_FORMAT_INSTRUCTIONS
     )
 
@@ -129,14 +132,14 @@ def _selection_user_prompt(
             "inference → conclusion — using the same `### Step N` structure.\n"
             "End with a `## Result` section that states the final expression / conclusion.\n\n"
             f"Selected text:\n\"\"\"{selected_text}\"\"\"\n\n"
-            f"Paper context:\n{paper_text[:6000]}"
+            f"Paper context:\n{paper_text}"
         )
     if action == "followup" and question:
         return (
             "The user has a follow-up question about the previous selection.\n\n"
             f"Selected text:\n\"\"\"{selected_text}\"\"\"\n\n"
             f"Follow-up question: {question}\n\n"
-            f"Paper context:\n{paper_text[:6000]}\n\n"
+            f"Paper context:\n{paper_text}\n\n"
             "Answer the question directly in 2–4 paragraphs of markdown."
         )
     return (
@@ -145,7 +148,7 @@ def _selection_user_prompt(
         "paper as context. Otherwise unpack jargon, walk the logic step by step, "
         "and add the broader implications.\n\n"
         f"Selected text:\n\"\"\"{selected_text}\"\"\"\n\n"
-        f"Paper context:\n{paper_text[:6000]}\n\n"
+        f"Paper context:\n{paper_text}\n\n"
         "Reply with markdown — start with a 1-sentence TL;DR in bold, then a "
         "few paragraphs of explanation. End with a `### Why it matters` section "
         "if there's something genuinely non-obvious to say there."
@@ -209,7 +212,13 @@ async def selection_stream(
     provider = _make_provider(model_used)
 
     selected_clean = _sanitize_user_text(selected_text or "Equation selected from PDF.")
-    paper_clean = _sanitize_user_text(paper_prompt_text(paper) or "", max_chars=6000)
+    query = " ".join(p for p in (action, question or "", selected_clean[:800]) if p)
+    paper_clean = excerpt_paper(
+        paper_prompt_text(paper) or "",
+        kind="selection",
+        user_id=user_id,
+        query=query,
+    )
     system = _selection_system_prompt()
     user_prompt = _selection_user_prompt(paper_clean, selected_clean, action, question)
 
@@ -469,8 +478,10 @@ async def summary_lite_stream(
 
     model_used = _resolve_model(user_id, body)
     provider = _make_provider(model_used)
-    cap = min(get_budgets("summary", user_id)["context"], 6000)
-    paper_clean = _sanitize_user_text(paper_prompt_text(paper) or "", max_chars=cap)
+    paper_clean = excerpt_paper(
+        paper_prompt_text(paper) or "", kind="summary", user_id=user_id,
+    )
+    cap = len(paper_clean)
     system, user_prompt = _summary_lite_prompts(paper_clean, cap)
 
     token = reserve_usage(
@@ -544,8 +555,10 @@ async def summary_deep_stream(
 
     model_used = _resolve_analysis_model_with_override(user_id, body)
     provider = _make_provider(model_used)
-    cap = min(get_budgets("summary", user_id)["context"], 6000)
-    paper_clean = _sanitize_user_text(paper_prompt_text(paper) or "", max_chars=cap)
+    paper_clean = excerpt_paper(
+        paper_prompt_text(paper) or "", kind="summary", user_id=user_id,
+    )
+    cap = len(paper_clean)
     system, user_prompt = _summary_deep_prompts(paper_clean, cap)
 
     token = reserve_usage(
@@ -621,12 +634,12 @@ def _figure_user_prompt(paper_text: str, question: str) -> str:
     if question.strip():
         return (
             f"Question about this figure: {question}\n\n"
-            f"Paper context:\n{paper_text[:6000]}\n\n"
+            f"Paper context:\n{paper_text}\n\n"
             "Answer the question directly using the figure and the paper. Use "
             "section headings where helpful and finish with a one-sentence takeaway."
         )
     return (
-        f"Paper context:\n{paper_text[:6000]}\n\n"
+        f"Paper context:\n{paper_text}\n\n"
         "Analyze this figure thoroughly. Cover: what it shows, what the axes / "
         "labels mean, the key observations, the methodology it illustrates, how "
         "it relates to the paper's argument, and end with a short bold takeaway."
@@ -706,7 +719,12 @@ async def figure_qa_stream(
             detail=f"Selected model '{model_used}' does not support figure analysis. Pick a vision-capable model.",
         )
 
-    paper_clean = _sanitize_user_text(paper_prompt_text(paper) or "", max_chars=6000)
+    paper_clean = excerpt_paper(
+        paper_prompt_text(paper) or "",
+        kind="figure",
+        user_id=user_id,
+        query=question,
+    )
     system = _figure_system_prompt()
     user_prompt = _figure_user_prompt(paper_clean, question)
 

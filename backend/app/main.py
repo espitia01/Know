@@ -192,20 +192,21 @@ async def get_current_user(user_id: str = Depends(require_auth)):
     tier = user.get("tier", "free")
     cancel_at_period_end = False
     cancel_at = None
+    period_end = None
+    past_due = False
 
     if customer_id:
         try:
-            from .api.billing import PRICE_TO_TIER
-            import stripe as _stripe
-            subs = _stripe.Subscription.list(customer=customer_id, status="active", limit=1)
-            if subs.data:
-                sub = subs.data[0]
-                cancel_at_period_end = bool(sub.cancel_at_period_end)
+            from .api.billing import PRICE_TO_TIER, _list_current_subscriptions, _stripe_period_end, _sub_status
+            current = _list_current_subscriptions(customer_id)
+            if current:
+                sub = current[0]
+                status = _sub_status(sub)
+                past_due = status in ("past_due", "unpaid")
+                cancel_at_period_end = bool(getattr(sub, "cancel_at_period_end", False))
+                period_end = _stripe_period_end(sub)
                 if cancel_at_period_end:
-                    try:
-                        cancel_at = sub.current_period_end
-                    except Exception:
-                        pass
+                    cancel_at = period_end
                 if tier == "free":
                     price_id = sub["items"]["data"][0]["price"]["id"]
                     resolved = PRICE_TO_TIER.get(price_id)
@@ -231,6 +232,8 @@ async def get_current_user(user_id: str = Depends(require_auth)):
         "has_billing": bool(customer_id and tier != "free"),
         "cancel_at_period_end": cancel_at_period_end,
         "cancel_at": cancel_at,
+        "period_end": period_end,
+        "past_due": past_due,
     }
 
 
@@ -298,6 +301,12 @@ async def get_account_usage(user_id: str = Depends(require_auth)):
     except Exception:
         per_model = []
 
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    daily_resets_at = (
+        (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    )
+
     return {
         "tier": tier,
         "papers_used": paper_count,
@@ -308,6 +317,7 @@ async def get_account_usage(user_id: str = Depends(require_auth)):
         "selections_per_paper_limit": limits.get("selections_per_paper", -1),
         "per_capability_usage": per_capability,
         "per_model_usage": per_model,
+        "daily_resets_at": daily_resets_at,
     }
 
 

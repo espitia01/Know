@@ -91,7 +91,7 @@ export function AppearanceSection({ tier }: Props) {
   const visiblePresets = BACKGROUND_PRESETS.filter((p) => p.id !== "custom");
 
   return (
-    <div className="glass rounded-2xl p-6 space-y-5">
+    <div className="rounded-xl border border-border/50 bg-card/30 dark:bg-card/22 p-5 space-y-5">
       <div className="flex items-center justify-between">
         <div>
           <p className="text-[14px] font-semibold text-foreground">Appearance</p>
@@ -100,14 +100,14 @@ export function AppearanceSection({ tier }: Props) {
           </p>
         </div>
         {!entitled && (
-          <span className="text-[11px] text-muted-foreground glass-subtle px-2.5 py-1 rounded-full font-medium">
+          <span className="rounded-md border border-border/50 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
             Scholar+
           </span>
         )}
       </div>
 
       {!entitled ? (
-        <div className="rounded-xl glass-subtle px-4 py-4 space-y-2">
+        <div className="space-y-2 rounded-lg border border-border/50 px-4 py-4">
           <p className="text-[12.5px] text-foreground/90">
             Choose a curated background for your dashboard and library.
           </p>
@@ -154,7 +154,7 @@ export function AppearanceSection({ tier }: Props) {
                 >
                   <div className="absolute inset-0" style={swatchStyle} />
                   <div className="absolute inset-0 flex items-end justify-start p-1.5 pointer-events-none">
-                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-background/80 text-foreground/90 backdrop-blur-sm">
+                    <span className="rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] font-medium text-foreground/90">
                       {p.label}
                     </span>
                   </div>

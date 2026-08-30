@@ -240,8 +240,8 @@ function DashboardContent() {
             </div>
           </div>
 
-          <div className="glass rounded-2xl py-12 px-6 space-y-4">
-            <div className="w-12 h-12 rounded-xl glass-subtle flex items-center justify-center mx-auto">
+          <div className="space-y-4 rounded-lg border border-border/50 px-6 py-12">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md border border-border/50">
               <svg className="w-6 h-6 text-muted-foreground/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25" />
               </svg>
@@ -327,10 +327,10 @@ function DashboardContent() {
         {/* Upload zone */}
         <div
           {...getRootProps()}
-          className={`cursor-pointer rounded-xl border border-dashed transition-[border-color,background-color,box-shadow,transform] duration-200 ease-out ring-focus ${
+          className={`cursor-pointer rounded-lg border border-dashed transition-colors motion-safe:duration-150 ring-focus ${
             isDragActive
-              ? "border-ring/50 bg-accent/45 shadow-md scale-[1.008]"
-              : "border-input bg-muted/25 hover:border-border-strong hover:bg-muted/38 shadow-[var(--shadow-xs)]"
+              ? "border-foreground/40 bg-muted/40"
+              : "border-input bg-muted/20 hover:border-border-strong hover:bg-muted/30"
           } ${loading ? "opacity-50 pointer-events-none" : ""}`}
         >
           <div className="flex flex-col items-center justify-center py-16 px-6">
@@ -349,7 +349,7 @@ function DashboardContent() {
               <p className="text-[15px] font-medium text-foreground">Drop here</p>
             ) : (
               <div className="text-center space-y-3">
-                <div className="w-11 h-11 rounded-xl glass flex items-center justify-center mx-auto">
+                <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-md border border-border/50">
                   <svg className="w-5 h-5 text-muted-foreground/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
                   </svg>
@@ -369,7 +369,7 @@ function DashboardContent() {
 
         {isGoogleDriveConfigured() ? (
           <div className="mx-auto w-full max-w-[320px] space-y-2">
-            <div className="flex items-center gap-3 text-[11px] uppercase tracking-[0.15em] text-muted-foreground/70">
+            <div className="flex items-center gap-3 text-[12px] text-muted-foreground">
               <span className="h-px flex-1 bg-border/60" />
               <span>or</span>
               <span className="h-px flex-1 bg-border/60" />
@@ -395,7 +395,7 @@ function DashboardContent() {
         {papers.length > 0 && (
           <div className="space-y-3 animate-fade-in">
             <div className="flex items-center justify-between gap-2 px-1">
-              <h2 className="text-[12px] text-muted-foreground/80 uppercase tracking-[0.15em] font-semibold">
+              <h2 className="text-[13px] font-medium text-muted-foreground">
                 Recent
               </h2>
               <button

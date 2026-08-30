@@ -92,11 +92,11 @@ export function WorkspaceTruncationModal({
       aria-label="Choose papers for workspace session"
     >
       <div
-        className="absolute inset-0 bg-foreground/25 backdrop-blur-md"
+        className="absolute inset-0 bg-foreground/25"
         onClick={onClose}
         aria-hidden
       />
-      <div className="relative glass-strong rounded-2xl shadow-xl w-full max-w-lg mx-4 flex flex-col max-h-[85vh] animate-fade-in">
+      <div className="relative mx-4 flex max-h-[85vh] w-full max-w-lg flex-col rounded-lg border border-border/50 bg-popover shadow-[var(--shadow-sm)]">
         <div className="px-5 py-4 border-b border-border">
           <h3 className="text-[14px] font-semibold text-foreground font-display tracking-[-0.02em]">
             This workspace has more papers than your session can hold

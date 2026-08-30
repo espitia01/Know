@@ -89,9 +89,10 @@ export function modelRouting(): { gateway: boolean; roles: Record<ModelRole, str
 
 function isTopTier(slug: string): boolean {
   return (
+    slug.includes("fable") ||
     slug.includes("opus") ||
-    slug.includes("gpt-5.4") ||
-    slug === "gpt-5" ||
+    slug.includes("gpt-5.6-sol") ||
+    (slug.includes("gpt-5.4") && !slug.includes("mini")) ||
     slug.includes("mistral-large")
   );
 }
@@ -99,6 +100,7 @@ function isTopTier(slug: string): boolean {
 function isBalanced(slug: string): boolean {
   return (
     slug.includes("sonnet") ||
+    slug.includes("gpt-5.6-terra") ||
     slug === "gpt-5" ||
     slug.includes("gpt-4.1") ||
     slug.includes("mistral-medium")

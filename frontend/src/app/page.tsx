@@ -2,12 +2,13 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { UserButton, useAuth } from "@clerk/nextjs";
 import { ArrowRight, Check } from "lucide-react";
 import { FEATURE_TOOLTIPS } from "@/lib/tooltips";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { FeedbackModal } from "@/components/FeedbackModal";
+import { UpgradeConfirmModal } from "@/components/UpgradeConfirmModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { DISCORD_URL } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -78,7 +79,7 @@ const TIERS = [
       "Structured summaries on every paper",
       "5 grounded Q&A turns per paper",
       "3 selection analyses per paper",
-      "Fast models: Mistral Small, Haiku, GPT-5 Mini",
+      "Fast models: Mistral Small, Haiku, GPT-5.4 mini",
     ],
   },
   {
@@ -113,10 +114,12 @@ const TIERS = [
       "Everything in Scholar, unlocked",
       "Unlimited Q&A and selections",
       "Cross-paper sessions",
-      "Opus when quality matters most",
+      "Fable when quality matters most",
     ],
   },
 ] as const;
+
+const TIER_ORDER: Record<string, number> = { free: 0, scholar: 1, researcher: 2 };
 
 function trustPublicSrc(filename: string) {
   return `/trust/${encodeURIComponent(filename)}`;
@@ -145,10 +148,21 @@ export default function LandingPage() {
   const { isSignedIn, isLoaded } = useAuth();
   const [showFeedback, setShowFeedback] = useState(false);
   const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState("");
+  const [upgradeTarget, setUpgradeTarget] = useState<"scholar" | "researcher" | null>(null);
+  const [currentTier, setCurrentTier] = useState<string>("free");
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn) return;
+    api.getCurrentUser()
+      .then((me) => setCurrentTier(me.tier || "free"))
+      .catch(() => {});
+  }, [isLoaded, isSignedIn]);
 
   const handleTierClick = async (tierKey: string) => {
+    setCheckoutError("");
     if (tierKey === "free") {
-      window.location.href = "/sign-up";
+      window.location.href = isSignedIn ? "/dashboard" : "/sign-up";
       return;
     }
     if (!isLoaded) return;
@@ -156,6 +170,34 @@ export default function LandingPage() {
       window.location.href = "/sign-up";
       return;
     }
+
+    let meTier = currentTier;
+    try {
+      const me = await api.getCurrentUser();
+      meTier = me.tier || "free";
+      setCurrentTier(meTier);
+    } catch {
+      /* use cached tier */
+    }
+
+    if (meTier === tierKey) {
+      window.location.href = "/dashboard";
+      return;
+    }
+    if ((TIER_ORDER[tierKey] ?? 0) < (TIER_ORDER[meTier] ?? 0)) {
+      try {
+        const { url } = await api.createPortalSession(`${window.location.origin}/settings`);
+        if (url) window.location.href = url;
+      } catch (e: unknown) {
+        setCheckoutError(e instanceof Error ? e.message : "Could not open billing.");
+      }
+      return;
+    }
+    if (meTier !== "free") {
+      setUpgradeTarget(tierKey === "researcher" ? "researcher" : "scholar");
+      return;
+    }
+
     setCheckoutLoading(tierKey);
     try {
       const { url } = await api.createCheckoutSession(
@@ -164,7 +206,12 @@ export default function LandingPage() {
         `${window.location.origin}/#pricing`,
       );
       if (url) window.location.href = url;
-    } catch {
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.code === "already_subscribed") {
+        setUpgradeTarget(tierKey === "researcher" ? "researcher" : "scholar");
+      } else {
+        setCheckoutError(e instanceof Error ? e.message : "Checkout failed. Try Settings.");
+      }
       setCheckoutLoading(null);
     }
   };
@@ -172,7 +219,7 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background text-foreground antialiased selection:bg-foreground/12">
       {/* ─── Header ────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-50 border-b border-border/40 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
+      <header className="sticky top-0 z-50 border-b border-border/40 bg-background">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-5 sm:px-8">
           <Link href="/" className="flex items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/40">
             <Image src="/logo.png" alt="" width={22} height={22} className="rounded-[var(--radius-sm)]" />
@@ -195,7 +242,7 @@ export default function LandingPage() {
                 </Link>
                 <Link
                   href="/sign-up"
-                  className="inline-flex items-center gap-1 rounded-full bg-foreground px-4 py-2 text-[13px] font-medium text-background transition-opacity hover:opacity-90"
+                  className="inline-flex items-center gap-1 rounded-md bg-foreground px-4 py-2 text-[13px] font-medium text-background transition-opacity hover:opacity-90"
                 >
                   Get started
                 </Link>
@@ -220,7 +267,7 @@ export default function LandingPage() {
         {/* ─── Hero ──────────────────────────────────────────────────── */}
         <section className="border-b border-border/40 px-5 pb-20 pt-20 sm:px-8 sm:pb-28 sm:pt-28">
           <div className="mx-auto max-w-3xl text-center">
-            <p className="mb-7 text-[12px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+            <p className="mb-7 text-[13px] text-muted-foreground">
               A reading companion for technical work
             </p>
             <h1 className="text-balance text-[clamp(2.4rem,5.6vw,4rem)] font-semibold leading-[1.04] tracking-[-0.045em]">
@@ -233,14 +280,14 @@ export default function LandingPage() {
             <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
               <Link
                 href="/sign-up"
-                className="inline-flex items-center gap-1.5 rounded-full bg-foreground px-6 py-3 text-[14px] font-medium text-background shadow-sm transition-opacity hover:opacity-90"
+                className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-6 py-3 text-[14px] font-medium text-background transition-opacity hover:opacity-90"
               >
                 Create an account
                 <ArrowRight className="h-4 w-4" aria-hidden />
               </Link>
               <Link
                 href="/try"
-                className="inline-flex items-center rounded-full border border-border bg-background px-6 py-3 text-[14px] font-medium text-foreground shadow-[var(--shadow-xs)] transition-colors hover:bg-muted/50"
+                className="inline-flex items-center rounded-md border border-border bg-background px-6 py-3 text-[14px] font-medium text-foreground transition-colors hover:bg-muted/50"
               >
                 Try the demo
               </Link>
@@ -259,7 +306,7 @@ export default function LandingPage() {
         {/* ─── Trust ─────────────────────────────────────────────────── */}
         <section className="border-y border-border/40 bg-muted/30 px-5 py-14 sm:px-8 dark:bg-muted/[0.04]">
           <div className="mx-auto max-w-5xl">
-            <p className="text-center text-[12px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+            <p className="text-center text-[13px] text-muted-foreground">
               Used by readers at
             </p>
             <div className="mt-9 flex flex-wrap items-center justify-center gap-x-9 gap-y-6 sm:gap-x-12">
@@ -286,7 +333,7 @@ export default function LandingPage() {
         {/* ─── Narrative blocks ──────────────────────────────────────── */}
         <section id="features" className="px-5 py-24 sm:px-8 sm:py-32">
           <div className="mx-auto max-w-3xl">
-            <p className="text-[12px] font-medium uppercase tracking-[0.18em] text-muted-foreground">Product</p>
+            <p className="text-[13px] text-muted-foreground">Product</p>
             <h2 className="mt-3 text-balance text-[clamp(1.85rem,3.6vw,2.5rem)] font-semibold leading-[1.15] tracking-[-0.035em]">
               Built for technical papers — not pasted chat on an upload box.
             </h2>
@@ -301,7 +348,7 @@ export default function LandingPage() {
                 )}
               >
                 <div className="lg:max-w-[18rem]">
-                  <p className="text-[12px] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+                  <p className="text-[13px] text-muted-foreground">
                     {block.eyebrow}
                   </p>
                   <p className="mt-4 font-mono text-[12px] tabular-nums text-muted-foreground/70">
@@ -327,7 +374,7 @@ export default function LandingPage() {
           className="scroll-mt-20 border-t border-border/40 bg-muted/[0.18] px-5 py-24 dark:bg-muted/[0.04] sm:px-8 sm:py-32"
         >
           <div className="mx-auto max-w-3xl text-center">
-            <p className="text-[12px] font-medium uppercase tracking-[0.18em] text-muted-foreground">Pricing</p>
+            <p className="text-[13px] text-muted-foreground">Pricing</p>
             <h2 className="mt-3 text-balance text-[clamp(1.85rem,3.6vw,2.5rem)] font-semibold leading-[1.15] tracking-[-0.035em]">
               Simple tiers. No surprise limits on the core reader.
             </h2>
@@ -340,16 +387,14 @@ export default function LandingPage() {
               <div
                 key={t.name}
                 className={cn(
-                  "relative flex flex-col rounded-[var(--radius-xl)] border bg-background px-7 pb-9 pt-9",
+                  "relative flex flex-col rounded-lg border bg-background px-7 pb-9 pt-9",
                   t.highlight
-                    ? "border-foreground/20 shadow-[var(--shadow-md)] ring-1 ring-foreground/[0.04] dark:border-foreground/30"
-                    : "border-border/55 dark:bg-card/40",
+                    ? "border-foreground/25"
+                    : "border-border/50",
                 )}
               >
                 {t.highlight && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full border border-border/55 bg-background px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-foreground/80 shadow-[var(--shadow-xs)]">
-                    Recommended
-                  </div>
+                  <p className="mb-1 text-[12px] text-muted-foreground">Recommended</p>
                 )}
                 <h3 className="text-[18px] font-semibold tracking-[-0.025em]">{t.name}</h3>
                 <p className="mt-2.5 text-[14px] leading-[1.6] text-muted-foreground">{t.summary}</p>
@@ -362,13 +407,19 @@ export default function LandingPage() {
                   onClick={() => handleTierClick(t.tier)}
                   disabled={checkoutLoading !== null}
                   className={cn(
-                    "mt-7 inline-flex h-10 items-center justify-center rounded-full px-5 text-[14px] font-medium transition-opacity disabled:opacity-50",
+                    "mt-7 inline-flex h-10 items-center justify-center rounded-md px-5 text-[14px] font-medium transition-opacity disabled:opacity-50",
                     t.highlight
                       ? "bg-foreground text-background hover:opacity-90"
                       : "border border-border bg-background text-foreground hover:bg-muted/50",
                   )}
                 >
-                  {checkoutLoading === t.tier ? "Redirecting…" : t.cta}
+                  {checkoutLoading === t.tier
+                    ? "Redirecting…"
+                    : isSignedIn && currentTier === t.tier
+                      ? "Current plan"
+                      : isSignedIn && (TIER_ORDER[t.tier] ?? 0) > (TIER_ORDER[currentTier] ?? 0) && currentTier !== "free"
+                        ? `Upgrade to ${t.name}`
+                        : t.cta}
                 </button>
                 <ul className="mt-9 space-y-3.5">
                   {t.features.map((feat) => (
@@ -392,6 +443,9 @@ export default function LandingPage() {
             </Link>
             .
           </p>
+          {checkoutError && (
+            <p className="mx-auto mt-4 max-w-xl text-center text-[12px] text-destructive">{checkoutError}</p>
+          )}
         </section>
 
         {/* ─── Closing ───────────────────────────────────────────────── */}
@@ -406,14 +460,14 @@ export default function LandingPage() {
             <div className="mt-10 flex flex-wrap justify-center gap-3">
               <Link
                 href="/sign-up"
-                className="inline-flex items-center gap-1.5 rounded-full bg-foreground px-6 py-3 text-[14px] font-medium text-background shadow-sm transition-opacity hover:opacity-90"
+                className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-6 py-3 text-[14px] font-medium text-background transition-opacity hover:opacity-90"
               >
                 Create an account
                 <ArrowRight className="h-4 w-4" aria-hidden />
               </Link>
               <Link
                 href="/try"
-                className="inline-flex items-center rounded-full border border-border bg-background px-6 py-3 text-[14px] font-medium text-foreground transition-colors hover:bg-muted/50"
+                className="inline-flex items-center rounded-md border border-border bg-background px-6 py-3 text-[14px] font-medium text-foreground transition-colors hover:bg-muted/50"
               >
                 Try the demo
               </Link>
@@ -442,6 +496,16 @@ export default function LandingPage() {
       </footer>
 
       <FeedbackModal open={showFeedback} onClose={() => setShowFeedback(false)} />
+      <UpgradeConfirmModal
+        tier={upgradeTarget ?? "researcher"}
+        tierLabel={upgradeTarget === "scholar" ? "Scholar" : "Researcher"}
+        open={upgradeTarget !== null}
+        onClose={() => setUpgradeTarget(null)}
+        onUpgraded={(mode) => {
+          setUpgradeTarget(null);
+          window.location.href = mode === "now" ? "/dashboard?upgraded=1" : "/settings";
+        }}
+      />
     </div>
   );
 }

@@ -188,7 +188,7 @@ function Lightbox({ src, alt, caption, onClose }: { src: string; alt: string; ca
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[2147483600] flex items-center justify-center bg-black/85 p-6 backdrop-blur-sm motion-safe:animate-fade-in"
+      className="fixed inset-0 z-[2147483600] flex items-center justify-center bg-black/85 p-6"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -532,7 +532,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
     const unsupported = ocrStatus === "unsupported";
     const failed = ocrStatus === "failed";
     return (
-      <div className="mx-auto flex max-w-lg flex-col gap-5 rounded-2xl border border-border/45 bg-gradient-to-b from-card/35 to-card/[0.08] px-6 py-9 text-center shadow-[var(--shadow-sm)] backdrop-blur-[2px] motion-safe:animate-fade-in dark:from-card/20 dark:to-transparent">
+      <div className="mx-auto flex max-w-lg flex-col gap-5 rounded-lg border border-border/50 px-6 py-9 text-center">
         <div className="space-y-2.5">
           <p className="text-[var(--text-md)] font-semibold tracking-tight text-foreground/95">
             {unsupported ? "OCR unavailable" : failed ? "OCR failed" : "No figures in OCR output"}
@@ -613,7 +613,7 @@ export function FiguresPanel({ paperId }: FiguresPanelProps) {
                 e.stopPropagation();
                 setLightboxFig(selected);
               }}
-              className="absolute top-2 right-2 inline-flex h-8 items-center gap-1.5 rounded-md border border-border/60 bg-card/85 px-2.5 text-[var(--text-xs)] font-medium text-foreground/90 shadow-[var(--shadow-xs)] backdrop-blur-sm transition-colors hover:bg-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              className="absolute top-2 right-2 inline-flex h-8 items-center gap-1.5 rounded-md border border-border/50 bg-background px-2.5 text-[var(--text-xs)] font-medium text-foreground/90 transition-colors hover:bg-muted/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
               aria-label="Expand figure"
               title="Expand figure"
             >

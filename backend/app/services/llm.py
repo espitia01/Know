@@ -25,11 +25,11 @@ from ..gating import resolve_deep_analysis
 
 DEEP_MULTIPLIER = 2
 STD_BUDGETS = {
-    "summary": {"context": 12000, "selection": 0, "history": 0},
-    "selection": {"context": 6000, "selection": 4000, "history": 0},
-    "qa": {"context": 6000, "selection": 0, "history": 0},
-    "figure": {"context": 6000, "selection": 0, "history": 0},
-    "assumptions": {"context": 6000, "selection": 0, "history": 0},
+    "summary": {"context": 48000, "selection": 0, "history": 0},
+    "selection": {"context": 32000, "selection": 8000, "history": 0},
+    "qa": {"context": 40000, "selection": 0, "history": 0},
+    "figure": {"context": 20000, "selection": 0, "history": 0},
+    "assumptions": {"context": 32000, "selection": 0, "history": 0},
 }
 
 
@@ -45,13 +45,36 @@ def get_budgets(kind: str, user_id: str | None) -> dict:
     table = DEEP_BUDGETS if deep else STD_BUDGETS
     return table.get(kind, STD_BUDGETS["qa"])
 
+
+def excerpt_paper(
+    paper_text: str,
+    *,
+    kind: str,
+    user_id: str | None = None,
+    query: str | None = None,
+) -> str:
+    """Sanitize + section-aware excerpt using the per-kind prompt budget.
+
+    Numbered equation/figure/table mentions in ``query`` are pulled from
+    the full manuscript first so "explain equation 25" is not answered
+    from the first 6k characters of the PDF.
+    """
+    from .paper_excerpt import build_analysis_excerpt
+
+    cap = int(get_budgets(kind, user_id)["context"])
+    cleaned = _sanitize_user_text(paper_text or "", max_chars=200_000)
+    profile = kind if kind in ("summary", "selection", "qa") else (
+        "summary" if kind == "assumptions" else "qa"
+    )
+    return build_analysis_excerpt(cleaned, max_chars=cap, query=query, profile=profile)
+
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 # Current Anthropic API IDs (Aug 2026). Saved Settings may still hold
 # 4.x aliases; ``canonicalize_model`` in gating.py rewrites them.
 HAIKU_MODEL = "claude-haiku-4-5"
 SONNET_MODEL = "claude-sonnet-5"
-OPUS_MODEL = "claude-opus-5"
+OPUS_MODEL = "claude-fable-5"
 
 MAX_IMAGE_DIMENSION = 1024
 
@@ -930,21 +953,43 @@ def get_fast_provider(user_id: str | None = None) -> LLMProvider:
 
 def _prompt_depth_suffix(model: str) -> str:
     slug = (model or "").lower()
-    if "opus" in slug or "gpt-5.4" in slug or "mistral-large" in slug:
+    if (
+        "fable" in slug
+        or "opus" in slug
+        or "gpt-5.6-sol" in slug
+        or ("gpt-5.4" in slug and "mini" not in slug)
+        or "mistral-large" in slug
+    ):
         return (
             "Be thorough. When the answer benefits from depth, include worked steps, "
             "edge cases, and cite which paragraph each claim came from."
         )
-    if "sonnet" in slug or slug == "gpt-5" or "mistral-medium" in slug:
+    if (
+        "sonnet" in slug
+        or "gpt-5.6-terra" in slug
+        or slug == "gpt-5"
+        or "mistral-medium" in slug
+    ):
         return "Write with clear structure and adequate detail for an expert reader."
     return "Be terse and direct. Avoid restating context."
 
 
 def _scaled_max_tokens(model: str, base: int) -> int:
     slug = (model or "").lower()
-    if "opus" in slug or "gpt-5.4" in slug or "mistral-large" in slug:
+    if (
+        "fable" in slug
+        or "opus" in slug
+        or "gpt-5.6-sol" in slug
+        or ("gpt-5.4" in slug and "mini" not in slug)
+        or "mistral-large" in slug
+    ):
         return min(int(base * 1.6), 12000)
-    if "sonnet" in slug or slug == "gpt-5" or "mistral-medium" in slug:
+    if (
+        "sonnet" in slug
+        or "gpt-5.6-terra" in slug
+        or slug == "gpt-5"
+        or "mistral-medium" in slug
+    ):
         return min(int(base * 1.25), 9000)
     return base
 
@@ -1334,7 +1379,7 @@ async def suggest_questions(
     never shows an empty suggestion strip.
     """
     provider = get_fast_provider(user_id)
-    paper_text = _sanitize_user_text(paper_text, max_chars=8000)
+    paper_text = excerpt_paper(paper_text, kind="qa", user_id=user_id)
     seen_block = ""
     if already_seen:
         # Bound the exclusion list so a runaway client can't blow out
@@ -1356,7 +1401,7 @@ specific questions worth asking about it. Each question:
 - Reads naturally to a researcher (no LLM-style hedging).
 {seen_block}
 Paper:
-{paper_text[:8000]}
+{paper_text}
 
 Return JSON: ["question 1", "question 2", ...]
 """
@@ -1413,7 +1458,7 @@ async def polish_note_from_selection(
     user = (
         "Write the note as polished markdown + LaTeX.\n\n"
         f'Excerpt from the PDF text layer:\n"""\n{selected_text}\n"""\n\n'
-        f'Nearby paper text for context:\n"""\n{paper_text[:5000]}\n"""'
+        f'Nearby paper text for context:\n"""\n{excerpt_paper(paper_text, kind="selection", user_id=user_id, query=selected_text)}\n"""'
     )
 
     raw = await provider.complete(system, user, max_tokens=4096)
@@ -1455,7 +1500,9 @@ async def analyze_selection(
         provider = get_fast_provider(user_id)
     budget = get_budgets("selection", user_id)
     selected_text = _sanitize_user_text(selected_text, max_chars=budget["selection"])
-    paper_text = _sanitize_user_text(paper_text, max_chars=budget["context"])
+    paper_text = excerpt_paper(
+        paper_text, kind="selection", user_id=user_id, query=selected_text,
+    )
 
     passage_explain_assumptions_json = f"""Explain the following passage from an academic paper clearly and thoroughly.
 
@@ -1479,7 +1526,7 @@ Selected text:
 \"\"\"{selected_text}\"\"\"
 
 Full paper context:
-{paper_text[:6000]}
+{paper_text}
 
 Return JSON:
 {{
@@ -1526,7 +1573,7 @@ Selected text:
 \"\"\"{selected_text}\"\"\"
 
 Full paper context:
-{paper_text[:6000]}
+{paper_text}
 
 Return JSON:
 {{
@@ -1648,7 +1695,9 @@ def _sanitize_user_text(text: str, *, max_chars: int = 10000) -> str:
 def _get_selection_prompt(paper_text: str, selected_text: str, action: str) -> tuple[str, str]:
     """Return (system, user_text) for selection analysis with markdown output (for streaming)."""
     selected_text = _sanitize_user_text(selected_text)
-    paper_text = _sanitize_user_text(paper_text, max_chars=6000)
+    paper_text = excerpt_paper(
+        paper_text, kind="selection", user_id=None, query=selected_text,
+    )
     system = (
         "You are an expert science educator. Analyze academic paper content to help students learn. "
         "Use markdown formatting with clear structure. "
@@ -1691,7 +1740,7 @@ Selected text:
 \"\"\"{selected_text}\"\"\"
 
 Paper context:
-{paper_text[:6000]}"""
+{paper_text}"""
 
     prompts = {
         # Explain folds in the old "Ask" button: if the selected text
@@ -1718,7 +1767,7 @@ Selected text:
 \"\"\"{selected_text}\"\"\"
 
 Paper context:
-{paper_text[:6000]}""",
+{paper_text}""",
 
         # `followup` is reached when the user types into the inline
         # follow-up box on a previous selection card. The "selection"
@@ -1736,7 +1785,7 @@ Earlier passage + analysis (verbatim):
 \"\"\"{selected_text}\"\"\"
 
 Paper context:
-{paper_text[:6000]}""",
+{paper_text}""",
     }
 
     return system, prompts.get(action, prompts["explain"])
@@ -1807,7 +1856,7 @@ async def analyze_paper(paper_text: str, user_id: str | None = None) -> dict:
     model_slug = getattr(provider, "model", "unknown")
     depth = _prompt_depth_suffix(model_slug)
     paper_text_full = _sanitize_user_text(paper_text, max_chars=200_000)
-    paper_text = build_prepare_excerpt(paper_text_full, max_chars=12000)
+    paper_text = build_prepare_excerpt(paper_text_full, max_chars=32000)
 
     bib_excerpt = extract_references_section(paper_text_full, max_chars=10000)
     bib_for_prompt = bib_excerpt[-8000:] if len(bib_excerpt) > 8000 else bib_excerpt
@@ -1879,7 +1928,7 @@ async def explain_term(paper_text: str, term: str, context: str, user_id: str | 
     provider = get_provider(user_id)
     term = _sanitize_user_text(term, max_chars=500)
     context = _sanitize_user_text(context, max_chars=5000)
-    paper_text = _sanitize_user_text(paper_text, max_chars=10000)
+    paper_text = excerpt_paper(paper_text, kind="qa", user_id=user_id, query=term)
 
     system = (
         "You are an expert science educator. Explain technical terms clearly and accurately. "
@@ -1896,7 +1945,7 @@ Use LaTeX notation for any math (e.g., $\\nabla \\cdot E = \\rho / \\epsilon_0$)
 Return JSON: {{"term": "...", "explanation": "...", "source": "name of source if from another paper", "in_paper": true/false}}
 
 Paper excerpt:
-{paper_text[:10000]}"""
+{paper_text}"""
 
     raw = await provider.complete(system, user, max_tokens=3000)
     return _safe_parse_json(raw)
@@ -1906,7 +1955,7 @@ async def find_skipped_steps(paper_text: str, section: str, user_id: str | None 
     """Identify and fill in skipped derivation steps."""
     provider = get_provider(user_id)
     section = _sanitize_user_text(section, max_chars=10000)
-    paper_text = _sanitize_user_text(paper_text, max_chars=10000)
+    paper_text = excerpt_paper(paper_text, kind="selection", user_id=user_id, query=section)
 
     system = (
         "You are an expert physicist and mathematics educator. When given a derivation from a paper, "
@@ -1919,7 +1968,7 @@ async def find_skipped_steps(paper_text: str, section: str, user_id: str | None 
 Section: {section}
 
 Full paper context:
-{paper_text[:10000]}
+{paper_text}
 
 Return JSON:
 {{
@@ -2136,7 +2185,7 @@ async def extract_assumptions(paper_text: str, user_id: str | None = None) -> di
     provider = get_provider(user_id)
     model_slug = getattr(provider, "model", settings.analysis_model)
     depth = _prompt_depth_suffix(model_slug)
-    paper_text = _sanitize_user_text(paper_text, max_chars=get_budgets("assumptions", user_id)["context"])
+    paper_text = excerpt_paper(paper_text, kind="assumptions", user_id=user_id)
 
     system = (
         "You are an expert science educator. Identify all assumptions in the paper, both those explicitly "
@@ -2145,7 +2194,7 @@ async def extract_assumptions(paper_text: str, user_id: str | None = None) -> di
         + f"\n\n{depth}"
     )
 
-    paper_block = f"Paper content:\n{paper_text[:6000]}"
+    paper_block = f"Paper content:\n{paper_text}"
     task = """Analyze this paper and extract all assumptions, both explicit (clearly stated) and implicit (unstated but necessary for the conclusions to hold).
 
 Return JSON:
@@ -2192,7 +2241,7 @@ async def generate_derivation_exercise(paper_text: str, section: str, user_id: s
     """Generate an interactive derivation exercise with fill-in-the-blank steps."""
     provider = get_provider(user_id)
     section = _sanitize_user_text(section, max_chars=10000)
-    paper_text = _sanitize_user_text(paper_text, max_chars=6000)
+    paper_text = excerpt_paper(paper_text, kind="selection", user_id=user_id, query=section)
 
     system = (
         "You are an expert physics/mathematics educator creating interactive derivation exercises. "
@@ -2214,7 +2263,7 @@ CRITICAL INSTRUCTIONS:
 - End at the final result from the paper
 
 Full paper context:
-{paper_text[:6000]}
+{paper_text}
 
 Return JSON:
 {{
@@ -2262,13 +2311,19 @@ async def answer_questions(
         except Exception:
             paper = None
 
+    from .paper_excerpt import extract_numbered_context
+
     visual_block = ""
     if isinstance(paper, ParsedPaper):
         visual_block = build_qa_visual_context(
-            paper, query, max_chars=min(2500, max(800, ctx_cap // 3)),
+            paper, query, max_chars=min(4000, max(800, ctx_cap // 4)),
         )
 
-    retrieval_cap = max(500, ctx_cap - len(visual_block) - 80) if visual_block else ctx_cap
+    numbered = extract_numbered_context(paper_text, query, max_chars=min(14000, ctx_cap // 3))
+    retrieval_cap = max(
+        500,
+        ctx_cap - len(visual_block) - len(numbered) - 120,
+    )
     context_block = ""
     retrieval_hits: list[dict] = []
     if paper_id:
@@ -2280,19 +2335,26 @@ async def answer_questions(
         except Exception:
             pass
     if not context_block:
-        paper_text = _sanitize_user_text(paper_text, max_chars=retrieval_cap)
-        context_block = paper_text[:retrieval_cap]
-
-    if visual_block:
-        context_block = (
-            f"## Figures & tables\n{visual_block}\n\n---\n\n## Text excerpts\n{context_block}"
+        context_block = excerpt_paper(
+            paper_text, kind="qa", user_id=user_id, query=query,
         )
+
+    parts: list[str] = []
+    if numbered:
+        parts.append(f"## Numbered items referenced in the question\n{numbered}")
+    if visual_block:
+        parts.append(f"## Figures & tables\n{visual_block}")
+    if context_block:
+        parts.append(f"## Text excerpts\n{context_block}")
+    context_block = "\n\n---\n\n".join(parts)
 
     system = (
         "You are an expert science educator. Answer each question helpfully whether or not every detail appears in "
         "the manuscript. When relevant, ground claims in this paper's text, methods, results, figures, or tables "
         "and indicate that basis. Use the Figures & tables section for questions about plots, diagrams, exhibits, "
-        "or numeric results shown visually. If the PDF does not address the topic—or does so only indirectly—say so "
+        "or numeric results shown visually. When the question names a numbered equation, figure, or table, use the "
+        "Numbered items section — only say that item is absent if it does not appear there or in the excerpts. "
+        "If the PDF does not address the topic—or does so only indirectly—say so "
         "briefly, then answer using reliable general knowledge clearly labeled as such, and propose concrete Google "
         "Scholar-style search phrases or keywords the reader could try next. Do not refuse solely because wording is "
         "absent from the excerpts. Return ONLY valid JSON. Each answer must be a single markdown string — never a "
@@ -2452,8 +2514,8 @@ async def summarize_paper_lite(
     else:
         provider = get_provider(user_id)
 
-    cap = min(get_budgets("summary", user_id)["context"], 6000)
-    paper_text = _sanitize_user_text(paper_text, max_chars=cap)
+    paper_text = excerpt_paper(paper_text, kind="summary", user_id=user_id)
+    cap = len(paper_text)
     model_slug = getattr(provider, "model", model_override or settings.analysis_model)
     depth = _prompt_depth_suffix(model_slug)
 
@@ -2506,8 +2568,8 @@ async def summarize_paper_deep(
     else:
         provider = get_provider(user_id)
 
-    cap = min(get_budgets("summary", user_id)["context"], 6000)
-    paper_text = _sanitize_user_text(paper_text, max_chars=cap)
+    paper_text = excerpt_paper(paper_text, kind="summary", user_id=user_id)
+    cap = len(paper_text)
     model_slug = getattr(provider, "model", model_override or settings.analysis_model)
     depth = _prompt_depth_suffix(model_slug)
 
@@ -2564,7 +2626,7 @@ async def summarize_paper(paper_text: str, model_override: str | None = None, us
     else:
         provider = get_provider(user_id)
 
-    paper_text = _sanitize_user_text(paper_text, max_chars=get_budgets("summary", user_id)["context"])
+    paper_text = excerpt_paper(paper_text, kind="summary", user_id=user_id)
 
     system = (
         "You are an expert science educator and researcher. Produce an extremely detailed, structured summary "
@@ -2587,7 +2649,7 @@ Structure your summary with ALL of the following sections:
 10. **key_figures_and_tables**: Array of descriptions of the most important figures/tables: {{"id": "Fig. 1", "description": "what it shows and why it matters"}}.
 
 Paper content:
-{paper_text[: get_budgets("summary", user_id)["context"]]}
+{paper_text}
 
 Return JSON with all the above fields."""
 
@@ -2772,14 +2834,13 @@ async def generate_podcast_script(
     cache: dict | None = None,
 ) -> tuple[list[dict], dict]:
     """Generate segmented podcast script JSON. Returns (segments, meta)."""
-    from .paper_excerpt import build_prepare_excerpt
     from .exports.podcast_render import validate_podcast_script
 
     provider = get_provider(user_id)
     target_words = target_minutes * 150
     from .pdf_parser import paper_prompt_text
 
-    paper_text = build_prepare_excerpt(paper_prompt_text(paper), max_chars=6000)
+    paper_text = excerpt_paper(paper_prompt_text(paper), kind="summary", user_id=user_id)
 
     section_blocks = []
     content = cache or {}
@@ -2837,9 +2898,9 @@ async def generate_podcast_script(
 
 def _get_figure_prompt(paper_text: str, question: str) -> tuple[str, str]:
     """Return (system, user_text) for figure analysis."""
-    paper_text = _sanitize_user_text(paper_text, max_chars=4000)
+    paper_text = excerpt_paper(paper_text, kind="figure", user_id=None, query=question)
     question = _sanitize_user_text(question, max_chars=2000)
-    context_block = paper_text[:4000]
+    context_block = paper_text
     system = (
         "You are an expert science educator analyzing figures from academic papers. "
         "Provide clear, thorough, educational explanations. Use markdown formatting. "

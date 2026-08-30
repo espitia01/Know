@@ -17,9 +17,9 @@ import { UpgradeConfirmModal } from "@/components/UpgradeConfirmModal";
 import { UpgradeScheduledModal } from "@/components/UpgradeScheduledModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { AppearanceSection } from "@/components/AppearanceSection";
-import { ModelPicker, ProviderStatusPills } from "@/components/settings/ModelPicker";
+import { ModelPicker } from "@/components/settings/ModelPicker";
+import { PlanUsage, type AccountUsage } from "@/components/settings/PlanUsage";
 import { DISCORD_URL } from "@/lib/constants";
-
 
 const DEFAULT_MODEL = "mistral-small-latest";
 
@@ -33,37 +33,6 @@ function formatDeepLimit(value: unknown, mult: number): string {
   if (value === -1) return "Unlimited";
   if (typeof value === "number" && value > 0) return String(Math.floor(value / mult));
   return "—";
-}
-
-function UsageBar({ label, used, limit, hint }: { label: string; used: number; limit: number; hint?: string }) {
-  const unlimited = limit === -1;
-  const pct = unlimited ? 0 : Math.min(100, limit > 0 ? (used / limit) * 100 : 0);
-  const nearLimit = !unlimited && pct >= 80;
-  const over = !unlimited && used >= limit;
-  return (
-    <div className="space-y-1.5" title={hint}>
-      <div className="flex items-center justify-between text-[12px]">
-        <span className="text-muted-foreground font-medium">{label}</span>
-        <span className="tabular-nums text-muted-foreground">
-          {unlimited ? (
-            <span className="font-medium text-foreground/90">{used} <span className="text-muted-foreground/80">/ Unlimited</span></span>
-          ) : (
-            <span className={`font-medium ${over ? "text-destructive" : nearLimit ? "text-warning" : "text-foreground"}`}>
-              {used} / {limit}
-            </span>
-          )}
-        </span>
-      </div>
-      <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-300 ${
-            unlimited ? "bg-muted-foreground/40" : over ? "bg-destructive/70" : nearLimit ? "bg-warning" : "bg-foreground"
-          }`}
-          style={{ width: unlimited ? "8%" : `${pct}%` }}
-        />
-      </div>
-    </div>
-  );
 }
 
 function SettingsContent() {
@@ -88,24 +57,15 @@ function SettingsContent() {
   const [billingError, setBillingError] = useState("");
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [planChangeTarget, setPlanChangeTarget] = useState<"scholar" | "researcher" | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [showUpgradeConfirm, setShowUpgradeConfirm] = useState(false);
   const [scheduledUpgradeAt, setScheduledUpgradeAt] = useState<number | null>(null);
+  const [scheduledTierLabel, setScheduledTierLabel] = useState("Researcher");
   const [showScheduledModal, setShowScheduledModal] = useState(false);
   const [hasAnthropicKey, setHasAnthropicKey] = useState<boolean | null>(null);
   const [hasOpenaiKey, setHasOpenaiKey] = useState<boolean | null>(null);
   const [hasMistralKey, setHasMistralKey] = useState<boolean | null>(null);
-  const [usage, setUsage] = useState<{
-    tier: string;
-    papers_used: number;
-    papers_limit: number;
-    daily_api_used: number;
-    daily_api_limit: number;
-    qa_per_paper_limit: number;
-    selections_per_paper_limit: number;
-    per_model_usage: { model: string; used: number; limit: number }[];
-    per_capability_usage: { capability: string; label: string; used: number; limit: number }[];
-  } | null>(null);
+  const [usage, setUsage] = useState<AccountUsage | null>(null);
 
   const tier = tierUser?.tier || "free";
   const usageRefreshKey = useStore((s) => s.usageRefreshKey);
@@ -175,319 +135,134 @@ function SettingsContent() {
     }
   };
 
+  const providerKeys = {
+    anthropic: !!hasAnthropicKey,
+    openai: !!hasOpenaiKey,
+    mistral: !!hasMistralKey,
+  };
+
   return (
-    <main className="flex-1 flex flex-col items-center px-6 pt-[8vh] pb-12 bg-mesh min-h-screen text-foreground">
-      <div className="max-w-lg w-full space-y-8">
-        {/* Header */}
+    <main className="flex-1 flex flex-col items-center px-6 pt-[8vh] pb-16 bg-mesh min-h-screen text-foreground">
+      <div className="max-w-xl w-full space-y-10">
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.back()}
-            className="text-muted-foreground hover:text-foreground transition-colors text-[13px] font-medium ring-focus rounded-md px-1"
+            className="text-muted-foreground hover:text-foreground motion-safe:duration-150 text-[13px] font-medium ring-focus rounded-md px-1"
           >
             &larr; Back
           </button>
           <div className="h-4 w-px bg-border" />
           <Image src="/logo.png" alt="Know" width={20} height={20} className="rounded-md" />
-          <h1 className="font-display text-[15px] font-semibold text-foreground tracking-tight">Settings</h1>
+          <h1 className="font-display text-[15px] font-semibold tracking-[-0.02em] text-foreground">
+            Settings
+          </h1>
           <div className="flex-1" />
           <ThemeToggle />
           <UserButton appearance={{ elements: { userButtonPopoverActionButton__manageAccount: { display: "none" } } }} />
         </div>
 
-        {/* Model Selection */}
-        <div className="space-y-5">
-          <div className="glass rounded-2xl p-6 space-y-5">
-            <div className="flex items-center justify-between">
-              <p className="text-[14px] font-semibold text-foreground">Models</p>
-              <span className="text-[11px] text-muted-foreground glass-subtle px-2.5 py-1 rounded-full font-medium capitalize">
-                {tier} Plan
-              </span>
-            </div>
-
-            {loadError && (
-              <p className="text-[12px] text-destructive">{loadError}</p>
-            )}
-
-            {loading ? (
-              <div className="space-y-4 animate-pulse">
-                <div className="h-10 rounded-xl glass-subtle" />
-                <div className="h-32 rounded-xl glass-subtle" />
-                <div className="h-32 rounded-xl glass-subtle" />
-              </div>
-            ) : (
-              <>
-            <ModelPicker
-              label="Analysis Model"
-              hint="(Prepare, Summary, Assumptions, Q&A)"
-              name="analysis_model"
-              value={analysisModel}
-              allowedIds={models}
-              keys={{
-                anthropic: !!hasAnthropicKey,
-                openai: !!hasOpenaiKey,
-                mistral: !!hasMistralKey,
-              }}
-              onChange={setAnalysisModel}
-            />
-
-            <div className="pt-4 border-t border-border">
-              <ModelPicker
-                label="Selection Model"
-                hint="(Selection stream, Figures; Explain, Derive)"
-                name="fast_model"
-                value={fastModel}
-                allowedIds={models}
-                keys={{
-                  anthropic: !!hasAnthropicKey,
-                  openai: !!hasOpenaiKey,
-                  mistral: !!hasMistralKey,
-                }}
-                onChange={setFastModel}
-              />
-            </div>
-
-            <ProviderStatusPills
-              keys={{
-                anthropic: !!hasAnthropicKey,
-                openai: !!hasOpenaiKey,
-                mistral: !!hasMistralKey,
-              }}
-            />
-              </>
-            )}
-
-            {!loading && tier !== "researcher" && (
-              <p className="text-[11px] text-muted-foreground/80 text-center pt-2">
-                Upgrade to Researcher to unlock top-tier models.{" "}
-                <button onClick={() => router.push("/#pricing")} className="underline hover:text-muted-foreground transition-colors">
-                  View plans
-                </button>
-              </p>
-            )}
+        {/* Plan & usage */}
+        <section className="space-y-4">
+          <div>
+            <h2 className="font-display text-[15px] font-semibold tracking-[-0.02em] text-foreground">
+              Plan
+            </h2>
+            <p className="mt-1 text-[12px] text-muted-foreground">
+              Your subscription, quotas, and billing.
+            </p>
           </div>
-
-          {tier !== "free" && (
-          <>
-            <div className="glass rounded-2xl p-6 space-y-4">
-              <p className="text-[14px] font-semibold text-foreground">Deep analysis (Researcher)</p>
-              <p className="text-[12px] text-muted-foreground leading-relaxed">
-                Use 2× larger prompt budgets across Summary, Selection, Q&A, Assumptions, and Figure Q&A — more of the paper reaches the model. Each call consumes 2× your per-paper quota.
-              </p>
-              <label className={`flex items-center gap-3 ${!deepAllowed ? "opacity-50" : ""}`}>
-                <input
-                  type="checkbox"
-                  checked={deepAnalysis}
-                  disabled={!deepAllowed}
-                  onChange={(e) => setDeepAnalysis(e.target.checked)}
-                  className="accent-foreground"
-                />
-                <span className="text-[13px] text-foreground">Enable deep analysis</span>
-              </label>
-              {tierLimits && (
-                <div className="grid grid-cols-2 gap-3 pt-2 text-[11px] text-muted-foreground">
-                  <div>
-                    <p className="font-medium text-foreground/90 mb-1">Standard</p>
-                    <p>Q&A {formatLimit(tierLimits.qa_per_paper)} / paper</p>
-                    <p>Selections {formatLimit(tierLimits.selections_per_paper)} / paper</p>
-                    <p>Context ~3k tokens / call</p>
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground/90 mb-1">Deep ({deepMultiplier}×)</p>
-                    <p>Q&A {formatDeepLimit(tierLimits.qa_per_paper, deepMultiplier)} / paper</p>
-                    <p>Selections {formatDeepLimit(tierLimits.selections_per_paper, deepMultiplier)} / paper</p>
-                    <p>Context ~6k tokens / call</p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <Button
-              onClick={handleSave}
-              disabled={saving}
-              className="w-full text-[13px] h-10 rounded-xl btn-primary-glass border-0"
-            >
-              {saving ? "Saving..." : "Save Settings"}
-            </Button>
-
-            {saved && (
-              <p className="text-[13px] text-center text-muted-foreground/80 animate-fade-in">Saved.</p>
-            )}
-            {saveError && (
-              <p className="text-[12px] text-center text-destructive">{saveError}</p>
-            )}
-          </>
-          )}
-
-          {tier === "free" && (
-            <>
-              <Button
-                onClick={handleSave}
-                disabled={saving}
-                className="w-full text-[13px] h-10 rounded-xl btn-primary-glass border-0"
-              >
-                {saving ? "Saving..." : "Save Settings"}
-              </Button>
-              {saved && (
-                <p className="text-[13px] text-center text-muted-foreground/80 animate-fade-in">Saved.</p>
-              )}
-              {saveError && (
-                <p className="text-[12px] text-center text-destructive">{saveError}</p>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Appearance — background image picker (Scholar+ only; free
-            users see the upsell card inside the component). */}
-        <AppearanceSection tier={tier} />
-
-        <div className="glass rounded-2xl p-6 space-y-3">
-          <p className="text-[14px] font-semibold text-foreground">Paper OCR</p>
-          <p className="text-[12px] leading-relaxed text-muted-foreground">
-            Know runs uploaded PDFs through Mistral OCR to produce a clean readable view and to feed the same Markdown to analysis models.
-          </p>
-          <p className="text-[11px] font-medium text-muted-foreground/90">
-            Status:{" "}
-            <span className="text-foreground/80">
-              {hasMistralKey === null
-                ? "Checking…"
-                : hasMistralKey
-                  ? "configured on server"
-                  : "not configured — uploads fall back to legacy PDF view"}
-            </span>
-          </p>
-        </div>
-
-        {/* Usage */}
-        {usage && (
-          <div className="glass rounded-2xl p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-[14px] font-semibold text-foreground">Usage</p>
-              <span className="text-[11px] text-muted-foreground glass-subtle px-2.5 py-1 rounded-full font-medium capitalize">
-                {usage.tier} Plan
-              </span>
-            </div>
-
-            <UsageBar
-              label="Papers in library"
-              used={usage.papers_used}
-              limit={usage.papers_limit}
-              hint="Total papers uploaded to your library."
-            />
-            <UsageBar
-              label="API calls today"
-              used={usage.daily_api_used}
-              limit={usage.daily_api_limit}
-              hint="Resets at midnight UTC. Counts all AI analyses."
-            />
-
-            {usage.per_capability_usage && usage.per_capability_usage.length > 0 && (
-              <div className="pt-2 border-t border-border space-y-3">
-                <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide">
-                  Shared model caps
-                </p>
-                {usage.per_capability_usage.map((row) => (
-                  <UsageBar
-                    key={row.capability}
-                    label={`${row.label} models`}
-                    used={row.used}
-                    limit={row.limit}
-                    hint={`Daily cap on ${row.label.toLowerCase()} models (Haiku, GPT-5 mini, Mistral Small, etc. share this bucket). Counts toward your total daily API budget.`}
-                  />
-                ))}
-              </div>
-            )}
-
-            <div className="pt-2 border-t border-border space-y-1.5 text-[11px] text-muted-foreground">
-              <div className="flex items-center justify-between">
-                <span>Q&amp;A per paper</span>
-                <span className="font-medium text-foreground/90 tabular-nums">
-                  {usage.qa_per_paper_limit === -1 ? "Unlimited" : usage.qa_per_paper_limit}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>Selections per paper</span>
-                <span className="font-medium text-foreground/90 tabular-nums">
-                  {usage.selections_per_paper_limit === -1 ? "Unlimited" : usage.selections_per_paper_limit}
-                </span>
-              </div>
-            </div>
-
-            {tier !== "researcher" && (
-              <button
-                onClick={() => router.push("/#pricing")}
-                className="w-full text-[12px] font-medium text-muted-foreground hover:text-foreground transition-colors pt-1"
-              >
-                Need more? View plans &rarr;
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Account */}
-        <div className="glass rounded-2xl p-6 space-y-5">
-          <p className="text-[14px] font-semibold text-foreground">Account</p>
-
-          {tierUser && (
-            <div className="flex items-center justify-between px-4 py-3.5 rounded-xl glass-subtle">
+          <div className="rounded-xl border border-border/50 bg-card/30 dark:bg-card/22 p-5 space-y-5">
+            <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-[13px] font-medium text-foreground capitalize">{tierUser.tier} Plan</p>
-                <p className="text-[11px] text-muted-foreground/80 mt-0.5">
-                  {tierUser.paper_count} paper{tierUser.paper_count !== 1 ? "s" : ""} uploaded
+                <p className="text-[14px] font-medium capitalize text-foreground">
+                  {tier} plan
+                </p>
+                <p className="mt-0.5 text-[12px] text-muted-foreground">
+                  {tierUser?.paper_count ?? 0} paper{(tierUser?.paper_count ?? 0) === 1 ? "" : "s"} in library
+                  {tierUser?.period_end
+                    ? ` · Renews ${new Date(tierUser.period_end * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+                    : ""}
                 </p>
               </div>
-              {tierUser.tier === "free" && (
+              {tier === "free" && (
                 <button
                   onClick={() => router.push("/#pricing")}
-                  className="text-[12px] font-semibold bg-foreground text-background px-4 py-2 rounded-xl hover:opacity-90 transition-all shadow-sm"
+                  className="shrink-0 rounded-lg bg-foreground px-3 py-1.5 text-[12px] font-medium text-background motion-safe:duration-150 hover:opacity-90"
                 >
                   Upgrade
                 </button>
               )}
-              {tierUser.tier === "scholar" && (
+              {tier === "scholar" && (
                 <button
-                  onClick={() => { setBillingError(""); setShowUpgradeConfirm(true); }}
-                  className="text-[12px] font-semibold bg-foreground text-background px-4 py-2 rounded-xl hover:opacity-90 transition-all shadow-sm"
+                  onClick={() => { setBillingError(""); setPlanChangeTarget("researcher"); }}
+                  className="shrink-0 rounded-lg bg-foreground px-3 py-1.5 text-[12px] font-medium text-background motion-safe:duration-150 hover:opacity-90"
                 >
-                  Upgrade to Researcher
+                  Upgrade
+                </button>
+              )}
+              {tier === "researcher" && (
+                <button
+                  onClick={() => { setBillingError(""); setPlanChangeTarget("scholar"); }}
+                  className="shrink-0 text-[12px] font-medium text-muted-foreground hover:text-foreground motion-safe:duration-150"
+                >
+                  Switch to Scholar
                 </button>
               )}
             </div>
-          )}
 
-          {tierUser?.has_billing && tierUser.tier !== "free" && (
-            <div className="space-y-3">
-              <button
-                onClick={async () => {
-                  setBillingLoading(true);
-                  setBillingError("");
-                  try {
-                    const { url } = await api.createPortalSession(window.location.href);
-                    if (url) window.location.href = url;
-                  } catch (e: unknown) {
-                    const msg = e instanceof Error ? e.message : "Could not open billing portal";
-                    setBillingError(msg);
-                  } finally {
-                    setBillingLoading(false);
-                  }
-                }}
-                disabled={billingLoading}
-                className="w-full text-[13px] font-medium px-4 py-3 rounded-xl glass text-foreground/90 hover:bg-accent transition-all disabled:opacity-50"
-              >
-                {billingLoading ? "Opening..." : "Manage Billing"}
-              </button>
+            {tierUser?.past_due && (
+              <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5">
+                <p className="text-[12px] font-medium text-warning">Payment needs attention</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  Update your card in billing to keep your plan.
+                </p>
+              </div>
+            )}
 
-              {tierUser.cancel_at_period_end ? (
-                <>
-                  <div className="px-4 py-3.5 rounded-xl glass-subtle border border-warning/30 text-center">
-                    <p className="text-[13px] text-warning font-medium">Cancellation scheduled</p>
-                    <p className="text-[11px] text-warning/80 mt-0.5">
-                      Access continues until{" "}
-                      {tierUser.cancel_at
-                        ? new Date(tierUser.cancel_at * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })
-                        : "end of billing period"}
-                    </p>
-                  </div>
+            {tierUser?.cancel_at_period_end && (
+              <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5">
+                <p className="text-[12px] font-medium text-warning">Cancellation scheduled</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  Access continues until{" "}
+                  {tierUser.cancel_at
+                    ? new Date(tierUser.cancel_at * 1000).toLocaleDateString("en-US", {
+                        month: "long",
+                        day: "numeric",
+                        year: "numeric",
+                      })
+                    : "the end of this billing period"}
+                  .
+                </p>
+              </div>
+            )}
+
+            {usage && !loading && (
+              <div className="border-t border-border/40 pt-5">
+                <PlanUsage usage={usage} periodEnd={tierUser?.period_end} />
+              </div>
+            )}
+
+            {tierUser?.has_billing && tierUser.tier !== "free" && (
+              <div className="flex flex-col gap-2 border-t border-border/40 pt-4">
+                <button
+                  onClick={async () => {
+                    setBillingLoading(true);
+                    setBillingError("");
+                    try {
+                      const { url } = await api.createPortalSession(window.location.href);
+                      if (url) window.location.href = url;
+                    } catch (e: unknown) {
+                      setBillingError(e instanceof Error ? e.message : "Could not open billing portal");
+                    } finally {
+                      setBillingLoading(false);
+                    }
+                  }}
+                  disabled={billingLoading}
+                  className="w-full rounded-lg border border-border/50 bg-background px-3 py-2.5 text-[13px] font-medium text-foreground hover:bg-accent/50 motion-safe:duration-150 disabled:opacity-50"
+                >
+                  {billingLoading ? "Opening…" : "Manage billing"}
+                </button>
+                {tierUser.cancel_at_period_end ? (
                   <button
                     onClick={async () => {
                       setResubscribeLoading(true);
@@ -496,59 +271,152 @@ function SettingsContent() {
                         await api.resubscribe();
                         await refreshTier();
                       } catch (e: unknown) {
-                        const msg = e instanceof Error ? e.message : "Could not resubscribe";
-                        setBillingError(msg);
+                        setBillingError(e instanceof Error ? e.message : "Could not resubscribe");
                       } finally {
                         setResubscribeLoading(false);
                       }
                     }}
                     disabled={resubscribeLoading}
-                    className="w-full text-[13px] font-semibold px-4 py-3 rounded-xl btn-primary-glass text-white transition-all disabled:opacity-50"
+                    className="w-full rounded-lg bg-foreground px-3 py-2.5 text-[13px] font-medium text-background hover:opacity-90 motion-safe:duration-150 disabled:opacity-50"
                   >
-                    {resubscribeLoading ? "Resubscribing..." : "Resubscribe"}
+                    {resubscribeLoading ? "Resuming…" : "Resume subscription"}
                   </button>
-                </>
-              ) : (
-                <button
-                  onClick={() => { setBillingError(""); setShowCancelModal(true); }}
-                  className="w-full text-[13px] font-medium px-4 py-3 rounded-xl glass border border-destructive/30 text-destructive hover:bg-destructive/10 transition-all"
-                >
-                  Cancel Subscription
-                </button>
-              )}
+                ) : (
+                  <button
+                    onClick={() => { setBillingError(""); setShowCancelModal(true); }}
+                    className="w-full rounded-lg px-3 py-2 text-[12px] font-medium text-muted-foreground hover:text-destructive motion-safe:duration-150"
+                  >
+                    Cancel subscription
+                  </button>
+                )}
+                {billingError && (
+                  <p className="text-[12px] text-destructive text-center">{billingError}</p>
+                )}
+              </div>
+            )}
 
-              {billingError && (
-                <p className="text-[11px] text-destructive text-center">{billingError}</p>
-              )}
+            {tier !== "researcher" && !tierUser?.has_billing && (
+              <button
+                onClick={() => router.push("/#pricing")}
+                className="text-[12px] font-medium text-muted-foreground hover:text-foreground motion-safe:duration-150"
+              >
+                Compare plans →
+              </button>
+            )}
+          </div>
+        </section>
+
+        {/* Models */}
+        <section className="space-y-4">
+          <div>
+            <h2 className="font-display text-[15px] font-semibold tracking-[-0.02em] text-foreground">
+              Models
+            </h2>
+            <p className="mt-1 text-[12px] text-muted-foreground">
+              Choose defaults for long-form analysis and selection work.
+            </p>
+          </div>
+          <div className="rounded-xl border border-border/50 bg-card/30 dark:bg-card/22 p-5 space-y-6">
+            {loadError && <p className="text-[12px] text-destructive">{loadError}</p>}
+            {loading ? (
+              <div className="space-y-3 animate-pulse">
+                <div className="h-10 rounded-lg bg-muted/[0.08]" />
+                <div className="h-10 rounded-lg bg-muted/[0.08]" />
+              </div>
+            ) : (
+              <>
+                <ModelPicker
+                  label="Analysis"
+                  hint="Prepare, Summary, Assumptions, and Q&A"
+                  name="analysis_model"
+                  value={analysisModel}
+                  allowedIds={models}
+                  keys={providerKeys}
+                  onChange={setAnalysisModel}
+                />
+                <ModelPicker
+                  label="Selection"
+                  hint="Explain, Derive, Figures, and follow-ups"
+                  name="fast_model"
+                  value={fastModel}
+                  allowedIds={models}
+                  keys={providerKeys}
+                  onChange={setFastModel}
+                />
+              </>
+            )}
+
+            {tier !== "free" && (
+              <div className="space-y-3 border-t border-border/40 pt-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium text-foreground">Deep analysis</p>
+                    <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+                      2× prompt budget so more of the paper reaches the model. Each call uses 2× quota.
+                    </p>
+                  </div>
+                  <label className={`mt-0.5 inline-flex items-center ${!deepAllowed ? "opacity-50" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={deepAnalysis}
+                      disabled={!deepAllowed}
+                      onChange={(e) => setDeepAnalysis(e.target.checked)}
+                      className="accent-foreground h-4 w-4"
+                    />
+                    <span className="sr-only">Enable deep analysis</span>
+                  </label>
+                </div>
+                {tierLimits && deepAllowed && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Standard: {formatLimit(tierLimits.qa_per_paper)} Q&amp;A and {formatLimit(tierLimits.selections_per_paper)} selections per paper.
+                    Deep: {formatDeepLimit(tierLimits.qa_per_paper, deepMultiplier)} Q&amp;A and {formatDeepLimit(tierLimits.selections_per_paper, deepMultiplier)} selections.
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 pt-1">
+              <Button
+                onClick={handleSave}
+                disabled={saving || loading}
+                className="h-9 rounded-lg bg-foreground px-4 text-[13px] font-medium text-background hover:opacity-90 border-0"
+              >
+                {saving ? "Saving…" : "Save models"}
+              </Button>
+              {saved && <p className="text-[12px] text-muted-foreground">Saved</p>}
+              {saveError && <p className="text-[12px] text-destructive">{saveError}</p>}
             </div>
-          )}
+          </div>
+        </section>
 
+        <AppearanceSection tier={tier} />
+
+        <section className="space-y-3">
+          <h2 className="font-display text-[15px] font-semibold tracking-[-0.02em] text-foreground">
+            Account
+          </h2>
           <button
             onClick={() => {
-              // Wipe every scrap of the outgoing user's state BEFORE Clerk
-              // navigates away so a subsequent sign-in in the same tab can't
-              // rehydrate their sessionStorage or reuse their bearer token.
               try { useStore.getState().clearSession(); } catch { /* no-op */ }
               clearAuthState();
               signOut({ redirectUrl: "/" });
             }}
-            className="w-full text-[13px] font-medium px-4 py-3 rounded-xl glass text-muted-foreground hover:text-destructive hover:border-destructive/40 hover:bg-destructive/10 transition-all"
+            className="w-full rounded-xl border border-border/50 bg-card/30 dark:bg-card/22 px-4 py-3 text-[13px] font-medium text-muted-foreground hover:text-destructive hover:border-destructive/40 motion-safe:duration-150"
           >
-            Sign Out
+            Sign out
           </button>
-        </div>
+        </section>
 
-        {/* Footer */}
         <div className="flex items-center justify-center gap-8 pt-2 pb-4">
           <button
             onClick={() => setShowFeedback(true)}
-            className="text-[12px] text-muted-foreground hover:text-foreground/90 transition-colors font-medium"
+            className="text-[12px] text-muted-foreground hover:text-foreground/90 motion-safe:duration-150 font-medium"
           >
             Feedback
           </button>
           <Link
             href="/terms"
-            className="text-[12px] text-muted-foreground hover:text-foreground/90 transition-colors font-medium"
+            className="text-[12px] text-muted-foreground hover:text-foreground/90 motion-safe:duration-150 font-medium"
           >
             Terms
           </Link>
@@ -556,11 +424,8 @@ function SettingsContent() {
             href={DISCORD_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[12px] text-muted-foreground hover:text-foreground/90 transition-colors font-medium flex items-center gap-1.5"
+            className="text-[12px] text-muted-foreground hover:text-foreground/90 motion-safe:duration-150 font-medium"
           >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
-            </svg>
             Discord
           </a>
         </div>
@@ -577,19 +442,18 @@ function SettingsContent() {
       />
       <FeedbackModal open={showFeedback} onClose={() => setShowFeedback(false)} />
       <UpgradeConfirmModal
-        tier="researcher"
-        tierLabel="Researcher"
-        open={showUpgradeConfirm}
-        onClose={() => setShowUpgradeConfirm(false)}
+        tier={planChangeTarget ?? "researcher"}
+        tierLabel={planChangeTarget === "scholar" ? "Scholar" : "Researcher"}
+        open={planChangeTarget !== null}
+        onClose={() => setPlanChangeTarget(null)}
         onUpgraded={async (mode, preview) => {
-          setShowUpgradeConfirm(false);
-          // Pull the new tier so the settings UI (models list, tier pill,
-          // Upgrade button state) reflects the change right away instead
-          // of waiting for the next focus/visibility event.
+          const next = planChangeTarget;
+          setPlanChangeTarget(null);
           await refreshTier();
           if (mode === "now") {
-            setShowUpgradeModal(true);
+            if (next === "researcher") setShowUpgradeModal(true);
           } else {
+            setScheduledTierLabel(next === "scholar" ? "Scholar" : "Researcher");
             setScheduledUpgradeAt(preview?.period_end ?? null);
             setShowScheduledModal(true);
           }
@@ -601,7 +465,7 @@ function SettingsContent() {
         onClose={() => setShowUpgradeModal(false)}
       />
       <UpgradeScheduledModal
-        tierLabel="Researcher"
+        tierLabel={scheduledTierLabel}
         effectiveAt={scheduledUpgradeAt}
         open={showScheduledModal}
         onClose={() => setShowScheduledModal(false)}

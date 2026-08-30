@@ -40,7 +40,7 @@ function FolderIcon({ className = "w-4 h-4", filled = false }: { className?: str
 
 function LibraryContent() {
   const router = useRouter();
-  const { user: tierUser, loading: tierLoading } = useUserTier();
+  const { user: tierUser, loading: tierLoading, refresh: refreshTier } = useUserTier();
   const isFree = tierLoading ? true : (!tierUser || tierUser.tier === "free");
   // Workspaces are part of the multi-paper/Researcher feature set — gate the
   // sidebar tab and CTAs on the same `multi-qa` capability.
@@ -226,11 +226,13 @@ function LibraryContent() {
       forgetCachedPaper(id);
       clearPaperUiPrefs(id);
       setPapers((prev) => prev.filter((p) => p.id !== id));
+      useStore.getState().bumpUsageRefresh();
+      void refreshTier();
     } catch (e) { console.error(e); }
     setDeleteConfirm(null);
     setDeleteAffectedWs([]);
     setDeleteLoading(false);
-  }, [deleteAffectedWs, forgetCachedPaper, clearPaperUiPrefs]);
+  }, [deleteAffectedWs, forgetCachedPaper, clearPaperUiPrefs, refreshTier]);
 
   const handleMoveToFolder = useCallback(async (paperId: string, folder: string) => {
     try {
@@ -324,7 +326,9 @@ function LibraryContent() {
     setSelectedPapers(new Set());
     setBulkDeleteConfirm(false);
     setBulkDeleting(false);
-  }, [selectedPapers, forgetCachedPaper, clearPaperUiPrefs]);
+    useStore.getState().bumpUsageRefresh();
+    void refreshTier();
+  }, [selectedPapers, forgetCachedPaper, clearPaperUiPrefs, refreshTier]);
 
   const [bibtexModal, setBibtexModal] = useState<{
     open: boolean;
@@ -384,7 +388,7 @@ function LibraryContent() {
     <>
     <main className="flex-1 flex flex-col h-screen overflow-hidden bg-mesh text-foreground">
       {/* Header */}
-      <header className="relative z-30 flex h-[52px] shrink-0 items-center gap-3 border-b border-border/50 bg-background/90 px-5 backdrop-blur-md">
+      <header className="relative z-30 flex h-[52px] shrink-0 items-center gap-3 border-b border-border/50 bg-background px-5">
         <button
           onClick={() => router.push("/dashboard")}
           className="text-muted-foreground hover:text-foreground transition-colors text-[13px] font-medium ring-focus rounded-md px-1"
@@ -437,7 +441,7 @@ function LibraryContent() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <aside className="w-56 shrink-0 border-r border-border glass-subtle overflow-y-auto p-4 space-y-4">
+        <aside className="w-56 shrink-0 overflow-y-auto space-y-4 border-r border-border/50 bg-background p-4">
           <Input
             placeholder="Search papers..."
             value={search}
@@ -446,7 +450,7 @@ function LibraryContent() {
           />
 
           {/* Sidebar tabs */}
-          <div className="flex gap-1 glass-subtle rounded-xl p-0.5">
+          <div className="flex gap-0.5 rounded-md border border-border/50 p-0.5">
             <button
               onClick={() => setSidebarTab("folders")}
               className={`flex-1 text-[11px] font-semibold py-1.5 rounded-lg transition-colors ${
@@ -491,7 +495,7 @@ function LibraryContent() {
             <>
           <div className="space-y-0.5">
             <div className="flex items-center justify-between mb-3">
-              <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80">
+              <p className="text-[12px] font-medium text-muted-foreground">
                 Folders
               </p>
               <button

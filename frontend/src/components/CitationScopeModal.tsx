@@ -92,8 +92,8 @@ export function CitationScopeModal({
       aria-modal="true"
       aria-label="Select papers for citation export"
     >
-      <div className="absolute inset-0 bg-foreground/25 backdrop-blur-md" onClick={onClose} />
-      <div className="relative glass-strong rounded-2xl shadow-xl w-full max-w-md mx-4 flex flex-col max-h-[80vh] animate-fade-in">
+      <div className="absolute inset-0 bg-foreground/25" onClick={onClose} />
+      <div className="relative mx-4 flex max-h-[80vh] w-full max-w-md flex-col rounded-lg border border-border/50 bg-popover shadow-[var(--shadow-sm)]">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div>
             <h3 className="text-[14px] font-semibold text-foreground">Export Citations</h3>

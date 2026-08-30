@@ -410,7 +410,7 @@ function AddPaperPopover({
   return (
     <div
       ref={ref}
-      className="absolute top-full right-0 mt-1 z-50 glass-strong rounded-2xl shadow-xl w-80 max-h-[420px] flex flex-col animate-fade-in overflow-hidden"
+      className="absolute top-full right-0 mt-1 z-50 flex max-h-[420px] w-80 flex-col overflow-hidden rounded-lg border border-border/50 bg-popover shadow-[var(--shadow-sm)]"
     >
       {/* Upload section */}
       <div className="p-2.5 border-b border-border space-y-2">
@@ -477,7 +477,7 @@ function AddPaperPopover({
         ) : selectedFolder === null ? (
           /* Folder list */
           <div className="p-1.5">
-            <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80 px-2.5 py-1.5">
+            <p className="px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground">
               Select a folder
             </p>
             {folders.map((f) => {
@@ -1793,7 +1793,6 @@ function PaperContent() {
       const isHoriz = panelPos !== "bottom";
       startCoord.current = isHoriz ? e.clientX : e.clientY;
       startSize.current = panelSize;
-      document.body.style.cursor = isHoriz ? "col-resize" : "row-resize";
       document.body.style.userSelect = "none";
     },
     [panelSize, panelPos]
@@ -1817,7 +1816,6 @@ function PaperContent() {
   const onDragEnd = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragging.current) return;
     dragging.current = false;
-    document.body.style.cursor = "";
     document.body.style.userSelect = "";
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
   }, []);
@@ -1862,11 +1860,12 @@ function PaperContent() {
   // Wider hit targets + pointer events fix reliable dragging on left/right.
   const dragHandle = isBottom ? (
     <div
-      className="shrink-0 h-2.5 w-full flex items-center justify-center cursor-row-resize group hover:bg-accent/60 transition-colors touch-none select-none"
+      className="shrink-0 h-1 w-full flex items-center justify-center cursor-row-resize group hover:bg-accent/60 transition-colors touch-none select-none"
       onPointerDown={onDragStart}
       onPointerMove={onDragMove}
       onPointerUp={onDragEnd}
       onPointerCancel={onDragEnd}
+      onLostPointerCapture={onDragEnd}
       role="separator"
       aria-orientation="horizontal"
     >
@@ -1874,11 +1873,12 @@ function PaperContent() {
     </div>
   ) : (
     <div
-      className="shrink-0 w-2.5 h-full flex items-center justify-center cursor-col-resize group hover:bg-accent/60 transition-colors touch-none select-none"
+      className="shrink-0 w-1 h-full flex items-center justify-center cursor-col-resize group hover:bg-accent/60 transition-colors touch-none select-none"
       onPointerDown={onDragStart}
       onPointerMove={onDragMove}
       onPointerUp={onDragEnd}
       onPointerCancel={onDragEnd}
+      onLostPointerCapture={onDragEnd}
       role="separator"
       aria-orientation="vertical"
     >
@@ -1956,7 +1956,7 @@ function PaperContent() {
           reserve its 48px, so we drop it from the tree entirely and rely
           on the floating restore control below to bring it back. */}
       {!chromeHidden && (
-      <header className="relative z-30 flex h-12 shrink-0 items-center gap-2.5 border-b border-border/50 bg-background/90 px-4 backdrop-blur-md">
+      <header className="relative z-30 flex h-12 shrink-0 items-center gap-2.5 border-b border-border/50 bg-background px-4">
         <button
           onClick={() => router.push("/dashboard")}
           className="text-muted-foreground/80 hover:text-foreground transition-colors shrink-0 ring-focus rounded-md p-1 -ml-1"
@@ -1981,7 +1981,7 @@ function PaperContent() {
         )}
 
         {showSessionBar && (
-          <span className="text-[10.5px] text-muted-foreground/70 truncate flex-1 font-semibold uppercase tracking-[0.14em]">
+          <span className="flex-1 truncate text-[12px] font-medium text-muted-foreground">
             Session · {sessionPapers.length} papers
           </span>
         )}
@@ -1992,7 +1992,7 @@ function PaperContent() {
             as it ticks up. */}
         {paperUsage && paperUsage.qa_limit > 0 && (
           <div
-            className="hidden sm:flex items-center gap-2 shrink-0 text-[10.5px] font-medium text-muted-foreground/80 tabular-nums rounded-full border border-border/70 bg-background/40 px-2.5 py-0.5"
+            className="hidden sm:flex shrink-0 items-center gap-2 text-[11px] font-medium tabular-nums text-muted-foreground"
             title={`Q&A ${paperUsage.qa_used}/${paperUsage.qa_limit} · Selections ${paperUsage.selections_used}/${paperUsage.selections_limit} on this paper`}
           >
             <span>Q&A {paperUsage.qa_used}/{paperUsage.qa_limit}</span>
@@ -2047,7 +2047,7 @@ function PaperContent() {
             {paper.folder || "No folder"}
           </button>
           {showFolderPicker && (
-            <div className="absolute right-0 top-full mt-1 z-50 glass-strong rounded-2xl shadow-lg p-2 w-64 max-w-[calc(100vw-1rem)] space-y-1 animate-fade-in">
+            <div className="absolute right-0 top-full z-50 mt-1 w-64 max-w-[calc(100vw-1rem)] space-y-1 rounded-lg border border-border/50 bg-popover p-2 shadow-[var(--shadow-sm)]">
               <button
                 onClick={() => handleMoveToFolder("")}
                 className={`w-full text-left text-[11px] px-2 py-1.5 rounded-md transition-colors ${
@@ -2137,9 +2137,9 @@ function PaperContent() {
             <span className="hidden sm:inline">{activeWorkspaceName || "Workspace"}</span>
           </button>
           {showWorkspaceMenu && (
-            <div className="absolute right-0 top-full mt-1 z-50 glass-strong rounded-2xl shadow-xl w-80 max-h-[400px] flex flex-col animate-fade-in">
+            <div className="absolute right-0 top-full z-50 mt-1 flex max-h-[400px] w-80 flex-col rounded-lg border border-border/50 bg-popover shadow-[var(--shadow-sm)]">
               <div className="p-3 border-b border-border space-y-2">
-                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80">Save Current Session</p>
+                <p className="text-[11px] font-medium text-muted-foreground">Save current session</p>
                 <div className="flex gap-1.5">
                   <input
                     value={workspaceNameInput}
@@ -2167,8 +2167,8 @@ function PaperContent() {
                   <p className="text-[12px] text-muted-foreground/80 text-center py-6">No saved workspaces yet</p>
                 ) : (
                   <>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/80 px-2 py-1.5">
-                      Load Workspace
+                    <p className="px-2 py-1.5 text-[11px] font-medium text-muted-foreground">
+                      Load workspace
                     </p>
                     {savedWorkspaces.map((ws) => (
                       <div
@@ -2266,8 +2266,8 @@ function PaperContent() {
 
       {/* Session paper tabs */}
       {showSessionBar && !chromeHidden && (
-        <div className="shrink-0 border-b border-border glass-subtle px-3 py-1.5">
-          <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide">
+        <div className="shrink-0 border-b border-border/40 bg-background px-3 py-1">
+          <div className="flex items-center gap-0.5 overflow-x-auto scrollbar-hide">
             {sessionPapers.map((sp) => (
               // Tab + close button are siblings inside a group wrapper so we
               // avoid the invalid/confusing pattern of a focusable close
@@ -2278,10 +2278,10 @@ function PaperContent() {
                 key={sp.id}
                 role="group"
                 aria-label={sp.title}
-                className={`group flex items-center rounded-full text-[11px] font-medium transition-colors shrink-0 ${
+                className={`group flex shrink-0 items-center rounded-md text-[11px] font-medium transition-colors ${
                   sp.id === activePaperId
-                    ? "btn-primary-glass"
-                    : "glass-subtle text-muted-foreground hover:bg-accent hover:text-foreground"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                 }`}
               >
                 <button
@@ -2289,7 +2289,7 @@ function PaperContent() {
                   onClick={() => handleSwitchPaper(sp.id)}
                   onMouseEnter={() => prefetchSessionPaper(sp.id)}
                   onFocus={() => prefetchSessionPaper(sp.id)}
-                  className="pl-3 pr-1.5 py-1 flex items-center rounded-l-full"
+                  className="flex items-center rounded-l-md py-1 pl-2.5 pr-1.5"
                   aria-current={sp.id === activePaperId ? "page" : undefined}
                 >
                   <span className="max-w-[180px] truncate">
@@ -2301,10 +2301,10 @@ function PaperContent() {
                     type="button"
                     onClick={() => handleRemoveSessionPaper(sp.id)}
                     aria-label={`Remove ${sp.title} from session`}
-                    className={`mr-1.5 w-3.5 h-3.5 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                    className={`mr-1.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm transition-colors ${
                       sp.id === activePaperId
-                        ? "hover:bg-background/20 text-background/60 hover:text-background"
-                        : "hover:bg-foreground/10 text-muted-foreground/30 hover:text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100"
+                        ? "text-background/60 hover:bg-background/20 hover:text-background"
+                        : "text-muted-foreground/30 opacity-0 hover:bg-foreground/10 hover:text-muted-foreground group-hover:opacity-100 focus:opacity-100"
                     }`}
                   >
                     <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -2379,7 +2379,7 @@ function PaperContent() {
           whole point of the mode, which is to get chrome out of the
           way. */}
       {headerHidden && !focusMode && (
-        <div className="fixed top-2 right-2 z-40 flex items-center gap-1 glass-strong rounded-full px-1.5 py-1 shadow-sm animate-fade-in">
+        <div className="fixed top-2 right-2 z-40 flex items-center rounded-md border border-border/50 bg-background px-1 py-0.5 shadow-[var(--shadow-xs)]">
           <button
             onClick={() => { setHeaderHidden(false); }}
             className="text-muted-foreground/80 hover:text-foreground transition-colors rounded-full p-1 ring-focus"
@@ -2402,7 +2402,7 @@ function PaperContent() {
       {focusMode && (
         <button
           onClick={() => setPanelVisible(!panelVisible)}
-          className="fixed bottom-4 right-4 z-50 glass-strong rounded-full pl-3 pr-3.5 py-2 flex items-center gap-2 text-[12px] font-medium text-foreground/90 hover:text-foreground shadow-md hover:shadow-lg transition-shadow animate-fade-in ring-focus"
+          className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-md border border-border/50 bg-background px-3 py-1.5 text-[12px] font-medium text-foreground ring-focus hover:bg-muted/40"
           title={panelVisible ? "Hide analysis pane" : "Open analysis pane"}
           aria-label={panelVisible ? "Hide analysis pane" : "Open analysis pane"}
           aria-pressed={panelVisible}
@@ -2428,16 +2428,16 @@ function PaperContent() {
           accessible without competing with the PDF content. */}
       {focusMode && showSessionBar && (
         <div className="fixed top-2 left-1/2 -translate-x-1/2 z-40 max-w-[min(90vw,720px)] animate-fade-in">
-          <div className="flex items-center gap-1 glass-strong rounded-full shadow-md px-1.5 py-1 overflow-x-auto scrollbar-hide">
+          <div className="flex items-center gap-0.5 overflow-x-auto rounded-md border border-border/50 bg-background px-1 py-0.5 shadow-[var(--shadow-xs)] scrollbar-hide">
             {sessionPapers.map((sp) => (
               <div
                 key={sp.id}
                 role="group"
                 aria-label={sp.title}
-                className={`group flex items-center rounded-full text-[11px] font-medium transition-colors shrink-0 ${
+                className={`group flex shrink-0 items-center rounded-md text-[11px] font-medium transition-colors ${
                   sp.id === activePaperId
-                    ? "btn-primary-glass"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                    ? "bg-foreground text-background"
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                 }`}
               >
                 <button
@@ -2445,7 +2445,7 @@ function PaperContent() {
                   onClick={() => handleSwitchPaper(sp.id)}
                   onMouseEnter={() => prefetchSessionPaper(sp.id)}
                   onFocus={() => prefetchSessionPaper(sp.id)}
-                  className="pl-3 pr-1.5 py-1 flex items-center rounded-l-full"
+                  className="flex items-center rounded-l-md py-1 pl-2.5 pr-1.5"
                   aria-current={sp.id === activePaperId ? "page" : undefined}
                 >
                   <span className="max-w-[180px] truncate">

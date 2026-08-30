@@ -22,7 +22,7 @@ export function Sidebar({ paperId }: SidebarProps) {
       onValueChange={setActiveTab}
       className="flex flex-col h-full"
     >
-      <TabsList className="mx-3 mt-3 grid h-10 shrink-0 grid-cols-5 gap-0.5 rounded-xl border border-border/55 bg-muted/45 p-[3px] shadow-[var(--shadow-xs)] backdrop-blur-sm">
+      <TabsList className="mx-3 mt-3 grid h-10 shrink-0 grid-cols-5 gap-0.5 rounded-md border border-border/50 bg-muted/30 p-[3px]">
         <TabsTrigger
           value="preread"
           className="min-w-0 px-1 py-1 text-[11px] font-medium tracking-tight data-active:font-semibold motion-safe:transition-[color,box-shadow] motion-safe:duration-150"

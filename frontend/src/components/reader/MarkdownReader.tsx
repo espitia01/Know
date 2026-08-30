@@ -333,7 +333,7 @@ export function MarkdownReader({
           </button>
         </div>
       )}
-      <div className="reader-chrome sticky top-0 z-10 flex items-center justify-end gap-2 border-b border-border/35 bg-background/85 px-4 py-1.5 backdrop-blur-md">
+      <div className="reader-chrome sticky top-0 z-10 flex items-center justify-end gap-2 border-b border-border/40 bg-background px-4 py-1.5">
         <ReaderFontMenu />
       </div>
       <div

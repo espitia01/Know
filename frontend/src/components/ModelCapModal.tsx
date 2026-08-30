@@ -78,10 +78,10 @@ export function ModelCapModal() {
       aria-label={`${cappedLabel} daily limit reached`}
     >
       <div
-        className="absolute inset-0 bg-foreground/25 backdrop-blur-md"
+        className="absolute inset-0 bg-foreground/25"
         onClick={() => finish(null)}
       />
-      <div className="relative glass-strong rounded-2xl shadow-xl max-w-md w-full mx-4 overflow-hidden animate-fade-in">
+      <div className="relative mx-4 w-full max-w-md overflow-hidden rounded-lg border border-border/50 bg-popover shadow-[var(--shadow-sm)]">
         <div className="px-6 pt-6 pb-5 border-b border-border">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-xl bg-warning/15 flex items-center justify-center shrink-0">

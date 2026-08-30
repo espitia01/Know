@@ -2069,7 +2069,7 @@ export function PdfViewer({
     <div className="flex flex-col h-full">
       {/* Toolbar */}
       <div
-        className={`shrink-0 flex items-center gap-2 px-3 py-1.5 border-b border-border glass-subtle ${
+        className={`flex shrink-0 items-center gap-2 border-b border-border/50 bg-background px-3 py-1.5 ${
           reserveToolbarRightForOverlay ? "pr-[3.25rem] sm:pr-[3.75rem]" : ""
         }`}
       >
@@ -2131,7 +2131,7 @@ export function PdfViewer({
               onChange={(e) => setPageInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handlePageInputSubmit()}
               onBlur={handlePageInputSubmit}
-              className="w-11 tabular text-center rounded-md border border-input bg-background/95 text-[11px] text-foreground shadow-[var(--shadow-xs)] backdrop-blur-sm transition-colors focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35 py-1"
+              className="w-11 tabular-nums rounded-md border border-input bg-background py-1 text-center text-[11px] text-foreground transition-colors focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/35"
             />
             <span>/ {numPages}</span>
           </div>
@@ -2162,7 +2162,7 @@ export function PdfViewer({
         onMouseMove={marqueeMode ? handleMarqueeMove : undefined}
       >
         {isScannedPdf && !scannedBannerDismissed && (
-          <div className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-border/50 bg-muted/[0.12] px-4 py-2 text-[var(--text-sm)] text-foreground/90 backdrop-blur-sm">
+          <div className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-border/50 bg-muted/[0.12] px-4 py-2 text-[var(--text-sm)] text-foreground/90">
             <span>This PDF has no selectable text. Drag to capture a region instead.</span>
             <button
               type="button"

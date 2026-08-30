@@ -54,10 +54,10 @@ export function FeedbackModal({ open, onClose }: FeedbackModalProps) {
       onKeyDown={(e) => { if (e.key === "Escape") onClose(); }}
     >
       <div
-        className="absolute inset-0 bg-foreground/25 backdrop-blur-md"
+        className="absolute inset-0 bg-foreground/25"
         onClick={onClose}
       />
-      <div className="relative glass-strong rounded-2xl shadow-xl max-w-md w-full mx-4 overflow-hidden animate-fade-in">
+      <div className="relative mx-4 w-full max-w-md overflow-hidden rounded-lg border border-border/50 bg-popover shadow-[var(--shadow-sm)]">
         <button
           onClick={onClose}
           aria-label="Close"

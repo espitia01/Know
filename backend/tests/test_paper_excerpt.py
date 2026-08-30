@@ -55,3 +55,33 @@ def test_long_methods_truncated_conclusion_kept():
     )
     excerpt = build_prepare_excerpt(raw, max_chars=4000)
     assert "Final takeaway" in excerpt or "Conclusion" in excerpt
+
+
+def test_analysis_excerpt_keeps_full_paper_when_under_budget():
+    from app.services.paper_excerpt import build_analysis_excerpt
+
+    raw = "Abstract\nHello.\n\n## Methods\n" + ("eq " * 100) + "\n\n(25)\n$$E=mc^2$$\n"
+    out = build_analysis_excerpt(raw, max_chars=40000, profile="summary")
+    assert out == raw.strip()
+
+
+def test_numbered_equation_window_is_prepended():
+    from app.services.paper_excerpt import extract_numbered_context, build_analysis_excerpt
+
+    later = "x" * 20_000
+    raw = (
+        "Abstract\nShort.\n\n"
+        + later
+        + "\n\nEquation 25. The free energy is\n\n$$F = -kT \\ln Z \\tag{25}$$\n\n"
+        "which closes the argument.\n"
+    )
+    window = extract_numbered_context(raw, "explain equation 25", max_chars=8000)
+    assert "25" in window
+    assert "\\tag{25}" in window or "Equation 25" in window
+
+    excerpt = build_analysis_excerpt(
+        raw, max_chars=8000, query="Explain equation 25", profile="qa",
+    )
+    assert "Numbered items" in excerpt
+    assert "25" in excerpt
+

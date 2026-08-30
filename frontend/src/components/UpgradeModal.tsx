@@ -54,11 +54,11 @@ export function UpgradeModal({ tier, open, onClose }: UpgradeModalProps) {
       aria-modal="true"
       aria-label={`Welcome to ${info.title}`}
     >
-      <div className="absolute inset-0 bg-foreground/25 backdrop-blur-md" onClick={onClose} />
+      <div className="absolute inset-0 bg-foreground/25" onClick={onClose} />
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className="relative glass-strong rounded-2xl shadow-xl max-w-md w-full mx-4 overflow-hidden animate-fade-in"
+        className="relative mx-4 w-full max-w-md overflow-hidden rounded-lg border border-border/50 bg-popover shadow-[var(--shadow-sm)]"
       >
         <button
           onClick={onClose}

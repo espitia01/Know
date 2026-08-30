@@ -814,6 +814,16 @@ export const useStore = create<AppStore>()(
           const next = list.filter((h) => selectionResultKey(h) !== target);
           const cur = state.selectionResultByPaper[paperId] ?? null;
           const clearCurrent = cur && selectionResultKey(cur) === target;
+          const cachedPaper =
+            state.paper?.id === paperId ? state.paper : state.papersById[paperId];
+          const cachedSelections = cachedPaper?.cached_analysis?.selections ?? [];
+          const nextCached = cachedSelections.filter((item) => selectionResultKey(item) !== target);
+          const nextCachedAnalysis = cachedPaper
+            ? {
+                ...(cachedPaper.cached_analysis || {}),
+                selections: nextCached,
+              }
+            : undefined;
           return {
             selectionHistoryByPaper: {
               ...state.selectionHistoryByPaper,
@@ -822,6 +832,25 @@ export const useStore = create<AppStore>()(
             selectionResultByPaper: clearCurrent
               ? { ...state.selectionResultByPaper, [paperId]: null }
               : state.selectionResultByPaper,
+            papersById: cachedPaper
+              ? {
+                  ...state.papersById,
+                  [paperId]: {
+                    ...cachedPaper,
+                    cached_analysis: nextCachedAnalysis,
+                  },
+                }
+              : state.papersById,
+            paper:
+              state.paper?.id === paperId
+                ? {
+                    ...state.paper,
+                    cached_analysis: {
+                      ...(state.paper.cached_analysis || {}),
+                      selections: nextCached,
+                    },
+                  }
+                : state.paper,
           };
         }),
 

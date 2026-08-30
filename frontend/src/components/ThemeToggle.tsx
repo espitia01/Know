@@ -33,10 +33,10 @@ export function ThemeToggle({ className, showLabel }: Props) {
       title={title}
       onClick={toggleTheme}
       className={cn(
-        "inline-flex items-center gap-2 h-8 px-2.5 rounded-lg",
+        "inline-flex items-center gap-2 h-8 px-2.5 rounded-md",
         "text-[13px] font-medium text-muted-foreground",
-        "border border-border/70 bg-background/60",
-        "hover:text-foreground hover:bg-accent hover:border-border-strong",
+        "border border-border/50 bg-background",
+        "hover:text-foreground hover:bg-muted/40",
         "transition-colors ring-focus",
         showLabel ? "min-w-[90px] justify-start" : "w-8 justify-center p-0",
         className,

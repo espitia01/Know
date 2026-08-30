@@ -56,9 +56,9 @@ export function FullscreenToggle({ className = "", onChange }: FullscreenToggleP
         // so the button reads as a peer control instead of a muted
         // afterthought. Previously it was nearly invisible over the mesh
         // background on light mode.
-        "h-8 w-8 flex items-center justify-center rounded-lg " +
-        "border border-border/80 bg-background/60 backdrop-blur-md " +
-        "text-foreground/80 hover:text-foreground hover:bg-accent " +
+        "h-8 w-8 flex items-center justify-center rounded-md " +
+        "border border-border/50 bg-background " +
+        "text-foreground/80 hover:text-foreground hover:bg-muted/40 " +
         "transition-colors ring-focus " +
         className
       }

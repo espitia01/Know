@@ -528,7 +528,7 @@ export default function TrialPaperView() {
         </p>
       </div>
 
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/50 bg-background/90 px-3 backdrop-blur-md sm:px-4">
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border/50 bg-background px-3 sm:px-4">
         <Link
           href="/try"
           className="ring-focus rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground"
@@ -597,7 +597,7 @@ export default function TrialPaperView() {
         <div
           role="separator"
           aria-orientation="vertical"
-          className="hidden w-2 shrink-0 cursor-col-resize touch-none select-none items-center justify-center border-l border-border bg-muted/20 hover:bg-accent/40 sm:flex"
+          className="hidden w-1 shrink-0 cursor-col-resize touch-none select-none items-center justify-center hover:bg-accent/40 sm:flex"
           onPointerDown={onSepPointerDown}
           onPointerMove={onSepPointerMove}
           onPointerUp={onSepPointerEnd}

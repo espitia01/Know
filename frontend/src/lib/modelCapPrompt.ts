@@ -10,6 +10,8 @@
 // can call it without being mounted under a provider, which matters because
 // `request` is called from many non-React places too.
 
+import { normalizeModelSlug } from "@/lib/modelLabels";
+
 export type ModelCapPromptInput = {
   cappedModel: string;
   limit: number;
@@ -57,23 +59,25 @@ export async function promptModelCap(
 export const MODEL_ORDER = [
   "mistral-small-latest",
   "claude-haiku-4-5",
-  "gpt-5-mini",
+  "gpt-5.4-mini",
   "mistral-medium-latest",
   "claude-sonnet-5",
-  "gpt-5",
+  "gpt-5.6-terra",
   "mistral-large-latest",
-  "claude-opus-5",
-  "gpt-5.4",
+  "claude-fable-5",
+  "gpt-5.6-sol",
 ] as const;
 
 export function pickFallback(
   cappedModel: string,
   allowedModels: string[]
 ): string | null {
-  const idx = MODEL_ORDER.indexOf(cappedModel as (typeof MODEL_ORDER)[number]);
+  const capped = normalizeModelSlug(cappedModel) || cappedModel;
+  const allowed = allowedModels.map((m) => normalizeModelSlug(m) || m);
+  const idx = MODEL_ORDER.indexOf(capped as (typeof MODEL_ORDER)[number]);
   if (idx <= 0) return null;
   for (let i = idx - 1; i >= 0; i--) {
-    if (allowedModels.includes(MODEL_ORDER[i])) return MODEL_ORDER[i];
+    if (allowed.includes(MODEL_ORDER[i])) return MODEL_ORDER[i];
   }
   return null;
 }

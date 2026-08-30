@@ -80,9 +80,9 @@ export function KeyboardShortcuts() {
   if (!helpOpen) return null;
 
   return (
-    <div className="fixed bottom-4 left-4 z-[70] w-64 rounded-2xl border border-border bg-popover text-popover-foreground shadow-xl p-3 animate-fade-in">
+    <div className="fixed bottom-4 left-4 z-[70] w-64 rounded-lg border border-border/50 bg-popover p-3 text-popover-foreground shadow-[var(--shadow-sm)]">
       <div className="flex items-center justify-between gap-3 pb-2 border-b border-border/70">
-        <p className="text-[var(--text-xs)] font-semibold uppercase tracking-wider text-muted-foreground/70">
+        <p className="text-[var(--text-xs)] font-medium text-muted-foreground">
           Keyboard shortcuts
         </p>
         <button

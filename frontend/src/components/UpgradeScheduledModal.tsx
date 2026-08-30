@@ -45,11 +45,11 @@ export function UpgradeScheduledModal({ tierLabel, effectiveAt, open, onClose }:
       aria-modal="true"
       aria-label={`Upgrade to ${tierLabel} scheduled`}
     >
-      <div className="absolute inset-0 bg-foreground/25 backdrop-blur-md" onClick={onClose} />
+      <div className="absolute inset-0 bg-foreground/25" onClick={onClose} />
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className="relative glass-strong rounded-2xl shadow-xl max-w-md w-full mx-4 overflow-hidden animate-fade-in"
+        className="relative mx-4 w-full max-w-md overflow-hidden rounded-lg border border-border/50 bg-popover shadow-[var(--shadow-sm)]"
       >
         <button
           onClick={onClose}
@@ -61,13 +61,8 @@ export function UpgradeScheduledModal({ tierLabel, effectiveAt, open, onClose }:
           </svg>
         </button>
 
-        <div className="glass-subtle px-6 pt-8 pb-5 text-center border-b border-border">
-          <div className="w-12 h-12 rounded-xl glass flex items-center justify-center mx-auto mb-4 shadow-sm">
-            <svg className="w-6 h-6 text-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <h2 className="font-display text-[19px] font-bold tracking-[-0.02em] text-foreground">Upgrade scheduled</h2>
+        <div className="border-b border-border/50 px-6 pb-5 pt-8 text-center">
+          <h2 className="font-display text-[19px] font-semibold tracking-[-0.02em] text-foreground">Upgrade scheduled</h2>
           <p className="text-[13px] text-muted-foreground mt-1.5">
             You&apos;ll move to {tierLabel} on {date}.
           </p>

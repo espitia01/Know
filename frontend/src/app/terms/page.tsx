@@ -10,7 +10,7 @@ export default function TermsOfServicePage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <nav className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border/80">
+      <nav className="sticky top-0 z-50 border-b border-border/50 bg-background">
         <div className="max-w-6xl mx-auto px-6 h-[60px] flex items-center justify-between">
           <Link href={homeHref} className="flex items-center gap-2">
             <Image src="/logo.png" alt="Know" width={24} height={24} className="rounded-md" />

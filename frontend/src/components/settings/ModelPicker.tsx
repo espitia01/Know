@@ -1,6 +1,7 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { Check, ChevronDown } from "lucide-react";
 import {
   ProviderLogo,
   PROVIDER_LABEL,
@@ -19,84 +20,75 @@ export type ModelInfo = {
 export const MODEL_CATALOG: ModelInfo[] = [
   {
     id: "mistral-small-latest",
-    name: "Mistral Small",
+    name: "Mistral Small 4",
     provider: "mistral",
     tier: "fast",
-    description:
-      "Fast and inexpensive multilingual model. Great default for Explain, Derive, and quick Q&A on short papers.",
+    description: "Fast default for Explain, Derive, and short Q&A.",
   },
   {
     id: "mistral-medium-latest",
-    name: "Mistral Medium",
+    name: "Mistral Medium 3.5",
     provider: "mistral",
     tier: "balanced",
-    description:
-      "Mistral's balanced workhorse. Recommended for Summary on longer papers when you want depth without the cost of a frontier model.",
+    description: "Balanced depth for Summary without frontier cost.",
   },
   {
     id: "mistral-large-latest",
-    name: "Mistral Large",
+    name: "Mistral Large 3",
     provider: "mistral",
     tier: "top",
-    description:
-      "Mistral's frontier multimodal model. Use for the most demanding Summary and Derive runs.",
+    description: "Frontier Mistral. Use for dense Summary and Derive runs.",
   },
   {
-    id: "gpt-5-mini",
-    name: "GPT-5 mini",
+    id: "gpt-5.4-mini",
+    name: "GPT-5.4 mini",
     provider: "openai",
     tier: "fast",
-    description:
-      "OpenAI's fastest current model. Snappy for selection-level explanations; concise prose.",
+    description: "Snappy selection-level explanations.",
   },
   {
-    id: "gpt-5",
-    name: "GPT-5",
+    id: "gpt-5.6-terra",
+    name: "GPT-5.6 Terra",
     provider: "openai",
     tier: "balanced",
-    description:
-      "OpenAI's general-purpose flagship. Strong at structured outputs, math, and code.",
+    description: "Strong at structured output, math, and code.",
   },
   {
-    id: "gpt-5.4",
-    name: "GPT-5.4",
+    id: "gpt-5.6-sol",
+    name: "GPT-5.6 Sol",
     provider: "openai",
     tier: "top",
-    description:
-      "OpenAI's premium reasoning model. Use for the most complex derivations and long-context summaries.",
+    description: "Flagship reasoning for hard derivations and long papers.",
   },
   {
     id: "claude-haiku-4-5",
     name: "Claude Haiku 4.5",
     provider: "anthropic",
     tier: "fast",
-    description:
-      "Anthropic's fast model. Excellent for selection Q&A and follow-ups; strong writing voice.",
+    description: "Fast Q&A and follow-ups with a strong writing voice.",
   },
   {
     id: "claude-sonnet-5",
     name: "Claude Sonnet 5",
     provider: "anthropic",
     tier: "balanced",
-    description:
-      "Anthropic's current balanced model. Reliable for Summary and Assumptions across most paper lengths.",
+    description: "Reliable for Summary and Assumptions on most papers.",
   },
   {
-    id: "claude-opus-5",
-    name: "Claude Opus 5",
+    id: "claude-fable-5",
+    name: "Claude Fable 5",
     provider: "anthropic",
     tier: "top",
-    description:
-      "Anthropic's deepest current analysis model. Reserve for hard derivations and dense theory papers.",
+    description: "Deepest analysis. Reserve for dense theory papers.",
   },
 ];
 
-const PROVIDER_ORDER: ProviderName[] = ["mistral", "openai", "anthropic"];
+const PROVIDER_ORDER: ProviderName[] = ["anthropic", "openai", "mistral"];
 
 const CAPABILITY_LABEL: Record<ModelInfo["tier"], string> = {
   fast: "Fast",
-  balanced: "Balanced",
-  top: "Top",
+  balanced: "Standard",
+  top: "Advanced",
 };
 
 type ProviderKeys = {
@@ -111,17 +103,7 @@ function providerConfigured(provider: ProviderName, keys: ProviderKeys): boolean
   return keys.mistral;
 }
 
-function providerKeyHint(provider: ProviderName): string {
-  if (provider === "openai") return "OPENAI_API_KEY (Vercel) or KNOW_OPENAI_API_KEY (Railway)";
-  if (provider === "mistral") return "MISTRAL_API_KEY (Vercel) or KNOW_MISTRAL_API_KEY (Railway)";
-  return "ANTHROPIC_API_KEY (Vercel) or KNOW_ANTHROPIC_API_KEY (Railway)";
-}
-
-function tierAllows(modelId: string, allowedIds: string[]): boolean {
-  return allowedIds.includes(modelId);
-}
-
-function requiredPlanBadge(model: ModelInfo): "Scholar" | "Researcher" {
+function requiredPlan(model: ModelInfo): "Scholar" | "Researcher" {
   if (model.tier === "top") return "Researcher";
   return "Scholar";
 }
@@ -145,114 +127,121 @@ export function ModelPicker({
   keys,
   onChange,
 }: ModelPickerProps) {
-  const selected = value || "mistral-small-latest";
+  const selectedId = normalizeModelSlug(value) || "mistral-small-latest";
+  const selected =
+    MODEL_CATALOG.find((m) => m.id === selectedId) ?? MODEL_CATALOG[0];
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
   return (
-    <div className="space-y-3">
-      <label className="text-[12px] text-muted-foreground font-medium">
-        {label}
-        <span className="text-muted-foreground/60 ml-1 font-normal">{hint}</span>
-      </label>
-      <div
-        className="max-h-[280px] overflow-y-auto space-y-4 pr-1"
-        role="radiogroup"
-        aria-label={label}
+    <div ref={rootRef} className="space-y-1.5">
+      <div className="space-y-0.5">
+        <label className="text-[13px] font-medium text-foreground" htmlFor={name}>
+          {label}
+        </label>
+        <p className="text-[12px] text-muted-foreground">{hint}</p>
+      </div>
+      <button
+        id={name}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-10 w-full items-center gap-2.5 rounded-lg border border-border/50 bg-background px-3 text-left motion-safe:duration-150 hover:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
       >
-        {PROVIDER_ORDER.map((provider) => {
-          const models = MODEL_CATALOG.filter((m) => m.provider === provider);
-          if (models.length === 0) return null;
-          return (
-            <div key={provider} className="space-y-1.5">
-              <p className="flex items-center gap-1.5 px-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                <ProviderLogo provider={provider} size={12} tone="none" />
-                {PROVIDER_LABEL[provider]}
-              </p>
-              <div className="space-y-1">
+        <ProviderLogo provider={selected.provider} size={14} tone="none" />
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
+          {selected.name}
+        </span>
+        <span className="shrink-0 text-[11px] text-muted-foreground">
+          {CAPABILITY_LABEL[selected.tier]}
+        </span>
+        <ChevronDown
+          className={`h-3.5 w-3.5 shrink-0 text-muted-foreground motion-safe:duration-150 ${open ? "rotate-180" : ""}`}
+          aria-hidden
+        />
+      </button>
+      {open && (
+        <div
+          id={listId}
+          role="listbox"
+          aria-label={label}
+          className="overflow-hidden rounded-lg border border-border/50 bg-background shadow-[var(--shadow-sm)]"
+        >
+          {PROVIDER_ORDER.map((provider) => {
+            const models = MODEL_CATALOG.filter((m) => m.provider === provider);
+            if (models.length === 0) return null;
+            return (
+              <div key={provider} className="border-b border-border/40 last:border-b-0">
+                <p className="flex items-center gap-1.5 px-3 pt-2.5 pb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <ProviderLogo provider={provider} size={10} tone="none" />
+                  {PROVIDER_LABEL[provider]}
+                </p>
                 {models.map((m) => {
                   const configured = providerConfigured(m.provider, keys);
-                  const allowed = tierAllows(m.id, allowedIds);
+                  const allowed = allowedIds.includes(m.id);
                   const disabled = !configured || !allowed;
-                  const planBadge = !allowed ? requiredPlanBadge(m) : null;
-                  const isSelected = normalizeModelSlug(selected) === m.id;
-                  const title = disabled
-                    ? !configured
-                      ? `Server is not configured for ${PROVIDER_LABEL[m.provider]} yet — set ${providerKeyHint(m.provider)}, or enable AI Gateway.`
-                      : `Available on the ${planBadge} plan.`
-                    : undefined;
-
+                  const isSelected = selectedId === m.id;
+                  const lockLabel = !allowed
+                    ? requiredPlan(m)
+                    : !configured
+                      ? "Unavailable"
+                      : null;
                   return (
                     <button
                       key={m.id}
                       type="button"
-                      role="radio"
-                      aria-checked={isSelected}
-                      aria-disabled={disabled}
-                      name={name}
-                      title={title}
+                      role="option"
+                      aria-selected={isSelected}
                       disabled={disabled}
                       onClick={() => {
-                        if (!disabled) onChange(m.id);
+                        onChange(m.id);
+                        setOpen(false);
                       }}
-                      className={`flex w-full items-start gap-3 rounded-lg px-3 py-2.5 text-left motion-safe:duration-150 ${
+                      className={`flex w-full items-center gap-2.5 px-3 py-2 text-left motion-safe:duration-150 ${
                         disabled
-                          ? "cursor-not-allowed opacity-45 bg-muted/[0.08]"
-                          : "cursor-pointer"
-                      } ${
-                        !disabled && isSelected
-                          ? "border border-border/50 bg-card/40"
-                          : !disabled
-                            ? "border border-transparent hover:bg-accent/50"
-                            : "border border-transparent"
-                      }`}
+                          ? "cursor-not-allowed opacity-45"
+                          : "hover:bg-accent/50"
+                      } ${isSelected && !disabled ? "bg-muted/[0.08]" : ""}`}
                     >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-[13px] font-medium text-foreground">{m.name}</p>
-                          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
-                            {CAPABILITY_LABEL[m.tier]}
-                          </span>
-                          {planBadge && (
-                            <span className="text-[10px] font-medium text-muted-foreground bg-muted/40 px-1.5 py-0.5 rounded">
-                              {planBadge}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-muted-foreground/80 mt-0.5 leading-relaxed line-clamp-2">
-                          {m.description}
-                        </p>
-                      </div>
+                      <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                        {m.name}
+                      </span>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        {lockLabel ?? CAPABILITY_LABEL[m.tier]}
+                      </span>
                       {isSelected && !disabled && (
-                        <Check className="mt-0.5 h-4 w-4 shrink-0 text-foreground/80" aria-hidden />
+                        <Check className="h-3.5 w-3.5 shrink-0 text-foreground/80" aria-hidden />
                       )}
                     </button>
                   );
                 })}
               </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-export function ProviderStatusPills({ keys }: { keys: ProviderKeys }) {
-  const items: { provider: ProviderName; configured: boolean }[] = [
-    { provider: "anthropic", configured: keys.anthropic },
-    { provider: "openai", configured: keys.openai },
-    { provider: "mistral", configured: keys.mistral },
-  ];
-  return (
-    <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
-      {items.map(({ provider, configured }) => (
-        <span
-          key={provider}
-          className="inline-flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground glass-subtle px-2 py-1 rounded-full"
-        >
-          <ProviderLogo provider={provider} size={12} tone="none" />
-          {PROVIDER_LABEL[provider]}: {configured ? "configured" : "not configured"}
-        </span>
-      ))}
+            );
+          })}
+        </div>
+      )}
+      <p className="text-[12px] leading-relaxed text-muted-foreground">
+        {selected.description}
+      </p>
     </div>
   );
 }

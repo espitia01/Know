@@ -38,7 +38,7 @@ export function UploadToast() {
 
   return (
     <div className="pointer-events-none fixed bottom-6 right-6 z-[200] flex max-w-[22rem] flex-col gap-2 motion-safe:animate-fade-in">
-      <div className="pointer-events-auto overflow-hidden rounded-2xl border border-border/55 bg-background/95 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.22)] backdrop-blur-md">
+      <div className="pointer-events-auto overflow-hidden rounded-lg border border-border/50 bg-background shadow-[var(--shadow-sm)]">
         <div className="flex items-center gap-3 border-b border-border/40 px-4 py-3">
           <div className="text-foreground/80">
             {uploading.length > 0 ? (

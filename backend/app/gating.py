@@ -44,12 +44,12 @@ ALL_MODELS = [
     # Anthropic (current Claude API IDs as of Aug 2026)
     "claude-haiku-4-5",
     "claude-sonnet-5",
-    "claude-opus-5",
-    # OpenAI
-    "gpt-5-mini",
-    "gpt-5",
-    "gpt-5.4",
-    # Mistral
+    "claude-fable-5",
+    # OpenAI — 5.6 family: Luna/mini, Terra (balanced), Sol (flagship)
+    "gpt-5.4-mini",
+    "gpt-5.6-terra",
+    "gpt-5.6-sol",
+    # Mistral (-latest tracks Small 4 / Medium 3.5 / Large 3)
     "mistral-small-latest",
     "mistral-medium-latest",
     "mistral-large-latest",
@@ -61,22 +61,26 @@ ALL_MODELS = [
 # map when we retire another model ID.
 MODEL_ALIASES = {
     # Anthropic — previous 4.x IDs still appear in saved Settings rows
-    "claude-opus-4": "claude-opus-5",
-    "claude-opus-4-0": "claude-opus-5",
-    "claude-opus-4-1": "claude-opus-5",
-    "claude-opus-4-5": "claude-opus-5",
-    "claude-opus-4-6": "claude-opus-5",
-    "claude-opus-4-7": "claude-opus-5",
-    "claude-opus-4-8": "claude-opus-5",
+    "claude-opus-4": "claude-fable-5",
+    "claude-opus-4-0": "claude-fable-5",
+    "claude-opus-4-1": "claude-fable-5",
+    "claude-opus-4-5": "claude-fable-5",
+    "claude-opus-4-6": "claude-fable-5",
+    "claude-opus-4-7": "claude-fable-5",
+    "claude-opus-4-8": "claude-fable-5",
+    "claude-opus-5": "claude-fable-5",
     "claude-sonnet-4-0": "claude-sonnet-5",
     "claude-sonnet-4-5": "claude-sonnet-5",
     "claude-sonnet-4-6": "claude-sonnet-5",
     # OpenAI
-    "gpt-4o": "gpt-5-mini",
-    "gpt-4o-mini": "gpt-5-mini",
-    "gpt-4.1": "gpt-5",
-    "gpt-4.1-mini": "gpt-5-mini",
-    "gpt-4.1-nano": "gpt-5-mini",
+    "gpt-4o": "gpt-5.4-mini",
+    "gpt-4o-mini": "gpt-5.4-mini",
+    "gpt-4.1": "gpt-5.6-terra",
+    "gpt-4.1-mini": "gpt-5.4-mini",
+    "gpt-4.1-nano": "gpt-5.4-mini",
+    "gpt-5-mini": "gpt-5.4-mini",
+    "gpt-5": "gpt-5.6-terra",
+    "gpt-5.4": "gpt-5.6-sol",
     # Mistral
     "mistral-small": "mistral-small-latest",
     "mistral-medium": "mistral-medium-latest",
@@ -101,12 +105,16 @@ def canonicalize_model(model: str | None) -> str | None:
 
 MODEL_TIER = {
     "claude-haiku-4-5": "fast",
+    "gpt-5.4-mini": "fast",
     "gpt-5-mini": "fast",
     "mistral-small-latest": "fast",
     "claude-sonnet-5": "balanced",
+    "gpt-5.6-terra": "balanced",
     "gpt-5": "balanced",
     "mistral-medium-latest": "balanced",
+    "claude-fable-5": "top",
     "claude-opus-5": "top",
+    "gpt-5.6-sol": "top",
     "gpt-5.4": "top",
     "mistral-large-latest": "top",
 }
@@ -132,7 +140,7 @@ TIER_LIMITS: dict[str, dict] = {
         "models": {
             "mistral-small-latest",
             "claude-haiku-4-5",
-            "gpt-5-mini",
+            "gpt-5.4-mini",
         },
         "best_model": "mistral-small-latest",
         "daily_api_calls": 10,
@@ -145,8 +153,8 @@ TIER_LIMITS: dict[str, dict] = {
         "selections_per_paper": 100,
         "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "export-pdf", "export-pptx"},
         "models": {
-            "mistral-small-latest", "claude-haiku-4-5", "gpt-5-mini",
-            "mistral-medium-latest", "claude-sonnet-5", "gpt-5",
+            "mistral-small-latest", "claude-haiku-4-5", "gpt-5.4-mini",
+            "mistral-medium-latest", "claude-sonnet-5", "gpt-5.6-terra",
         },
         "best_model": "claude-sonnet-5",
         "daily_api_calls": 100,
@@ -157,15 +165,15 @@ TIER_LIMITS: dict[str, dict] = {
         "max_papers": -1,
         "qa_per_paper": -1,
         "selections_per_paper": -1,
-        "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "multi-qa", "export-pdf", "export-pptx", "export-podcast"},
+        "features": {"summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "multi-qa", "export-pdf", "export-pptx"},
         "models": {
-            "mistral-small-latest", "claude-haiku-4-5", "gpt-5-mini",
-            "mistral-medium-latest", "claude-sonnet-5", "gpt-5",
-            "mistral-large-latest", "claude-opus-5", "gpt-5.4",
+            "mistral-small-latest", "claude-haiku-4-5", "gpt-5.4-mini",
+            "mistral-medium-latest", "claude-sonnet-5", "gpt-5.6-terra",
+            "mistral-large-latest", "claude-fable-5", "gpt-5.6-sol",
         },
-        "best_model": "claude-opus-5",
+        "best_model": "claude-fable-5",
         "daily_api_calls": 300,
-        "export_daily": {"pdf": 20, "pptx": 10, "podcast": 3},
+        "export_daily": {"pdf": 20, "pptx": 10, "podcast": 0},
         "per_capability_daily": {"fast": 300, "balanced": 150, "top": 30},
     },
 }
@@ -488,7 +496,7 @@ def enforce_model(user_id: str, requested_model: str) -> str:
 
     We canonicalize first so that settings rows holding a stale alias
     (e.g. ``claude-opus-4-7`` after Anthropic moved the flagship to
-    ``claude-opus-5``) resolve to the current ID instead of falling
+    ``claude-fable-5``) resolve to the current ID instead of falling
     all the way through to the tier default.
     """
     requested_model = canonicalize_model(requested_model) or ""

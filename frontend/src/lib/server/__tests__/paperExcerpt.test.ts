@@ -32,6 +32,12 @@ describe("buildPaperExcerpt", () => {
     expect(out).toContain("effect size");
   });
 
+  it("includes Methods for the selection profile so later equations survive", () => {
+    const out = buildPaperExcerpt(LONG_PAPER, { maxChars: 20000, profile: "selection" });
+    expect(out).toContain("Methods");
+    expect(out).toContain("regression");
+  });
+
   it("falls back to head slice when no headings", () => {
     const raw = "x".repeat(10000);
     const max = 500;

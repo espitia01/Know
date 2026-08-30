@@ -73,6 +73,17 @@ async function authHeaders(): Promise<Record<string, string>> {
 const MODEL_CAP_DETAIL_RE =
   /Daily limit reached for (\S+) \((\d+)\/day on (\S+) plan\)/;
 
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 type StructuredErrorDetail = {
   code?:
     | "daily_cap"
@@ -81,7 +92,8 @@ type StructuredErrorDetail = {
     | "daily_export_cap"
     | "export_tier"
     | "export_concurrent"
-    | "prepare_empty";
+    | "prepare_empty"
+    | "already_subscribed";
   model?: string;
   limit?: number;
   tier?: string;
@@ -212,7 +224,7 @@ async function request<T>(
         }
       }
 
-      throw new Error(message);
+      throw new ApiError(message, status, structured?.code);
     }
     const text = await res.text();
     if (!text) return {} as T;
@@ -1132,7 +1144,16 @@ export const api = {
   getModels: () => getRequest<{ models: string[] }>("/api/settings/models"),
 
   getCurrentUser: () =>
-    getRequest<{ user_id: string; tier: string; paper_count: number; has_billing: boolean; cancel_at_period_end: boolean; cancel_at: number | null }>("/api/user/me"),
+    getRequest<{
+      user_id: string;
+      tier: string;
+      paper_count: number;
+      has_billing: boolean;
+      cancel_at_period_end: boolean;
+      cancel_at: number | null;
+      period_end: number | null;
+      past_due: boolean;
+    }>("/api/user/me"),
 
   createCheckoutSession: (tier: string, successUrl?: string, cancelUrl?: string) =>
     request<{ url: string; session_id: string }>("/api/billing/checkout-session", {
@@ -1171,6 +1192,7 @@ export const api = {
       target_tier: string;
       current_price_id: string;
       new_price_id: string;
+      direction?: "upgrade" | "downgrade";
     }>("/api/billing/upgrade-preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1244,5 +1266,6 @@ export const api = {
         used: number;
         limit: number;
       }[];
+      daily_resets_at?: string;
     }>(`/api/usage`),
 };

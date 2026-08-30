@@ -10,6 +10,7 @@ type Preview = {
   period_end: number | null;
   current_tier: string;
   target_tier: string;
+  direction?: "upgrade" | "downgrade";
 };
 
 interface UpgradeConfirmModalProps {
@@ -115,24 +116,32 @@ export function UpgradeConfirmModal({ tier, tierLabel, open, onClose, onUpgraded
   if (!open) return null;
 
   const currency = preview?.currency || "usd";
-  const immediate = preview ? formatCurrency(preview.immediate_charge_cents, currency) : "—";
+  const isDowngrade = preview?.direction === "downgrade" || (preview != null && preview.immediate_charge_cents < 0);
+  const todayCents = preview?.immediate_charge_cents ?? 0;
+  const immediate =
+    !preview
+      ? "—"
+      : todayCents < 0
+        ? `${formatCurrency(-todayCents, currency)} credit`
+        : formatCurrency(todayCents, currency);
   const nextCycle = preview ? formatCurrency(preview.next_cycle_charge_cents, currency) : "—";
+  const actionVerb = isDowngrade ? "Switch" : "Upgrade";
 
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center"
       role="dialog"
       aria-modal="true"
-      aria-label={`Upgrade to ${tierLabel}`}
+      aria-label={`${isDowngrade ? "Switch to" : "Upgrade to"} ${tierLabel}`}
     >
       <div
-        className="absolute inset-0 bg-foreground/25 backdrop-blur-md"
+        className="absolute inset-0 bg-foreground/25"
         onClick={() => { if (!submitting) onClose(); }}
       />
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className="relative glass-strong rounded-2xl shadow-xl max-w-md w-full mx-4 overflow-hidden animate-fade-in"
+        className="relative mx-4 w-full max-w-md overflow-hidden rounded-lg border border-border/50 bg-popover shadow-[var(--shadow-sm)]"
       >
         <button
           onClick={onClose}
@@ -147,10 +156,10 @@ export function UpgradeConfirmModal({ tier, tierLabel, open, onClose, onUpgraded
 
         <div className="px-6 pt-7 pb-3">
           <p className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground/80">
-            Confirm upgrade
+            Confirm {isDowngrade ? "plan change" : "upgrade"}
           </p>
           <h2 className="font-display text-[19px] font-bold tracking-[-0.02em] text-foreground mt-1">
-            Upgrade to {tierLabel}
+            {isDowngrade ? `Switch to ${tierLabel}` : `Upgrade to ${tierLabel}`}
           </h2>
           <p className="text-[12.5px] text-muted-foreground mt-1.5">
             Choose when you&apos;d like the change to take effect.
@@ -159,13 +168,15 @@ export function UpgradeConfirmModal({ tier, tierLabel, open, onClose, onUpgraded
 
         <div className="px-6 pb-5 space-y-2.5">
           {/* Option 1 — upgrade now, prorated. */}
-          <div className="rounded-xl border border-border/80 glass-subtle p-4">
+          <div className="rounded-lg border border-border/50 p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-[13px] font-semibold text-foreground">Upgrade now</p>
+                <p className="text-[13px] font-semibold text-foreground">{actionVerb} now</p>
                 <p className="text-[11.5px] text-muted-foreground mt-0.5">
-                  Switch to {tierLabel} immediately. You&apos;ll be charged the
-                  prorated difference for the remainder of this billing cycle.
+                  Switch to {tierLabel} immediately.
+                  {isDowngrade
+                    ? " Unused time on your current plan is credited."
+                    : " You'll be charged the prorated difference for the remainder of this billing cycle."}
                 </p>
               </div>
               <div className="shrink-0 text-right">
@@ -183,12 +194,12 @@ export function UpgradeConfirmModal({ tier, tierLabel, open, onClose, onUpgraded
               disabled={submitting !== null || loadingPreview || !preview}
               className="mt-3 w-full text-[13px] font-semibold py-2.5 rounded-xl bg-foreground text-background shadow-sm hover:opacity-95 transition-opacity disabled:opacity-50"
             >
-              {submitting === "now" ? "Upgrading…" : `Upgrade now · ${loadingPreview ? "…" : immediate}`}
+              {submitting === "now" ? "Updating…" : `${actionVerb} now · ${loadingPreview ? "…" : immediate}`}
             </button>
           </div>
 
           {/* Option 2 — defer to next renewal. */}
-          <div className="rounded-xl border border-border/70 glass-subtle p-4">
+          <div className="rounded-lg border border-border/50 p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[13px] font-semibold text-foreground">Start next cycle</p>

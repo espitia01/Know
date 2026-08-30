@@ -26,8 +26,10 @@ def test_provider_for_slug_dispatch():
 
 
 def test_enforce_model_canonicalizes_aliases():
-    assert canonicalize_model("gpt-4o") == "gpt-5-mini"
+    assert canonicalize_model("gpt-4o") == "gpt-5.4-mini"
     assert canonicalize_model("mistral-tiny") == "mistral-small-latest"
+    assert canonicalize_model("claude-opus-5") == "claude-fable-5"
+    assert canonicalize_model("gpt-5") == "gpt-5.6-terra"
 
 
 @patch("app.gating.get_user_tier", return_value="free")

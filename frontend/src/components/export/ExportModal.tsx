@@ -37,22 +37,23 @@ const FORMATS = [
     id: "pdf" as const,
     label: "PDF",
     feature: "export-pdf" as const,
-    blurb: "Print-ready report with cover and table of contents",
+    blurb: "LaTeX article compiled to PDF",
     needsOpenAi: false,
   },
   {
     id: "pptx" as const,
-    label: "PowerPoint",
+    label: "Slides",
     feature: "export-pptx" as const,
-    blurb: "16:9 slide deck for meetings and journal clubs",
+    blurb: "Beamer slide deck compiled to PDF",
     needsOpenAi: false,
   },
   {
     id: "podcast" as const,
     label: "Podcast",
     feature: "export-podcast" as const,
-    blurb: "Single-speaker MP3 walkthrough",
+    blurb: "Temporarily unavailable",
     needsOpenAi: true,
+    paused: true,
   },
 ];
 
@@ -102,6 +103,7 @@ export function ExportModal({ paperId, open, onClose, hasOpenAiKey = true }: Exp
 
   const selectedFormat = FORMATS.find((f) => f.id === format)!;
   const canSelectFormat = (f: (typeof FORMATS)[number]) => {
+    if ("paused" in f && f.paused) return false;
     if (!canAccess(tier, f.feature)) return false;
     if (f.needsOpenAi && !hasOpenAiKey) return false;
     return true;
@@ -162,8 +164,7 @@ export function ExportModal({ paperId, open, onClose, hasOpenAiKey = true }: Exp
   if (!open || typeof document === "undefined") return null;
 
   async function handleGenerate() {
-    const feature = selectedFormat.feature;
-    if (!canAccess(tier, feature)) return;
+    if (!canSelectFormat(selectedFormat)) return;
     if (selectedFormat.needsOpenAi && !hasOpenAiKey) return;
     setBusy(true);
     try {
@@ -260,7 +261,7 @@ export function ExportModal({ paperId, open, onClose, hasOpenAiKey = true }: Exp
           <>
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-[var(--text-sm)]">
               <fieldset className="space-y-2">
-                <legend className="text-[var(--text-xs)] font-semibold uppercase tracking-wide text-muted-foreground/80">
+                <legend className="text-[var(--text-xs)] font-medium text-muted-foreground">
                   Format
                 </legend>
                 <div className="grid grid-cols-3 gap-2">
@@ -274,15 +275,24 @@ export function ExportModal({ paperId, open, onClose, hasOpenAiKey = true }: Exp
                         disabled={!allowed}
                         onClick={() => allowed && setFormat(f.id)}
                         className={cn(
-                          "flex flex-col items-center gap-2 rounded-lg border px-2 py-3 text-center transition-colors motion-safe:duration-150",
+                        "h-auto flex flex-col items-center gap-1.5 rounded-md border px-2 py-2.5 text-center transition-colors motion-safe:duration-150",
                           selected
-                            ? "border-foreground/25 bg-card/30"
+                            ? "border-foreground/30 bg-muted/40"
                             : "border-border/50 hover:bg-muted/[0.08]",
-                          !allowed && "cursor-not-allowed opacity-45",
+                          !allowed && "cursor-not-allowed opacity-40 hover:bg-transparent",
                         )}
                       >
                         <ExportFormatIcon format={f.id} size="md" />
                         <span className="text-[var(--text-xs)] font-medium">{f.label}</span>
+                        {!allowed && (
+                          <span className="text-[10px] text-muted-foreground">
+                            {"paused" in f && f.paused
+                              ? "Paused"
+                              : tier === "free"
+                                ? "Scholar+"
+                                : "Unavailable"}
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -302,7 +312,7 @@ export function ExportModal({ paperId, open, onClose, hasOpenAiKey = true }: Exp
 
               <fieldset className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
-                  <legend className="text-[var(--text-xs)] font-semibold uppercase tracking-wide text-muted-foreground/80">
+                  <legend className="text-[var(--text-xs)] font-medium text-muted-foreground">
                     Sections
                   </legend>
                   <button
@@ -450,12 +460,12 @@ export function ExportModal({ paperId, open, onClose, hasOpenAiKey = true }: Exp
                 )}
                 <a
                   href={progressRow.download_url}
-                  {...(format === "pdf"
-                    ? { target: "_blank", rel: "noopener noreferrer" }
-                    : { download: true })}
+                  {...(format === "podcast"
+                    ? { download: true }
+                    : { target: "_blank", rel: "noopener noreferrer" })}
                   className="rounded-md bg-primary px-4 py-2 text-[var(--text-sm)] font-medium text-primary-foreground motion-safe:duration-150 hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                 >
-                  {format === "pdf" ? "Open PDF" : `Download ${format.toUpperCase()}`}
+                  {format === "podcast" ? "Download MP3" : "Open PDF"}
                 </a>
                 {format === "podcast" && (
                   <audio controls src={progressRow.download_url} className="w-full max-w-sm h-8" preload="none" />

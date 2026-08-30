@@ -14,9 +14,9 @@ const META: Record<
     ariaLabel: "PDF document",
   },
   pptx: {
-    label: "PPT",
+    label: "SLD",
     bg: "bg-orange-500/12 text-orange-600 dark:text-orange-400",
-    ariaLabel: "PowerPoint presentation",
+    ariaLabel: "Beamer slides",
   },
   podcast: {
     label: "MP3",
@@ -25,7 +25,7 @@ const META: Record<
   },
 };
 
-/** Branded format badge — PDF / PowerPoint / audio, no external assets. */
+/** Branded format badge — PDF / Slides / audio, no external assets. */
 export function ExportFormatIcon({
   format,
   size = "md",
@@ -58,6 +58,6 @@ export function ExportFormatIcon({
 
 export function exportFormatLabel(format: ExportFormat): string {
   if (format === "pdf") return "PDF document";
-  if (format === "pptx") return "PowerPoint deck";
-  return "Podcast (MP3)";
+  if (format === "pptx") return "Slides (Beamer PDF)";
+  return "Podcast (paused)";
 }

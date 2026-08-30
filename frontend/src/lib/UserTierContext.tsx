@@ -13,6 +13,8 @@ export interface UserInfo {
   has_billing: boolean;
   cancel_at_period_end: boolean;
   cancel_at: number | null;
+  period_end: number | null;
+  past_due: boolean;
 }
 
 interface UserTierContextValue {
@@ -57,7 +59,12 @@ export function UserTierProvider({ children }: { children: ReactNode }) {
       const data = await api.getCurrentUser();
       const tier = data.tier;
       const safeTier = (tier === "free" || tier === "scholar" || tier === "researcher") ? tier : "free";
-      setUser({ ...data, tier: safeTier } as UserInfo);
+      setUser({
+        ...data,
+        tier: safeTier,
+        period_end: data.period_end ?? null,
+        past_due: Boolean(data.past_due),
+      } as UserInfo);
     } catch {
       setUser(null);
       setError(true);
@@ -104,13 +111,14 @@ export function UserTierProvider({ children }: { children: ReactNode }) {
     <UserTierContext.Provider value={value}>
       {children}
       <CancellationBanner user={user} />
+      <PastDueBanner user={user} />
       {/* Surface tier-fetch failures instead of silently defaulting to
           "free" — otherwise paying users see unexplained downgrade UX
           while the real problem is a network/auth blip they can retry. */}
       {error && isSignedIn && (
         <div
           role="alert"
-          className="fixed bottom-4 right-4 z-[200] max-w-sm glass-strong border border-destructive/30/70 rounded-xl px-4 py-3 shadow-lg"
+          className="fixed bottom-4 right-4 z-[200] max-w-sm rounded-lg border border-destructive/30 bg-popover px-4 py-3 shadow-[var(--shadow-sm)]"
         >
           <p className="text-[12px] font-semibold text-destructive">
             Couldn&apos;t load your account
@@ -196,7 +204,7 @@ function CancellationBanner({ user }: { user: UserInfo | null }) {
   return (
     <div
       role="status"
-      className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[150] max-w-md w-[calc(100vw-2rem)] glass-strong border border-amber-200/70 rounded-xl px-4 py-3 shadow-lg flex items-start gap-3"
+      className="fixed bottom-4 left-1/2 z-[150] flex w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 items-start gap-3 rounded-lg border border-border/50 bg-popover px-4 py-3 shadow-[var(--shadow-sm)]"
     >
       <svg className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
@@ -227,6 +235,39 @@ function CancellationBanner({ user }: { user: UserInfo | null }) {
   );
 }
 
+function PastDueBanner({ user }: { user: UserInfo | null }) {
+  const [dismissed, setDismissed] = useState(false);
+  if (!user?.past_due || dismissed) return null;
+  return (
+    <div
+      role="status"
+      className="fixed bottom-4 left-1/2 z-[150] flex w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 items-start gap-3 rounded-lg border border-warning/30 bg-popover px-4 py-3 shadow-[var(--shadow-sm)]"
+    >
+      <div className="flex-1 min-w-0">
+        <p className="text-[12px] font-semibold text-foreground">Payment failed</p>
+        <p className="text-[11px] text-muted-foreground mt-0.5">
+          Update your card in Settings so your plan stays active.
+        </p>
+      </div>
+      <a
+        href="/settings"
+        className="shrink-0 text-[11px] font-medium text-foreground hover:opacity-80"
+      >
+        Settings
+      </a>
+      <button
+        onClick={() => setDismissed(true)}
+        aria-label="Dismiss"
+        className="text-muted-foreground/80 hover:text-muted-foreground motion-safe:duration-150 shrink-0"
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 export const TIER_FEATURES: Record<string, Set<string>> = {
   free: new Set(["summary", "qa", "selection"]),
   scholar: new Set(["summary", "prepare", "assumptions", "qa", "figures", "notes", "selection", "bibtex", "export-pdf", "export-pptx"]),
@@ -243,7 +284,6 @@ export const TIER_FEATURES: Record<string, Set<string>> = {
     "workspace",
     "export-pdf",
     "export-pptx",
-    "export-podcast",
   ]),
 };
 

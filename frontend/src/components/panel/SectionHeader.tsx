@@ -29,7 +29,7 @@ export function SectionHeader({
     >
       <div className="flex min-w-0 items-baseline gap-2">
         {eyebrow ? (
-          <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/85">
+          <span className="text-[11px] font-medium text-muted-foreground">
             {title}
           </span>
         ) : (

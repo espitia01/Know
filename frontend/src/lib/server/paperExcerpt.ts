@@ -96,8 +96,17 @@ function isFullSection(profile: ExcerptProfile, nameLower: string): boolean {
       nameLower.startsWith("conclusion")
     );
   }
-  // selection
-  return nameLower.includes("abstract") || nameLower.includes("introduction");
+  // selection: keep methods/theory so numbered equations later in the paper survive
+  return (
+    nameLower.includes("abstract") ||
+    nameLower.includes("introduction") ||
+    nameLower.includes("method") ||
+    nameLower.includes("approach") ||
+    nameLower.includes("model") ||
+    nameLower.includes("theor") ||
+    nameLower.includes("result") ||
+    nameLower.includes("discussion")
+  );
 }
 
 function pieceForSection(

@@ -60,7 +60,7 @@ def test_combined_fast_cap_shared_across_providers(_paper, _daily, _tier):
         return counts[capability]
 
     models = (
-        ["claude-haiku-4-5", "gpt-5-mini", "mistral-small-latest"] * 100
+        ["claude-haiku-4-5", "gpt-5.4-mini", "mistral-small-latest"] * 100
     )[:300]
 
     with patch("app.gating.reserve_daily_capability_usage", side_effect=cap_reserve):

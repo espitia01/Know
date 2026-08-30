@@ -1,7 +1,7 @@
 import "server-only";
 
 /** Max OCR chars loaded into stream routes — avoids Vercel heap OOM. */
-export const MAX_PAPER_RAW_CHARS = 24_000;
+export const MAX_PAPER_RAW_CHARS = 80_000;
 
 export function capPaperRawText(raw: string | null | undefined): string {
   if (!raw) return "";

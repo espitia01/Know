@@ -86,10 +86,10 @@ export function CancelModal({ tier, open, onClose, onCancelled }: CancelModalPro
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div
-        className="absolute inset-0 bg-foreground/30 backdrop-blur-sm"
+        className="absolute inset-0 bg-foreground/30"
         onClick={step !== "cancelling" ? onClose : undefined}
       />
-      <div className="relative bg-card text-card-foreground rounded-2xl shadow-xl border border-border max-w-md w-full mx-4 overflow-hidden animate-fade-in">
+      <div className="relative mx-4 w-full max-w-md overflow-hidden rounded-lg border border-border/50 bg-card text-card-foreground shadow-[var(--shadow-sm)]">
 
         {step === "confirm" && (
           <>

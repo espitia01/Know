@@ -122,7 +122,7 @@ export default function TrialPage() {
           </div>
 
           {isMobile ? (
-            <div className="text-center py-16 px-6 rounded-2xl border border-border bg-card/60 glass-subtle">
+            <div className="text-center py-16 px-6 rounded-lg border border-border/50">
               <div className="w-11 h-11 rounded-xl bg-accent border border-border flex items-center justify-center mx-auto mb-4">
                 <svg className="w-5 h-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 006 3.75v16.5a2.25 2.25 0 002.25 2.25h7.5A2.25 2.25 0 0018 20.25V3.75a2.25 2.25 0 00-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />

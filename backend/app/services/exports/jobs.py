@@ -51,7 +51,12 @@ async def run_export_job(export_id: str) -> None:
         if fmt == "pdf":
             data, ctype, filename = render_pdf(row, paper, cache)
         elif fmt == "pptx":
-            data, ctype, filename = render_pptx(row, paper, cache)
+            try:
+                from .latex_render import LatexUnavailable, render_beamer_pdf
+
+                data, ctype, filename = render_beamer_pdf(row, paper, cache)
+            except LatexUnavailable:
+                data, ctype, filename = render_pptx(row, paper, cache)
         elif fmt == "podcast":
             from ...services.llm import generate_podcast_script
 
@@ -75,7 +80,7 @@ async def run_export_job(export_id: str) -> None:
         else:
             raise RuntimeError("unknown_format")
 
-        ext = _EXT.get(fmt, fmt)
+        ext = "pdf" if ctype == "application/pdf" else _EXT.get(fmt, fmt)
         storage_path = f"exports/{export_id}.{ext}"
         ok = cloud_storage.upload_file(user_id, storage_path, data, ctype)
         if not ok:

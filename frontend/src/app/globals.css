@@ -659,10 +659,6 @@
 
 /* Selection toolbar tooltips — anchored below buttons so they don’t cover fresh selections. */
 .know-toolbar-btn { position: relative; }
-.know-toolbar-btn[data-action="explain"] { border-left-color: rgb(56 132 244 / 0.55); }
-.know-toolbar-btn[data-action="derive"] { border-left-color: rgb(168 85 247 / 0.55); }
-.know-toolbar-btn[data-action="note"] { border-left-color: rgb(251 146 60 / 0.55); }
-.know-toolbar-btn[data-action="highlight"] { border-left-color: rgb(254 240 138 / 0.75); }
 .know-toolbar-btn::after {
   content: attr(data-tooltip);
   position: absolute;
@@ -1369,37 +1365,24 @@
 }
 
 /* ────────────────────────────────────────────────────────────────────────
-   Glass utilities — rebuilt to be theme-aware via --surface-tint /
-   --surface-line rgb triplets. Same class works in both modes.
+   Surface utilities — opaque cards, no blur. Class names kept so
+   existing call sites flatten without a rewrite.
    ──────────────────────────────────────────────────────────────────── */
 .glass {
-  background: rgb(var(--surface-tint) / 0.62);
-  backdrop-filter: blur(24px) saturate(1.4);
-  -webkit-backdrop-filter: blur(24px) saturate(1.15);
-  border: 1px solid rgb(var(--surface-line) / 0.07);
-  box-shadow: var(--shadow-sm);
+  background: var(--card);
+  border: 1px solid var(--border);
 }
 .glass-subtle {
-  background: rgb(var(--surface-tint) / 0.44);
-  backdrop-filter: blur(14px) saturate(1.1);
-  -webkit-backdrop-filter: blur(14px) saturate(1.1);
-  border: 1px solid rgb(var(--surface-line) / 0.05);
+  background: color-mix(in oklch, var(--muted) 8%, transparent);
 }
 .glass-strong {
-  background: rgb(var(--surface-tint) / 0.82);
-  backdrop-filter: blur(28px) saturate(1.2);
-  -webkit-backdrop-filter: blur(28px) saturate(1.2);
-  border: 1px solid rgb(var(--surface-line) / 0.08);
-  box-shadow: var(--shadow-md);
+  background: var(--popover);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
 }
 .glass-nav {
-  background: rgb(var(--surface-tint) / 0.82);
-  backdrop-filter: blur(24px) saturate(1.12);
-  -webkit-backdrop-filter: blur(24px) saturate(1.12);
-  border-bottom: 1px solid rgb(var(--surface-line) / 0.08);
-  box-shadow:
-    var(--shadow-xs),
-    inset 0 -1px 0 rgb(var(--surface-line) / 0.03);
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
 }
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -1413,26 +1396,11 @@
    Dark mode: same structure but using neutral-white highlights at a
    few percent opacity, matching the quiet feel of the rest of the UI.
 */
-/* Dashboard / library background.
- *
- * `.bg-mesh` layers two quiet radial gradients on top of whatever
- * bg-color is already in place (body + body::before). We deliberately
- * do NOT set `background-color` here: otherwise `main.bg-mesh` covers
- * the user's chosen preset (painted on `body::before`) and the whole
- * feature appears broken. `body` already has `bg-background` as the
- * base fill, so these gradients sit on top with transparency.
+/* `.bg-mesh` is a no-op hook kept so existing pages stay on the base
+ * surface. User background presets still paint via `body::before`.
  */
 .bg-mesh {
   position: relative;
-  background-image:
-    radial-gradient(ellipse 70% 55% at 15% 10%, rgb(0 0 0 / 0.035), transparent 65%),
-    radial-gradient(ellipse 55% 45% at 95% 95%, rgb(0 0 0 / 0.025), transparent 65%);
-}
-
-.dark .bg-mesh {
-  background-image:
-    radial-gradient(ellipse 70% 55% at 15% 10%, rgb(255 255 255 / 0.03), transparent 65%),
-    radial-gradient(ellipse 55% 45% at 95% 95%, rgb(255 255 255 / 0.02), transparent 65%);
 }
 
 /* Global user-background layer.
@@ -1468,56 +1436,34 @@ body::before {
 .bg-user-hide::before {
   opacity: 0 !important;
 }
-.bg-mesh-hero {
-  background:
-    radial-gradient(ellipse 80% 60% at 50% -20%, rgb(var(--mesh-violet) / calc(var(--mesh-a1) * 1.6)), transparent),
-    radial-gradient(ellipse 60% 50% at 20% 50%, rgb(var(--mesh-blue)   / calc(var(--mesh-a2) * 1.3)), transparent),
-    radial-gradient(ellipse 70% 50% at 80% 60%, rgb(var(--mesh-pink)   / var(--mesh-a3)), transparent);
-}
+.bg-mesh-hero,
 .bg-mesh-section {
-  background:
-    radial-gradient(ellipse 60% 40% at 70% 30%, rgb(var(--mesh-violet) / calc(var(--mesh-a1) * 0.8)), transparent),
-    radial-gradient(ellipse 50% 50% at 30% 70%, rgb(var(--mesh-blue)   / calc(var(--mesh-a2) * 0.8)), transparent);
+  background: none;
 }
 
 /* ────────────────────────────────────────────────────────────────────────
    Interactive utilities
    ──────────────────────────────────────────────────────────────────── */
 .glass-hover {
-  transition:
-    background 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-    border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-    transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 .glass-hover:hover {
-  background: rgb(var(--surface-tint) / 0.82);
-  box-shadow: var(--shadow-sm);
-  border-color: rgb(var(--surface-line) / 0.10);
+  background: var(--accent);
 }
 
 /* Primary button — keeps the "confident, dark" feel in both modes.
    In light mode it's near-black; in dark mode it's near-white with
    foreground-colored text. */
 .btn-primary-glass {
-  /* Per audit §12.3/§13.1: make primary actions neutral and product-tool
-     like instead of relying on saturated marketing gradients. */
   background: var(--primary);
   color: var(--primary-foreground);
-  box-shadow:
-    var(--shadow-sm),
-    inset 0 1px 0 rgb(255 255 255 / 0.06);
-  transition: opacity 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+  transition: opacity 0.15s ease;
 }
 .btn-primary-glass:hover {
-  box-shadow:
-    var(--shadow-sm),
-    inset 0 1px 0 rgb(255 255 255 / 0.08);
-  opacity: 0.94;
+  opacity: 0.9;
 }
 .btn-primary-glass:active {
-  transform: translateY(0);
-  opacity: 0.88;
+  opacity: 0.85;
 }
 .btn-primary-glass:focus-visible {
   outline: 2px solid var(--ring);
@@ -1529,27 +1475,8 @@ body::before {
   transform: none;
 }
 
-/* Glass border glow for highlighted cards (pricing "Most Popular" etc.) */
 .glass-border-glow {
   position: relative;
-}
-.glass-border-glow::before {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  padding: 1.5px;
-  background: linear-gradient(
-    135deg,
-    rgb(var(--mesh-violet) / 0.35),
-    rgb(var(--mesh-blue)   / 0.22),
-    rgb(var(--mesh-pink)   / 0.18)
-  );
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
 }
 
 /* Focus ring — apply to non-native interactive elements that can't use
@@ -1613,13 +1540,13 @@ body::before {
   }
 }
 .analysis-panel-tabs [data-slot="tabs-trigger"]::after {
-  left: 12% !important;
-  right: auto !important;
-  width: 76% !important;
-  max-width: calc(100% - 0.5rem) !important;
-  height: 1.5px !important;
-  bottom: 1px !important;
-  border-radius: 1px;
+  left: 0 !important;
+  right: 0 !important;
+  width: 100% !important;
+  max-width: none !important;
+  height: 1px !important;
+  bottom: 0 !important;
+  border-radius: 0;
   transform: none !important;
   transform-origin: center bottom;
 }
@@ -1641,20 +1568,8 @@ body::before {
   border-radius: 999px;
 }
 
-/* Scrollport: top edge soft fade of content. */
 .analysis-scroll-fade {
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    #000 24px,
-    #000 100%
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    #000 24px,
-    #000 100%
-  );
+  /* Intentional: no mask fade — content just scrolls. */
 }
 
 /*
@@ -1756,18 +1671,16 @@ body::before {
   background-color: color-mix(in oklch, var(--card) 72%, transparent);
 }
 
-/* Reader shell: visually join the navbar + side analysis column (non-focus). */
+/* Reader shell: join the navbar + side analysis column. */
 .know-reader-analysis-shell {
-  background: rgb(var(--surface-tint) / 0.86);
-  backdrop-filter: blur(20px) saturate(1.05);
-  -webkit-backdrop-filter: blur(20px) saturate(1.05);
+  background: var(--background);
   border-top: none;
 }
 .know-reader-analysis-shell-right {
-  border-left: 1px solid rgb(var(--surface-line) / 0.09);
+  border-left: 1px solid var(--border);
 }
 .know-reader-analysis-shell-left {
-  border-right: 1px solid rgb(var(--surface-line) / 0.09);
+  border-right: 1px solid var(--border);
 }
 
 /* Notes row actions: show on row hover for fine pointers; always show on touch. */

@@ -24,8 +24,8 @@ def _jinja_env() -> Environment:
     return env
 
 
-def render_pdf(export_row: dict, paper: ParsedPaper, cache: dict) -> tuple[bytes, str, str]:
-    """Return (pdf_bytes, content_type, filename)."""
+def _render_weasyprint(export_row: dict, paper: ParsedPaper, cache: dict) -> tuple[bytes, str, str]:
+    """HTML → PDF fallback when a TeX engine is not installed."""
     sections = export_row.get("sections") or []
     options = export_row.get("options") or {}
     paper_size = options.get("pdf", {}).get("paper_size", "Letter")
@@ -76,3 +76,13 @@ def render_pdf(export_row: dict, paper: ParsedPaper, cache: dict) -> tuple[bytes
     date = datetime.now(timezone.utc).strftime("%Y%m%d")
     filename = f"Know-export-{slug}-{date}.pdf"
     return pdf_bytes, "application/pdf", filename
+
+
+def render_pdf(export_row: dict, paper: ParsedPaper, cache: dict) -> tuple[bytes, str, str]:
+    """Prefer a compiled LaTeX article; fall back to WeasyPrint HTML."""
+    try:
+        from .latex_render import LatexUnavailable, render_latex_pdf
+
+        return render_latex_pdf(export_row, paper, cache)
+    except LatexUnavailable:
+        return _render_weasyprint(export_row, paper, cache)
